@@ -331,7 +331,8 @@ let coins = 0, lifetime = 0, time = 0;
 let crabs = [], customers = [], floaters = [];
 let spawnT = 3, toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x, 3=6x
 const FF_SPEED = [1, 2, 3, 6];
-let camX = 1180, followIdx = -1, followNpc = null, tab = "crew";
+let camX = 1180, followIdx = -1, followNpc = null, followCust = null, tab = "crew";
+let ffSleep = false, ffSleepDay = 0, ffChain = 0;   // the little sun: skip to morning
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
 let today = newDayLog();
@@ -815,6 +816,7 @@ function updateCommute(c, dt) {
 }
 
 function arriveCommute(c, atWork) {
+  c.cstate = "";   // dismount! a stale "drive" left cyclists rendered on their bikes all night
   if (atWork) {
     c.dayState = "working"; c.duty = true; c.kstate = "idle"; c.workBiz = c.p.job;
     if (c.p.job === "fishing" && c.fishSpot) { c.x = c.fishSpot.x; c.y = c.fishSpot.y; c.castT = 3 + Math.random() * 6; }
@@ -1460,7 +1462,7 @@ function updateCustomers(dt) {
 // ---------------------------------------------------------------- status text
 function crabStatus(c) {
   if (c.p.sick) return "SICK - DAY " + ((c.p.sick.days || 0) + 1) + " - NEEDS FOOD + REST";
-  if (c.p.fisher && c.dayState === "working") return "FISHING OFF THE PIER";
+  if (c.p.job === "fishing" && c.dayState === "working") return "FISHING OFF THE PIER";
   if (c.dayState === "home") {
     if (darkness() > 0.7) return c.p.homeless ? "SLEEPING AT THE SHELTER" : "SLEEPING";
     return c.p.homeless ? "AT THE SHELTER" : "CHILLING AT HOME";
@@ -1532,7 +1534,7 @@ cv.addEventListener("mousedown", (ev) => {
 addEventListener("mousemove", (ev) => {
   if (!dragging) return;
   const p = evPos(ev);
-  if (Math.abs(p.x - dragStartX) > 4) { dragMoved = true; followIdx = -1; followNpc = null; }
+  if (Math.abs(p.x - dragStartX) > 4) { dragMoved = true; followIdx = -1; followNpc = null; followCust = null; }
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 });
 addEventListener("mouseup", () => { dragging = false; setTimeout(() => { dragMoved = false; }, 50); });
@@ -1547,7 +1549,7 @@ cv.addEventListener("touchmove", (ev) => {
   if (!dragging) return;
   ev.preventDefault();
   const p = evPos(ev.touches[0]);
-  if (Math.abs(p.x - dragStartX) > 6) { dragMoved = true; followIdx = -1; followNpc = null; }
+  if (Math.abs(p.x - dragStartX) > 6) { dragMoved = true; followIdx = -1; followNpc = null; followCust = null; }
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 }, { passive: false });
 cv.addEventListener("touchend", (ev) => {
@@ -1563,7 +1565,7 @@ cv.addEventListener("wheel", (ev) => {
   ev.preventDefault();
   const scale = ev.deltaMode === 1 ? 16 : 1;   // some browsers report lines, not pixels
   camX = clampCam(camX + dx * scale * 0.6);
-  followIdx = -1; followNpc = null;
+  followIdx = -1; followNpc = null; followCust = null;
 }, { passive: false });
 function evPos(ev) {
   const r = cv.getBoundingClientRect();
@@ -1597,7 +1599,7 @@ cv.addEventListener("click", (ev) => {
     // the DOES row doubles as the reassignment control for crew crabs
     const pt = evPos(ev);
     const owned = Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player");
-    if (!dossier.p.npc && owned.length > 1 && pt.y >= 47 && pt.y < 57 && pt.x >= 24 && pt.x < 232) {
+    if (dossier.p && !dossier.p.npc && owned.length > 1 && pt.y >= 47 && pt.y < 57 && pt.x >= 24 && pt.x < 232) {
       const c = dossier;
       c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
       sfx.buy();
@@ -1638,7 +1640,7 @@ cv.addEventListener("click", (ev) => {
       for (let i = 0; i < crabs.length; i++) {
         const bx = 4 + i * CARD_STEP;
         if (p.x >= bx && p.x < bx + CARD && p.y >= ROW_Y && p.y < ROW_Y + CARD) {
-          followIdx = followIdx === i ? -1 : i; followNpc = null; return;
+          followIdx = followIdx === i ? -1 : i; followNpc = null; followCust = null; return;
         }
       }
     }
@@ -1656,8 +1658,14 @@ cv.addEventListener("click", (ev) => {
   }
   // a click on the follow card itself opens the crab's full record
   {
-    const fc2 = followNpc || (followIdx >= 0 && crabs[followIdx]);
+    const fc2 = followNpc || followCust || (followIdx >= 0 && crabs[followIdx]);
     if (fc2 && p.x >= 2 && p.x < 130 && p.y >= 2 && p.y < 54) { dossier = fc2; sfx.ding(); return; }
+  }
+  // the little sun: fast-forward to morning
+  if (p.x >= W - 26 && p.x < W - 1 && p.y >= 13 && p.y < 28) {
+    ffSleep = !ffSleep;
+    if (ffSleep) ffSleepDay = tmin < 6.5 * 60 ? day : day + 1;
+    sfx.ding(); return;
   }
   const wx = p.x + camX;
   // the job board is readable
@@ -1669,6 +1677,16 @@ cv.addEventListener("click", (ev) => {
     if (!c.hidden && Math.abs(wx - (c.x + 8)) < 12 && Math.abs(p.y - (c.y - 6)) < 14) {
       if (c.p.npc) { followNpc = c; followIdx = -1; }
       else { followIdx = crabs.indexOf(c); followNpc = null; }
+      followCust = null;
+      return;
+    }
+  }
+  // tourists are people too: click to follow them around their visit
+  for (const k of customers) {
+    if (k.isCrab || k.state === "showering") continue;
+    const ky = FLOOR_Y - 4 - 26 * (k.climb || 0);
+    if (Math.abs(wx - (k.x + 8)) < 12 && Math.abs(p.y - ky) < 14) {
+      followCust = k; followIdx = -1; followNpc = null;
       return;
     }
   }
@@ -1678,9 +1696,9 @@ addEventListener("keydown", (e) => {
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
-  if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; }
-  if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; }
-  if (e.key === "Escape") { if (dossier) { dossier = null; return; } followIdx = -1; followNpc = null; }
+  if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; followCust = null; }
+  if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; followCust = null; }
+  if (e.key === "Escape") { if (dossier) { dossier = null; return; } followIdx = -1; followNpc = null; followCust = null; }
 });
 
 // ---------------------------------------------------------------- drawing
@@ -2027,7 +2045,7 @@ function drawCrab(c) {
     }
   }
   if (c.p.sick && ((c.animT * 2) | 0) % 2) wblit(SICK_MARK, c.x + 10, y - 8);
-  if (c.p.fisher && c.dayState === "working") wblit(ROD[((c.animT * 2) | 0) % 2], c.x + 12, y - 3, c.flip);
+  if (c.p.job === "fishing" && c.dayState === "working") wblit(ROD[((c.animT * 2) | 0) % 2], c.x + 12, y - 3, c.flip);
   if (c.carrying) wblit(ITEMS[c.carrying], c.x + 4, y - 7);
   if (working && c.workMax > 0.7) {
     const frac = 1 - c.workT / c.workMax;
@@ -2129,8 +2147,41 @@ function crabMood(c) {
   if (c.dayState === "working" && c.kstate === "work") return ["BUSY", [40, 110, 190]];
   return ["SUNNY", [40, 150, 70]];
 }
+function custStatus(k) {
+  const b = BIZ[k.biz] ? BIZ[k.biz].name : "TOWN";
+  if (k.state === "arriving") return "HEADING TO THE " + b;
+  if (k.state === "waiting") return "IN LINE AT THE " + b;
+  if (k.state === "toSeat") return "FINDING A SEAT";
+  if (k.state === "seatedWaiting") return "WAITING ON THEIR ORDER";
+  if (k.state === "dining") return "EATING " + (ITEM_NAMES[k.recipe.icon] || "LUNCH");
+  if (k.state === "waitStall" || k.state === "toStall" || k.state === "outStall") return "AT THE SHOWERS";
+  if (k.state === "leaving") return k.happy ? "HEADING HOME HAPPY" : k.served ? "HEADING HOME" : "LEAVING IN A HUFF";
+  return "ENJOYING THE BEACH";
+}
+function drawCustCard(k) {
+  const wcard = 128;
+  rect(ctx, 2, 2, wcard, 52, [30, 20, 36]);
+  rect(ctx, 3, 3, wcard - 2, 50, [255, 250, 235]);
+  rect(ctx, 5, 6, 20, 26, [245, 225, 200]);
+  blit(ctx, CRAB_ARTS[k.color].a, 7, 14);
+  const acc = ACCESSORIES[k.acc];
+  if (acc) blit(ctx, acc.art, 7 + acc.dx, 14 + acc.dy);
+  text(ctx, k.name.split(" ")[0].slice(0, 9), 29, 5, [40, 30, 40]);
+  const mood = !k.served && k.patience < 15 ? ["STEAMED", [190, 80, 80]]
+    : k.happy || k.served ? ["HAPPY", [40, 150, 70]] : ["VISITING", [110, 110, 130]];
+  smallText(ctx, mood[0], 126 - smallTextWidth(mood[0]), 6, mood[1]);
+  smallText(ctx, "TOURIST - IN TOWN FOR THE DAY", 29, 13, [120, 90, 60]);
+  smallText(ctx, custStatus(k).slice(0, 26), 29, 21, [30, 110, 60]);
+  smallText(ctx, "WANTS: " + (ITEM_NAMES[k.recipe.icon] || "?") + " $" + k.recipe.pay, 29, 28, [140, 110, 40]);
+  smallText(ctx, "PATIENCE", 6, 44, [110, 110, 130]);
+  rect(ctx, 40, 45, 60, 4, [30, 20, 36]);
+  const pf = Math.max(0, Math.min(1, k.patience / (k.maxPatience || 50)));
+  rect(ctx, 41, 46, Math.round(58 * pf), 2, pf > 0.5 ? [96, 200, 120] : pf > 0.25 ? [235, 200, 90] : [235, 90, 90]);
+  smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
+}
 function drawFollowCard() {
   if (dossier) return;   // the full record is open - don't double up
+  if (followCust) { drawCustCard(followCust); return; }
   const c = followNpc || (followIdx >= 0 && crabs[followIdx]);
   if (!c) return;
   const p = c.p;
@@ -2154,7 +2205,8 @@ function drawFollowCard() {
   const trend = p.walletPrev == null ? 0 : p.wallet - p.walletPrev;
   if (trend) smallText(ctx, trend > 0 ? "+" : "-", wx3 - 6, 29, trend > 0 ? [40, 150, 70] : [190, 80, 80]);
   // job + needs
-  smallText(ctx, "JOB:" + (p.npc ? (p.fisher ? "PIER" : "OWN") : BIZ[p.job].short), 6, 36, [70, 90, 130]);
+  const jobTag = p.owner ? "OWN" : p.job === "fishing" ? "PIER" : BIZ[p.job].short;   // live job, not the old trade
+  smallText(ctx, "JOB:" + jobTag, 6, 36, [70, 90, 130]);
   if (UPS.arcade.lvl > 0) {
     rect(ctx, 58, 35, 28, 8, [96, 170, 220]);
     smallText(ctx, "JOB>", 60, 36, [255, 255, 255]);
@@ -2391,8 +2443,42 @@ const _art2Cache = {};
 function art2(key, art) {   // lazily scaled 2x art for the dossier portrait
   return _art2Cache[key] || (_art2Cache[key] = scale2(art));
 }
+function drawCustDossier(k) {
+  const x = 24, y = 6, w2 = 208, h2 = 120;
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 32, [58, 42, 38]);
+  rect(ctx, x + 4, y + 4, 40, 30, [245, 225, 200]);
+  blit(ctx, art2("c" + k.color, CRAB_ARTS[k.color].a), x + 8, y + 8);
+  const acc = ACCESSORIES[k.acc];
+  if (acc) blit(ctx, art2("a" + k.acc, acc.art), x + 8 + acc.dx * 2, y + 8 + acc.dy * 2);
+  text(ctx, k.name, x + 48, y + 5, [255, 240, 210]);
+  smallText(ctx, "VISITING TOURIST", x + 48, y + 15, [210, 190, 170]);
+  const lines = ["'WHAT A CUTE LITTLE TOWN'", "'SMELLS LIKE GOOD TACOS'", "'THE GULLS FOLLOWED ME HERE'", "'I'M NEVER GOING HOME'"];
+  smallText(ctx, lines[(k.name.length + k.color) % lines.length], x + 48, y + 24, [255, 215, 150]);
+  let ly = y + 42;
+  const row = (label, val, col) => {
+    smallText(ctx, label, x + 8, ly, [120, 110, 125]);
+    smallText(ctx, val, x + 56, ly, col || [40, 30, 40]);
+    ly += 9;
+  };
+  row("NOW", custStatus(k).slice(0, 32), [70, 90, 130]);
+  row("ORDER", (ITEM_NAMES[k.recipe.icon] || "?") + " - $" + k.recipe.pay + (k.served ? " - PAID" : ""), [140, 110, 40]);
+  row("MOOD", !k.served && k.patience < 15 ? "ABOUT TO WALK OUT" : k.happy || k.served ? "HAVING A GREAT TIME" : "WAITING PATIENTLY",
+    !k.served && k.patience < 15 ? [190, 80, 80] : [40, 150, 70]);
+  ly += 2;
+  smallText(ctx, "PATIENCE", x + 8, ly, [110, 110, 130]);
+  rect(ctx, x + 44, ly, 100, 5, [30, 20, 36]);
+  const pf = Math.max(0, Math.min(1, k.patience / (k.maxPatience || 50)));
+  rect(ctx, x + 45, ly + 1, Math.round(98 * pf), 3, pf > 0.5 ? [96, 200, 120] : pf > 0.25 ? [235, 200, 90] : [235, 90, 90]);
+  ly += 10;
+  smallText(ctx, "WORD OF MOUTH: TOURISTS WHO LEAVE HAPPY", x + 8, ly, [90, 90, 105]); ly += 7;
+  smallText(ctx, "TELL THEIR FRIENDS. ANGRY ONES TELL MORE.", x + 8, ly, [90, 90, 105]);
+  smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
+}
 function drawDossier() {
   if (!dossier) return;
+  if (!dossier.p) { drawCustDossier(dossier); return; }
   const c = dossier, p = c.p;
   const x = 24, y = 6, w2 = 208, h2 = 168;   // sits fully above the panel
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
@@ -2555,7 +2641,7 @@ function drawToast() {
 // ---------------------------------------------------------------- main loop
 let last = performance.now(), saveT = 0;
 function frame(now) {
-  const dt = Math.min(0.1, (now - last) / 1000) * TURBO * FF_SPEED[ffMode];
+  const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
   last = now; time += dt;
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
@@ -2563,6 +2649,8 @@ function frame(now) {
     trade.day = { fish: 0, corn: 0, water: 0, power: 0 };
     today = newDayLog(); today.repStart = rep;
   }
+  if (ffSleep && (gameOver || screen !== "play" || (day >= ffSleepDay && tmin >= 6.5 * 60 && tmin < 12 * 60)))
+    ffSleep = false;   // morning - or anything that should break the spell
   if (screen === "play" && tmin >= 20 * 60 && lastRentDay !== day) {
     today.repEnd = rep;
     lastRentDay = day;
@@ -2788,12 +2876,14 @@ function frame(now) {
     else if (c.dayState === "home") updateHome(c, dt);
     maybeQuip(c, dt);
   }
-  const followed = followNpc || (followIdx >= 0 && crabs[followIdx]);
+  if (followCust && !customers.includes(followCust)) followCust = null;   // they went home
+  if (dossier && !dossier.p && !customers.includes(dossier)) dossier = null;
+  const followed = followNpc || followCust || (followIdx >= 0 && crabs[followIdx]);
   if (followed) {
     const t = clampCam(followed.x - W / 2 + 8);
     camX += (t - camX) * Math.min(1, dt * 5);
   }
-  if (reportT > 0) reportT -= dt;
+  if (reportT > 0 && !ffSleep) reportT -= dt;   // the day report waits out a sun-skip
   if (newConfirmT > 0) newConfirmT -= dt;
   if (toast) { toast.t -= dt; if (toast.t <= 0) toast = null; }
   saveT += dt; if (saveT > 5) { saveT = 0; save(); }
@@ -2876,6 +2966,18 @@ function frame(now) {
     rect(ctx, W - rw - 2, 2, rw, 10, [30, 20, 36]);
     smallText(ctx, rTxt, W - rw + 2, 4, rep >= 50 ? [140, 220, 140] : rep >= 25 ? [220, 205, 185] : [235, 130, 130]);
   }
+  {  // the little sun: skip to morning (top-right, under the REP chip)
+    const on = ffSleep;
+    rect(ctx, W - 24, 14, 22, 13, [30, 20, 36]);
+    rect(ctx, W - 23, 15, 20, 11, on ? [255, 216, 96] : [70, 58, 66]);
+    const sc = on ? [140, 90, 20] : [255, 216, 96];
+    rect(ctx, W - 16, 18, 5, 5, sc);                       // sun core
+    px(ctx, W - 14, 16, sc); px(ctx, W - 14, 24, sc);      // rays
+    px(ctx, W - 18, 20, sc); px(ctx, W - 10, 20, sc);
+    px(ctx, W - 17, 17, sc); px(ctx, W - 11, 17, sc);
+    px(ctx, W - 17, 23, sc); px(ctx, W - 11, 23, sc);
+    if (on) smallText(ctx, "ZZZ", W - 44, 17, [255, 230, 120]);
+  }
   {  // line-of-credit chips, bottom-right of the world (right above the BILL chip)
     let cy = PANEL_Y - 12;
     if (bankHorizon <= CREDIT_CFG.CHIP_DAYS && !gameOver) {
@@ -2897,6 +2999,12 @@ function frame(now) {
   drawToast();
   if (gameOver) drawGameOver();
   if (window.MergeMode) MergeMode.frame(dt);
+  // sun mode: chain extra 0.6s sim steps synchronously (same per-step bound the
+  // suite verifies at 6x) so the night passes in about a second of real time
+  if (ffSleep && screen === "play" && !gameOver && ffChain < 6) {
+    ffChain++; frame(last + 100); return;
+  }
+  if (ffChain) { ffChain = 0; last = performance.now(); }   // resync: chained steps ran ahead of the real clock
   requestAnimationFrame(frame);
 }
 
