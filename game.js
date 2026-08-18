@@ -365,10 +365,17 @@ function collide(dt) {
       const dx = b.x - a.x, dy = (b.y - a.y) * 1.8;   // wide sprites: ellipse
       const d = Math.hypot(dx, dy);
       if (d < 12 && d > 0.01) {
+        const still = (c) => c.kstate === "work" ||
+          (Math.abs((c.tx != null ? c.tx : c.x) - c.x) < 3 && Math.abs((c.ty != null ? c.ty : c.y) - c.y) < 3);
+        const aStill = still(a), bStill = still(b);
         const push = Math.min((12 - d) / 2 * Math.min(1, dt * 12), 4);
         const ux = dx / d, uy = dy / d / 1.8;
-        a.x -= ux * push; a.y = clampY(a.y - uy * push);
-        b.x += ux * push; b.y = clampY(b.y + uy * push);
+        if (aStill && !bStill) { b.x += ux * push * 2; b.y = clampY(b.y + uy * push * 2); }
+        else if (bStill && !aStill) { a.x -= ux * push * 2; a.y = clampY(a.y - uy * push * 2); }
+        else {
+          a.x -= ux * push; a.y = clampY(a.y - uy * push);
+          b.x += ux * push; b.y = clampY(b.y + uy * push);
+        }
       }
     }
   // solid stations: walk around, not through (except the crab working that spot)
@@ -560,7 +567,7 @@ function setT(c, x, y) { c.tx = x; c.ty = y; }
 // y=168 below the front row) for horizontal travel, cut in at the end
 function routedStep(c, spd, dt) {
   const tx = c.tx, ty = c.ty;
-  if (Math.abs(c.x - tx) <= 14) return stepTo(c, tx, spd, dt, ty);   // close: go direct
+  if (Math.abs(c.x - tx) <= 5) return stepTo(c, tx, spd, dt, ty);   // final approach: straight in
   const lane = ty <= 147 ? 147 : 168;
   stepTo(c, tx, spd, dt, lane);   // diagonal into + along the lane (x-progress escapes colliders)
   return false;
