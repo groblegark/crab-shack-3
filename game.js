@@ -1449,6 +1449,58 @@ function drawBG() {
   }
 }
 
+function drawPier() {
+  // the east break: the sea cuts a channel under the boardwalk, and the
+  // coast road crosses it on planks - SALTY and DRIFT fish off the rail.
+  const bx0 = PIER_X0 - 4, bx1 = PIER_X1 + 4;      // water channel
+  const dx0 = PIER_X0 - 14, dx1 = PIER_X1 + 14;    // plank deck bridging it
+  if (bx1 - camX < -20 || dx0 - camX > W + 20) return;
+  // channel water, with the same wave dashes as the open sea
+  wrect(bx0, SHORE_Y, bx1 - bx0, 124 - SHORE_Y, [40, 140, 220]);
+  for (let y = SHORE_Y + 3; y < 120; y += 5)
+    for (let x = bx0; x < bx1; x += 24) {
+      const off = ((Math.sin(time * 1.3 + y) * 8) | 0) + ((y * 7) % 13);
+      if (x + off > bx0 && x + off + 10 < bx1) wrect(x + off, y, 10, 1, [96, 200, 255]);
+    }
+  // foam where the channel laps the sand
+  const f = (Math.sin(time * 0.9 + 2) * 2) | 0;
+  wrect(bx0, 122 + Math.max(0, f), bx1 - bx0, 2, [230, 250, 255]);
+  wrect(bx0, SHORE_Y, 1, 124 - SHORE_Y, [170, 220, 250]);
+  wrect(bx1 - 1, SHORE_Y, 1, 124 - SHORE_Y, [170, 220, 250]);
+  // pilings sunk into the water under the deck
+  for (let x = dx0 + 16; x < dx1 - 8; x += 34) {
+    wrect(x, 104, 4, 13, [120, 80, 45]);
+    wrect(x + 3, 104, 1, 13, [90, 60, 35]);
+    wrect(x - 1, 115 + (((x / 34) | 0) % 2), 6, 1, [180, 230, 250]);   // waterline ripple
+  }
+  // railing along the sea side
+  for (let x = dx0 + 4; x < dx1 - 4; x += 24) {
+    wrect(x, 76, 2, 10, [140, 90, 50]);
+    wrect(x, 76, 2, 1, [190, 140, 80]);
+  }
+  wrect(dx0 + 2, 78, dx1 - dx0 - 4, 2, [160, 110, 60]);
+  // plank deck (ends rest on the sand past the channel)
+  wrect(dx0, 86, dx1 - dx0, 18, [206, 156, 94]);
+  wrect(dx0, 86, dx1 - dx0, 1, [236, 196, 130]);
+  for (let r = 0; r < 4; r++) {
+    const y = 90 + r * 4;
+    wrect(dx0, y, dx1 - dx0, 1, [176, 126, 72]);
+    for (let x = dx0 + 5 + ((r * 9) % 16); x < dx1 - 1; x += 16) wrect(x, y - 3, 1, 3, [186, 136, 78]);
+  }
+  wrect(dx0, 103, dx1 - dx0, 1, [120, 80, 45]);
+  wrect(dx0, 104, dx1 - dx0, 1, [90, 60, 35]);
+  // bait bucket between the fishing spots
+  wblit(BUCKET, 1928, 97);
+  // lamp post on the east end for the night tide
+  wrect(dx1 - 8, 66, 2, 20, [70, 60, 90]);
+  wrect(dx1 - 9, 62, 4, 4, [30, 20, 36]);
+  wrect(dx1 - 8, 63, 2, 2, darkness() > 0.4 ? [255, 230, 120] : [204, 208, 220]);
+  if (darkness() > 0.4) {   // soft halo once it's lit
+    wrect(dx1 - 10, 63, 1, 2, [190, 160, 80]); wrect(dx1 - 5, 63, 1, 2, [190, 160, 80]);
+    wrect(dx1 - 8, 61, 2, 1, [190, 160, 80]); wrect(dx1 - 8, 66, 2, 1, [190, 160, 80]);
+  }
+}
+
 function drawTown() {
   // coast road runs the full length of town, behind everything
   wrect(0, ROAD_Y0, WORLD_W, ROAD_Y1 - ROAD_Y0, [120, 116, 130]);
@@ -1456,6 +1508,7 @@ function drawTown() {
   wrect(0, ROAD_Y1 - 2, WORLD_W, 2, [90, 86, 100]);
   for (let x = 6; x < WORLD_W; x += 22) wrect(x, ROAD_Y0 + 9, 10, 2, [230, 220, 120]);
   wrect(0, ROAD_Y1, WORLD_W, 3, [214, 196, 156]);   // shoulder
+  drawPier();
   // houses face the promenade (owned ones get the owner's roof color)
   for (const c of allCrabs())
     if (!c.p.homeless) wblit(HOUSES2[c.p.color % HOUSES2.length], HOUSE_XS[c.p.house], HOME_BOTTOM - HOUSES2[0].h);
