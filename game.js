@@ -711,7 +711,7 @@ function pickErrand(c) {
     }
   }
   if ((c.p.hunger || 0) >= 0.5 && staffed("shack")) {
-    const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= r.pay + 2);
+    const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= Math.ceil(r.pay * 1.25) + 2);
     if (affordable.length) {
       // treat yourself when flush, eat cheap when broke
       affordable.sort((a, b) => a.pay - b.pay);
@@ -722,16 +722,16 @@ function pickErrand(c) {
   if (c.p.sick) return null;   // bed rest: food handled above, nothing else
   if ((c.p.dirt || 0) >= 0.66 && staffed("cleaners")) {
     const r = BIZ.cleaners.recipes[1];   // uniform service
-    if (c.p.wallet >= r.pay + 2) return { biz: "cleaners", recipe: r, need: "clean" };
+    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "cleaners", recipe: r, need: "clean" };
   }
   const needsBath = (c.p.sandy || 0) >= 0.6 || ((c.p.dirt || 0) >= 0.75 && !staffed("cleaners"));
   if (needsBath && staffed("showers") && !c.p.npc) {
     const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
-    if (c.p.wallet >= r.pay + 2) return { biz: "showers", recipe: r, need: "spa" };
+    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "showers", recipe: r, need: "spa" };
   }
   if ((c.p.bored || 0) >= 0.6 && staffed("arcade")) {
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
-    if (c.p.wallet >= r.pay + 2) return { biz: "arcade", recipe: r, need: "fun" };
+    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "arcade", recipe: r, need: "fun" };
   }
   return null;
 }
@@ -1000,7 +1000,7 @@ function payAndBenefit(c, cust) {
   creditAccomplishment(c, cust);
   if (c && c.p) today.byCrab[c.p.name] = (today.byCrab[c.p.name] || 0) + 1;
   if (cust.isCrab) {
-    const price = Math.min(Math.ceil(cust.recipe.pay * 1.25), Math.floor(cust.crab.p.wallet));
+    const price = Math.ceil(cust.recipe.pay * 1.25);   // full retail, always - no broke-crab discounts
     cust.crab.p.wallet = Math.max(0, cust.crab.p.wallet - price);
     creditBiz(cust.biz, price, cust.x, 126);
     if (cust.crab.p.npc && bizOwner(cust.biz) === "player" && window._stats)
