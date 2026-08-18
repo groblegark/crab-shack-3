@@ -113,7 +113,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **42 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **44 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
@@ -123,9 +123,11 @@ vm — never fork game logic into tools/) and perf expectations live there.
   save/load (incl. boat berths), no-inflation wallet bounds, needs-drag
   visibility, laundromat-removal migration (one-shot refund) + dirt
   serviced by showers alone, thirst serviced end-to-end at the bar,
-  parched-spiral sickness attribution (with a watered control arm), and
+  parched-spiral sickness attribution (with a watered control arm),
   juicebar economics (ledger flows charged-vs-tracked, staff retail,
-  save/load roundtrip of thirst + unlock + firstPour).
+  save/load roundtrip of thirst + unlock + firstPour), tired
+  accrual/sleep-repair (bed vs cot rates) and the sandy->tired save
+  migration.
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
   [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
   (default cores−1, deterministic either way, ~3x faster on 4 seeds).
@@ -318,13 +320,30 @@ first, connect later. Don't build the network before the node is beautiful.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
-- **Tiredness replaces sandiness** (Matt 2026-08-18): drop the SPA/sandy need;
-  in its place TIRED, accrued by work/errands, repaired by SLEEP — faster in
-  your own bed (house/boat) than on a shelter cot. Showers become dirt-only.
-  SEQUENCE AFTER the T2 thirst merge — T2 is concurrently rewriting the needs
-  bars, sickness-risk table, and quips; doing both at once guarantees a
-  semantic collision. Touches: needs bars/dossier, sickness risk (sandy ≥
-  0.95 term), shower recipes/needsBath, crew shift-end bumps, suite pins.
+- ~~Tiredness replaces sandiness~~ — **built (worktree branch, 2026-08-18),
+  after the T2 merge as sequenced**: `p.sandy` renamed `p.tired` with save
+  migration (old sandy seeds tired, crew + townsfolk paths, nothing strands).
+  Accrual: +0.45 shift end, +0.05 nightly ONLY on days worked (workedToday
+  flag; fishers/NPCs/owners identical — equality directive), +0.03 per
+  errand, nothing from idling. SLEEP repairs it: proportional drain while
+  bedded down at night — own bed (house/boat) 0.5/game-hour, shelter cot
+  half that. Same-schedule contrast from 0.8: housed wakes 0.037, cot 0.213
+  (suite-pinned); organic 4-seed steady state: housed wake med ~0.07,
+  evening peak med ~0.59 (SUDSY's arcade nights pin her at 1.0 — she sleeps
+  4.5h). Showers are DIRT-ONLY (needsBath drops the sandy term, errand files
+  under clean, stall no longer resets sandy); SUDSY's economy holds — dirt
+  alone keeps her stalls busy (449 vs 453 showers / 4x20d). Sickness: tired
+  ≥ 0.95 → +0.05 (was sandy +0.03), blamed "exhaustion"; T2's thirst
+  coupling rewired to tired > 0.5 checked PRE-bump at shift end (same firing
+  rate as the sandy original); tip-fumble term follows the rename at 0.85
+  (evenings routinely reach the old 0.66). Deliberately NO crabEff tired
+  term — a future loosening with its own matrix run. UI: ZZZ bar on the
+  follow card (both canvas modes), RESTED in the dossier, EXHAUSTED mood at
+  0.85, DEAD ON MY FEET quips; the old darkness "TIRED" mood renamed UP
+  LATE. Measured: baseline 16 seeds 11-23 med 15 (was 10-21 med 14), 8
+  seeds 11-23 med 15 (was 10-16 med 13) — runway eases ~1-2 days because
+  crew keep the shower money sandy forced out while sleep is free; growth
+  chef,table 1/6 escapes, same eviction days. Suite 44/44.
 - **Per-owner everything; all crabs equal** (Matt 2026-08-18): "no public
   utilities, no town payroll — per-owner … all crabs should be equal in the
   simulation, they just start with different stuff." Language pass done
