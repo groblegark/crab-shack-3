@@ -24,15 +24,17 @@ const SHELTER_X = 444, MOVE_IN_COST = 25;
 const BIZ = {
   shack: {
     name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 105,
-    x0: 1250, x1: 1480, door: 1277,
+    x0: 1220, x1: 1560, door: 1247,
     stations: {
-      crate: [{ x: 1262, y: 136 }],
-      board: [{ x: 1296, y: 136 }, { x: 1317, y: 136 }, { x: 1338, y: 136 }],
-      grill: [{ x: 1366, y: 160 }, { x: 1388, y: 160 }, { x: 1410, y: 160 }],
-      pass:  [{ x: 1438, y: 160 }],
+      crate: [{ x: 1232, y: 136 }],
+      board: [{ x: 1268, y: 136 }, { x: 1289, y: 136 }, { x: 1310, y: 136 }],
+      sink:  [{ x: 1342, y: 136 }],
+      grill: [{ x: 1380, y: 160 }, { x: 1402, y: 160 }, { x: 1424, y: 160 }],
+      pass:  [{ x: 1452, y: 160 }],
     },
-    source: "crate", out: "pass", queueX: 1466,
-    park: 1130, rack: 1228,
+    tables: [{ x: 1492, y: 152, dishes: 0, occupant: null }, { x: 1532, y: 152, dishes: 0, occupant: null }],
+    source: "crate", out: "pass", queueX: 1566,
+    park: 1130, rack: 1208,
     recipes: [
       { id: "taco", icon: "taco", pay: 17, raw: "fish_raw",
         steps: [["board", 3.0, "fish_cut"], ["grill", 4.0, "taco"]] },
@@ -70,7 +72,7 @@ const BIZ = {
       prize: [{ x: 1772, y: 160 }],
     },
     source: "booth", out: "prize", queueX: 1804,
-    park: 1546, rack: 1600,
+    park: 1590, rack: 1604,
     recipes: [
       { id: "clawgame", icon: "plush", pay: 13, raw: "token",
         steps: [["claw", 3.5, "plush"]] },
@@ -147,7 +149,7 @@ function totalRent() {
 }
 function nightlyDue() { return totalRent() + CRAB_WAGE * crabs.length; }
 const busy = {
-  shack: { board: [false, false, false], grill: [false, false, false] },
+  shack: { board: [false, false, false], grill: [false, false, false], sink: [false] },
   cleaners: { washer: [false, false], dryer: [false, false] },
   arcade: { claw: [false, false], skee: [false, false] },
 };
@@ -378,6 +380,21 @@ function collide(dt) {
         }
       }
     }
+  // solid tables: nobody walks through the picnic area
+  for (const bizKey of Object.keys(BIZ)) {
+    if (!bizUnlocked(bizKey) || !BIZ[bizKey].tables) continue;
+    for (const t of BIZ[bizKey].tables) {
+      for (const c of bodies) {
+        if (Math.abs((c.tx || 0) - (t.x + 2)) < 8 && Math.abs((c.ty || 0) - (t.y + 12)) < 8) continue;
+        const dx = c.x + 8 - (t.x + 10), dy = c.y - t.y;
+        if (Math.abs(dx) < 14 && dy > -9 && dy < 6) {
+          const push = Math.min(95 * dt, 5);
+          if (Math.abs(dx) > Math.abs(dy) * 1.6) c.x += (dx > 0 ? 1 : -1) * push;
+          else c.y = clampY(c.y + (dy > -2 ? 1 : -1) * push);
+        }
+      }
+    }
+  }
   // solid stations: walk around, not through (except the crab working that spot)
   for (const bizKey of Object.keys(BIZ)) {
     if (!bizUnlocked(bizKey)) continue;
@@ -582,7 +599,8 @@ function release(c) {
   c.slot = -1; c.slotKind = null;
 }
 function abortChef(c) {
-  if (c.kstate === "work") release(c);
+  if (c.kstate === "work" || c.kstate === "washing") release(c);
+  if (c.busTable) { c.busTable.busing = false; c.busTable = null; }
   c.kstate = "idle"; c.cust = null; c.carrying = null; c.stepIdx = 0;
 }
 function updateKitchen(c, dt) {
@@ -595,6 +613,13 @@ function updateKitchen(c, dt) {
       if (o) {
         o.claimed = true; c.cust = o; c.stepIdx = -1; c.kstate = "walk";
         const s0 = stationSpot(bizKey, biz.source, 0); setT(c, s0.x, s0.y);
+        return;
+      }
+      // no orders? bus a dirty table
+      const dirty = biz.tables && biz.tables.find(t => t.dishes > 0 && !t.busing);
+      if (dirty) {
+        dirty.busing = true; c.busTable = dirty; c.kstate = "toBus";
+        setT(c, dirty.x + 2, dirty.y + 12);
         return;
       }
     }
@@ -617,6 +642,25 @@ function updateKitchen(c, dt) {
           c.kstate = "toSlot";
         }
       }
+    }
+  } else if (c.kstate === "toBus") {
+    if (routedStep(c, spd, dt)) {
+      c.busTable.dishes = 0; c.busTable.busing = false; c.busTable = null;
+      c.carrying = "dirty_dishes";
+      const sk = stationSpot(bizKey, "sink", 0); setT(c, sk.x, sk.y);
+      c.kstate = "toSink";
+    }
+  } else if (c.kstate === "toSink") {
+    if (routedStep(c, spd, dt)) {
+      const s = tryAcquire(bizKey, "sink");
+      if (s >= 0) { c.slotKind = "sink"; c.slot = s; c.workMax = c.workT = 2.5 / crabWork(c); c.kstate = "washing"; }
+    }
+  } else if (c.kstate === "washing") {
+    c.workT -= dt;
+    if (c.workT <= 0) {
+      release(c); c.carrying = null; c.kstate = "idle";
+      if (window._stats) window._stats.bused = (window._stats.bused || 0) + 1;
+      popText("SQUEAKY CLEAN", c.x - 10, FLOOR_Y - 30, [140, 220, 255]);
     }
   } else if (c.kstate === "waitCash") {
     if (coins >= INGREDIENT_COST[c.cust.recipe.raw]) { c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1; }
@@ -675,7 +719,11 @@ function serve(c) {
       earn(cust.recipe.pay + tip, cust.x, 126);
       popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
     }
-    cust.served = true; cust.state = "leaving"; cust.happy = true; sfx.ding();
+    cust.served = true; cust.happy = true; sfx.ding();
+    const tables = BIZ[cust.biz].tables;
+    const seat = tables && !cust.isCrab ? tables.find(t => !t.occupant && t.dishes === 0) : null;
+    if (seat) { seat.occupant = cust; cust.state = "toTable"; cust.table = seat; }
+    else cust.state = "leaving";
     if (window._stats) window._stats[cust.isCrab ? "crabServes" : "tourServes"]++;
   }
   c.cust = null; c.carrying = null; c.kstate = "idle"; c.stepIdx = 0;
@@ -713,6 +761,20 @@ function updateCustomers(dt) {
           if (window._stats) window._stats[k.isCrab ? "crabRage" : "tourRage"]++;
           popText("!!", k.x, 120, [255, 80, 80]); sfx.angry();
         }
+      }
+    } else if (k.state === "toTable") {
+      const t = k.table;
+      const d = Math.hypot(t.x + 10 - k.x, 0);
+      if (d > 3) k.x += Math.sign(t.x + 10 - k.x) * 45 * dt;
+      else { k.state = "dining"; k.dineT = 6 + Math.random() * 4; }
+    } else if (k.state === "dining") {
+      k.dineT -= dt;
+      if (k.dineT <= 0) {
+        k.table.dishes = Math.min(3, k.table.dishes + 1);
+        k.table.occupant = null;
+        earn(5, k.x, 130);   // table tip on the way out
+        popText("TABLE TIP", k.x - 10, 122, [140, 255, 160]);
+        k.state = "leaving";
       }
     } else if (k.state === "leaving") {
       k.x += (k.happy ? 50 : 75) * dt;
@@ -1035,7 +1097,7 @@ function drawTown() {
   for (const key of Object.keys(BIZ)) if (bizUnlocked(key)) drawBusiness(key);
 }
 
-const STATION_ART = { crate: CRATE, board: BOARD, grill: GRILL, pass: PASS,
+const STATION_ART = { crate: CRATE, board: BOARD, grill: GRILL, pass: PASS, sink: SINK,
   basket: BASKET, washer: null, dryer: DRYER, counter: COUNTER,
   booth: TOKEN_BOOTH, claw: null, skee: SKEEBALL, prize: PRIZE_COUNTER };
 
@@ -1143,7 +1205,7 @@ function drawCrab(c) {
     wblit(BUGGIES2[c.p.color], c.x - 16, ROAD_Y1 - BUGGIES2[0].h, c.flip);
     return;
   }
-  const working = c.kstate === "work" && c.dayState === "working";
+  const working = (c.kstate === "work" || c.kstate === "washing") && c.dayState === "working";
   const moving = c.dayState !== "home" || Math.hypot((c.tx || c.x) - c.x, (c.ty || c.y) - c.y) > 2;
   let art;
   if (working) art = ((c.animT * 6) | 0) % 2 ? arts.w : arts.a;
@@ -1617,7 +1679,15 @@ function frame(now) {
       }
     }
   }
-  for (const k of customers) paint.push({ base: k.isCrab ? 165 : FLOOR_Y, f: () => drawCustomer(k) });
+  for (const key of Object.keys(BIZ)) {
+    const tables = BIZ[key].tables;
+    if (!tables || !bizUnlocked(key)) continue;
+    for (const t of tables) paint.push({ base: t.y, f: () => {
+      wblit(PICNIC_TABLE, t.x, t.y - PICNIC_TABLE.h);
+      if (t.dishes > 0) wblit(DISHES[t.dishes - 1], t.x + 6, t.y - PICNIC_TABLE.h - DISHES[t.dishes - 1].h + 1);
+    } });
+  }
+  for (const k of customers) paint.push({ base: k.state === "dining" ? (k.table.y + 1) : (k.isCrab ? 165 : FLOOR_Y), f: () => drawCustomer(k) });
   for (const c of crabs) paint.push({ base: c.cstate === "drive" ? ROAD_Y1 : c.y, f: () => drawCrab(c) });
   paint.push({ base: FLOOR_Y, f: drawLandlord });
   paint.sort((a, b) => a.base - b.base);

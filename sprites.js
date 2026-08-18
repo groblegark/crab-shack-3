@@ -678,3 +678,42 @@ defItem("gold_plush", [
   "KAAKKAAK.",
   ".KK..KK..",
 ]);
+
+// ================================================================ dining art
+const SINK = parseArt([
+  "......KKK.......",
+  "......KMMK......",
+  "..KKKKKMMK......",
+  "KKMMMMMMMKKKKKKK",
+  "KMKCCCCCCCCCCKMK",
+  "KMKCVCVCCVCVCKMK",
+  "KMKCCCCCCCCCCKMK",
+  "KMKKKKKKKKKKKKMK",
+  "KMMMMMMMMMMMMMMK",
+  "KKKKKKKKKKKKKKKK",
+  ".KNK.........KNK",
+], PAL);
+const PICNIC_TABLE = parseArt([
+  "....KKKKKKKKKKKK....",
+  "..KKEEEEEEEEEEEEKK..",
+  ".KEEEEEEEEEEEEEEEEK.",
+  ".KKKKKEEKKKKEEKKKKK.",
+  "....KEEK....KEEK....",
+  ".KKKKKKKKKKKKKKKKKK.",
+  ".KEEEEEK......KEEEEK",
+  "..KKKKK........KKKK.",
+], PAL);
+const DISHES = [
+  parseArt(["..KKKK..", ".KLLLLK.", "KKKKKKKK"], PAL),
+  parseArt(["..KKKK..", ".KVLLVK.", ".KLLLLK.", "KKKKKKKK"], PAL),
+  parseArt([".KKKKKK.", ".KLVLLK.", ".KVLLVK.", ".KLLLLK.", "KKKKKKKK"], PAL),
+];
+defItem("dirty_dishes", [
+  "..KKKK...",
+  ".KLDLLK..",
+  ".KDLLDK..",
+  ".KLLLLK..",
+  "KKKKKKKK.",
+  ".........",
+  ".........",
+]);
