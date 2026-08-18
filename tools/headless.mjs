@@ -7,6 +7,8 @@
 //   node tools/headless.mjs --days 30 --set ads=3,chef=4
 import { readFileSync } from "fs";
 import vm from "vm";
+import os from "os";
+import { fork } from "child_process";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -22,6 +24,9 @@ const SET = (opt("set", "") || "").split(",").filter(Boolean);
 const STEP = parseFloat(opt("step", "0.05"));   // sim timestep, seconds
 const QUIET = args.includes("--quiet");
 const SEEDS = parseInt(opt("seeds", "1"));
+const JOBS = opt("jobs", null) != null
+  ? parseInt(opt("jobs", null))
+  : Math.min(SEEDS, Math.max(1, os.cpus().length - 1));
 
 function mulberry32(a) {
   return function () {
@@ -133,9 +138,44 @@ return { dayRows, wall, stats: G("JSON.stringify(window._stats)"),
   coins: G("Math.round(coins)"), ups: G(`Object.keys(UPS).map(k => k + ":" + UPS[k].lvl).join(" ")`) };
 }
 
-const results = [];
+// ---- worker mode: this file is its own worker entry (fork + IPC) ---------
+// `--_worker <seed>` runs one seed and sends the result back to the parent.
+const WORKER_SEED = opt("_worker", null);
+if (WORKER_SEED != null) {
+  process.send(runOnce(parseInt(WORKER_SEED)));
+  process.exit(0);
+}
+
+// ---- seed matrix: sequential (--jobs 1) or a pool of forked workers ------
+function runParallel(seedList, jobs) {
+  return new Promise((resolve, reject) => {
+    const out = new Array(seedList.length);
+    let next = 0, done = 0;
+    const launch = () => {
+      if (next >= seedList.length) return;
+      const idx = next++;
+      const child = fork(fileURLToPath(import.meta.url),
+        [...args, "--_worker", String(seedList[idx])],
+        { stdio: ["ignore", "inherit", "inherit", "ipc"] });
+      child.on("message", (msg) => { out[idx] = msg; });
+      child.on("error", reject);
+      child.on("exit", (code) => {
+        if (code !== 0 || out[idx] === undefined)
+          return reject(new Error(`worker for seed ${seedList[idx]} failed (exit ${code})`));
+        if (++done === seedList.length) return resolve(out);
+        launch();
+      });
+    };
+    for (let i = 0; i < Math.min(jobs, seedList.length); i++) launch();
+  });
+}
+
 const SEEDBASE = parseInt(opt("seedbase", "0"));
-for (let s = 1; s <= SEEDS; s++) results.push(runOnce((s + SEEDBASE) * 1337));
+const seedList = [];
+for (let s = 1; s <= SEEDS; s++) seedList.push((s + SEEDBASE) * 1337);
+const results = (JOBS <= 1 || SEEDS <= 1)
+  ? seedList.map((seed) => runOnce(seed))
+  : await runParallel(seedList, JOBS);
 const r0 = results[0];
 if (!QUIET && SEEDS === 1) {
   console.log("day  end$   lifetime$  (settlement at 20:00 included)");

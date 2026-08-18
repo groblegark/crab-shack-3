@@ -335,6 +335,18 @@ function crabMove(c) {
   return 40 * t.move * (1 - 0.2 * Math.max(0, (c.p.bored || 0) - 0.5)) * (c.p.sick ? 0.5 : 1);
 }
 function crabWork(c) { return TRAITS[c.p.trait].work; }
+// needs -> output: a well-kept crab works at 1.0. Let hunger or dirt slide
+// and the crew's timed work slows (station prep, kitchen hustle, stall
+// cleaning): hunger past 0.3 costs up to -18%, dirt past 0.6 up to -6%
+// (floor 0.76). Tuned against the baseline eviction curve - see the
+// "needs bite" scenario in tools/suite.mjs before touching these numbers.
+// (Fishing casts deliberately NOT coupled: the whole town eats the catch,
+// and any measurable drag there re-tilts the calibrated economy.)
+function crabEff(c) {
+  const hungry = Math.max(0, (c.p.hunger || 0) - 0.3) / 0.7;
+  const grubby = Math.max(0, (c.p.dirt || 0) - 0.6) / 0.4;
+  return 1 - 0.18 * Math.min(1, hungry) - 0.06 * Math.min(1, grubby);
+}
 
 // ---------------------------------------------------------------- sound (from CS1)
 const PLAYLIST = [
@@ -961,7 +973,11 @@ function updateFishing(c, dt) {
 function updateKitchen(c, dt) {
   if (c.cust && (c.cust.state === "leaving" || c.cust.served)) { abortChef(c); return; }
   const bizKey = c.workBiz, biz = BIZ[bizKey];
-  const spd = crabMove(c) * 1.55;   // hustle: kitchens move quick
+  // hustle: kitchens move quick - but a run-down crab loses the spring in
+  // their step: a gentle slope, plus a kicker once seriously neglected
+  // (eff < 0.85), totalling ~-18% at rock bottom
+  const eff = crabEff(c);
+  const spd = crabMove(c) * 1.55 * (1 - 0.3 * (1 - eff) - 1.2 * Math.max(0, 0.85 - eff));
   if (c.kstate === "idle") {
     const lastCall = c.pendingOff && tmin < SHIFTS[c.p.shift].end + 45;
     if (!c.pendingOff || lastCall) {
@@ -1012,7 +1028,7 @@ function updateKitchen(c, dt) {
       }
     }
   } else if (c.kstate === "toStallClean") {
-    if (routedStep(c, spd, dt)) { c.workMax = c.workT = 2.5 / crabWork(c); c.kstate = "cleaningStall"; }
+    if (routedStep(c, spd, dt)) { c.workMax = c.workT = 2.5 / (crabWork(c) * crabEff(c)); c.kstate = "cleaningStall"; }
   } else if (c.kstate === "cleaningStall") {
     c.workT -= dt;
     if (c.workT <= 0) {
@@ -1038,7 +1054,7 @@ function updateKitchen(c, dt) {
   } else if (c.kstate === "toSlot") {
     if (routedStep(c, spd, dt)) {
       const [, secs] = c.cust.recipe.steps[c.stepIdx];
-      const mult = masteryMult(c, c.cust.recipe.id) / (crabWork(c) * (1 - 0.15 * (c.p.hunger || 0)));
+      const mult = masteryMult(c, c.cust.recipe.id) / (crabWork(c) * crabEff(c));
       c.workMax = c.workT = secs * mult;
       c.kstate = "work";
     }
@@ -1943,6 +1959,9 @@ function drawFollowCard() {
     rect(ctx, 58, 35, 28, 8, [96, 170, 220]);
     smallText(ctx, "JOB>", 60, 36, [255, 255, 255]);
   }
+  const eff = crabEff(c);
+  if (!p.sick && eff < 0.995)
+    smallText(ctx, "PACE " + Math.round(eff * 100) + "%", 74, 36, eff < 0.8 ? [190, 80, 80] : [200, 110, 40]);
   const bars = [["FED", 1 - (p.hunger || 0), 6], ["CLN", 1 - (p.dirt || 0), 37],
     ["FUN", 1 - (p.bored || 0), 68], ["SPA", 1 - (p.sandy || 0), 99]];
   for (const [label, frac, bx] of bars) {
@@ -2195,6 +2214,14 @@ function drawDossier() {
   row("HOME", hl, hcol);
   row("NOW", crabStatus(c).slice(0, 34));
   if (p.sick) row("HEALTH", "SICK - DAY " + ((p.sick.days || 0) + 1), [190, 80, 80]);
+  const eff = crabEff(c);
+  if (!p.sick && eff < 0.995) {
+    const why = [];
+    if ((p.hunger || 0) > 0.3) why.push("HUNGRY");
+    if ((p.dirt || 0) > 0.6) why.push("GRUBBY");
+    row("PACE", "WORKING AT " + Math.round(eff * 100) + "%" + (why.length ? " - " + why.join(", ") : ""),
+      eff < 0.8 ? [190, 80, 80] : [200, 110, 40]);
+  }
   ly += 2;
   const bars = [["FED", 1 - (p.hunger || 0)], ["CLEAN", 1 - (p.dirt || 0)],
     ["FUN", 1 - (p.bored || 0)], ["UNSANDY", 1 - (p.sandy || 0)]];

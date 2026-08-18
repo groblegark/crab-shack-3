@@ -111,6 +111,9 @@ scenario("staff meals: closing crew cooks their own dinner, at retail", () => {
     for (const c of crabs) { c.p.hunger = 0; c.errandCd = 999; c.p.sandy = 0; }
     const c = crabs[0];
     c.p.hunger = 0.9; c.p.wallet = 30; c.errandCd = 0;   // <40: cheapest recipe, deterministic
+    // he may be mid-commute when we force this - park him at home so the
+    // home-errand check is live inside tonight's town-awake window
+    if (c.dayState !== "working") { c.dayState = "home"; }
     return JSON.stringify({ paid: window._stats.staffMealPaid || 0, cost: window._stats.staffMealCost || 0,
       meals: window._stats.staffMeals || 0 });
   })()`));
@@ -217,6 +220,7 @@ scenario("disease: care cures, neglect can kill", () => {
     sim.runUntil("tmin > 10 * 60", {});
     sim.G('crabs[0].p.sick = { days: 0 }; crabs[0].p.hunger = 0; crabs[0].p.dirt = 0;');
     for (let d = 0; d < 5 && !sim.G("gameOver"); d++) {
+      sim.G('if (coins < 400) coins = 600;');   // testing cure odds, not solvency (a lone founder down = knife-edge till)
       sim.runUntil("lastRentDay === day", {});
       sim.G('if (crabs[0] && crabs[0].p.sick) { crabs[0].p.hunger = 0; crabs[0].p.dirt = 0; }');
       sim.runUntil("tmin < 10", { maxSteps: 40000 });
@@ -490,6 +494,33 @@ scenario("all crew dead: town survives, rehire recovers", () => {
   if (sim.G("crabs.length") !== 1) return "rehire after wipeout failed";
   sim.runDays(1, { onTick: (G) => { if (G("coins") < 400) G("coins = 800"); }, tickEvery: 40 });
   return sim.G("crabs.length === 1 && isFinite(crabs[0].p.wallet)") ? true : "rehired crab broke";
+});
+
+scenario("needs bite: needy crew serve measurably fewer dishes", () => {
+  // crabEff: a well-kept crab works at 1.0; hunger past 0.5 and dirt past 0.6
+  // slow station prep + kitchen hustle. Pin the crew both ways and compare
+  // paying dishes served over the same 5 days (rep pinned so demand is equal,
+  // sickness cleared so only the efficiency channel differs).
+  const sim0 = createSim({ seed: 1 });
+  const effs = JSON.parse(sim0.G(`JSON.stringify([
+    crabEff({p:{hunger:0,dirt:0}}), crabEff({p:{hunger:1,dirt:0}}),
+    crabEff({p:{hunger:0,dirt:1}}), crabEff({p:{hunger:1,dirt:1}})])`));
+  if (effs[0] !== 1) return `well-kept eff ${effs[0]}, expected 1.0`;
+  if (!near(effs[1], 0.78, 0.86)) return `starving eff ${effs[1]}, expected ~0.82`;
+  if (!near(effs[2], 0.90, 0.97)) return `filthy eff ${effs[2]}, expected ~0.94`;
+  if (!near(effs[3], 0.72, 0.80)) return `rock-bottom eff ${effs[3]}, expected ~0.76`;
+  const serve = (seed, needy) => {
+    const sim = createSim({ seed });
+    const pin = `for (const c of crabs) { c.p.hunger = ${needy ? 1 : 0}; c.p.dirt = ${needy ? 1 : 0};
+      c.p.bored = 0; c.p.sandy = 0; c.p.sick = null; } rep = 90;`;
+    sim.runDays(5, { onTick: (G) => G(pin) });
+    return sim.G("window._stats.tourServes");
+  };
+  let kept = 0, needy = 0;
+  for (const seed of [1337, 42]) { kept += serve(seed, false); needy += serve(seed, true); }
+  if (kept < 100) return `well-kept crew only served ${kept} dishes over 2x5 days - demand broke?`;
+  return needy < kept * 0.85 ? true
+    : `needy crew served ${needy} vs well-kept ${kept} - impairment not visible (need <85%)`;
 });
 
 // ---- runner
