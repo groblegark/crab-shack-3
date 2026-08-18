@@ -82,7 +82,7 @@ for (const kv of SET) {
 G('soundOn = false; musicOn = false; screen = "play"; window._headless = true; window._stats = { tourServes: 0, crabServes: 0, tourRage: 0, crabRage: 0, bused: 0 };');
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);
 const buyScript = BUY.length ? new vm.Script(`
-  if (Math.abs(tmin - 12 * 60) < ${STEP} * TS) {
+  if (tmin >= 9 * 60 && tmin <= 19 * 60 && Math.abs(tmin - Math.round(tmin / 60) * 60) < ${STEP} * TS / 2) {
     for (const k of ${JSON.stringify(BUY)}) {
       const u = UPS[k];
       if (u.lvl >= u.max) continue;
@@ -104,11 +104,20 @@ const buyScript = BUY.length ? new vm.Script(`
     }
   }`) : null;
 const dayRows = [];
+const walletScript = new vm.Script(`
+  if (Math.abs(tmin - 6 * 60) < ${STEP} * TS) {
+    window._wal = window._wal || { max12: -1e9, min: 1e9 };
+    for (const c of crabs) {
+      if (day <= 12 && c.p.wallet > window._wal.max12) window._wal.max12 = c.p.wallet;
+      if (c.p.wallet < window._wal.min) window._wal.min = c.p.wallet;
+    }
+  }`);
 let lastDay = G("day");
 const t0 = Date.now();
 while (G("day") <= DAYS && !G("gameOver")) {
   stepScript.runInContext(C);
   if (buyScript) buyScript.runInContext(C);
+  walletScript.runInContext(C);
   const d = G("day");
   if (d !== lastDay) {
     dayRows.push({ day: lastDay, endBalance: G("Math.round(coins)"), lifetime: G("Math.round(lifetime)") });
@@ -117,12 +126,13 @@ while (G("day") <= DAYS && !G("gameOver")) {
 }
 const wall = Date.now() - t0;
 return { dayRows, wall, stats: G("JSON.stringify(window._stats)"),
-  over: G("gameOver"), day: G("day"), rent: G("rentAmount()"),
+  over: G("gameOver"), day: G("day"), rent: G("rentAmount()"), rep: G("Math.round(rep)"), wal: G("JSON.stringify(window._wal)"),
   coins: G("Math.round(coins)"), ups: G(`Object.keys(UPS).map(k => k + ":" + UPS[k].lvl).join(" ")`) };
 }
 
 const results = [];
-for (let s = 1; s <= SEEDS; s++) results.push(runOnce(s * 1337));
+const SEEDBASE = parseInt(opt("seedbase", "0"));
+for (let s = 1; s <= SEEDS; s++) results.push(runOnce((s + SEEDBASE) * 1337));
 const r0 = results[0];
 if (!QUIET && SEEDS === 1) {
   console.log("day  end$   lifetime$  (settlement at 20:00 included)");
@@ -130,9 +140,10 @@ if (!QUIET && SEEDS === 1) {
 }
 for (const r of results) {
   console.log("   stats:", r.stats);
+  console.log("   wallets:", r.wal);
   console.log(r.over
-    ? `EVICTED day ${r.day} (rent $${r.rent}, had $${r.coins}) — ${r.ups}`
-    : `SURVIVED ${DAYS}d, $${r.coins} — ${r.ups}`);
+    ? `EVICTED day ${r.day} (rent $${r.rent}, had $${r.coins}, rep ${r.rep}) — ${r.ups}`
+    : `SURVIVED ${DAYS}d, $${r.coins} rep ${r.rep} — ${r.ups}`);
 }
 if (SEEDS > 1) {
   const evictDays = results.map(r => r.over ? r.day : DAYS + 1).sort((a, b) => a - b);

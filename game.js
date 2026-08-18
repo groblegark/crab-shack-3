@@ -28,7 +28,7 @@ const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
 // ---------------------------------------------------------------- businesses
 const BIZ = {
   shack: {
-    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 205, owner: "player",
+    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 250, owner: "player",
     x0: 1220, x1: 1560, door: 1247,
     stations: {
       crate: [{ x: 1232, y: 136 }],
@@ -49,7 +49,7 @@ const BIZ = {
         steps: [["board", 3.0, "fish_cut"], ["grill", 4.0, "taco"]] },
       { id: "juice", icon: "juice", pay: 10, raw: "fruit",
         steps: [["board", 2.5, "juice"]] },
-      { id: "fish", icon: "plate_fish", pay: 12, raw: "fish_raw",
+      { id: "fish", icon: "plate_fish", pay: 13, raw: "fish_raw",
         steps: [["grill", 5.0, "plate_fish"]] },
     ],
   },
@@ -106,9 +106,9 @@ const BIZ = {
     source: "taps", out: "towel", queueX: 1126,
     park: 896, rack: 924,
     recipes: [
-      { id: "rinse", icon: "shine", pay: 8, raw: "soap", showerT: 5, deep: false,
+      { id: "rinse", icon: "shine", pay: 5, raw: "soap", showerT: 5, deep: false,
         steps: [] },
-      { id: "soak", icon: "suds", pay: 15, raw: "soap", showerT: 8, deep: true,
+      { id: "soak", icon: "suds", pay: 10, raw: "soap", showerT: 8, deep: true,
         steps: [] },
     ],
   },
@@ -178,12 +178,12 @@ const ITEM_NAMES = {
   towel_dirty: "TOWELS", towel_wet: "WET TOWELS", towel_clean: "FRESH TOWELS",
   uniform_dirty: "LAUNDRY", uniform_wet: "WET WASH", uniform_clean: "CLEAN PRESS",
   token: "TOKENS", plush: "CLAW PLUSH", tickets: "TICKET RUN", gold_plush: "GOLD PLUSH",
-  soap: "SOAP", suds: "DELUXE SOAK", shine: "QUICK RINSE",
+  soap: "SOAP", suds: "DELUXE SOAK", shine: "QUICK RINSE", dirty_dishes: "DIRTY DISHES",
 };
 
 // ---------------------------------------------------------------- upgrades
 const UPS = {
-  chef:  { name: "HIRE CRAB", base: 80, mult: 2.4, max: 6, lvl: 2 },
+  chef:  { name: "HIRE CRAB", base: 60, mult: 2.0, max: 6, lvl: 2 },
   grill: { name: "GRILL+",    base: 120, mult: 1.6, max: 2, lvl: 0 },
   board: { name: "BOARD+",    base: 90, mult: 1.6, max: 2, lvl: 0 },
   table: { name: "TABLE+",    base: 60, mult: 1.5, max: 2, lvl: 0 },
@@ -215,12 +215,12 @@ const spawnEvery = () => 7.5 / (0.7 + 0.01 * rep);   // word of mouth drives foo
 let coins = 0, lifetime = 0, time = 0;
 let crabs = [], customers = [], floaters = [];
 let spawnT = 3, toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x
-let camX = 1180, followIdx = -1, tab = "crew";
+let camX = 1180, followIdx = -1, followNpc = null, tab = "crew";
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
 let screen = "title", hasSave = false, wiping = false;
 function newGame() { wiping = true; localStorage.removeItem(SAVE_KEY); location.reload(); }
-const CRAB_WAGE = 26, HOUSE_RENT = 12;
+const CRAB_WAGE = 22, HOUSE_RENT = 10;
 function rentAmount() { return day <= 1 ? 0 : BIZ.shack.rent; }   // shack lease (legacy name)
 function totalRent() {   // the PLAYER's nightly property bill
   if (day <= 1) return 0;
@@ -1087,7 +1087,7 @@ function updateCustomers(dt) {
       if (k.patience <= 0) {
         k.state = "leaving"; k.happy = false; k.claimed = false;
         if (k.table) { k.table.occupant = null; k.table = null; }
-        if (!k.isCrab) rep = Math.max(0, rep - 2);
+        if (!k.isCrab) rep = Math.max(0, rep - 3);
         if (window._stats) window._stats[k.isCrab ? "crabRage" : "tourRage"]++;
         popText("!!", k.x, 120, [255, 80, 80]); sfx.angry();
       }
@@ -1280,14 +1280,14 @@ cv.addEventListener("click", (ev) => {
       for (let i = 0; i < crabs.length; i++) {
         const bx = 4 + i * 27;
         if (p.x >= bx && p.x < bx + 24 && p.y >= 199 && p.y < 223) {
-          followIdx = followIdx === i ? -1 : i; return;
+          followIdx = followIdx === i ? -1 : i; followNpc = null; return;
         }
       }
     }
     return;
   }
   // follow-card job toggle
-  if (followIdx >= 0 && (UPS.cleaners.lvl > 0 || UPS.arcade.lvl > 0) && p.x >= 58 && p.x < 71 && p.y >= 33 && p.y < 45) {
+  if (followIdx >= 0 && !followNpc && (UPS.cleaners.lvl > 0 || UPS.arcade.lvl > 0) && p.x >= 58 && p.x < 71 && p.y >= 33 && p.y < 45) {
     const c = crabs[followIdx];
     const owned = Object.keys(BIZ).filter(bizUnlocked);
     c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
@@ -1295,12 +1295,13 @@ cv.addEventListener("click", (ev) => {
     popText("NEW JOB: " + BIZ[c.p.job].name, c.x - 20, FLOOR_Y - 34, [140, 255, 160]);
     return;
   }
-  // world: click a crab to follow it
+  // world: click any crab - crew or townsfolk - to follow them
   const wx = p.x + camX;
-  for (let i = 0; i < crabs.length; i++) {
-    const c = crabs[i];
+  for (const c of allCrabs()) {
     if (!c.hidden && Math.abs(wx - (c.x + 8)) < 12 && Math.abs(p.y - (c.y - 6)) < 14) {
-      followIdx = i; return;
+      if (c.p.npc) { followNpc = c; followIdx = -1; }
+      else { followIdx = crabs.indexOf(c); followNpc = null; }
+      return;
     }
   }
 });
@@ -1311,7 +1312,7 @@ addEventListener("keydown", (e) => {
   if (e.key === "f") ffMode = (ffMode + 1) % 3;            // fast-forward 1x/2x/3x
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; }
-  if (e.key === "Escape") followIdx = -1;
+  if (e.key === "Escape") { followIdx = -1; followNpc = null; }
 });
 
 // ---------------------------------------------------------------- drawing
@@ -1647,8 +1648,9 @@ function crabMood(c) {
   return ["SUNNY", [40, 150, 70]];
 }
 function drawFollowCard() {
-  if (followIdx < 0 || !crabs[followIdx]) return;
-  const c = crabs[followIdx], p = c.p;
+  const c = followNpc || (followIdx >= 0 && crabs[followIdx]);
+  if (!c) return;
+  const p = c.p;
   const wcard = 128;
   rect(ctx, 2, 2, wcard, 52, [30, 20, 36]);
   rect(ctx, 3, 3, wcard - 2, 50, [255, 250, 235]);
@@ -1668,7 +1670,7 @@ function drawFollowCard() {
   const trend = p.walletPrev == null ? 0 : p.wallet - p.walletPrev;
   if (trend) smallText(ctx, trend > 0 ? "+" : "-", wx3 - 6, 29, trend > 0 ? [40, 150, 70] : [190, 80, 80]);
   // job + needs
-  smallText(ctx, "JOB:" + BIZ[p.job].short, 6, 36, [70, 90, 130]);
+  smallText(ctx, "JOB:" + (p.npc ? (p.fisher ? "PIER" : "OWN") : BIZ[p.job].short), 6, 36, [70, 90, 130]);
   if (UPS.cleaners.lvl > 0 || UPS.arcade.lvl > 0) {
     rect(ctx, 60, 35, 9, 8, [96, 170, 220]);
     smallText(ctx, ">", 62, 36, [255, 255, 255]);
@@ -1689,7 +1691,6 @@ function drawPanel() {
   blit(ctx, COIN, 4, PANEL_Y + 2);
   textShadow(ctx, "$" + fmt(coins), 13, PANEL_Y + 2, [255, 230, 120], [30, 20, 20]);
   text(ctx, "D" + day + " " + clockStr(), 84, PANEL_Y + 2, [220, 210, 190]);
-  smallText(ctx, "REP " + Math.round(rep), 84, PANEL_Y + 11, rep >= 50 ? [140, 220, 140] : rep >= 25 ? [190, 175, 160] : [235, 130, 130]);
   rect(ctx, 146, PANEL_Y + 1, 19, 11, muted ? [140, 50, 50] : [30, 20, 20]);
   rect(ctx, 147, PANEL_Y + 2, 17, 9, muted ? [90, 35, 35] : [90, 70, 60]);
   blit(ctx, muted ? SPEAKER_OFF : SPEAKER_ON, 150, PANEL_Y + 3);
@@ -1946,9 +1947,9 @@ function frame(now) {
       for (const k of everyone) {
         if (k.p.sick) continue;
         let risk = 0;
-        if ((k.p.hunger || 0) >= 0.95) risk += 0.12;
-        if ((k.p.dirt || 0) >= 0.95) risk += 0.12;
-        if ((k.p.sandy || 0) >= 0.95) risk += 0.06;
+        if ((k.p.hunger || 0) >= 0.95) risk += 0.10;
+        if ((k.p.dirt || 0) >= 0.95) risk += 0.06;
+        if ((k.p.sandy || 0) >= 0.95) risk += 0.03;
         for (const s2 of sickNow) {
           const coworkers = s2.workBiz === k.workBiz && k.dayState !== "home" && !s2.p.npc;
           const shelterMates = k.p.homeless && s2.p.homeless;
@@ -2050,8 +2051,9 @@ function frame(now) {
     else if (c.dayState === "home") updateHome(c, dt);
     maybeQuip(c, dt);
   }
-  if (followIdx >= 0 && crabs[followIdx]) {
-    const t = clampCam(crabs[followIdx].x - W / 2 + 8);
+  const followed = followNpc || (followIdx >= 0 && crabs[followIdx]);
+  if (followed) {
+    const t = clampCam(followed.x - W / 2 + 8);
     camX += (t - camX) * Math.min(1, dt * 5);
   }
   if (newConfirmT > 0) newConfirmT -= dt;
@@ -2099,6 +2101,12 @@ function frame(now) {
   drawFloaters(dt);
   drawNight();
   drawFollowCard();
+  {  // town reputation chip, top-right of the world
+    const rTxt = "REP " + Math.round(rep);
+    const rw = smallTextWidth(rTxt) + 8;
+    rect(ctx, W - rw - 2, 2, rw, 10, [30, 20, 36]);
+    smallText(ctx, rTxt, W - rw + 2, 4, rep >= 50 ? [140, 220, 140] : rep >= 25 ? [220, 205, 185] : [235, 130, 130]);
+  }
   drawPanel();
   drawToast();
   if (gameOver) drawGameOver();
