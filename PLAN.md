@@ -250,8 +250,10 @@ first, connect later. Don't build the network before the node is beautiful.
 ## Feature requests (Matt, 2026-08-18, unscheduled)
 - **REMOVE the laundry mechanic** (Matt: "not natural in any way now that we
   have showers"). SUDS N BUBBLES goes away. This is economy surgery, not a
-  delete: it's the $400 buy-ladder rung (needs a replacement — candidates: an
-  earlier boat, a juice bar for T2 thirst — or a retune without it), CLN-need
+  delete: it's the $400 buy-ladder rung — decided: the replacement is a
+  **juice bar landing with T2 thirst** in the immediately-following pass;
+  the removal pass itself keeps the interim retune minimal and measures the
+  curve without the laundromat income. Also: CLN-need
   servicing folds into showers (they already reduce dirt/sandy), sick-crab
   errands reference the cleaners, the sudsgear upgrade is laundry-specific,
   several suite scenarios cover laundry, and existing saves can own the
