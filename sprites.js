@@ -734,3 +734,92 @@ defItem("dirty_dishes", [
   ".........",
   ".........",
 ]);
+
+
+// ================================================================ showers art
+// SUDSY's exclusive teal shell (last index; crew colors top out before it)
+CRAB_COLORS.push([[88, 205, 188], [44, 145, 130]]);
+// shower cap: white with blue polka dots (SUDSY's off-duty look and her trade)
+ACCESSORIES.showercap = { dx: 4, dy: -3, art: parseArt([
+  ".KLLLLK.",
+  "KLCLLCLK",
+  "KLLCLLCK",
+  "KKKKKKKK",
+], PAL) };
+// coin-op taps: shower head on a pipe over a token box
+const TAPS = parseArt([
+  ".KKKKK..........",
+  "KMMMMMK.........",
+  "KMKMKMK.........",
+  ".KKKKK..........",
+  "...KMK..........",
+  "...KMK..........",
+  ".KKKMKKK........",
+  "KAAKMKAAK.......",
+  "KACKMKCAK.......",
+  "KKKKKKKKK.......",
+  ".KNK..KNK.......",
+], PAL);
+// shower stall: open frame, or curtain drawn + steam when running
+const STALL = [
+  parseArt([
+    "KKKKKKKKKKKKKKKK",
+    "KVVVVVVVVVVVVVVK",
+    "KVK..........KVK",
+    "KVK...KMMK...KVK",
+    "KVK...KMKK...KVK",
+    "KVK..........KVK",
+    "KVK..........KVK",
+    "KVK..........KVK",
+    "KVK..........KVK",
+    "KKK..........KKK",
+  ], PAL),
+  parseArt([
+    "KKKKKKKKKKKKKKKK",
+    "KVVVVVVVVVVVVVVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KKKKKKKKKKKKKKKK",
+  ], PAL),
+];
+// scrub bench: towels + soap bar
+const SCRUB = parseArt([
+  "..KLLK....KPPK..",
+  "..KLLK.....KK...",
+  "KKKKKKKKKKKKKKKK",
+  "KEEEEEEEEEEEEEEK",
+  "KKKKKKKKKKKKKKKK",
+  ".KDDK......KDDK.",
+], PAL);
+defItem("soap", [
+  ".........",
+  ".KKKKK...",
+  "KPPLPPK..",
+  "KPPPPPK..",
+  ".KKKKK...",
+  ".........",
+  ".........",
+]);
+defItem("suds", [
+  "..K.KK...",
+  ".KVKLVK..",
+  "KLVLVLVK.",
+  "KVLVLVLK.",
+  ".KLVLVK..",
+  "..KKK....",
+  ".........",
+]);
+defItem("shine", [
+  "....K....",
+  "...KLK...",
+  ".KKLLLKK.",
+  "..KLLLK..",
+  "...KLK...",
+  "....K....",
+  ".........",
+]);
