@@ -87,6 +87,12 @@ compounds or collapses → the landlord collects at 20:00 either way.
 6. Staff-bused table service for a fancier restaurant tier.
 7. Cosmetics: closed-eye sleep sprites, taller shower-stall art (curtain reads
    as a wall fixture at the y136 row), followable-NPC polish.
+8. **Portrait-phone canvas** — the screen fills a phone's width but the 256x240
+   aspect leaves dead space above/below on tall screens. A real fix is a taller
+   canvas in portrait (e.g. 256x288, extra rows going to the UI panel): `H` is
+   baked into ppu.js and panel draw coordinates, so it's a contained but real
+   refactor. Wheel/trackpad panning, no-zoom, no pull-to-refresh, and crisp
+   half-step scaling are already in.
 
 ## Conventions
 - Suite green before push; economy changes need a matrix re-run.

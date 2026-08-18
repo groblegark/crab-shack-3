@@ -1224,6 +1224,16 @@ cv.addEventListener("touchmove", (ev) => {
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 }, { passive: false });
 cv.addEventListener("touchend", () => { setTimeout(() => { dragging = false; dragMoved = false; }, 50); });
+// horizontal wheel / trackpad swipe pans the town (shift+wheel too)
+cv.addEventListener("wheel", (ev) => {
+  if (screen !== "play") return;
+  const dx = Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : (ev.shiftKey ? ev.deltaY : 0);
+  if (!dx) return;
+  ev.preventDefault();
+  const scale = ev.deltaMode === 1 ? 16 : 1;   // some browsers report lines, not pixels
+  camX = clampCam(camX + dx * scale * 0.6);
+  followIdx = -1; followNpc = null;
+}, { passive: false });
 function evPos(ev) {
   const r = cv.getBoundingClientRect();
   return { x: (ev.clientX - r.left) * (cv.width / r.width), y: (ev.clientY - r.top) * (cv.height / r.height) };

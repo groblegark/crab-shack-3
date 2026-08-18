@@ -2,11 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>CRAB SHACK 3 — a beach economy</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><text x=%220%22 y=%2214%22 font-size=%2214%22>🦀</text></svg>">
 <style>
-  html, body { margin: 0; height: 100%; }
+  html, body {
+    margin: 0; height: 100%; height: 100dvh;
+    overscroll-behavior: none;            /* no pull-to-refresh while dragging the town */
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     background: #10182c;
     background-image: radial-gradient(ellipse at 50% 30%, #1c2a4a 0%, #10182c 70%);
@@ -39,6 +43,25 @@
     <canvas id="screen" width="256" height="240"></canvas>
     <div class="scan"></div>
   </div>
+  <script>
+    // Fit the 256x240 screen to any viewport, preferring crisp half-pixel steps.
+    (function () {
+      const cv = document.getElementById("screen");
+      function fit() {
+        const small = Math.min(innerWidth, innerHeight) < 620;
+        const pad = small ? 14 : 60;               // bezel padding + breathing room
+        let s = Math.min((innerWidth - pad) / 256, (innerHeight - pad) / 240);
+        if (s >= 2) s = Math.floor(s * 2) / 2;     // crisp steps once there's room
+        s = Math.max(s, 0.5);
+        cv.style.width = Math.round(256 * s) + "px";
+        cv.style.height = Math.round(240 * s) + "px";
+      }
+      addEventListener("resize", fit);
+      addEventListener("orientationchange", () => setTimeout(fit, 120));
+      if (window.visualViewport) visualViewport.addEventListener("resize", fit);
+      fit();
+    })();
+  </script>
   <script src="font.js"></script>
   <script src="ppu.js"></script>
   <script src="sprites.js"></script>
