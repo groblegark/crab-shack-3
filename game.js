@@ -227,7 +227,12 @@ const PLAYLIST = [
   { src: "music/butter-pow.mp3", name: "BUTTER POW" },
   { src: "music/carnival-of-the-glitch.mp3", name: "CARNIVAL OF THE GLITCH" },
 ];
-let musicOn = true, music = null;
+let musicOn = true, music = null, muted = false;
+function toggleMute() {
+  muted = !muted;
+  if (muted) { if (music) music.pause(); }
+  else if (musicOn) { if (music) music.play().catch(() => {}); else startMusic(); }
+}
 let trackIdx = (Math.random() * PLAYLIST.length) | 0;
 function playTrack(i) {
   if (music) { music.pause(); music = null; }
@@ -239,14 +244,14 @@ function playTrack(i) {
   music.play().then(() => { toast = { text: "NOW PLAYING: " + t.name, t: 4 }; })
     .catch(() => { music = null; });
 }
-function startMusic() { if (!music && musicOn) playTrack(trackIdx); }
+function startMusic() { if (!music && musicOn && !muted) playTrack(trackIdx); }
 function toggleMusic() {
   musicOn = !musicOn;
   if (!musicOn && music) { music.pause(); music = null; } else if (musicOn) startMusic();
 }
 let AC = null;
 function beep(freq, dur, type, vol, when) {
-  if (!soundOn) return;
+  if (!soundOn || muted) return;
   if (!AC) try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
   const t = AC.currentTime + (when || 0);
   const o = AC.createOscillator(), g = AC.createGain();
@@ -936,6 +941,7 @@ cv.addEventListener("click", (ev) => {
       if (p.x > 212) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }
       if (p.x > 188) { soundOn = !soundOn; if (soundOn) sfx.ding(); return; }
       if (p.x > 168) { toggleMusic(); return; }
+      if (p.x >= 145 && p.x <= 166) { toggleMute(); if (!muted) sfx.ding(); return; }
     }
     if (p.y >= 187 && p.y < 197) {
       if (p.x >= 4 && p.x < 36) { tab = "crew"; return; }
@@ -1003,7 +1009,7 @@ cv.addEventListener("click", (ev) => {
   }
 });
 addEventListener("keydown", (e) => {
-  if (e.key === "m") soundOn = !soundOn;
+  if (e.key === "m") { toggleMute(); if (!muted) sfx.ding(); }
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
   if (e.key === "f") ffMode = (ffMode + 1) % 3;            // fast-forward 1x/2x/3x
@@ -1382,8 +1388,11 @@ function drawPanel() {
   blit(ctx, COIN, 4, PANEL_Y + 2);
   textShadow(ctx, "$" + fmt(coins), 13, PANEL_Y + 2, [255, 230, 120], [30, 20, 20]);
   text(ctx, "D" + day + " " + clockStr(), 84, PANEL_Y + 2, [220, 210, 190]);
-  smallText(ctx, "MUS", 169, PANEL_Y + 3, musicOn ? [140, 220, 140] : [140, 120, 110]);
-  smallText(ctx, "SND", 190, PANEL_Y + 3, soundOn ? [140, 220, 140] : [140, 120, 110]);
+  rect(ctx, 146, PANEL_Y + 1, 19, 11, muted ? [140, 50, 50] : [30, 20, 20]);
+  rect(ctx, 147, PANEL_Y + 2, 17, 9, muted ? [90, 35, 35] : [90, 70, 60]);
+  blit(ctx, muted ? SPEAKER_OFF : SPEAKER_ON, 150, PANEL_Y + 3);
+  smallText(ctx, "MUS", 169, PANEL_Y + 3, !muted && musicOn ? [140, 220, 140] : [140, 120, 110]);
+  smallText(ctx, "SND", 190, PANEL_Y + 3, !muted && soundOn ? [140, 220, 140] : [140, 120, 110]);
   text(ctx, ">>", 214, PANEL_Y + 2, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
   text(ctx, ">>>", 230, PANEL_Y + 2, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
   // tabs

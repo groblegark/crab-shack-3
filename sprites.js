@@ -734,3 +734,23 @@ defItem("dirty_dishes", [
   ".........",
   ".........",
 ]);
+
+// speaker icons for the master mute button
+const SPEAKER_ON = parseArt([
+  "...KK......",
+  "..KLK.K....",
+  ".KLLK..K.K.",
+  "KLLLK.K.K.K",
+  ".KLLK..K.K.",
+  "..KLK.K....",
+  "...KK......",
+], PAL);
+const SPEAKER_OFF = parseArt([
+  "...KK......",
+  "..KLK.R..R.",
+  ".KLLK..RR..",
+  "KLLLK..RR..",
+  ".KLLK.R..R.",
+  "..KLK......",
+  "...KK......",
+], PAL);
