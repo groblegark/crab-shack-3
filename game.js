@@ -23,7 +23,7 @@ const SHELTER_X = 444, MOVE_IN_COST = 25;
 // ---------------------------------------------------------------- businesses
 const BIZ = {
   shack: {
-    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 115,
+    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 105,
     x0: 1250, x1: 1480, door: 1277,
     stations: { crate: [1262], board: [1296, 1317, 1338], grill: [1366, 1388, 1410], pass: [1438] },
     source: "crate", out: "pass", queueX: 1466,
@@ -402,8 +402,8 @@ function updateSchedule(c, dt) {
   if (c.dayState === "working" && c.pendingOff && c.kstate === "idle") {
     c.duty = false; c.pendingOff = false;
     if (c.carrying) c.carrying = null;
-    c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.4);   // a shift works up an appetite
-    c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.34);      // and stains the uniform
+    c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25);  // a shift works up an appetite
+    c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and stains the uniform
     startCommute(c, false);
   }
   // off-duty errands, while town is open and it's not almost shift time
@@ -443,7 +443,7 @@ function updateErrand(c, dt) {
     if (stepTo(c, c.target, crabMove(c), dt)) {
       const cust = { biz: c.errandBiz, recipe: c.errand.recipe, isCrab: true, crab: c,
         need: c.errand.need, x: c.x, spawnX: c.x, state: "waiting",
-        patience: 40, maxPatience: 40, claimed: false, served: false };
+        patience: 90, maxPatience: 90, claimed: false, served: false };   // locals will wait
       customers.push(cust);
       c.errandCust = cust; c.dayState = "errand";
     }
@@ -540,7 +540,7 @@ function serve(c) {
   const cust = c.cust;
   if (cust && cust.state === "waiting") {
     if (cust.isCrab) {
-      const price = cust.recipe.pay;
+      const price = Math.min(Math.ceil(cust.recipe.pay * 1.25), Math.floor(cust.crab.p.wallet));
       cust.crab.p.wallet = Math.max(0, cust.crab.p.wallet - price);
       earn(price, cust.x, 126);
       if (cust.need === "food") cust.crab.p.hunger = 0;
@@ -553,6 +553,7 @@ function serve(c) {
       popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
     }
     cust.served = true; cust.state = "leaving"; cust.happy = true; sfx.ding();
+    if (window._stats) window._stats[cust.isCrab ? "crabServes" : "tourServes"]++;
   }
   c.cust = null; c.carrying = null; c.kstate = "idle"; c.stepIdx = 0;
 }
@@ -582,6 +583,7 @@ function updateCustomers(dt) {
         k.patience -= dt;
         if (k.patience <= 0) {
           k.state = "leaving"; k.happy = false; k.claimed = false;
+          if (window._stats) window._stats[k.isCrab ? "crabRage" : "tourRage"]++;
           popText("!!", k.x, 120, [255, 80, 80]); sfx.angry();
         }
       }
@@ -1270,8 +1272,8 @@ addEventListener("beforeunload", save);
 hasSave = load();
 if (!hasSave) {
   crabs = [newCrab(makeCrabPersona(0)), newCrab(makeCrabPersona(1))];
-  coins = 140;   // opening cash: ingredients + first rent buffer
-  toast = { text: "LANDLORD: SHACK RENT IS $115 A NIGHT. FIRST NIGHT FREE!", t: 9 };
+  coins = 180;   // opening cash: ingredients + first rent buffer
+  toast = { text: "LANDLORD: SHACK RENT IS $105 A NIGHT. FIRST NIGHT FREE!", t: 9 };
 }
 requestAnimationFrame(frame);
 

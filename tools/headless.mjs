@@ -79,7 +79,7 @@ for (const kv of SET) {
 }
 
 // ---- run ----------------------------------------------------------------
-G('soundOn = false; musicOn = false; screen = "play";');
+G('soundOn = false; musicOn = false; screen = "play"; window._stats = { tourServes: 0, crabServes: 0, tourRage: 0, crabRage: 0 };');
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);
 const buyScript = BUY.length ? new vm.Script(`
   if (Math.abs(tmin - 12 * 60) < ${STEP} * TS) {
@@ -110,7 +110,7 @@ while (G("day") <= DAYS && !G("gameOver")) {
   }
 }
 const wall = Date.now() - t0;
-return { dayRows, wall,
+return { dayRows, wall, stats: G("JSON.stringify(window._stats)"),
   over: G("gameOver"), day: G("day"), rent: G("rentAmount()"),
   coins: G("Math.round(coins)"), ups: G(`Object.keys(UPS).map(k => k + ":" + UPS[k].lvl).join(" ")`) };
 }
@@ -123,6 +123,7 @@ if (!QUIET && SEEDS === 1) {
   for (const r of r0.dayRows) console.log(String(r.day).padStart(3), String(r.endBalance).padStart(6), String(r.lifetime).padStart(9));
 }
 for (const r of results) {
+  console.log("   stats:", r.stats);
   console.log(r.over
     ? `EVICTED day ${r.day} (rent $${r.rent}, had $${r.coins}) — ${r.ups}`
     : `SURVIVED ${DAYS}d, $${r.coins} — ${r.ups}`);
