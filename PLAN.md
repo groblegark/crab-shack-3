@@ -76,7 +76,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ### Verified balance (8 seeds, tools/headless.mjs)
 - Baseline (buy nothing): **0/8 survive, median eviction ~11-12** — the
   8-seed snapshot moves a day either way per build; at 16 seeds the tails run
-  6–20+. Combined tree (job board + needs drag + T1 + boat, 2026-08-18): 0/8, evictions 8-16, median 12.
+  6–20+. Combined tree incl. credit line (2026-08-18): 0/8, evictions 10-19, median 13 (credit's sanctioned +1).
   Standing pressures: job-board labor competition (a hired-away fisher lowers
   townCatch, pushing the shack onto $7 import fish; SUDSY's flush-hire
   threshold till ≥ 260 spares the earliest days) and the needs-drag rework
@@ -103,11 +103,12 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **35 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **39 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
   job-board hire/payroll/quit, stall-wedge soak, T1 trade-ledger flows,
+  line-of-credit draw/bankruptcy/predictor-lead/roundtrip,
   disease infection/cure/mortality, showers turnover, NPC economics,
   save/load (incl. boat berths), no-inflation wallet bounds, needs-drag
   visibility, laundromat-removal migration (one-shot refund) + dirt
@@ -276,7 +277,19 @@ first, connect later. Don't build the network before the node is beautiful.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
-- **Line of credit** (Matt): business owners (player and NPC alike) can take
+- **Line of credit** — **built (worktree branch, 2026-08-18), tight landing**:
+  all knobs in game.js CREDIT_CFG (LIMIT 120 ~ half a night's shack rent,
+  RATE 0.25/night compounding, MIN_PAY 80 auto-collected). Rent shortfalls
+  draw on the line via one settlement hook (settleCreditLine, pure math shared
+  by player + NPC + forecaster); exhausted line + missed obligations =
+  BANKRUPT (the new game-over; NPC owners instead go dark 2 nights, debt
+  written off). Bankruptcy prediction: forecastBankruptcy() replays upcoming
+  settlements at the day-ledger run rate (pessimistic min(3-day avg, latest));
+  chip at horizon <= 5 days, toast at <= 3. Measured 30d x 8 seeds: baseline
+  median 12 (8-16) -> 13 (10-19), 0/8 both; toast lead >= 2 days in 7/8
+  doomed seeds, chip lead >= 3 in 8/8. Suite 37/37 (4 new credit scenarios).
+  Loosening stays stepwise per the original spec below.
+- *(original spec)* **Line of credit** (Matt): business owners (player and NPC alike) can take
   a default *compounding* line of credit at a standard rate (rate is a play
   knob, tuned later). Deliberately SHORT — small limit, quick repayment.
   **Missing a loan payment = bankrupt** (this replaces/absorbs the current

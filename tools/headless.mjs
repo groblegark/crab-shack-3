@@ -134,7 +134,7 @@ while (G("day") <= DAYS && !G("gameOver")) {
 }
 const wall = Date.now() - t0;
 return { dayRows, wall, stats: G("JSON.stringify(window._stats)"),
-  over: G("gameOver"), day: G("day"), rent: G("rentAmount()"), rep: G("Math.round(rep)"), wal: G("JSON.stringify(window._wal)"),
+  over: G("gameOver"), bankrupt: G("bankrupt"), debt: G("Math.round(credit.bal)"), day: G("day"), rent: G("rentAmount()"), rep: G("Math.round(rep)"), wal: G("JSON.stringify(window._wal)"),
   coins: G("Math.round(coins)"), ups: G(`Object.keys(UPS).map(k => k + ":" + UPS[k].lvl).join(" ")`) };
 }
 
@@ -185,7 +185,7 @@ for (const r of results) {
   console.log("   stats:", r.stats);
   console.log("   wallets:", r.wal);
   console.log(r.over
-    ? `EVICTED day ${r.day} (rent $${r.rent}, had $${r.coins}, rep ${r.rep}) — ${r.ups}`
+    ? `${r.bankrupt ? "BANKRUPT" : "EVICTED"} day ${r.day} (rent $${r.rent}, had $${r.coins}, debt $${r.debt}, rep ${r.rep}) — ${r.ups}`
     : `SURVIVED ${DAYS}d, $${r.coins} rep ${r.rep} — ${r.ups}`);
 }
 if (SEEDS > 1) {
