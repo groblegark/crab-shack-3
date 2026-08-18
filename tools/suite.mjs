@@ -50,7 +50,7 @@ scenario("growth strategy can escape (KNOWN TIGHT: recalibrate after wage-econom
   for (const seed of [1337, 2674, 4011, 5348]) {
     const sim = createSim({ seed });
     const buy = () => {
-      for (const k of ["chef", "ads", "knife", "flame"]) {
+      for (const k of ["chef", "grill", "board", "table"]) {
         sim.G(`{ const u = UPS["${k}"];
           const bill = CRAB_WAGE * (crabs.length + ("${k}" === "chef" ? 1 : 0)) + totalRent();
           if (u.lvl < u.max && coins >= upCost(u) + bill + 30) tryBuy("${k}"); }`);
