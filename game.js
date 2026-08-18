@@ -353,6 +353,7 @@ function stepTo(c, tx, speed, dt, ty) {
   const step = Math.min(speed * dt, d);
   c.x += dx / d * step;
   c.y += dy / d * step;
+  c._stepped = true;   // moved this frame (anchors are crabs that did not)
   return false;
 }
 // soft-radius separation + station bodies: nobody stands inside anybody
@@ -365,8 +366,7 @@ function collide(dt) {
       const dx = b.x - a.x, dy = (b.y - a.y) * 1.8;   // wide sprites: ellipse
       const d = Math.hypot(dx, dy);
       if (d < 12 && d > 0.01) {
-        const still = (c) => c.kstate === "work" ||
-          (Math.abs((c.tx != null ? c.tx : c.x) - c.x) < 3 && Math.abs((c.ty != null ? c.ty : c.y) - c.y) < 3);
+        const still = (c) => !c._stepped;
         const aStill = still(a), bStill = still(b);
         const push = Math.min((12 - d) / 2 * Math.min(1, dt * 12), 4);
         const ux = dx / d, uy = dy / d / 1.8;
@@ -424,7 +424,7 @@ function updateCommute(c, dt) {
   if (c.pauseT > 0) { c.pauseT -= dt; return; }
 
   if (c.cstate === "travel") {           // walking the whole way
-    if (stepTo(c, dest, wspd, dt, 158)) arriveCommute(c, toWork);
+    if (stepTo(c, dest, wspd, dt, 167)) arriveCommute(c, toWork);
   } else if (c.cstate === "drive") {     // bike/buggy: ride to park spot, walk rest
     const b = BIZ[c.p.job];
     const park = toWork ? (m === "buggy" ? b.park + c.p.house * 18 : b.rack + c.p.house * 7) : homeX(c);
@@ -433,7 +433,7 @@ function updateCommute(c, dt) {
       else arriveCommute(c, false);
     }
   } else if (c.cstate === "walkFromPark") {
-    if (stepTo(c, dest, wspd, dt, 158)) arriveCommute(c, true);
+    if (stepTo(c, dest, wspd, dt, 167)) arriveCommute(c, true);
   } else if (c.cstate === "walkToVehicle") {   // heading home: fetch parked ride
     const b = BIZ[c.p.job];
     const park = m === "buggy" ? b.park + c.p.house * 18 : b.rack + c.p.house * 7;
@@ -450,7 +450,7 @@ function updateCommute(c, dt) {
       c.hidden = false; c.x = BUS_STOPS[c.busTo]; c.cstate = "walkOff";
     }
   } else if (c.cstate === "walkOff") {
-    if (stepTo(c, dest, wspd, dt, 158)) arriveCommute(c, toWork);
+    if (stepTo(c, dest, wspd, dt, 167)) arriveCommute(c, toWork);
   }
 }
 
@@ -1584,6 +1584,7 @@ function frame(now) {
   updateCustomers(dt);
   for (const c of crabs) {
     c.animT += dt;
+    c._stepped = false;
     updateSchedule(c, dt);
     if (c.dayState === "toWork" || c.dayState === "toHome") updateCommute(c, dt);
     else if (c.dayState === "toErrand" || c.dayState === "errand") updateErrand(c, dt);
