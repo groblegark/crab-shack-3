@@ -184,6 +184,15 @@ defItem("juice", [
   ".KYYK....",
   ".KKKK....",
 ]);
+defItem("cooler", [
+  "....KC...",
+  "...KC....",
+  ".KCCCCK..",
+  ".KCYCYK..",
+  ".KCCCCK..",
+  ".KCCCCK..",
+  ".KKKKK...",
+]);
 defItem("plate_fish", [
   ".........",
   ".KKK.....",
@@ -515,6 +524,51 @@ const COUNTER = parseArt([
   "......KLLK..........",
   "......KVVK..........",
   "......KLLK..........",
+  "KKKKKKKKKKKKKKKKKKKK",
+  "KEEEEEEEEEEEEEEEEEEK",
+  "KEDEEEEDEEEEDEEEEDEK",
+  "KKKKKKKKKKKKKKKKKKKK",
+  ".KDDK..........KDDK.",
+  ".KDDK..........KDDK.",
+  ".KDDK..........KDDK.",
+], PAL);
+// juice bar: a bin of oranges, a pair of blenders, and a cup counter
+const FRUIT_BIN = parseArt([
+  "KKKKKKKKKKKKKKKKKKKK",
+  "KEEEEEEEEEEEEEEEEEEK",
+  "KEDOOZOODOOZOODOOZEK",
+  "KEOOOOODOOOOODOOOOEK",
+  "KDEEDDEEEEDDEEEEDDEK",
+  "KEEEEEEEEEEEEEEEEEEK",
+  "KKKKKKKKKKKKKKKKKKKK",
+], PAL);
+const JUICER = [
+  parseArt([
+    "..KKKKK...",
+    ".KLYOOYK..",
+    ".KYOOYYK..",
+    ".KOYYOOK..",
+    ".KKKKKKK..",
+    "...KMMK...",
+    "..KMMMMK..",
+    "..KNNNNK..",
+    "..KKKKKK..",
+  ], PAL),
+  parseArt([
+    "..KKKKK...",
+    ".KOYLYOK..",
+    ".KYYOOYK..",
+    ".KOOYYOK..",
+    ".KKKKKKK..",
+    "...KMMK...",
+    "..KMMMMK..",
+    "..KNNNNK..",
+    "..KKKKKK..",
+  ], PAL),
+];
+const JUICE_COUNTER = parseArt([
+  "..KYYK....KCCK......",
+  "..KYYK....KCCK......",
   "KKKKKKKKKKKKKKKKKKKK",
   "KEEEEEEEEEEEEEEEEEEK",
   "KEDEEEEDEEEEDEEEEDEK",

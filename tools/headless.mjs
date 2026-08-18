@@ -97,14 +97,14 @@ const buyScript = BUY.length ? new vm.Script(`
       if (!u || u.lvl >= u.max) continue;
       const reserve = upCost(u) + playerBill(k === "chef") + 30;
       if (coins >= reserve) tryBuy(k);
-      else if (k === "arcade") break;   // save for the big unlocks
+      else if (k === "arcade" || k === "juicebar") break;   // save for the big unlocks
     }
     // rehire after a death so a plague doesn't permanently shrink the crew
     window._peakCrew = Math.max(window._peakCrew || 0, crabs.length);
     if (crabs.length < window._peakCrew && UPS.chef.lvl < UPS.chef.max &&
         coins >= upCost(UPS.chef) + playerBill(true) + 30) tryBuy("chef");
     // staff side businesses only if the shack keeps coverage on that crab's shift
-    for (const biz2 of ["arcade"]) {
+    for (const biz2 of ["arcade", "juicebar"]) {
       if (!bizUnlocked(biz2) || crabs.some(c => c.p.job === biz2)) continue;
       const mover = crabs.find(c => c.p.job === "shack" &&
         crabs.some(o => o !== c && o.p.job === "shack" && o.p.shift === c.p.shift));
