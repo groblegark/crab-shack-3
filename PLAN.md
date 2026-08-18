@@ -248,6 +248,19 @@ first, connect later. Don't build the network before the node is beautiful.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Line of credit** (Matt): business owners (player and NPC alike) can take
+  a default *compounding* line of credit at a standard rate (rate is a play
+  knob, tuned later). Deliberately SHORT — small limit, quick repayment.
+  **Missing a loan payment = bankrupt** (this replaces/absorbs the current
+  miss-rent-and-die: rent shortfalls draw on credit, so the loan becomes the
+  real cliff). Must include **bankruptcy prediction**: project till + income
+  rate against upcoming bills + debt service and show the player a warning
+  IN ADVANCE of the cliff (the headless buyer's reserve math — cost +
+  tonight's bill + cushion — is the seed of the predictor). Rollout knob:
+  start financing so tight it's barely different from today's curve
+  (measured — the landing commit should be near-inert like T1), then loosen
+  release by release until it's fun. Balance-critical: eviction-day metrics
+  are THE baseline stat, so every loosening step needs its own matrix run.
 - **REMOVE the laundry mechanic** (Matt: "not natural in any way now that we
   have showers"). SUDS N BUBBLES goes away. This is economy surgery, not a
   delete: it's the $400 buy-ladder rung — decided: the replacement is a
