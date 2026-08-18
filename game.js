@@ -32,6 +32,17 @@ const SHELTER_X = 444, MOVE_IN_COST = 35;
 const JOB_BOARD_X = 716, NPC_WAGE = 20;   // the town labor market
 const PIER_X0 = 1870, PIER_X1 = 2040, PIER_Y = 96;   // planks over the east break
 const FISHING_SPOTS = [{ x: 1900, y: PIER_Y }, { x: 1956, y: PIER_Y }, { x: 2012, y: PIER_Y }];
+// live-aboard boats moor off the seaward rail - a fisher's top housing rung
+const BOAT_BERTHS = [{ x: 1862 }, { x: 1910 }, { x: 1958 }];
+const BOAT_Y = 62;                          // hull rides the surf band above the pier
+const BOAT_COST = 75, MOORING_FEE = 2;      // vs $35 house move-in + $10/night rent
+const BOAT_NAMES = ["PEARL", "GULLWING", "SQUALL"];   // one per berth
+function boatSpot(i) { return { x: BOAT_BERTHS[i].x + 10, y: 76 }; }   // on deck by the mast
+function freeBerth() {
+  const used = new Set(allCrabs().filter(k => k.p.boat != null).map(k => k.p.boat));
+  for (let i = 0; i < BOAT_BERTHS.length; i++) if (!used.has(i)) return i;
+  return -1;
+}
 let townCatch = 6;   // the day's landed fish, crate-side
 let rep = 30;        // word of mouth (0-100): happy guests talk, rage-quits talk louder
 const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
@@ -278,6 +289,7 @@ const CRAB_ARTS = CRAB_COLORS.map(c => crabArt(c[0], c[1]));
 const TOURIST_ARTS = TOURIST_STYLES.map(touristArt);
 const LANDLORD_ART = crabArt([255, 200, 80], [190, 140, 30]);
 const HOUSES = CRAB_COLORS.map(c => houseArt(c[0]));
+const BOATS = CRAB_COLORS.map(c => boatArt(c[0]));
 const BUGGIES = CRAB_COLORS.map(c => buggyArt(c[0]));
 
 function scale2(art) {
@@ -318,6 +330,7 @@ function initNpcs() {
 }
 function homeX(c) { return homeSpot(c).x; }
 function homeSpot(c) {
+  if (c.p.boat != null) return boatSpot(c.p.boat);   // on deck, rain or shine
   if (c.p.homeless) {
     const cot = [6, 20, 34, 48][Math.max(0, allCrabs().indexOf(c)) % 4];
     return { x: SHELTER_X + cot, y: 155 };
@@ -343,7 +356,8 @@ function newCrab(persona) {
   if (persona.sick === undefined) persona.sick = null;
   if (persona.homeless === undefined) persona.homeless = !!persona.npc;   // old saves: crew were housed, npcs slept rough
   delete persona.homeX;   // pre-housing-market nook field
-  if (!persona.homeless && (persona.house == null || HOUSE_XS[persona.house] == null)) persona.homeless = true;
+  if (persona.boat != null && BOAT_BERTHS[persona.boat] == null) persona.boat = null;
+  if (!persona.homeless && persona.boat == null && (persona.house == null || HOUSE_XS[persona.house] == null)) persona.homeless = true;
   if (!persona.made) persona.made = {};   // dish id -> lifetime count
   if (persona.sandy == null) persona.sandy = 0;
   return {
@@ -498,10 +512,13 @@ function load() {
       if (n) {
         Object.assign(n.p, sp);
         delete n.p.homeX;   // pre-housing-market nook field
-        if (!n.p.homeless && (n.p.house == null || HOUSE_XS[n.p.house] == null)) n.p.homeless = true;
+        if (n.p.boat != null && BOAT_BERTHS[n.p.boat] == null) n.p.boat = null;
+        if (!n.p.homeless && n.p.boat == null && (n.p.house == null || HOUSE_XS[n.p.house] == null)) n.p.homeless = true;
+        if (n.p.boat != null) n.fishSpot = boatSpot(n.p.boat);   // fish from their own deck
       } else {
         const c = newCrab(Object.assign({ npc: true }, sp));
-        if (sp.fisher) c.fishSpot = FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
+        if (c.p.fisher) c.fishSpot = c.p.boat != null ? boatSpot(c.p.boat)
+          : FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
         c.x = homeX(c); npcs.push(c);
       }
     }
@@ -1007,12 +1024,20 @@ function updateFishing(c, dt) {
   if (c.fishSpot) { c.x = c.fishSpot.x; c.y = c.fishSpot.y; }
   c.castT = (c.castT || 5) - dt;
   if (c.castT <= 0) {
-    c.castT = 14 + Math.random() * 18;
-    townCatch++;
-    c.p.wallet += 2;   // the market pays small money for each landed fish
-    popText("CATCH!", c.x - 4, c.y - 24, [140, 220, 255]);
+    // a live-aboard works the deeper water off their own deck: quicker bites,
+    // and now and then the net comes up double
+    const aboard = c.p.boat != null;
+    c.castT = aboard ? 9 + Math.random() * 13 : 14 + Math.random() * 18;
+    const haul = aboard && Math.random() < 0.2 ? 2 : 1;
+    townCatch += haul;
+    c.p.wallet += 2 * haul;   // the market pays small money for each landed fish
+    popText(haul > 1 ? "DOUBLE HAUL!" : "CATCH!", c.x - 4, c.y - 24, [140, 220, 255]);
     sfx.splash();
-    if (window._stats) window._stats.catches = (window._stats.catches || 0) + 1;
+    if (window._stats) {
+      window._stats.catches = (window._stats.catches || 0) + haul;
+      const by = window._stats.catchesBy = window._stats.catchesBy || {};
+      by[c.p.name] = (by[c.p.name] || 0) + haul;
+    }
     if (Math.random() < 0.25) c.quip = { text: ["BIG ONE!", "THEY'RE BITING", "SEA PROVIDES"][(Math.random() * 3) | 0], t: 2.2 };
   }
 }
@@ -1675,7 +1700,7 @@ function drawPier() {
   // a gull loiters on the rail, eyeing the bucket (it clears off now and then)
   if ((time % 47) < 34 && darkness() < 0.8) {
     const hop = ((time * 2) | 0) % 8 === 0 ? -1 : 0;
-    wblit(GULL_SIT, 1988, 73 + hop, ((time / 9) | 0) % 2 === 0);
+    wblit(GULL_SIT, 2020, 73 + hop, ((time / 9) | 0) % 2 === 0);   // east of the berths
   }
   // lamp post on the east end for the night tide
   wrect(dx1 - 8, 66, 2, 20, [70, 60, 90]);
@@ -1687,6 +1712,21 @@ function drawPier() {
   }
 }
 
+function drawBoats() {
+  // moored live-aboards ride the surf band off the seaward rail, bobbing on
+  // their own beat; hull trim wears the owner's color like the house roofs do
+  for (const c of allCrabs()) {
+    if (c.p.boat == null) continue;
+    const b = BOAT_BERTHS[c.p.boat];
+    if (b.x - camX < -40 || b.x - camX > W + 40) continue;
+    const bob = Math.sin(time * 0.8 + c.p.boat * 2.1) > 0 ? 1 : 0;
+    wblit(BOATS[c.p.color % BOATS.length], b.x, BOAT_Y + bob);
+    // mooring line from the stern down to the pier rail
+    wrect(b.x + 34, 80 + bob, 3, 1, [140, 90, 50]);
+    wrect(b.x + 36, 81 + bob, 2, 1, [140, 90, 50]);
+  }
+}
+
 function drawTown() {
   // coast road runs the full length of town, behind everything
   wrect(0, ROAD_Y0, WORLD_W, ROAD_Y1 - ROAD_Y0, [120, 116, 130]);
@@ -1695,6 +1735,7 @@ function drawTown() {
   for (let x = 6; x < WORLD_W; x += 22) wrect(x, ROAD_Y0 + 9, 10, 2, [230, 220, 120]);
   wrect(0, ROAD_Y1, WORLD_W, 3, [214, 196, 156]);   // shoulder
   drawPier();
+  drawBoats();
   // houses face the promenade (owned ones get the owner's roof color)
   for (const c of allCrabs())
     if (!c.p.homeless) wblit(HOUSES2[c.p.color % HOUSES2.length], HOUSE_XS[c.p.house], HOME_BOTTOM - HOUSES2[0].h);
@@ -1960,6 +2001,10 @@ function drawNight() {
       if (c.p.homeless) { wrect(SHELTER_X + 8, 130, 8, 6, [255, 216, 96]); wrect(SHELTER_X + 50, 130, 8, 6, [255, 216, 96]); }
       else wrect(HOUSE_XS[c.p.house] + 38, 132, 10, 8, [255, 216, 96]);
     }
+    // a cabin lamp burns on each occupied live-aboard
+    for (const c of allCrabs())
+      if (c.p.boat != null && c.dayState === "home" && !c.hidden)
+        wrect(BOAT_BERTHS[c.p.boat].x + 7, BOAT_Y + 11, 3, 3, [255, 216, 96]);
     if (dark > 0.65) {
       for (let i = 0; i < 6; i++) {
         if (((time * 3 + i) | 0) % 4 === 0) continue;
@@ -2228,6 +2273,7 @@ function drawGameOver() {
   if (bl) text(ctx, "CLICK TO START OVER", cx2 - 56, 137, [40, 110, 60], 6);
 }
 function homeLabel(p) {
+  if (p.boat != null) return ["LIVES ABOARD THE " + BOAT_NAMES[p.boat], [70, 140, 200]];
   if (p.homeless) return ["SLEEPS AT THE SHELTER", [190, 80, 80]];
   if (p.house >= 7) return ["BEACH COTTAGE BY THE PIER", [90, 140, 190]];
   if (p.house === 6) return ["HOUSE BY THE SHELTER", [90, 130, 90]];
@@ -2268,7 +2314,8 @@ function drawDossier() {
   };
   const doesTxt = p.npc
     ? (p.employer ? "WORKS AT " + BIZ[p.job].name + " FOR " + OWNERS[p.employer].name
-      : p.fisher ? "FISHES OFF THE PIER" : "RUNS " + BIZ[p.job].name)
+      : p.fisher ? (p.boat != null ? "FISHES OFF THE " + BOAT_NAMES[p.boat] : "FISHES OFF THE PIER")
+      : "RUNS " + BIZ[p.job].name)
     : "WORKS " + BIZ[p.job].name;   // short verb: leave room for TAP: REASSIGN
   row("DOES", doesTxt, [70, 90, 130]);
   if (!p.npc && Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1)
@@ -2431,6 +2478,21 @@ function frame(now) {
           popText("HOME SWEET HOME", HOUSE_XS[free] + 8, 100, [140, 255, 160]);
           sfx.ding();
         }
+      } else if (c.p.boat != null) {
+        // live-aboard: no landlord, just the harbormaster's mooring fee
+        // (a boat is owned outright - a broke night runs a tab, never an eviction)
+        if (c.p.wallet >= MOORING_FEE) c.p.wallet -= MOORING_FEE;
+      } else if (c.p.fisher && freeBerth() >= 0 && c.p.wallet >= BOAT_COST + MOORING_FEE) {
+        // top of the ladder: a housed fisher with deep savings trades up to a
+        // live-aboard boat; the old house frees for the next climber
+        const berth = freeBerth();
+        c.p.wallet -= BOAT_COST;
+        c.p.boat = berth; c.p.house = null;
+        c.fishSpot = boatSpot(berth);
+        today.moved.push(c.p.name + " MOVED ABOARD THE " + BOAT_NAMES[berth]);
+        toast = { text: c.p.name + " MOVED ABOARD!", t: 6 };
+        popText("LIVE-ABOARD!", BOAT_BERTHS[berth].x + 2, 58, [140, 220, 255]);
+        sfx.ding();
       } else if (c.p.wallet >= HOUSE_RENT) {
         c.p.wallet -= HOUSE_RENT;
       } else {

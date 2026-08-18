@@ -384,6 +384,37 @@ function houseArt(roofCol) {
   ], p);
 }
 
+// live-aboard fishing boat, sheer stripe + pennant color-swapped per owner;
+// aft mast with the gaff sail furled, little forward cabin, bow to the west
+function boatArt(col) {
+  const p = swap(PAL, { R: col });
+  return parseArt([
+    "......................KRRR..........",
+    "......................KRR...........",
+    "......................K.............",
+    "......................K.............",
+    "......................KLL...........",
+    "......................KLLL..........",
+    ".....................KKLLL..........",
+    "......................KLLL..........",
+    "......................KLL...........",
+    "....KKKKKKKKKKK.......KLL...........",
+    "....KEEEEEEEEEK.......KLL...........",
+    "....KEKCCKEEEEK.......KLL...........",
+    "....KEKCCKEEEEK......KKLLK..........",
+    "....KEEEEEEEEEK.......KK............",
+    "....KEEEEEEEEEK......KDDDDDDDDDK....",
+    "..KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK..",
+    ".KEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEK.",
+    ".KRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRK.",
+    "..KDDDDDDDDDDDDDDDDDDDDDADDDDDDDDK..",
+    "...KDDDDDDDDDDDDDDDDDDDDDDDDDDDDK...",
+    "....KKDDDDDDDDDDDDDDDDDDDDDDDDKK....",
+    "......KKKKKKKKKKKKKKKKKKKKKKKK......",
+    "....V..C.V....C....V...C....V..C....",
+  ], p);
+}
+
 const BUS = parseArt([
   ".KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK.",
   "KAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK",
