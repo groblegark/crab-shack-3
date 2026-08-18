@@ -531,8 +531,7 @@ function routedStep(c, spd, dt) {
   const tx = c.tx, ty = c.ty;
   if (Math.abs(c.x - tx) <= 14) return stepTo(c, tx, spd, dt, ty);   // close: go direct
   const lane = ty <= 147 ? 147 : 168;
-  if (Math.abs(c.y - lane) > 3) { stepTo(c, c.x, spd, dt, lane); return false; }  // merge into lane
-  stepTo(c, tx, spd, dt, lane);                                      // travel the lane
+  stepTo(c, tx, spd, dt, lane);   // diagonal into + along the lane (x-progress escapes colliders)
   return false;
 }
 function tryAcquire(bizKey, kind) {
@@ -551,7 +550,7 @@ function abortChef(c) {
 function updateKitchen(c, dt) {
   if (c.cust && (c.cust.state === "leaving" || c.cust.served)) { abortChef(c); return; }
   const bizKey = c.workBiz, biz = BIZ[bizKey];
-  const spd = crabMove(c) * 1.1;
+  const spd = crabMove(c) * 1.55;   // hustle: kitchens move quick
   if (c.kstate === "idle") {
     if (!c.pendingOff) {
       const o = customers.find(k => k.biz === bizKey && k.state === "waiting" && !k.claimed && !k.served);
