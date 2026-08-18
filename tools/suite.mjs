@@ -672,6 +672,80 @@ scenario("laundromat removal: old save migrates, refund fires exactly once", () 
   return sim2.G("isFinite(coins) && crabs.length === 2") ? true : "migrated save broke after a day";
 });
 
+scenario("thirst: drink errand serviced end-to-end at a staffed juice bar", () => {
+  const sim = createSim({ seed: 33 });
+  sim.G('coins = 900; tryBuy("juicebar"); crabs[0].p.job = "juicebar";');
+  const ok0 = sim.runUntil('crabs[0].duty && crabs[0].workBiz === "juicebar" && !crabs[0].pendingOff', { maxSteps: 200000 });
+  if (!ok0) return "the bar never opened (crabs[0] " + sim.G("crabs[0].dayState") + ")";
+  sim.runUntil('crabs[1].dayState === "home" && tmin > 9.5 * 60 && tmin < 12.5 * 60', { maxSteps: 200000 });
+  sim.G(`{ const c = crabs[1]; c.p.thirst = 0.9; c.p.hunger = 0.2; c.p.dirt = 0.2;
+    c.p.sandy = 0.2; c.p.bored = 0.2; c.p.wallet = 30; c.errandCd = 0; }`);
+  const ok = sim.runUntil("(crabs[1].p.thirst || 0) === 0", { maxSteps: 60000 });
+  if (!ok) return "thirst never serviced (thirst " + sim.G("crabs[1].p.thirst").toFixed(2)
+    + ", state " + sim.G("crabs[1].dayState") + ")";
+  // wallet 30 (<= 40) picks the cheapest drink: JUICE $6 at retail = ceil(6 x 1.25) = $8
+  const paid = 30 - sim.G("crabs[1].p.wallet");
+  if (paid !== 8) return "crew paid $" + paid + ", expected $8 retail JUICE";
+  if (!sim.G("(window._stats.crabDrinks || 0) >= 1")) return "crabDrinks not counted";
+  if (!sim.G("(window._stats.drinkServes || 0) >= 1")) return "bar serve not counted";
+  return sim.G("trade.total.fruit >= 1") ? true : "the drink's fruit never hit the ledger";
+});
+
+scenario("thirst: a parched town breeds sickness, attributed to thirst", () => {
+  // +0.12/night at thirst >= 0.95 - the scariest neglect. Pin thirst full with
+  // every other need comfortable: illness must arrive AND be blamed on thirst
+  // (14 nights x 2+ crabs at 0.12: a healthy town is a ~3% anomaly; we break
+  // on the first hit). The watered control arm must never get thirst-blamed.
+  const sim = createSim({ seed: 71 });
+  const pin = 'for (const c of allCrabs()) { c.p.thirst = 1; c.p.hunger = 0.2; c.p.dirt = 0.2; c.p.sandy = 0.2; }';
+  for (let d = 0; d < 14; d++) {
+    sim.runUntil("tmin >= 19.8 * 60 && lastRentDay !== day", { maxSteps: 80000,
+      onTick: (G) => { if (G("coins") < 300) G("coins = 600"); } });
+    sim.runUntil("lastRentDay === day", { maxSteps: 20000, onTick: (G) => G(pin), tickEvery: 4 });
+    if (sim.G("((window._stats.causes || {}).thirst || 0) > 0")) break;
+    sim.runUntil("tmin < 10", { maxSteps: 40000 });
+  }
+  if (!sim.G("((window._stats.causes || {}).thirst || 0) > 0"))
+    return "no thirst-attributed illness in 14 parched nights";
+  // control: a watered town (thirst pinned 0) never gets thirst-blamed
+  const sim2 = createSim({ seed: 71 });
+  const water = "for (const c of allCrabs()) c.p.thirst = 0;";
+  for (let d = 0; d < 6; d++) {
+    sim2.runUntil("tmin >= 19.8 * 60 && lastRentDay !== day", { maxSteps: 80000,
+      onTick: (G) => { if (G("coins") < 300) G("coins = 600"); } });
+    sim2.runUntil("lastRentDay === day", { maxSteps: 20000, onTick: (G) => G(water), tickEvery: 4 });
+    sim2.runUntil("tmin < 10", { maxSteps: 40000 });
+  }
+  return sim2.G("((window._stats.causes || {}).thirst || 0)") === 0 ? true
+    : "watered control arm got thirst-blamed sickness";
+});
+
+scenario("juicebar economics: ledger flows, register income, staff retail", () => {
+  const sim = createSim({ seed: 44 });
+  sim.G('coins = 900; tryBuy("juicebar"); crabs[0].p.job = "juicebar"; crabs[1].p.job = "juicebar";');
+  sim.runDays(2, { onTick: (G) => { if (G("coins") < 300) G("coins = 600"); }, tickEvery: 40 });
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  if ((st.drinkServes || 0) < 8) return "only " + (st.drinkServes | 0) + " drinks in 2 staffed days";
+  const t = JSON.parse(sim.G("JSON.stringify(trade)"));
+  if (t.total.fruit < st.drinkServes) return "fruit imports (" + t.total.fruit + ") < drinks served (" + st.drinkServes + ")";
+  if ((st.coolersMade || 0) < 1) return "no COOLER in " + st.drinkServes + " drinks (recipe mix broke?)";
+  if (t.total.water < (st.coolersMade || 0)) return "COOLER gallons missing from the water ledger";
+  if (t.spent !== t.total.fish * 7) return "spent $" + t.spent + " != fish x $7 - a drink flow got CHARGED (tracking only until T3)";
+  // staff quench at retail either way: a register buy while the other shift
+  // tends bar (crabDrinks) or a self-serve pour at the dark bar (staffMeals -
+  // both crew are juicebar staff here, so every selfCook IS a retail pour)
+  if ((st.crabDrinks || 0) + (st.staffMeals || 0) < 1) return "staff never drank at retail in 2 days";
+  // save/load: thirst, the unlock, the ledger, and the first-pour flag roundtrip
+  const store = new Map();
+  const a = createSim({ seed: 9, storage: store, fresh: false });
+  a.G('coins = 500; tryBuy("juicebar"); crabs[0].p.thirst = 0.62; firstPour = true; trade.total.fruit = 31; save()');
+  const b = createSim({ seed: 10, storage: store, fresh: false });
+  if (b.G("UPS.juicebar.lvl") !== 1 || !b.G('bizUnlocked("juicebar")')) return "juicebar unlock did not roundtrip";
+  if (Math.abs(b.G("crabs[0].p.thirst") - 0.62) > 1e-9) return "thirst did not roundtrip";
+  if (!b.G("firstPour")) return "firstPour flag did not roundtrip";
+  return b.G("trade.total.fruit") === 31 ? true : "fruit ledger did not roundtrip";
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

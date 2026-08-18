@@ -211,7 +211,10 @@ function ingredientCost(raw) {
 }
 function consumeIngredient(raw, recipe) {
   if (raw === "fruit") tradeImport("fruit", 1);                   // every drink counts its fruit (T1 tracking)
-  if (recipe && recipe.raw2 === "water") tradeImport("water", 1); // the COOLER's gallon of fresh water
+  if (recipe && recipe.raw2 === "water") {
+    tradeImport("water", 1); // the COOLER's gallon of fresh water
+    if (window._stats) window._stats.coolersMade = (window._stats.coolersMade || 0) + 1;
+  }
   if (raw !== "fish_raw") return;
   if (townCatch > 0) townCatch--;
   else tradeImport("fish", 1, FISH_IMPORT);   // shipped in - the $7 was already charged upstream
@@ -1107,10 +1110,14 @@ function updateKitchen(c, dt) {
   if (c.kstate === "idle") {
     const lastCall = c.pendingOff && tmin < SHIFTS[c.p.shift].end + 45;
     if (!c.pendingOff || lastCall) {
-      // paying guests first; locals and crew get served in the lulls
+      // paying guests first; locals and crew get served in the lulls - but a
+      // local past half patience jumps the line: the juice bar's steady
+      // tourist stream never lulls on its own, and a starved local walking
+      // away parched is the exact spiral the reserved 5th slot exists to stop
       const pending = customers.filter(k => k.biz === bizKey &&
         (k.state === "waiting" || k.state === "seatedWaiting") && !k.claimed && !k.served);
-      const o = pending.find(k => !k.isCrab) || pending[0];
+      const o = pending.find(k => k.isCrab && k.patience < k.maxPatience * 0.5)
+        || pending.find(k => !k.isCrab) || pending[0];
       if (o) {
         o.claimed = true; c.cust = o; c.stepIdx = -1; c.kstate = "walk";
         // send dine-in guests to a table right away - the server brings it out
