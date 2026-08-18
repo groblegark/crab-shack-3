@@ -202,6 +202,15 @@ first, connect later. Don't build the network before the node is beautiful.
    sprites with breathing + Z drift, taller shower stalls (curtain with a
    feet gap), grill smoke, shower suds, beach memorials now actually drawn,
    dossier portrait/flavor-line polish, gull-cry + catch-splash sfx.
+   Post-ship incident (Matt: "crabs stuck in the shower", fixed same day):
+   (a) the bather vignette drew from claim time, showing a head in an empty
+   stall during the walk-over — now gated on state === "showering" (ea65082,
+   which also added the real walk-in/out movement); (b) a crab dying
+   mid-errand (or NPC-hired mid-errand) leaked stall.occupant forever —
+   cleaners require !occupant, so the stall deadlocked for the run. New
+   abortErrand() releases stall/table/claim/ghost customer on both paths
+   (ef5b5a6); suite soaks 2 days asserting no stall stays occupied past a
+   real cycle (30/30).
    Remaining: followable-NPC polish. ~~Shower stall entry~~ — **shipped**
    (Matt 2026-08-18): the bather is now visible in the stall — head bobbing
    over the curtain in their own shell colors, white eyes, feet in the gap
@@ -219,6 +228,16 @@ first, connect later. Don't build the network before the node is beautiful.
    half-step scaling are already in.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **REMOVE the laundry mechanic** (Matt: "not natural in any way now that we
+  have showers"). SUDS N BUBBLES goes away. This is economy surgery, not a
+  delete: it's the $400 buy-ladder rung (needs a replacement — candidates: an
+  earlier boat, a juice bar for T2 thirst — or a retune without it), CLN-need
+  servicing folds into showers (they already reduce dirt/sandy), sick-crab
+  errands reference the cleaners, the sudsgear upgrade is laundry-specific,
+  several suite scenarios cover laundry, and existing saves can own the
+  laundromat → save migration required. Balance-moving → full matrix.
+  Sequenced AFTER the merge queue drains (T4 boat + portrait-canvas agents
+  are building against pre-removal trees); acked by the CS3 build session.
 - **Overtime**: the player can request a crew crab work overtime for extra
   pay. Design seams: shifts already exist (shift D/N on personas), wage is a
   constant (22) paid at settlement — overtime = staying past shift end at a
