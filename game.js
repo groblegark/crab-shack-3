@@ -1491,6 +1491,11 @@ function drawPier() {
   wrect(dx0, 104, dx1 - dx0, 1, [90, 60, 35]);
   // bait bucket between the fishing spots
   wblit(BUCKET, 1928, 97);
+  // a gull loiters on the rail, eyeing the bucket (it clears off now and then)
+  if ((time % 47) < 34 && darkness() < 0.8) {
+    const hop = ((time * 2) | 0) % 8 === 0 ? -1 : 0;
+    wblit(GULL_SIT, 1988, 73 + hop, ((time / 9) | 0) % 2 === 0);
+  }
   // lamp post on the east end for the night tide
   wrect(dx1 - 8, 66, 2, 20, [70, 60, 90]);
   wrect(dx1 - 9, 62, 4, 4, [30, 20, 36]);
@@ -1518,6 +1523,8 @@ function drawTown() {
     smallText(ctx, "SHELTER", SHELTER_X + 22 - camX, HOME_BOTTOM - SHELTER2.h + 3, [30, 20, 36]);
     smallText(ctx, "SHELTER", SHELTER_X + 21 - camX, HOME_BOTTOM - SHELTER2.h + 2, [240, 235, 220]);
   }
+  // the town remembers: driftwood memorials on the dune west of the shelter
+  for (const m of memorials) wblit(MEMORIAL, m.x, 150 - MEMORIAL.h);
   // bus stops on the shoulder
   for (const s of BUS_STOPS) wblit(BUS_STOP, s - 3, ROAD_Y1 + 3);
   // scenery fills the beach pockets between lots
@@ -1612,7 +1619,18 @@ function drawStation(key, kind, i) {
   if (kind === "claw") art = CLAW_MACHINE[isBusy ? ((time * 4) | 0) % 2 : 0];
   if (kind === "stall") art = STALL[isBusy ? 1 : 0];
   wblit(art, st.x, st.y - art.h);
-  if (kind === "grill" && isBusy) wblit(FLAME[((time * 8) | 0) % 2], st.x + 6, st.y - GRILL.h - 4);
+  if (kind === "grill" && isBusy) {
+    wblit(FLAME[((time * 8) | 0) % 2], st.x + 6, st.y - GRILL.h - 4);
+    // a wisp of smoke curls off the hot grill
+    for (let i = 0; i < 3; i++) {
+      const ph = (time * 0.55 + i * 0.37 + st.x * 0.011) % 1;
+      if (ph > 0.8) continue;
+      const sx = st.x + 7 + i * 2 + ((Math.sin(time * 1.2 + i * 2.1 + st.x) * 2) | 0);
+      const sy = st.y - GRILL.h - 8 - ph * 12;
+      const s = ph < 0.45 ? 2 : 1;
+      wrect(sx, sy, s, s, ph < 0.3 ? [168, 168, 182] : [206, 206, 220]);
+    }
+  }
 }
 
 function drawSwoop() {
@@ -1635,6 +1653,9 @@ function drawBus() {
     wrect(wx2 + 1, by + 4, 4, 1, CRAB_COLORS[riders[i].p.color][0]);
   }
 }
+
+// toque on duty, personal accessory otherwise; fishers never cook
+function crabHat(c) { return c.duty && !c.p.fisher ? "toque" : c.p.acc; }
 
 function drawCrab(c) {
   if (c.hidden) return;
@@ -1662,8 +1683,8 @@ function drawCrab(c) {
   } else {
     wblit(art, c.x, y, c.flip);
   }
-  // hat: toque on duty, personal accessory otherwise
-  const accKey = c.duty ? "toque" : c.p.acc;
+  // hat: toque on duty, personal accessory otherwise (fishers keep their own)
+  const accKey = crabHat(c);
   const acc = ACCESSORIES[accKey];
   if (acc) {
     const ax = c.flip ? 16 - acc.dx - acc.art.w : acc.dx;
@@ -1785,7 +1806,7 @@ function drawFollowCard() {
   rect(ctx, 3, 3, wcard - 2, 50, [255, 250, 235]);
   rect(ctx, 5, 6, 20, 26, [200, 230, 245]);
   blit(ctx, CRAB_ARTS[p.color].a, 7, 14);
-  const acc = ACCESSORIES[c.duty ? "toque" : p.acc];
+  const acc = ACCESSORIES[crabHat(c)];
   if (acc) blit(ctx, acc.art, 7 + acc.dx, 14 + acc.dy);
   text(ctx, p.name, 29, 5, [40, 30, 40]);
   const [mood, mcol] = crabMood(c);
@@ -2323,6 +2344,15 @@ function frame(now) {
     const stalls = BIZ[key].stalls;
     if (stalls) for (const t of stalls) paint.push({ base: t.y, f: () => {
       wblit(STALL[t.occupant ? 1 : 0], t.x, t.y - STALL[0].h);
+      if (t.occupant) {   // suds drift up over the curtain while the water runs
+        for (let i = 0; i < 3; i++) {
+          const ph = (time * 0.6 + i * 0.33 + t.x * 0.013) % 1;
+          if (ph > 0.85) continue;
+          const sx = t.x + 3 + i * 4 + ((Math.sin(time * 1.5 + i * 2.1) * 2) | 0);
+          const s = ph < 0.5 ? 2 : 1;
+          wrect(sx, t.y - STALL[0].h - 2 - ph * 8, s, s, i % 2 ? [96, 200, 255] : [88, 205, 188]);
+        }
+      }
       if (t.dirty) { px(ctx, t.x + 3 - camX, t.y - 2, [130, 220, 110]); px(ctx, t.x + 7 - camX, t.y - 1, [110, 190, 110]); px(ctx, t.x + 11 - camX, t.y - 2, [130, 220, 110]); }
     } });
   }

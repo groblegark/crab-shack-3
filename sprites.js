@@ -296,6 +296,15 @@ const GULL = [
   parseArt(["KK.....KK", ".KK...KK.", "..KLKLK..", "....K...."], PAL),
   parseArt([".........", "..K...K..", ".KKLKLKK.", "....K...."], PAL),
 ];
+// a gull at rest, wings folded, sizing up the bait bucket
+const GULL_SIT = parseArt([
+  "...KK..",
+  "..KLLKQ",
+  ".KLLLK.",
+  "KMMLLK.",
+  ".KKKK..",
+  "...K.K.",
+], PAL);
 const COIN = parseArt([
   ".KKKK.",
   "KAALAK",
