@@ -214,7 +214,8 @@ const spawnEvery = () => 7.5 / (0.7 + 0.01 * rep);   // word of mouth drives foo
 // ---------------------------------------------------------------- state
 let coins = 0, lifetime = 0, time = 0;
 let crabs = [], customers = [], floaters = [];
-let spawnT = 3, toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x
+let spawnT = 3, toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x, 3=6x
+const FF_SPEED = [1, 2, 3, 6];
 let camX = 1180, followIdx = -1, followNpc = null, tab = "crew";
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
@@ -1304,8 +1305,9 @@ cv.addEventListener("click", (ev) => {
   // panel
   if (p.y >= PANEL_Y) {
     if (p.y < 186) {
-      if (p.x > 228) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }
-      if (p.x > 212) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }
+      if (p.x > 233) { ffMode = ffMode === 3 ? 0 : 3; sfx.ding(); return; }
+      if (p.x > 217) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }
+      if (p.x > 203) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }
       if (p.x > 188) { soundOn = !soundOn; if (soundOn) sfx.ding(); return; }
       if (p.x > 168) { toggleMusic(); return; }
       if (p.x >= 145 && p.x <= 166) { toggleMute(); if (!muted) sfx.ding(); return; }
@@ -1356,7 +1358,7 @@ addEventListener("keydown", (e) => {
   if (e.key === "m") { toggleMute(); if (!muted) sfx.ding(); }
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
-  if (e.key === "f") ffMode = (ffMode + 1) % 3;            // fast-forward 1x/2x/3x
+  if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; }
   if (e.key === "Escape") { followIdx = -1; followNpc = null; }
@@ -1743,8 +1745,9 @@ function drawPanel() {
   blit(ctx, muted ? SPEAKER_OFF : SPEAKER_ON, 150, PANEL_Y + 3);
   smallText(ctx, "MUS", 169, PANEL_Y + 3, !muted && musicOn ? [140, 220, 140] : [140, 120, 110]);
   smallText(ctx, "SND", 190, PANEL_Y + 3, !muted && soundOn ? [140, 220, 140] : [140, 120, 110]);
-  text(ctx, ">>", 214, PANEL_Y + 2, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
-  text(ctx, ">>>", 230, PANEL_Y + 2, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
+  smallText(ctx, ">>", 206, PANEL_Y + 3, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
+  smallText(ctx, ">>>", 219, PANEL_Y + 3, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
+  smallText(ctx, ">>>>", 236, PANEL_Y + 3, ffMode === 3 ? [255, 230, 120] : [150, 132, 122]);
   // tabs
   for (const [i, t] of [["crew", 0], ["shop", 1]].map((v, i) => [i, v[0]])) {
     const x = 4 + i * 34, active = tab === t;
@@ -1966,7 +1969,7 @@ function drawToast() {
 // ---------------------------------------------------------------- main loop
 let last = performance.now(), saveT = 0;
 function frame(now) {
-  const dt = Math.min(0.1, (now - last) / 1000) * TURBO * (1 + ffMode);
+  const dt = Math.min(0.1, (now - last) / 1000) * TURBO * FF_SPEED[ffMode];
   last = now; time += dt;
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {

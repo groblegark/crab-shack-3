@@ -159,10 +159,11 @@ scenario("no crab freezes mid-walk (full town)", () => {
   return det.worstSeconds < 18 ? true : `a crab froze ~${det.worstSeconds}s in a moving state`;
 });
 
-scenario("fast-forward (3x dt) stays stable", () => {
+scenario("fast-forward (6x dt) stays stable", () => {
   const sim = createSim({ seed: 55 });
+  sim.G("ffMode = 3");   // the real in-game top speed: dt = 0.1 * 6
   const det = stuckDetector(sim);
-  sim.runDays(3, { step: 150, onTick: det.tick, tickEvery: 7 });
+  sim.runDays(3, { step: 100, onTick: det.tick, tickEvery: 10 });
   const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
   if (st.tourServes < 15) return `only ${st.tourServes} serves at 3x dt`;
   return det.worstSeconds < 18 ? true : `a crab froze ~${det.worstSeconds}s at 3x dt`;
