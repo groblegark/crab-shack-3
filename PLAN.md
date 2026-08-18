@@ -182,10 +182,12 @@ first, connect later. Don't build the network before the node is beautiful.
    sprites with breathing + Z drift, taller shower stalls (curtain with a
    feet gap), grill smoke, shower suds, beach memorials now actually drawn,
    dossier portrait/flavor-line polish, gull-cry + catch-splash sfx.
-   Remaining: followable-NPC polish; **shower stall entry** (Matt 2026-08-18:
-   crabs should visibly go INTO a stall — today game.js:895 sets hidden=true
-   so they vanish — show the crab behind the curtain, feet in the gap, head
-   over the top) **with bubbles** rising while the shower runs.
+   Remaining: followable-NPC polish. ~~Shower stall entry~~ — **shipped**
+   (Matt 2026-08-18): the bather is now visible in the stall — head bobbing
+   over the curtain in their own shell colors, white eyes, feet in the gap
+   (already there), suds rising while the water runs. The crab entity stays
+   hidden=true during showerT (out of collision/painter); the stall draw
+   renders the bather from t.occupant.
 8. ~~Secret mobile merge mode~~ — **shipped**: touch-only hidden mode (hold a
    crab until the thought bubble fills), per-crab boards, goal ladder pays
    into the till ($60/session cap). Lives in merge.js, desktop-inert.

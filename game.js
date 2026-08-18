@@ -2531,6 +2531,18 @@ function frame(now) {
         wrect(t.x + 5, t.y - 3, 2, 2, col);
         wrect(t.x + 9, t.y - 3, 2, 2, col);
       }
+      if (t.occupant) {   // the bather's head bobs over the curtain
+        const oc = t.occupant, pcol = oc.p ? oc.p.color : oc.color;
+        const pal = CRAB_COLORS[(pcol || 0) % CRAB_COLORS.length];
+        const bob = Math.round(Math.sin(time * 3 + t.x) * 1.5);
+        const hy = t.y - STALL[0].h + 4 + bob;
+        wrect(t.x + 5, hy, 6, 3, pal[0]);                    // wet shell dome
+        wrect(t.x + 6, hy - 1, 4, 1, pal[0]);
+        wrect(t.x + 6, hy - 3, 1, 2, pal[1] || pal[0]);      // eyestalks
+        wrect(t.x + 9, hy - 3, 1, 2, pal[1] || pal[0]);
+        px(ctx, t.x + 6 - camX, hy - 3, [255, 255, 255]);    // happy wet eyes
+        px(ctx, t.x + 9 - camX, hy - 3, [255, 255, 255]);
+      }
       if (t.occupant) {   // suds drift up over the curtain while the water runs
         for (let i = 0; i < 3; i++) {
           const ph = (time * 0.6 + i * 0.33 + t.x * 0.013) % 1;
