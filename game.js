@@ -112,7 +112,7 @@ const shoesMult = () => 1 + 0.12 * UPS.shoes.lvl;
 // ---------------------------------------------------------------- state
 let coins = 0, lifetime = 0, time = 0;
 let crabs = [], customers = [], floaters = [];
-let spawnT = 3, toast = null, soundOn = true;
+let spawnT = 3, toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x
 let camX = 1180, followIdx = -1, tab = "crew";
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let screen = "title", hasSave = false, wiping = false;
@@ -786,8 +786,12 @@ cv.addEventListener("click", (ev) => {
   if (dragMoved) return;
   // panel
   if (p.y >= PANEL_Y) {
-    if (p.x > 212 && p.y < 188) { soundOn = !soundOn; if (soundOn) sfx.ding(); return; }
-    if (p.x > 168 && p.x <= 212 && p.y < 188) { toggleMusic(); return; }
+    if (p.y < 188) {
+      if (p.x > 228) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }
+      if (p.x > 212) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }
+      if (p.x > 188) { soundOn = !soundOn; if (soundOn) sfx.ding(); return; }
+      if (p.x > 168) { toggleMusic(); return; }
+    }
     if (p.y >= 187 && p.y < 197) {
       if (p.x >= 4 && p.x < 36) { tab = "crew"; return; }
       if (p.x >= 38 && p.x < 70) { tab = "shop"; return; }
@@ -856,6 +860,7 @@ addEventListener("keydown", (e) => {
   if (e.key === "m") soundOn = !soundOn;
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
+  if (e.key === "f") ffMode = (ffMode + 1) % 3;            // fast-forward 1x/2x/3x
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; }
   if (e.key === "Escape") followIdx = -1;
@@ -1155,8 +1160,10 @@ function drawPanel() {
   blit(ctx, COIN, 4, PANEL_Y + 2);
   textShadow(ctx, "$" + fmt(coins), 13, PANEL_Y + 2, [255, 230, 120], [30, 20, 20]);
   text(ctx, "D" + day + " " + clockStr(), 84, PANEL_Y + 2, [220, 210, 190]);
-  smallText(ctx, "MUS", 169, PANEL_Y + 2, musicOn ? [140, 220, 140] : [140, 120, 110]);
-  smallText(ctx, "SND", 213, PANEL_Y + 2, soundOn ? [140, 220, 140] : [140, 120, 110]);
+  smallText(ctx, "MUS", 169, PANEL_Y + 3, musicOn ? [140, 220, 140] : [140, 120, 110]);
+  smallText(ctx, "SND", 190, PANEL_Y + 3, soundOn ? [140, 220, 140] : [140, 120, 110]);
+  text(ctx, ">>", 214, PANEL_Y + 2, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
+  text(ctx, ">>>", 230, PANEL_Y + 2, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
   // tabs
   for (const [i, t] of [["crew", 0], ["shop", 1]].map((v, i) => [i, v[0]])) {
     const x = 4 + i * 34, active = tab === t;
@@ -1296,7 +1303,7 @@ function drawToast() {
 // ---------------------------------------------------------------- main loop
 let last = performance.now(), saveT = 0;
 function frame(now) {
-  const dt = Math.min(0.1, (now - last) / 1000) * TURBO;
+  const dt = Math.min(0.1, (now - last) / 1000) * TURBO * (1 + ffMode);
   last = now; time += dt;
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) { tmin -= 1440; day++; }
