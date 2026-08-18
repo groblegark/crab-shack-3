@@ -196,6 +196,16 @@ first, connect later. Don't build the network before the node is beautiful.
    refactor. Wheel/trackpad panning, no-zoom, no pull-to-refresh, and crisp
    half-step scaling are already in.
 
+## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Overtime**: the player can request a crew crab work overtime for extra
+  pay. Design seams: shifts already exist (shift D/N on personas), wage is a
+  constant (22) paid at settlement — overtime = staying past shift end at a
+  premium rate (say 1.5x), at a needs/health cost so it's a real trade-off
+  (tired crabs get dirty/hungry/sick faster — the stats→performance work
+  slots straight in here). Control could live in the dossier next to
+  TAP: REASSIGN. Balance-moving → needs the headless matrix; sequence it
+  after T1 with the other economy stages.
+
 ## Conventions
 - Suite green before push; economy changes need a matrix re-run.
 - Big features → fork subagents in git worktrees (they don't push; the parent
