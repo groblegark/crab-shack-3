@@ -2064,9 +2064,11 @@ function drawBusiness(key) {
     wrect(signX + signW / 2 - 23, 118, 46, 11, [30, 20, 36]);
     text(ctx, "CLOSED", signX + signW / 2 - 18 - camX, 120, [255, 120, 120]);
   } else if (bizRestingToday(key)) {
-    // the whole roster is off today: an honest smalltown closed-sign day
-    wrect(signX + signW / 2 - 25, 118, 50, 11, [30, 20, 36]);
-    text(ctx, "DAY OFF", signX + signW / 2 - 22 - camX, 120, [140, 220, 255]);
+    // the whole roster is off today: an honest smalltown closed-sign day,
+    // hung over the roofline where the stalls can't hide it
+    wrect(signX + signW / 2 - 25, 79, 50, 12, [30, 20, 36]);
+    wrect(signX + signW / 2 - 24, 80, 48, 10, [255, 250, 235]);
+    text(ctx, "DAY OFF", signX + signW / 2 - 21 - camX, 82, [40, 110, 190]);
   }
 }
 
@@ -2320,7 +2322,7 @@ function drawFollowCard() {
   {   // the weekly day off, when the row has room for it
     const offTxt = "OFF " + WEEKDAYS[dayOffIdx(c)];
     const ox = 29 + smallTextWidth(shiftTxt) + 5;
-    if (ox + smallTextWidth(offTxt) < wx3 - 8) smallText(ctx, offTxt, ox, 28, [70, 140, 200]);
+    if (ox + smallTextWidth(offTxt) < wx3 - 2) smallText(ctx, offTxt, ox, 28, [70, 140, 200]);
   }
   text(ctx, wTxt, wx3, 28, p.homeless ? [190, 80, 80] : [140, 110, 40], 5);
   const trend = p.walletPrev == null ? 0 : p.wallet - p.walletPrev;
@@ -2350,7 +2352,8 @@ function drawPanel() {
   rect(ctx, 0, PANEL_Y, W, 1, [120, 90, 70]);
   blit(ctx, COIN, 4, PANEL_Y + 2);
   textShadow(ctx, "$" + fmt(coins), 13, PANEL_Y + 2, [255, 230, 120], [30, 20, 20]);
-  text(ctx, WEEKDAYS[weekdayIdx(day)] + " D" + day + " " + clockStr(), 80, PANEL_Y + 2, [220, 210, 190], 5);
+  smallText(ctx, WEEKDAYS[weekdayIdx(day)], 71, PANEL_Y + 3, [190, 175, 160]);
+  text(ctx, "D" + day + " " + clockStr(), 84, PANEL_Y + 2, [220, 210, 190]);
   rect(ctx, 146, PANEL_Y + 1, 19, 11, muted ? [140, 50, 50] : [30, 20, 20]);
   rect(ctx, 147, PANEL_Y + 2, 17, 9, muted ? [90, 35, 35] : [90, 70, 60]);
   blit(ctx, muted ? SPEAKER_OFF : SPEAKER_ON, 150, PANEL_Y + 3);
