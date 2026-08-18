@@ -175,6 +175,32 @@ Staged landings (each stage ships alone, suite-green, balance re-verified):
   `raw: "fruit"`). Crabs and guests drink; juice ingredients come through the
   import ledger. Needs a full headless matrix re-run — a new need is a new
   death spiral candidate.
+- **T2 spec (draft, 2026-08-18, pending Matt's read)** — thirst + juice bar
+  land as ONE measured pass, immediately after laundry removal merges:
+  - **THIRST need**: parallel to FED, faster cycle (casual, frequent): +0.35
+    at shift end, +0.15 nightly, +50% accrual while sandy > 0.5 (beach heat).
+    Drink errand at thirst ≥ 0.45, priority between food and clean. At
+    LANDING thirst adds sickness risk (≥ 0.95 → +0.12/night, the scariest
+    neglect) and a parched walk penalty (≥ 0.8 → −15%), but deliberately NO
+    new crabEff prep-drag term — one new death-spiral pressure at a time;
+    coupling into crabEff is a later loosening with its own matrix run.
+  - **JUICE BAR**: the $400 rung in the vacated _biz1 shop slot and the
+    vacated cleaners lot (~680-860). Player-owned shopfront, rent ~55,
+    juicer x2 + counter, recipes JUICE $6 (fruit) and COOLER $9 (fruit +
+    fresh water), prep 1.5-2.5s — cheap, fast, high-throughput. Tourists
+    order drinks too (new demand stream on the rep curve). Staff drink at
+    retail, same policy as meals.
+  - **Ledger (T1 hooks)**: new IMPORTS entry fruit $2; every drink counts
+    fruit and 1 gal water through tradeImport(); still tracking-only until
+    T3 charges sourcing.
+  - **Matrix plan**: measure the COMBINED removal+juicebar curve (removal
+    lands measured-inert first, so movement attributes to T2): target
+    median 11-13, evictions 7-17, via --jobs matrix; watch crew wallets —
+    thirst spend at retail is a real drain, and the precedent is RAISE THE
+    WAGE (22 → measured value) rather than discount drinks. Growth check
+    gains a juicebar buy strategy in the headless buyer. Suite adds: thirst
+    serviced end-to-end, parched-spiral risk, juicebar economics + ledger
+    flows, and the no-inflation guard re-run.
 - **T3 — Ingredient sourcing for everything**: recipes get real ingredient
   lists (corn → tortillas → FISH TACO is the pilot; the `raw:` field and
   `consumeIngredient()` are the embryo). A pantry + a receiving station where
