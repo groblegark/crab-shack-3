@@ -624,6 +624,69 @@ scenario("boat: ownership and berth roundtrip through save/load", () => {
   return st2[0] && st2[1] ? true : "garbage berth 9 not sanitized to homeless: " + JSON.stringify(st2);
 });
 
+scenario("credit: rent shortfall draws the line instead of evicting", () => {
+  const sim = createSim({ seed: 41 });
+  sim.runUntil("tmin >= 19.8 * 60", {});
+  // enough for wages but not the rent: tonight must draw, not evict
+  sim.G("coins = 200;");
+  const ok = sim.runUntil("lastRentDay === day", { maxSteps: 20000 });
+  if (!ok) return "settlement never ran";
+  if (sim.G("gameOver")) return "town died despite available credit";
+  const bal = sim.G("credit.bal");
+  if (!(bal > 0)) return "no credit drawn (bal " + bal + ")";
+  if (bal > sim.G("CREDIT_CFG.LIMIT")) return "first draw exceeds the limit: " + bal;
+  const c = sim.G("coins");
+  if (c < 0) return "till went negative: " + c;
+  // and the town keeps running: the next morning arrives with the debt on the books
+  sim.runUntil("tmin >= 9 * 60 && day === 2", { maxSteps: 60000 });
+  return sim.G("gameOver") ? "died overnight after the draw" : true;
+});
+
+scenario("credit: exhausted line + missed payment = bankrupt game over", () => {
+  // deep shortfall past the remaining headroom: the bill can't be drawn
+  const a = createSim({ seed: 42 });
+  a.runUntil("tmin >= 19.9 * 60", {});
+  a.G("credit.bal = CREDIT_CFG.LIMIT; coins = 0;");
+  a.runUntil("gameOver || lastRentDay === day", { maxSteps: 20000 });
+  if (!a.G("gameOver")) return "deep shortfall on an exhausted line did not bankrupt";
+  if (!a.G("bankrupt")) return "gameOver without the bankrupt flag (wrong flavor)";
+  // rent covered exactly, but the minimum payment missed with zero headroom
+  const b = createSim({ seed: 43 });
+  b.runUntil("tmin >= 19.9 * 60", {});
+  b.G("credit.bal = CREDIT_CFG.LIMIT; coins = totalRent() + CRAB_WAGE * crabs.length;");
+  b.runUntil("gameOver || lastRentDay === day", { maxSteps: 20000 });
+  if (!b.G("gameOver")) return "missed minimum on an exhausted line did not bankrupt";
+  return b.G("bankrupt") ? true : "minimum-payment bankruptcy lacks the flag";
+});
+
+scenario("credit: predictor warns >=2 days before a doomed town goes under", () => {
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(30);
+  if (!sim.G("gameOver")) return "doomed baseline survived 30d?";
+  const warn = sim.G("window._stats.warnDay == null ? -1 : window._stats.warnDay");
+  if (warn < 0) return "no warning ever fired (design failure)";
+  const lead = sim.G("day") - warn;
+  return lead >= 2 ? true : "warning only " + lead + " day(s) before bankruptcy";
+});
+
+scenario("credit: balance, flags and NPC lines roundtrip save/load", () => {
+  const store = new Map();
+  const a = createSim({ seed: 44, storage: store, fresh: false });
+  a.runDays(2);
+  a.G("credit.bal = 77; credit.warned = true; OWNERS.sudsy.credit = 33; OWNERS.sudsy.darkT = 2; save()");
+  const b = createSim({ seed: 45, storage: store, fresh: false });
+  const st = JSON.parse(b.G('JSON.stringify([credit.bal, credit.warned, OWNERS.sudsy.credit, OWNERS.sudsy.darkT, bizDark("showers")])'));
+  if (st[0] !== 77 || st[1] !== true) return "player credit lost: " + JSON.stringify(st);
+  if (st[2] !== 33 || st[3] !== 2 || st[4] !== true) return "npc credit/dark lost: " + JSON.stringify(st);
+  // an old save (pre-credit keys) must load with a zero balance, no flags
+  const raw = JSON.parse(store.get("crabshack3_v1"));
+  delete raw.credit; delete raw.bankrupt; delete raw.dayLog; delete raw.npc.credit;
+  store.set("crabshack3_v1", JSON.stringify(raw));
+  const c = createSim({ seed: 46, storage: store, fresh: false });
+  const st2 = JSON.parse(c.G("JSON.stringify([credit.bal, OWNERS.sudsy.credit || 0, bankrupt])"));
+  return st2[0] === 0 && st2[1] === 0 && st2[2] === false ? true : "old save defaults wrong: " + JSON.stringify(st2);
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
