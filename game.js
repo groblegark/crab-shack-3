@@ -462,6 +462,7 @@ function stepTo(c, tx, speed, dt, ty) {
   c.x += dx / d * step;
   c.y += dy / d * step;
   c._stepped = true;   // moved this frame (anchors are crabs that did not)
+  c._mx = tx;          // actual motion target this frame (collision uses this, not c.tx)
   return false;
 }
 // soft-radius separation + station bodies: nobody stands inside anybody
@@ -480,6 +481,12 @@ function collide(dt) {
         const ux = dx / d, uy = dy / d / 1.8;
         if (aStill && !bStill) { b.x += ux * push * 2; b.y = clampY(b.y + uy * push * 2); }
         else if (bStill && !aStill) { a.x -= ux * push * 2; a.y = clampY(a.y - uy * push * 2); }
+        else if (Math.sign((a._mx != null ? a._mx : a.x) - a.x) !== Math.sign((b._mx != null ? b._mx : b.x) - b.x) && Math.abs(dx) > 2) {
+          // head-on: step around each other, not into each other
+          a.y = clampY(Math.max(FLOOR_MIN, a.y - push * 2));
+          b.y = clampY(b.y + push * 2);
+          if (b.y >= FLOOR_MAX - 0.5) b.y = clampY(b.y - push * 4);   // no room below: b passes above instead
+        }
         else {
           a.x -= ux * push; a.y = clampY(a.y - uy * push);
           b.x += ux * push; b.y = clampY(b.y + uy * push);

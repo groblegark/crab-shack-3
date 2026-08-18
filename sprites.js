@@ -860,3 +860,39 @@ const MEMORIAL = parseArt([
   "KKKKKKKKKK",
   "KGGKGGKGGK",
 ], PAL);
+
+// ================================================================ fishing art
+// fishing rod held out over the water (two bob frames)
+const ROD = [
+  parseArt([
+    "..........K",
+    ".......KK..",
+    ".....KK....",
+    "...KK...L..",
+    ".KK.....L..",
+    "K.......L..",
+  ], PAL),
+  parseArt([
+    "..........K",
+    ".......KK..",
+    ".....KK....",
+    "...KK......",
+    ".KK.....L..",
+    "K.......L..",
+  ], PAL),
+];
+const BUCKET = parseArt([
+  "KKKKKKKK",
+  "KCCFCCFK",
+  ".KMMMMK.",
+  ".KMMMMK.",
+  "..KKKK..",
+], PAL);
+// caught fish flopping (palette-swapped silver)
+const CATCH_FISH = parseArt([
+  ".KKK.....",
+  "KMMKKKKK.",
+  "KMMMMMWBK",
+  "KMMKKKKK.",
+  ".KKK.....",
+], PAL);
