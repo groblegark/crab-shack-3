@@ -33,7 +33,12 @@ const BIZ = {
       grill: [{ x: 1380, y: 160 }, { x: 1402, y: 160 }, { x: 1424, y: 160 }],
       pass:  [{ x: 1452, y: 160 }],
     },
-    tables: [{ x: 1492, y: 152, dishes: 0, occupant: null }, { x: 1532, y: 152, dishes: 0, occupant: null }],
+    tables: [
+      { x: 1492, y: 152, dishes: 0, occupant: null },
+      { x: 1532, y: 152, dishes: 0, occupant: null },
+      { x: 1484, y: 134, dishes: 0, occupant: null },
+      { x: 1524, y: 134, dishes: 0, occupant: null },
+    ],
     source: "crate", out: "pass", queueX: 1566,
     park: 1130, rack: 1208,
     recipes: [
@@ -85,20 +90,23 @@ const BIZ = {
   },
   showers: {
     name: "SUDS SHOWERS", short: "SHWR", sign: "SUDS SHOWERS", kind: "shopfront", rent: 35, owner: "sudsy",
-    x0: 950, x1: 1070, door: 964,
+    x0: 940, x1: 1120, door: 954,
     stations: {
-      taps:  [{ x: 956, y: 136 }],
-      stall: [{ x: 990, y: 136 }, { x: 1012, y: 136 }],
-      scrub: [{ x: 1000, y: 160 }],
-      towel: [{ x: 1040, y: 160 }],
+      taps:  [{ x: 946, y: 136 }],
+      towel: [{ x: 972, y: 160 }],
     },
-    source: "taps", out: "towel", queueX: 1076,
-    park: 906, rack: 934,
+    stalls: [
+      { x: 996, y: 136, occupant: null, dirty: false, cleaning: false },
+      { x: 1026, y: 136, occupant: null, dirty: false, cleaning: false },
+      { x: 1056, y: 136, occupant: null, dirty: false, cleaning: false },
+    ],
+    source: "taps", out: "towel", queueX: 1126,
+    park: 896, rack: 924,
     recipes: [
-      { id: "rinse", icon: "shine", pay: 8, raw: "soap",
-        steps: [["stall", 2.5, "shine"]] },
-      { id: "soak", icon: "suds", pay: 15, raw: "soap",
-        steps: [["stall", 3.0, "suds"], ["scrub", 2.0, "shine"]] },
+      { id: "rinse", icon: "shine", pay: 8, raw: "soap", showerT: 5, deep: false,
+        steps: [] },
+      { id: "soak", icon: "suds", pay: 15, raw: "soap", showerT: 8, deep: true,
+        steps: [] },
     ],
   },
 };
@@ -207,7 +215,7 @@ const busy = {
   shack: { board: [false, false, false], grill: [false, false, false], sink: [false] },
   cleaners: { washer: [false, false], dryer: [false, false] },
   arcade: { claw: [false, false], skee: [false, false] },
-  showers: { stall: [false, false], scrub: [false] },
+  showers: {},
 };
 const bus = { x: 360, dir: 1, state: "drive", dwellT: 0, riders: [] };
 let earnHist = [];
@@ -481,8 +489,9 @@ function collide(dt) {
     }
   // solid tables: nobody walks through the picnic area
   for (const bizKey of Object.keys(BIZ)) {
-    if (!bizUnlocked(bizKey) || !BIZ[bizKey].tables) continue;
-    for (const t of BIZ[bizKey].tables) {
+    if (!bizUnlocked(bizKey)) continue;
+    const furniture = (BIZ[bizKey].tables || []).concat(BIZ[bizKey].stalls || []);
+    for (const t of furniture) {
       for (const c of bodies) {
         if (Math.abs((c.tx || 0) - (t.x + 2)) < 8 && Math.abs((c.ty || 0) - (t.y + 12)) < 8) continue;
         const dx = c.x + 8 - (t.x + 10), dy = c.y - t.y;
@@ -743,13 +752,16 @@ function updateErrand(c, dt) {
       c.quip = { text: "CLOSED?! HMPH", t: 2.2 };
       return;
     }
-    c.x = k.x; c.y = 166;   // stand in the queue, same line as tourists
+    if (k.state === "dining" && k.table) { c.x = k.table.x + 2; c.y = k.table.y + 1; }
+    else if (k.state === "showering" && k.stall) { c.x = k.stall.x + 2; c.y = k.stall.y + 4; c.hidden = true; }
+    else { c.hidden = false; c.x = k.x; c.y = 166; }
   }
 }
 function finishErrand(k) {
   k.done = true;
   const c = k.crab;
   if (c.errandCust === k) {
+    c.hidden = false;
     c.errandCust = null; c.errandCd = 25;
     if (!k.served) c.quip = { text: "LINE WAS TOO LONG", t: 2.4 };
     c.dayState = "home";
@@ -785,6 +797,7 @@ function release(c) {
 function abortChef(c) {
   if (c.kstate === "work" || c.kstate === "washing" || c.kstate === "toSlot") release(c);
   if (c.busTable) { c.busTable.busing = false; c.busTable = null; }
+  if (c.cleanStall) { c.cleanStall.cleaning = false; c.cleanStall = null; c.kstate = "idle"; }
   c.kstate = "idle"; c.cust = null; c.carrying = null; c.stepIdx = 0;
 }
 function updateKitchen(c, dt) {
@@ -805,6 +818,12 @@ function updateKitchen(c, dt) {
       if (dirty) {
         dirty.busing = true; c.busTable = dirty; c.kstate = "toBus";
         setT(c, dirty.x + 2, dirty.y + 12);
+        return;
+      }
+      const grubby = !c.pendingOff && biz.stalls && biz.stalls.find(t => t.dirty && !t.cleaning && !t.occupant);
+      if (grubby) {
+        grubby.cleaning = true; c.cleanStall = grubby; c.kstate = "toStallClean";
+        setT(c, grubby.x + 2, grubby.y + 7);
         return;
       }
     }
@@ -828,6 +847,16 @@ function updateKitchen(c, dt) {
           c.kstate = "toSlot";
         }
       }
+    }
+  } else if (c.kstate === "toStallClean") {
+    if (routedStep(c, spd, dt)) { c.workMax = c.workT = 2.5 / crabWork(c); c.kstate = "cleaningStall"; }
+  } else if (c.kstate === "cleaningStall") {
+    c.workT -= dt;
+    if (c.workT <= 0) {
+      if (c.cleanStall) { c.cleanStall.dirty = false; c.cleanStall.cleaning = false; c.cleanStall = null; }
+      c.kstate = "idle";
+      if (window._stats) window._stats.stallsCleaned = (window._stats.stallsCleaned || 0) + 1;
+      popText("SPARKLING", c.x - 6, FLOOR_Y - 30, [140, 220, 255]);
     }
   } else if (c.kstate === "toBus") {
     if (routedStep(c, spd, dt)) {
@@ -902,8 +931,7 @@ function serve(c) {
       if (cust.need === "food") cust.crab.p.hunger = 0;
       if (cust.need === "clean") cust.crab.p.dirt = 0;
       if (cust.need === "fun") { cust.crab.p.bored = 0; cust.crab.quip = { text: "BEST DAY EVER!", t: 2.4 }; }
-      if (cust.need === "spa") cust.crab.p.dirt = Math.max(0, (cust.crab.p.dirt || 0) - 0.5);
-      if (cust.need === "spa") { cust.crab.p.sandy = 0; cust.crab.quip = { text: "SQUEAKY CLEAN!", t: 2.4 }; }
+
       popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
     } else {
       const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0))
@@ -913,9 +941,14 @@ function serve(c) {
       popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
     }
     cust.served = true; cust.happy = true; sfx.ding();
-    const tables = BIZ[cust.biz].tables;
-    const seat = tables && !cust.isCrab ? tables.find(t => !t.occupant && t.dishes === 0) : null;
-    if (seat) { seat.occupant = cust; cust.state = "toTable"; cust.table = seat; }
+    const tables = BIZ[cust.biz].tables, stalls = BIZ[cust.biz].stalls;
+    const seat = tables ? tables.find(t => !t.occupant && t.dishes === 0) : null;
+    const stall = stalls ? stalls.find(t => !t.occupant && !t.dirty) : null;
+    if (stalls) {
+      if (stall) { stall.occupant = cust; cust.state = "toStall"; cust.stall = stall; }
+      else { cust.state = "waitStall"; cust.waitT = 30; }
+    }
+    else if (seat) { seat.occupant = cust; cust.state = "toTable"; cust.table = seat; }
     else cust.state = "leaving";
     if (window._stats) window._stats[cust.isCrab ? "crabServes" : "tourServes"]++;
     if (window._stats && bizOwner(cust.biz) !== "player")
@@ -958,10 +991,34 @@ function updateCustomers(dt) {
           popText("!!", k.x, 120, [255, 80, 80]); sfx.angry();
         }
       }
+    } else if (k.state === "toStall") {
+      const st = k.stall;
+      const dxs = st.x + 3 - k.x;
+      if (Math.abs(dxs) > 2) k.x += Math.sign(dxs) * Math.min(45 * dt, Math.abs(dxs));
+      else { k.state = "showering"; k.showerT = k.recipe.showerT || 5; }
+    } else if (k.state === "showering") {
+      k.showerT -= dt;
+      if (k.showerT <= 0) {
+        const st = k.stall;
+        st.occupant = null; st.dirty = true; k.stall = null;
+        if (k.isCrab) {
+          k.crab.p.sandy = 0;
+          k.crab.p.dirt = Math.max(0, (k.crab.p.dirt || 0) - (k.recipe.deep ? 0.7 : 0.5));
+          k.crab.quip = { text: "SQUEAKY CLEAN!", t: 2.4 };
+        }
+        if (window._stats) window._stats.showersDone = (window._stats.showersDone || 0) + 1;
+        popText("AHHH", k.x, 126, [140, 220, 255]);
+        k.state = "leaving";
+      }
+    } else if (k.state === "waitStall") {
+      k.waitT -= dt;
+      const st = BIZ[k.biz].stalls.find(t => !t.occupant && !t.dirty);
+      if (st) { st.occupant = k; k.stall = st; k.state = "toStall"; }
+      else if (k.waitT <= 0) { k.state = "leaving"; k.happy = false; }
     } else if (k.state === "toTable") {
       const t = k.table;
-      const d = Math.hypot(t.x + 10 - k.x, 0);
-      if (d > 3) k.x += Math.sign(t.x + 10 - k.x) * 45 * dt;
+      const dxt = t.x + 10 - k.x;
+      if (Math.abs(dxt) > 2) k.x += Math.sign(dxt) * Math.min(45 * dt, Math.abs(dxt));
       else { k.state = "dining"; k.dineT = 6 + Math.random() * 4; }
     } else if (k.state === "dining") {
       k.dineT -= dt;
@@ -1003,7 +1060,7 @@ function crabStatus(c) {
   if (c.dayState === "working") {
     if (c.kstate === "work" && c.slotKind === "board") return "CHOPPING";
     if (c.kstate === "work" && c.slotKind === "grill") return "GRILLING";
-    if (c.kstate === "work" && c.slotKind === "stall") return "RUNNING A SHOWER";
+    if (c.kstate === "toStallClean" || c.kstate === "cleaningStall") return "SCRUBBING A STALL";
     if (c.kstate === "work") return "GRABBING FOOD";
     if (c.carrying) return "CARRYING " + ITEM_NAMES[c.carrying];
     if (c.kstate === "waitCash") return "SHORT ON CASH!";
@@ -1939,11 +1996,16 @@ function frame(now) {
     }
   }
   for (const key of Object.keys(BIZ)) {
+    if (!bizUnlocked(key)) continue;
     const tables = BIZ[key].tables;
-    if (!tables || !bizUnlocked(key)) continue;
-    for (const t of tables) paint.push({ base: t.y, f: () => {
+    if (tables) for (const t of tables) paint.push({ base: t.y, f: () => {
       wblit(PICNIC_TABLE, t.x, t.y - PICNIC_TABLE.h);
       if (t.dishes > 0) wblit(DISHES[t.dishes - 1], t.x + 6, t.y - PICNIC_TABLE.h - DISHES[t.dishes - 1].h + 1);
+    } });
+    const stalls = BIZ[key].stalls;
+    if (stalls) for (const t of stalls) paint.push({ base: t.y, f: () => {
+      wblit(STALL[t.occupant ? 1 : 0], t.x, t.y - STALL[0].h);
+      if (t.dirty) { px(ctx, t.x + 3 - camX, t.y - 2, [130, 220, 110]); px(ctx, t.x + 7 - camX, t.y - 1, [110, 190, 110]); px(ctx, t.x + 11 - camX, t.y - 2, [130, 220, 110]); }
     } });
   }
   for (const k of customers) paint.push({ base: k.state === "dining" ? (k.table.y + 1) : (k.isCrab ? 165 : FLOOR_Y), f: () => drawCustomer(k) });

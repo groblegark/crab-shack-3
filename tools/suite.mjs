@@ -220,6 +220,16 @@ scenario("disease: care cures, neglect can kill", () => {
   return true;
 });
 
+scenario("showers: guests occupy stalls, staff turn them over", () => {
+  const sim = createSim({ seed: 23 });
+  sim.runDays(3);
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  if ((st.showersDone || 0) < 3) return `only ${st.showersDone | 0} completed showers in 3 days`;
+  if ((st.stallsCleaned || 0) < 2) return `only ${st.stallsCleaned | 0} stalls cleaned in 3 days`;
+  const wedged = sim.G("BIZ.showers.stalls.filter(t => t.dirty && !t.cleaning).length");
+  return wedged <= 2 ? true : `${wedged} stalls left permanently dirty`;
+});
+
 scenario("save/load roundtrip preserves state", () => {
   const store = new Map();
   const a = createSim({ seed: 31, storage: store, fresh: false });
