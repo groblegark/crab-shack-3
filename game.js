@@ -152,7 +152,7 @@ function newCrab(persona) {
   return {
     p: persona,
     x: homeX({ p: persona }), flip: false, hidden: false, animT: Math.random() * 9,
-    dayState: "home", cstate: "", target: 0, busFrom: -1, busTo: -1,
+    dayState: "home", cstate: "", target: 0, busFrom: -1, busTo: -1, workBiz: "shack",
     errandBiz: null, errandCust: null, errandCd: 0,
     duty: false, pendingOff: false, pauseT: 0,
     // kitchen fields
@@ -368,7 +368,7 @@ function updateCommute(c, dt) {
 }
 
 function arriveCommute(c, atWork) {
-  if (atWork) { c.dayState = "working"; c.duty = true; c.kstate = "idle"; }
+  if (atWork) { c.dayState = "working"; c.duty = true; c.kstate = "idle"; c.workBiz = c.p.job; }
   else { c.dayState = "home"; }
 }
 
@@ -418,7 +418,7 @@ function updateSchedule(c, dt) {
 
 // ---------------------------------------------------------------- errands
 function pickErrand(c) {
-  const staffed = (b) => bizUnlocked(b) && crabs.some(k => k.duty && k.p.job === b);
+  const staffed = (b) => bizUnlocked(b) && crabs.some(k => k.duty && k.workBiz === b);
   if ((c.p.hunger || 0) >= 0.5 && staffed("shack")) {
     const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= r.pay + 2);
     if (affordable.length) {
@@ -475,7 +475,7 @@ function tryAcquire(bizKey, kind) {
   return -1;
 }
 function release(c) {
-  if (c.slotKind && c.slot >= 0) busy[c.p.job][c.slotKind][c.slot] = false;
+  if (c.slotKind && c.slot >= 0) busy[c.workBiz][c.slotKind][c.slot] = false;
   c.slot = -1; c.slotKind = null;
 }
 function abortChef(c) {
@@ -484,7 +484,7 @@ function abortChef(c) {
 }
 function updateKitchen(c, dt) {
   if (c.cust && (c.cust.state === "leaving" || c.cust.served)) { abortChef(c); return; }
-  const bizKey = c.p.job, biz = BIZ[bizKey];
+  const bizKey = c.workBiz, biz = BIZ[bizKey];
   const spd = crabMove(c) * 1.1;
   if (c.kstate === "idle") {
     if (!c.pendingOff) {
@@ -596,7 +596,7 @@ function updateCustomers(dt) {
   spawnT -= dt;
   if (spawnT <= 0 && shackOpen()) {
     // tourists pick a staffed business
-    const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && crabs.some(c => c.duty && c.p.job === b));
+    const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && crabs.some(c => c.duty && c.workBiz === b));
     if (open.length) {
       const weights = open.map(b => b === "shack" ? 0.7 : 0.3);
       let r = Math.random() * weights.reduce((a, v) => a + v, 0), pick = open[0];
@@ -826,7 +826,7 @@ function drawTown() {
   // the crab shelter
   wblit(SHELTER2, SHELTER_X, LOT_BOTTOM - SHELTER2.h);
   if (SHELTER_X - camX > -80 && SHELTER_X - camX < W)
-    text(ctx, "SHELTER", SHELTER_X + 14 - camX, LOT_BOTTOM - SHELTER2.h - 8, [230, 220, 200], 4);
+    smallText(ctx, "SHELTER", SHELTER_X + 14 - camX, LOT_BOTTOM - SHELTER2.h - 8, [230, 220, 200]);
   // bus stops on the shoulder
   for (const s of BUS_STOPS) wblit(BUS_STOP, s - 3, ROAD_Y1 + 3);
   // scenery fills the beach pockets between lots
@@ -1021,20 +1021,20 @@ function drawFollowCard() {
   const acc = ACCESSORIES[c.duty ? "toque" : p.acc];
   if (acc) blit(ctx, acc.art, 7 + acc.dx, 14 + acc.dy);
   text(ctx, p.name, 29, 5, [40, 30, 40]);
-  text(ctx, TRAITS[p.trait].label + " " + MODES[p.mode].label, 29, 13, [120, 90, 60], 5);
-  text(ctx, crabStatus(c), 29, 21, [30, 110, 60], 5);
-  text(ctx, "SHIFT " + SHIFTS[p.shift].label, 29, 28, [110, 110, 130], 4);
+  smallText(ctx, TRAITS[p.trait].label + " " + MODES[p.mode].label, 29, 13, [120, 90, 60]);
+  smallText(ctx, crabStatus(c), 29, 21, [30, 110, 60]);
+  smallText(ctx, "SHIFT " + SHIFTS[p.shift].label, 29, 28, [110, 110, 130]);
   const wTxt = "$" + fmt(Math.max(0, p.wallet));
-  text(ctx, wTxt, 126 - textWidth(wTxt, 4), 28, p.homeless ? [190, 80, 80] : [140, 110, 40], 4);
+  text(ctx, wTxt, 126 - textWidth(wTxt, 5), 28, p.homeless ? [190, 80, 80] : [140, 110, 40], 5);
   // job + needs
-  text(ctx, "JOB:" + BIZ[p.job].short, 6, 36, [70, 90, 130], 4);
+  smallText(ctx, "JOB:" + BIZ[p.job].short, 6, 36, [70, 90, 130]);
   if (UPS.cleaners.lvl > 0) {
     rect(ctx, 60, 35, 9, 8, [96, 170, 220]);
-    text(ctx, ">", 62, 36, [255, 255, 255], 4);
+    smallText(ctx, ">", 62, 36, [255, 255, 255]);
   }
   const bars = [["FED", 1 - (p.hunger || 0), 74], ["CLN", 1 - (p.dirt || 0), 102]];
   for (const [label, frac, bx] of bars) {
-    text(ctx, label, bx, 36, [110, 110, 130], 4);
+    smallText(ctx, label, bx, 36, [110, 110, 130]);
     rect(ctx, bx + 13, 37, 12, 4, [30, 20, 36]);
     rect(ctx, bx + 14, 38, Math.round(10 * frac), 2,
       frac > 0.5 ? [96, 200, 120] : frac > 0.25 ? [235, 200, 90] : [235, 90, 90]);
@@ -1047,24 +1047,24 @@ function drawPanel() {
   blit(ctx, COIN, 4, PANEL_Y + 2);
   textShadow(ctx, "$" + fmt(coins), 13, PANEL_Y + 2, [255, 230, 120], [30, 20, 20]);
   text(ctx, "D" + day + " " + clockStr(), 84, PANEL_Y + 2, [220, 210, 190]);
-  text(ctx, "MUS", 169, PANEL_Y + 2, musicOn ? [140, 220, 140] : [140, 120, 110], 5);
-  text(ctx, "SND", 213, PANEL_Y + 2, soundOn ? [140, 220, 140] : [140, 120, 110], 5);
+  smallText(ctx, "MUS", 169, PANEL_Y + 2, musicOn ? [140, 220, 140] : [140, 120, 110]);
+  smallText(ctx, "SND", 213, PANEL_Y + 2, soundOn ? [140, 220, 140] : [140, 120, 110]);
   // tabs
   for (const [i, t] of [["crew", 0], ["shop", 1]].map((v, i) => [i, v[0]])) {
     const x = 4 + i * 34, active = tab === t;
     rect(ctx, x, 187, 32, 10, active ? [190, 140, 80] : [90, 70, 60]);
-    text(ctx, t.toUpperCase(), x + 4, 189, active ? [40, 24, 16] : [160, 140, 130], 5);
+    smallText(ctx, t.toUpperCase(), x + 4, 189, active ? [40, 24, 16] : [160, 140, 130]);
   }
   const rate = incomeRate();
-  text(ctx, "$" + rate.toFixed(1) + "/S", 84, 189, [170, 150, 135], 5);
+  text(ctx, "$" + rate.toFixed(1) + "/S", 84, 189, [170, 150, 135]);
   {
     const conf = newConfirmT > 0;
     rect(ctx, 128, 187, 30, 10, conf ? [140, 40, 40] : [90, 70, 60]);
-    text(ctx, conf ? "SURE?" : "NEW", 128 + (conf ? 3 : 7), 189, conf ? [255, 200, 200] : [160, 140, 130], 5);
+    smallText(ctx, conf ? "SURE?" : "NEW", 128 + (conf ? 3 : 7), 189, conf ? [255, 200, 200] : [160, 140, 130]);
   }
   const due = nightlyDue();
   const rTxt = "DUE 20:00 $" + fmt(due);
-  text(ctx, rTxt, 252 - textWidth(rTxt, 4), 189, coins < due ? [255, 120, 120] : [170, 150, 135], 4);
+  text(ctx, rTxt, 252 - textWidth(rTxt, 5), 189, coins < due ? [255, 120, 120] : [170, 150, 135], 5);
 
   if (tab === "shop") {
     for (const b of BUTTONS) {
@@ -1076,7 +1076,7 @@ function drawPanel() {
       rect(ctx, b.x + 1, b.y + 1, b.w - 2, b.h - 2, afford ? (key === "cleaners" ? [96, 170, 220] : [190, 140, 80]) : [96, 78, 68]);
       const nameCol = afford ? [40, 24, 16] : [160, 145, 135];
       const lvl = key === "chef" ? String(u.lvl) : (u.lvl > 0 && key !== "cleaners" ? String(u.lvl) : "");
-      text(ctx, u.name + (lvl ? " " + lvl : ""), b.x + 3, b.y + 2, nameCol, 5);
+      smallText(ctx, u.name + (lvl ? " " + lvl : ""), b.x + 3, b.y + 2, nameCol);
       text(ctx, maxed ? "MAX" : "$" + fmt(cost), b.x + 3, b.y + 10, maxed ? [160, 145, 135] : afford ? [80, 45, 20] : [140, 125, 115], 5);
     }
   } else {
@@ -1089,7 +1089,7 @@ function drawPanel() {
       const acc = ACCESSORIES[c.duty ? "toque" : c.p.acc];
       if (acc) blit(ctx, acc.art, bx + 4 + acc.dx, 206 + acc.dy);
       rect(ctx, bx + 18, 201, 4, 4, c.duty ? [96, 232, 120] : [150, 140, 140]);
-      text(ctx, c.p.name.slice(0, 5), bx + 1, 224, [220, 210, 190], 5);
+      smallText(ctx, c.p.name.slice(0, 5), bx + 1, 224, [220, 210, 190]);
     }
     if (!crabs.length) text(ctx, "NO CREW YET", 8, 206, [190, 170, 150]);
   }
@@ -1119,7 +1119,7 @@ function drawTitle() {
   blit(ctx, ACCESSORIES.toque.art, W / 2 - 60 + 4, 54);
   blit(ctx, CRAB_ARTS[1].a, W / 2 + 44, 58, true);
   blit(ctx, ACCESSORIES.flower.art, W / 2 + 44, 55);
-  text(ctx, "A WHOLE IDLE BEACH ECONOMY", W / 2 - 64, 76, [110, 90, 80], 5);
+  smallText(ctx, "A WHOLE IDLE BEACH ECONOMY", W / 2 - 64, 76, [110, 90, 80]);
   // menu
   const bx = W / 2 - 50;
   if (hasSave) {
@@ -1133,8 +1133,8 @@ function drawTitle() {
   rect(ctx, bx + 1, ny + 1, 98, 14, conf ? [150, 60, 60] : [120, 100, 80]);
   text(ctx, conf ? "WIPE SAVE?" : "NEW GAME", bx + (conf ? 21 : 26), ny + 5, conf ? [255, 220, 220] : [235, 225, 210]);
   if (((time * 1.5) | 0) % 2) text(ctx, "CLICK TO PLAY", W / 2 - 38, 162, [255, 250, 235], 6);
-  text(ctx, "MUSIC: PIXEL WAVE WALTZ - MATT CLANKER", 14, PANEL_Y + 8, [170, 150, 135], 5);
-  text(ctx, "BUILT ON THE SNESCAT TOY PPU", 44, PANEL_Y + 20, [140, 120, 105], 5);
+  smallText(ctx, "MUSIC: PIXEL WAVE WALTZ - MATT CLANKER", 14, PANEL_Y + 8, [170, 150, 135]);
+  smallText(ctx, "BUILT ON THE SNESCAT TOY PPU", 44, PANEL_Y + 20, [140, 120, 105]);
 }
 function drawGameOver() {
   ctx.fillStyle = "rgba(16,12,30,0.72)";
@@ -1146,7 +1146,7 @@ function drawGameOver() {
   text(ctx, "THE LANDLORD CRAB TOOK", cx2 - 66, 92, [90, 60, 50], 6);
   text(ctx, "BACK THE SHACK", cx2 - 41, 101, [90, 60, 50], 6);
   text(ctx, "NIGHTLY RENT OWED $" + fmt(totalRent()), cx2 - 66, 114, [140, 60, 60], 6);
-  text(ctx, "SURVIVED " + day + " DAYS  EARNED $" + fmt(lifetime), cx2 - 78, 124, [90, 90, 110], 5);
+  smallText(ctx, "SURVIVED " + day + " DAYS  EARNED $" + fmt(lifetime), cx2 - 78, 124, [90, 90, 110]);
   const bl = ((time * 2) | 0) % 2;
   if (bl) text(ctx, "CLICK TO START OVER", cx2 - 56, 137, [40, 110, 60], 6);
 }
