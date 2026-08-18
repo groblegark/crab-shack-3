@@ -50,11 +50,11 @@ compounds or collapses → the landlord collects at 20:00 either way.
   including NPCs, fast-forward >>/>>> (F), master mute (M).
 
 ### Verified balance (8 seeds, tools/headless.mjs)
-- Baseline (buy nothing): **0/8 survive, evicted day 10–19, median 13**.
-- Hire-and-seat strategy (`--buy chef,table`): **3/8 alive at day 40**, and the
-  losses now come late (day 16+, median 33) rather than early collapses.
-- Constants: shack rent 255, wage 22, house rent 10, hires 60×2.0,
-  showers 5/10, fish pay 13.
+- Baseline (buy nothing): **0/8 survive, evicted day 9–22, median 13**.
+- Hire-and-seat strategy (`--buy chef,table`): **2/6 alive at day 40**.
+- Constants: shack rent 230, wage 22, house rent 10, hires 60×2.0,
+  showers 5/10, fish pay 13. **Rent is charged from night one** — you open
+  with $150 in your pocket and have to trade your way to the first payment.
 - **Queue**: 5 slots, of which tourists may fill 4 — the 5th is reserved for
   locals (crew + neighbours). Staff claim paying guests first and serve locals
   in the lulls.
@@ -85,6 +85,15 @@ compounds or collapses → the landlord collects at 20:00 either way.
   bypass cache (`await p.route('**/*', r => r.continue())`) — the dev server
   caches game files hard; only index.html gets a `?t=` bust.
 
+## Gameplay features (recent)
+- **Day report card** at closing: guests served, takings, walkouts, wages,
+  rent, till, word-of-mouth swing, busiest crab, and the day's illnesses,
+  recoveries, deaths and moves. Click to dismiss.
+- **Accomplishments**, not XP: crabs count the dishes they've served; at 25 /
+  100 / 250 of a dish they get the knack (−5%), get famous (−12%), or master
+  it (−20% prep time) for that dish only, announced in a toast and shown on
+  their follow card. Rewards watching a specific crab grow into a specialist.
+
 ## Backlog (rough priority)
 1. **Business settings** — per-business config (staff-meal pricing
    retail/at-cost/free is already TODO-marked in game.js; then prices, hours,
@@ -100,7 +109,10 @@ compounds or collapses → the landlord collects at 20:00 either way.
 6. Staff-bused table service for a fancier restaurant tier.
 7. Cosmetics: closed-eye sleep sprites, taller shower-stall art (curtain reads
    as a wall fixture at the y136 row), followable-NPC polish.
-8. **Portrait-phone canvas** — the screen fills a phone's width but the 256x240
+8. **Secret mobile merge mode** (in progress, branch `merge-mode`): a
+   touch-only hidden mode where you play as a crab and merge icons — built for
+   Matt's kids. Early draft pending approval.
+9. **Portrait-phone canvas** — the screen fills a phone's width but the 256x240
    aspect leaves dead space above/below on tall screens. A real fix is a taller
    canvas in portrait (e.g. 256x288, extra rows going to the UI panel): `H` is
    baked into ppu.js and panel draw coordinates, so it's a contained but real

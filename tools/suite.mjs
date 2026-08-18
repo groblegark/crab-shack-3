@@ -42,21 +42,28 @@ scenario("baseline always loses (day 6-14)", () => {
   return near(med, 6, 14) ? true : `median eviction day ${med} outside 6-14 (${days})`;
 });
 
-scenario("growth strategy can escape (KNOWN TIGHT: recalibrate after wage-economy merge)", () => {
-  // TODO(calibration): disease added real drag; the wage/retail rebalance
-  // lands next. Target after joint calibration: >=2/4. Interim: >=1/4 or
-  // clear escape progress (median eviction beyond day 18).
+scenario("growth strategy can escape", () => {
+  // Models the same sensible player the CLI harness does: hourly purchase
+  // checks (not noon-only), reserve = cost + tonight's player bill + cushion,
+  // and hire-and-seat as the plan. Bar: at least 1 of 4 seeds escapes, or the
+  // failures are late (median eviction beyond day 18).
   let survived = 0; const evictDays = [];
   for (const seed of [1337, 2674, 4011, 5348]) {
     const sim = createSim({ seed });
     const buy = () => {
-      for (const k of ["chef", "grill", "board", "table"]) {
+      for (const k of ["chef", "table"]) {
         sim.G(`{ const u = UPS["${k}"];
-          const bill = CRAB_WAGE * (crabs.length + ("${k}" === "chef" ? 1 : 0)) + totalRent();
+          const bill = CRAB_WAGE * (crabs.length + ("${k}" === "chef" ? 1 : 0)) +
+            Object.keys(BIZ).filter(b2 => bizUnlocked(b2) && bizOwner(b2) === "player")
+              .reduce((s2, b2) => s2 + BIZ[b2].rent, 0);
           if (u.lvl < u.max && coins >= upCost(u) + bill + 30) tryBuy("${k}"); }`);
       }
     };
-    sim.runDays(40, { onTick: (G) => { if (Math.abs(G("tmin") - 720) < 4) buy(); }, tickEvery: 20 });
+    let lastHour = -1;
+    sim.runDays(40, { onTick: (G) => {
+      const h = Math.floor(G("tmin") / 60);
+      if (h >= 9 && h <= 19 && h !== lastHour) { lastHour = h; buy(); }
+    }, tickEvery: 20 });
     if (!sim.G("gameOver")) survived++;
     else evictDays.push(sim.G("day"));
   }

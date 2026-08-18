@@ -28,7 +28,7 @@ const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
 // ---------------------------------------------------------------- businesses
 const BIZ = {
   shack: {
-    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 255, owner: "player",
+    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 230, owner: "player",
     x0: 1220, x1: 1560, door: 1247,
     stations: {
       crate: [{ x: 1232, y: 136 }],
@@ -134,7 +134,7 @@ const OWNERS = { sudsy: { id: "sudsy", name: "SUDSY", till: 200 } };
 const bizOwner = (b) => BIZ[b].owner || "player";
 function ownerFunds(b) { return bizOwner(b) === "player" ? coins : OWNERS[bizOwner(b)].till; }
 function creditBiz(b, amt, x, y) {
-  if (bizOwner(b) === "player") earn(amt, x, y);
+  if (bizOwner(b) === "player") { today.revenue += amt; earn(amt, x, y); }
   else {
     OWNERS[bizOwner(b)].till += amt;
     popText("+$" + Math.floor(amt), x, y, [150, 210, 255]);
@@ -218,12 +218,17 @@ let spawnT = 3, toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x
 let camX = 1180, followIdx = -1, followNpc = null, tab = "crew";
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
+let today = newDayLog();
+let report = null, reportT = 0;
+function newDayLog() {
+  return { served: 0, revenue: 0, rage: 0, sick: [], died: [], recovered: [],
+    moved: [], byCrab: {}, repStart: 30, catchStart: 0 };
+}
 let screen = "title", hasSave = false, wiping = false;
 function newGame() { wiping = true; localStorage.removeItem(SAVE_KEY); location.reload(); }
 const CRAB_WAGE = 22, HOUSE_RENT = 10;
-function rentAmount() { return day <= 1 ? 0 : BIZ.shack.rent; }   // shack lease (legacy name)
-function totalRent() {   // the PLAYER's nightly property bill
-  if (day <= 1) return 0;
+function rentAmount() { return BIZ.shack.rent; }   // shack lease (legacy name); due from night one
+function totalRent() {   // the PLAYER's nightly property bill, due from night one
   return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player")
     .reduce((s, b) => s + BIZ[b].rent, 0);
 }
@@ -304,6 +309,7 @@ function newCrab(persona) {
   if (persona.dirt == null) persona.dirt = 0;
   if (persona.bored == null) persona.bored = 0;
   if (persona.sick === undefined) persona.sick = null;
+  if (!persona.made) persona.made = {};   // dish id -> lifetime count
   if (persona.sandy == null) persona.sandy = 0;
   return {
     p: persona,
@@ -941,7 +947,7 @@ function updateKitchen(c, dt) {
   } else if (c.kstate === "toSlot") {
     if (routedStep(c, spd, dt)) {
       const [, secs] = c.cust.recipe.steps[c.stepIdx];
-      const mult = 1 / (crabWork(c) * (1 - 0.15 * (c.p.hunger || 0)));
+      const mult = masteryMult(c, c.cust.recipe.id) / (crabWork(c) * (1 - 0.15 * (c.p.hunger || 0)));
       c.workMax = c.workT = secs * mult;
       c.kstate = "work";
     }
@@ -967,7 +973,32 @@ function updateKitchen(c, dt) {
     }
   }
 }
+const MASTERY = [[250, 0.20, "MASTERED"], [100, 0.12, "IS FAMOUS FOR"], [25, 0.05, "HAS THE KNACK FOR"]];
+function masteryMult(c, id) {
+  const n = (c.p.made && c.p.made[id]) || 0;
+  for (const [need, bonus] of MASTERY) if (n >= need) return 1 - bonus;
+  return 1;
+}
+function creditAccomplishment(c, cust) {
+  if (!c || !c.p || cust.isCrab) return;   // paying guests only
+  const id = cust.recipe.id;
+  c.p.made[id] = (c.p.made[id] || 0) + 1;
+  const n = c.p.made[id];
+  for (const [need, , label] of MASTERY) {
+    if (n === need) {
+      const dish = ITEM_NAMES[cust.recipe.icon];
+      toast = { text: c.p.name + " " + label + " " + dish + "! " + n + " SERVED", t: 6 };
+      popText(label + " " + dish, c.x - 24, FLOOR_Y - 36, [255, 230, 120]);
+      c.quip = { text: ["I'VE GOT THIS", "MY SPECIALTY", "EASY NOW"][(Math.random() * 3) | 0], t: 2.4 };
+      sfx.ding();
+      break;
+    }
+  }
+}
 function payAndBenefit(c, cust) {
+  today.served++;
+  creditAccomplishment(c, cust);
+  if (c && c.p) today.byCrab[c.p.name] = (today.byCrab[c.p.name] || 0) + 1;
   if (cust.isCrab) {
     const price = Math.min(Math.ceil(cust.recipe.pay * 1.25), Math.floor(cust.crab.p.wallet));
     cust.crab.p.wallet = Math.max(0, cust.crab.p.wallet - price);
@@ -1090,7 +1121,7 @@ function updateCustomers(dt) {
       if (k.patience <= 0) {
         k.state = "leaving"; k.happy = false; k.claimed = false;
         if (k.table) { k.table.occupant = null; k.table = null; }
-        if (!k.isCrab) rep = Math.max(0, rep - 3);
+        if (!k.isCrab) { rep = Math.max(0, rep - 3); today.rage++; }
         if (window._stats) window._stats[k.isCrab ? "crabRage" : "tourRage"]++;
         popText("!!", k.x, 120, [255, 80, 80]); sfx.angry();
       }
@@ -1266,6 +1297,7 @@ cv.addEventListener("click", (ev) => {
     return;
   }
   if (gameOver) { newGame(); return; }
+  if (reportT > 0) { reportT = 0; return; }
   startMusic();
   const p = evPos(ev);
   if (dragMoved) return;
@@ -1752,7 +1784,7 @@ function drawPanel() {
     for (const key of Object.keys(BIZ)) {
       if (!bizUnlocked(key)) continue;
       smallText(ctx, BIZ[key].short + " RENT", 132, by, [190, 175, 160]);
-      smallText(ctx, "$" + (day <= 1 && key === "shack" ? 0 : BIZ[key].rent), 224, by, [235, 160, 130]); by += 6;
+      smallText(ctx, "$" + BIZ[key].rent, 224, by, [235, 160, 130]); by += 6;
     }
     smallText(ctx, "TOTAL", 132, by, [230, 215, 195]);
     smallText(ctx, "$" + fmt(due), 224, by, coins < due ? [255, 140, 140] : [255, 230, 120]);
@@ -1810,7 +1842,7 @@ function drawIntro() {
   const terms = [
     ["THE SHACK IS YOURS TO RUN", [70, 70, 90]],
     ["RENT: $" + BIZ.shack.rent + ", NIGHTLY AT 20:00", [170, 50, 50]],
-    ["YOUR FIRST NIGHT IS FREE", [40, 130, 60]],
+    ["RENT IS DUE TONIGHT. GOOD LUCK.", [170, 50, 50]],
     ["CREW WAGES: $" + CRAB_WAGE + " EACH, NIGHTLY", [70, 70, 90]],
     ["CREW PAY THEIR OWN $" + HOUSE_RENT + " HOME RENT", [70, 70, 90]],
     ["THE LAUNDROMAT? $" + UPS.cleaners.base + ", RENT $" + BIZ.cleaners.rent, [70, 70, 90]],
@@ -1889,6 +1921,38 @@ function drawGameOver() {
   const bl = ((time * 2) | 0) % 2;
   if (bl) text(ctx, "CLICK TO START OVER", cx2 - 56, 137, [40, 110, 60], 6);
 }
+function drawReport() {
+  if (!report || reportT <= 0) return;
+  const w2 = 176, x = ((W - w2) / 2) | 0, y = 24, h2 = 118;
+  ctx.fillStyle = "rgba(16,12,30,0.55)";
+  ctx.fillRect(0, 0, W, PANEL_Y);
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 11, [190, 140, 80]);
+  text(ctx, "DAY " + report.day + " REPORT", x + 34, y + 2, [40, 24, 16]);
+  let ly = y + 16;
+  const line = (label, val, col) => {
+    smallText(ctx, label, x + 6, ly, [110, 100, 110]);
+    smallText(ctx, String(val), x + w2 - 6 - smallTextWidth(String(val)), ly, col || [50, 40, 50]);
+    ly += 8;
+  };
+  line("GUESTS SERVED", report.served, [40, 110, 60]);
+  line("TAKINGS", "$" + fmt(report.revenue), [40, 110, 60]);
+  line("WALKED OUT ANGRY", report.rage, report.rage > 2 ? [180, 60, 60] : [110, 100, 110]);
+  line("WAGES PAID", "-$" + fmt(report.wages), [150, 70, 60]);
+  line("RENT", "-$" + fmt(report.rent), [150, 70, 60]);
+  line("IN THE TILL", "$" + fmt(report.coins), [90, 70, 40]);
+  const dRep = report.repEnd - report.repStart;
+  line("WORD OF MOUTH", report.repEnd + (dRep >= 0 ? "  +" + dRep : "  " + dRep),
+    dRep >= 0 ? [40, 110, 60] : [180, 60, 60]);
+  ly += 2;
+  if (report.best) smallText(ctx, "BUSIEST CLAW: " + report.best + " x" + report.bestN, x + 6, ly, [70, 90, 130]), ly += 8;
+  for (const n of report.died) smallText(ctx, n + " HAS PASSED AWAY", x + 6, ly, [180, 60, 60]), ly += 7;
+  for (const n of report.sick) smallText(ctx, n + " FELL ILL", x + 6, ly, [120, 150, 90]), ly += 7;
+  for (const n of report.recovered) smallText(ctx, n + " IS BACK ON THEIR CLAWS", x + 6, ly, [40, 110, 60]), ly += 7;
+  for (const m of report.moved) smallText(ctx, m, x + 6, ly, [110, 100, 110]), ly += 7;
+  if (((time * 1.5) | 0) % 2) smallText(ctx, "CLICK TO CARRY ON", x + 52, y + h2 - 9, [150, 130, 120]);
+}
 function drawToast() {
   if (!toast) return;
   const sp = textWidth(toast.text) + 12 > 252 ? 5 : 6;
@@ -1905,8 +1969,12 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000) * TURBO * (1 + ffMode);
   last = now; time += dt;
   if (!gameOver && screen === "play") tmin += dt * TS;
-  if (tmin >= 1440) { tmin -= 1440; day++; townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06; }
+  if (tmin >= 1440) {
+    tmin -= 1440; day++; townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
+    today = newDayLog(); today.repStart = rep;
+  }
   if (screen === "play" && tmin >= 20 * 60 && lastRentDay !== day) {
+    today.repEnd = rep;
     lastRentDay = day;
     for (const c of crabs) c.p.walletPrev = c.p.wallet;
     (window.dayLog = window.dayLog || []).push({ day, close: Math.round(coins) });
@@ -1929,6 +1997,7 @@ function frame(now) {
         for (let h = 0; h < HOUSE_XS.length; h++) if (!used.has(h)) { free = h; break; }
         if (free >= 0 && c.p.wallet >= MOVE_IN_COST + HOUSE_RENT) {
           c.p.wallet -= MOVE_IN_COST; c.p.house = free; c.p.homeless = false;
+          today.moved.push(c.p.name + " GOT A HOUSE");
           toast = { text: c.p.name + " MOVED INTO A HOUSE!", t: 5 };
           popText("HOME SWEET HOME", HOUSE_XS[free] + 8, 100, [140, 255, 160]);
           sfx.ding();
@@ -1937,7 +2006,7 @@ function frame(now) {
         c.p.wallet -= HOUSE_RENT;
       } else {
         c.p.homeless = true;
-        evictedNames.push(c.p.name);
+        evictedNames.push(c.p.name); today.moved.push(c.p.name + " -> SHELTER");
         popText(c.p.name + " LOST THEIR HOUSE", c.x - 12, FLOOR_Y - 34, [255, 120, 120]);
       }
     }
@@ -1971,7 +2040,7 @@ function frame(now) {
           if (coworkers || shelterMates) risk += 0.08;
         }
         if (risk > 0 && Math.random() < Math.min(0.5, risk)) {
-          k.p.sick = { days: 0 };
+          k.p.sick = { days: 0 }; today.sick.push(k.p.name);
           if (window._stats) {
             const why = [];
             if ((k.p.hunger || 0) >= 0.9) why.push("hunger");
@@ -1990,7 +2059,7 @@ function frame(now) {
         k.p.sick.days++;
         const cared = (k.p.hunger || 0) < 0.5 && (k.p.dirt || 0) < 0.66;
         if (Math.random() < (cared ? 0.4 : 0.12)) {
-          k.p.sick = null;
+          k.p.sick = null; today.recovered.push(k.p.name);
           popText(k.p.name + " RECOVERED!", k.x - 12, FLOOR_Y - 34, [140, 255, 160]);
           if (window._stats) window._stats.recoveries = (window._stats.recoveries || 0) + 1;
         } else if (!k.p.npc && k.p.sick.days >= 3 &&
@@ -1998,6 +2067,7 @@ function frame(now) {
           // the tide takes them
           abortChef(k);
           memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
+          today.died.push(k.p.name);
           crabs = crabs.filter(c2 => c2 !== k);
           UPS.chef.lvl = Math.max(1, crabs.length);
           if (followIdx >= crabs.length) followIdx = -1;
@@ -2012,9 +2082,17 @@ function frame(now) {
     if (coins >= rent) {
       coins -= rent;
       earnHist.push({ t: time, amt: -rent });
-      if (!evictedNames.length && !toast) toast = { text: rent === 0
-        ? "FIRST NIGHT FREE - WELCOME TO THE BOARDWALK!"
-        : "PAID $" + fmt(wages) + " WAGES + $" + fmt(rent) + " RENT", t: 5 };
+      report = {
+        day, served: today.served, revenue: Math.round(today.revenue), rage: today.rage,
+        wages, rent, sick: today.sick.slice(0, 3), died: today.died.slice(0, 2),
+        recovered: today.recovered.slice(0, 2), moved: today.moved.slice(0, 2),
+        repStart: Math.round(today.repStart), repEnd: Math.round(rep),
+        best: Object.keys(today.byCrab).sort((a, b) => today.byCrab[b] - today.byCrab[a])[0],
+        bestN: 0, coins: Math.round(coins),
+      };
+      if (report.best) report.bestN = today.byCrab[report.best];
+      reportT = 11;
+
       if (rent > 0) popText("-$" + rent + " RENT", BIZ.shack.door, 110, [255, 120, 120]);
       sfx.buy(); save();
     } else {
@@ -2071,6 +2149,7 @@ function frame(now) {
     const t = clampCam(followed.x - W / 2 + 8);
     camX += (t - camX) * Math.min(1, dt * 5);
   }
+  if (reportT > 0) reportT -= dt;
   if (newConfirmT > 0) newConfirmT -= dt;
   if (toast) { toast.t -= dt; if (toast.t <= 0) toast = null; }
   saveT += dt; if (saveT > 5) { saveT = 0; save(); }
@@ -2115,6 +2194,7 @@ function frame(now) {
   drawSwoop();
   drawFloaters(dt);
   drawNight();
+  drawReport();
   drawFollowCard();
   {  // town reputation chip, top-right of the world
     const rTxt = "REP " + Math.round(rep);
@@ -2135,7 +2215,7 @@ initNpcs();
 hasSave = load();
 if (!hasSave) {
   crabs = [newCrab(makeCrabPersona(0)), newCrab(makeCrabPersona(1))];
-  coins = 180;   // opening cash: ingredients + first rent buffer
+  coins = 150;   // a few bux in your pocket - rent is due tonight: ingredients + first rent buffer
 }
 requestAnimationFrame(frame);
 
