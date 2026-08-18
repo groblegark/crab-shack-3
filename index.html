@@ -45,21 +45,36 @@
     <div class="scan"></div>
   </div>
   <script>
-    // Fit the 256x240 screen to any viewport, preferring crisp half-pixel steps.
+    // Fit the screen to any viewport, preferring crisp half-pixel steps.
+    // Portrait viewports get a taller 256x288 canvas (the extra rows go to the
+    // UI panel - see game.js); landscape/desktop keep the classic 256x240.
+    // Layout constants across the game files are consts derived from H at
+    // parse time, so a mode flip on rotate reloads the page - the game saves
+    // on beforeunload (and every 5s), so nothing is lost.
     (function () {
       const cv = document.getElementById("screen");
+      const modeH = () => (innerHeight > innerWidth ? 288 : 240);
+      const H = modeH();
+      cv.height = H;
+      window.SCREEN_H = H;                         // ppu.js picks this up
       function fit() {
         const small = Math.min(innerWidth, innerHeight) < 620;
         const pad = small ? 14 : 60;               // bezel padding + breathing room
-        let s = Math.min((innerWidth - pad) / 256, (innerHeight - pad) / 240);
+        let s = Math.min((innerWidth - pad) / 256, (innerHeight - pad) / H);
         if (s >= 2) s = Math.floor(s * 2) / 2;     // crisp steps once there's room
         s = Math.max(s, 0.5);
         cv.style.width = Math.round(256 * s) + "px";
-        cv.style.height = Math.round(240 * s) + "px";
+        cv.style.height = Math.round(H * s) + "px";
       }
-      addEventListener("resize", fit);
-      addEventListener("orientationchange", () => setTimeout(fit, 120));
-      if (window.visualViewport) visualViewport.addEventListener("resize", fit);
+      let flipT = 0;
+      function refit() {
+        fit();
+        clearTimeout(flipT);                       // settle before deciding it's a real rotate
+        if (modeH() !== H) flipT = setTimeout(() => { if (modeH() !== H) location.reload(); }, 250);
+      }
+      addEventListener("resize", refit);
+      addEventListener("orientationchange", () => setTimeout(refit, 120));
+      if (window.visualViewport) visualViewport.addEventListener("resize", refit);
       fit();
     })();
   </script>
