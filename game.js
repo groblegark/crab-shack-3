@@ -606,6 +606,10 @@ function updateSchedule(c, dt) {
   }
   if (c.dayState === "working" && tmin >= sh.end) c.pendingOff = true;
   if (c.dayState === "working" && c.pendingOff && c.kstate === "idle") {
+    // last call: stick around while anyone's still waiting in the grace window
+    const lingering = tmin < sh.end + 45 &&
+      customers.some(k => k.biz === c.workBiz && k.state === "waiting" && !k.served);
+    if (lingering) return;
     c.duty = false; c.pendingOff = false;
     if (c.carrying) c.carrying = null;
     c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25);  // a shift works up an appetite
@@ -732,7 +736,8 @@ function updateErrand(c, dt) {
   } else if (c.dayState === "errand") {
     const k = c.errandCust;
     if (!k) { c.dayState = "home"; startCommute(c, false); return; }
-    const open = allCrabs().some(w => w.duty && !w.pendingOff && w.workBiz === k.biz);
+    const open = allCrabs().some(w => w.duty && w.workBiz === k.biz &&
+      (!w.pendingOff || tmin < SHIFTS[w.p.shift].end + 45));
     if (!open && k.state === "waiting" && !k.claimed) {
       k.state = "leaving"; k.happy = false;   // kitchen's dark - go home
       c.quip = { text: "CLOSED?! HMPH", t: 2.2 };
@@ -787,15 +792,16 @@ function updateKitchen(c, dt) {
   const bizKey = c.workBiz, biz = BIZ[bizKey];
   const spd = crabMove(c) * 1.55;   // hustle: kitchens move quick
   if (c.kstate === "idle") {
-    if (!c.pendingOff) {
+    const lastCall = c.pendingOff && tmin < SHIFTS[c.p.shift].end + 45;
+    if (!c.pendingOff || lastCall) {
       const o = customers.find(k => k.biz === bizKey && k.state === "waiting" && !k.claimed && !k.served);
       if (o) {
         o.claimed = true; c.cust = o; c.stepIdx = -1; c.kstate = "walk";
         const s0 = stationSpot(bizKey, biz.source, 0); setT(c, s0.x, s0.y);
         return;
       }
-      // no orders? bus a dirty table
-      const dirty = biz.tables && biz.tables.find(t => t.dishes > 0 && !t.busing);
+      // no orders? bus a dirty table (not during last call - go home after)
+      const dirty = !c.pendingOff && biz.tables && biz.tables.find(t => t.dishes > 0 && !t.busing);
       if (dirty) {
         dirty.busing = true; c.busTable = dirty; c.kstate = "toBus";
         setT(c, dirty.x + 2, dirty.y + 12);
