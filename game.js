@@ -133,6 +133,7 @@ let earnHist = [];
 
 const CRAB_ARTS = CRAB_COLORS.map(c => crabArt(c[0], c[1]));
 const TOURIST_ARTS = TOURIST_STYLES.map(touristArt);
+const LANDLORD_ART = crabArt([255, 200, 80], [190, 140, 30]);
 const HOUSES = CRAB_COLORS.map(c => houseArt(c[0]));
 const BUGGIES = CRAB_COLORS.map(c => buggyArt(c[0]));
 
@@ -773,11 +774,16 @@ cv.addEventListener("click", (ev) => {
       if (hasSave && p.y >= 118 && p.y < 134) { screen = "play"; startMusic(); sfx.ding(); return; }
       const ny = hasSave ? 138 : 122;
       if (p.y >= ny && p.y < ny + 16) {
-        if (!hasSave || newConfirmT > 0) { hasSave ? newGame() : (screen = "play", startMusic(), sfx.ding()); }
+        if (!hasSave || newConfirmT > 0) { hasSave ? newGame() : (screen = "intro", startMusic(), sfx.ding()); }
         else { newConfirmT = 3; sfx.buy(); }
         return;
       }
     }
+    return;
+  }
+  if (screen === "intro") {
+    const p = evPos(ev);
+    if (p.x >= W / 2 - 56 && p.x < W / 2 + 56 && p.y >= 152 && p.y < 170) { screen = "play"; sfx.ding(); }
     return;
   }
   if (gameOver) { newGame(); return; }
@@ -1180,7 +1186,8 @@ function drawPanel() {
   const due = nightlyDue();
   const rTxt = "BILL $" + fmt(due);
   const chipW = textWidth(rTxt, 5) + 8;
-  rect(ctx, 252 - chipW, 186, chipW, 11, tab === "menu" ? [190, 140, 80] : [90, 70, 60]);
+  const crunch = coins < due && tmin >= 18 * 60 && tmin < 20 * 60 && ((time * 2) | 0) % 2;
+  rect(ctx, 252 - chipW, 186, chipW, 11, crunch ? [150, 40, 40] : tab === "menu" ? [190, 140, 80] : [90, 70, 60]);
   text(ctx, rTxt, 252 - chipW + 4, 188, coins < due ? [255, 140, 140] : tab === "menu" ? [40, 24, 16] : [200, 185, 170], 5);
 
   if (tab === "menu") {
@@ -1245,6 +1252,53 @@ function drawFloaters(dt) {
     textShadow(ctx, f.text, fx, f.y, f.color, [30, 20, 36]);
   }
   floaters = floaters.filter(f => f.t > 0);
+}
+function drawIntro() {
+  ctx.fillStyle = "rgba(16,20,50,0.5)";
+  ctx.fillRect(0, 0, W, H);
+  const cw = 200, cx2 = W / 2 - cw / 2;
+  rect(ctx, cx2 - 2, 22, cw + 4, 152, [30, 20, 36]);
+  rect(ctx, cx2, 24, cw, 148, [255, 250, 235]);
+  textShadow(ctx, "THE LEASE", W / 2 - textWidth("THE LEASE") / 2, 30, [120, 70, 30], [220, 200, 170]);
+  blit(ctx, LANDLORD_ART.a, cx2 + 8, 42);
+  blit(ctx, ACCESSORIES.shades.art, cx2 + 8 + 1, 42 + 1);
+  text(ctx, "MR. PINCHERTON'S TERMS:", cx2 + 30, 44, [90, 60, 40]);
+  const terms = [
+    ["THE SHACK IS YOURS TO RUN", [70, 70, 90]],
+    ["RENT: $" + BIZ.shack.rent + ", NIGHTLY AT 20:00", [170, 50, 50]],
+    ["YOUR FIRST NIGHT IS FREE", [40, 130, 60]],
+    ["CREW WAGES: $" + CRAB_WAGE + " EACH, NIGHTLY", [70, 70, 90]],
+    ["CREW PAY THEIR OWN HOME RENT", [70, 70, 90]],
+    ["THE LAUNDROMAT? $" + UPS.cleaners.base + ", RENT $" + BIZ.cleaners.rent, [70, 70, 90]],
+    ["MISS RENT AND I TAKE THE SHACK", [170, 50, 50]],
+  ];
+  for (let i = 0; i < terms.length; i++)
+    text(ctx, "- " + terms[i][0], cx2 + 6, 60 + i * 11, terms[i][1]);
+  text(ctx, "GOOD LUCK. I'LL COME COLLECT.", cx2 + 6, 60 + terms.length * 11 + 3, [110, 90, 80]);
+  const bx = W / 2 - 56;
+  rect(ctx, bx, 152, 112, 18, [30, 20, 36]);
+  rect(ctx, bx + 1, 153, 110, 16, [190, 140, 80]);
+  text(ctx, "SIGN WITH A CLAW", bx + 9, 158, [40, 24, 16]);
+}
+function drawLandlord() {
+  const t0 = 19.5 * 60;
+  if (screen !== "play" || tmin < t0 || tmin > 20 * 60 + 30) return;
+  const t = Math.min(1, (tmin - t0) / 20);
+  const lx = BIZ.shack.stations.pass[0].x + 96 - t * 66;
+  const ly = FLOOR_Y - 12;
+  wblit(LANDLORD_ART.a, lx, ly, true);
+  wblit(ACCESSORIES.shades.art, lx + 1, ly + 1, true);
+  if (t >= 1) {
+    const msg = tmin < 20 * 60 ? "RENT TIME!" : (coins >= 0 ? "PLEASURE." : "");
+    if (msg) {
+      const tw = textWidth(msg) + 6;
+      let bx = lx + 8 - tw / 2 - camX;
+      bx = Math.max(1, Math.min(bx, W - tw - 1));
+      rect(ctx, bx, ly - 22, tw, 11, [30, 20, 36]);
+      rect(ctx, bx + 1, ly - 21, tw - 2, 9, [255, 240, 200]);
+      text(ctx, msg, bx + 3, ly - 20, [120, 70, 20]);
+    }
+  }
 }
 function drawTitle() {
   ctx.fillStyle = "rgba(16,20,50,0.35)";
@@ -1360,6 +1414,14 @@ function frame(now) {
     }
   }
 
+  if (screen === "intro") {
+    camX = clampCam(BIZ.shack.x0 - 20);
+    drawBG(); drawTown();
+    for (const c of crabs) drawCrab(c);
+    drawIntro();
+    requestAnimationFrame(frame);
+    return;
+  }
   if (screen === "title") {
     // attract mode: slow ping-pong pan across the town
     const span = WORLD_W - W, s = (time * 9) % (2 * span);
@@ -1412,6 +1474,7 @@ function frame(now) {
   }
   for (const k of customers) paint.push({ base: k.isCrab ? 165 : FLOOR_Y, f: () => drawCustomer(k) });
   for (const c of crabs) paint.push({ base: c.cstate === "drive" ? ROAD_Y1 : c.y, f: () => drawCrab(c) });
+  paint.push({ base: FLOOR_Y, f: drawLandlord });
   paint.sort((a, b) => a.base - b.base);
   for (const e of paint) e.f();
   drawFloaters(dt);
@@ -1430,7 +1493,6 @@ hasSave = load();
 if (!hasSave) {
   crabs = [newCrab(makeCrabPersona(0)), newCrab(makeCrabPersona(1))];
   coins = 180;   // opening cash: ingredients + first rent buffer
-  toast = { text: "LANDLORD: SHACK RENT IS $105 A NIGHT. FIRST NIGHT FREE!", t: 9 };
 }
 requestAnimationFrame(frame);
 
