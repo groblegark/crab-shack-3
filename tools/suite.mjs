@@ -65,13 +65,15 @@ scenario("growth strategy can escape (KNOWN TIGHT: recalibrate after wage-econom
   return med >= 18 ? true : `0/4 survived and median eviction day ${med} < 18`;
 });
 
-scenario("dishes: dining, busing, washing all flow", () => {
+scenario("dining: outdoor tables, guests bus their own", () => {
   const sim = createSim({ seed: 99 });
   sim.runDays(3);
   const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
   if (st.tourServes < 20) return `only ${st.tourServes} serves in 3 days`;
-  if (!st.bused || st.bused < 2) return `only ${st.bused | 0} tables bused in 3 days`;
-  return true;
+  if ((st.seated || 0) < 5) return `only ${st.seated | 0} diners seated in 3 days`;
+  // after close, every table should be clear - guests handled their own dishes
+  const blocked = sim.G("BIZ.shack.tables.filter(t => t.dishes > 0 && !t.occupant).length");
+  return blocked === 0 ? true : `${blocked} tables left with abandoned dishes`;
 });
 
 scenario("errands: crabs keep themselves fed", () => {
@@ -93,6 +95,7 @@ scenario("staff meals: closing crew cooks their own dinner, at retail", () => {
   // deterministic retail accounting: after settlement, one hungry broke-ish
   // crab self-cooks the cheapest item (juice: pay 10, ingredient fruit 3)
   sim.runUntil("tmin >= 20.6 * 60 && lastRentDay === day", {});
+  sim.runUntil("customers.length === 0", { maxSteps: 60000 });   // lingering diners' tips would pollute the ledger
   const before = JSON.parse(sim.G(`(() => {
     for (const c of crabs) { c.p.hunger = 0; c.errandCd = 999; c.p.sandy = 0; }
     const c = crabs[0];
@@ -177,15 +180,16 @@ scenario("mid-shift job toggle is safe", () => {
 
 scenario("disease: sustained neglect breeds sickness", () => {
   const sim = createSim({ seed: 71 });
-  sim.runUntil("tmin > 10 * 60", {});
-  sim.G('for (const c of crabs) { c.p.hunger = 1; c.p.dirt = 1; c.p.sandy = 1; }');
-  // pin needs at max across several settlements
+  // pin needs at max moments before each settlement (errands would otherwise
+  // un-pin them during the day)
   for (let d = 0; d < 6; d++) {
-    sim.runUntil("lastRentDay === day", {});
+    sim.runUntil("tmin >= 19.9 * 60 && lastRentDay !== day", { maxSteps: 80000 });
     sim.G('for (const c of crabs) { c.p.hunger = 1; c.p.dirt = 1; c.p.sandy = 1; }');
-    sim.runUntil("tmin < 10", { maxSteps: 40000 });
+    sim.runUntil("lastRentDay === day", { maxSteps: 20000 });
     if (sim.G("gameOver")) break;
     if (sim.G("crabs.some(c => c.p.sick) || (window._stats.deaths || 0) > 0")) return true;
+    sim.runUntil("tmin < 10", { maxSteps: 40000 });
+    if (sim.G("gameOver")) break;
   }
   return sim.G("crabs.some(c => c.p.sick) || (window._stats.deaths || 0) > 0")
     ? true : "no crab fell ill after 6 nights of maxed neglect";
