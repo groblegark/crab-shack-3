@@ -24,7 +24,7 @@ const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
 // ---------------------------------------------------------------- businesses
 const BIZ = {
   shack: {
-    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 200, owner: "player",
+    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 240, owner: "player",
     x0: 1220, x1: 1560, door: 1247,
     stations: {
       crate: [{ x: 1232, y: 136 }],
@@ -33,8 +33,8 @@ const BIZ = {
       pass:  [{ x: 1452, y: 160 }],
     },
     tables: [
-      { x: 1492, y: 152, dishes: 0, occupant: null },
-      { x: 1532, y: 152, dishes: 0, occupant: null },
+      { x: 1492, y: 158, dishes: 0, occupant: null },
+      { x: 1532, y: 158, dishes: 0, occupant: null },
       { x: 1484, y: 134, dishes: 0, occupant: null },
       { x: 1524, y: 134, dishes: 0, occupant: null },
     ],
@@ -707,6 +707,7 @@ function updateSelfCook(c, dt) {
       if (window._stats) {
         window._stats.staffMealPaid = (window._stats.staffMealPaid || 0) + r.pay;
         window._stats.staffMealCost = (window._stats.staffMealCost || 0) + INGREDIENT_COST[r.raw];
+        window._stats.lastStaffMeal = { id: r.id, pay: r.pay, cost: INGREDIENT_COST[r.raw] };
       }
       c.carrying = r.raw; c.cookStep = 1; c.workT = 0.6;
     }
@@ -758,7 +759,7 @@ function updateErrand(c, dt) {
       c.quip = { text: "CLOSED?! HMPH", t: 2.2 };
       return;
     }
-    if (k.state === "dining" && k.table) { c.x = k.table.x + 2; c.y = k.table.y + 1; }
+    if ((k.state === "dining" || k.state === "seatedWaiting" || k.state === "toSeat") && k.table) { c.x = k.table.x + 2; c.y = k.table.y + 1; }
     else if (k.state === "showering" && k.stall) { c.x = k.stall.x + 2; c.y = k.stall.y + 4; c.hidden = true; }
     else { c.hidden = false; c.x = k.x; c.y = 166; }
   }
@@ -788,7 +789,12 @@ function routedStep(c, spd, dt) {
   const tx = c.tx, ty = c.ty;
   if (Math.abs(c.x - tx) <= 5) return stepTo(c, tx, spd, dt, ty);   // final approach: straight in
   const lane = ty <= 147 ? 147 : 168;
-  stepTo(c, tx, spd, dt, lane);   // diagonal into + along the lane (x-progress escapes colliders)
+  if (Math.abs(c.y - lane) > 3) {
+    // merge at a 2:1 slope: reaches the lane quickly, keeps x-motion to slide off colliders
+    stepTo(c, c.x + Math.sign(tx - c.x) * Math.abs(c.y - lane) * 2, spd, dt, lane);
+    return false;
+  }
+  stepTo(c, tx, spd, dt, lane);   // travel the lane
   return false;
 }
 function tryAcquire(bizKey, kind) {
@@ -812,9 +818,14 @@ function updateKitchen(c, dt) {
   if (c.kstate === "idle") {
     const lastCall = c.pendingOff && tmin < SHIFTS[c.p.shift].end + 45;
     if (!c.pendingOff || lastCall) {
-      const o = customers.find(k => k.biz === bizKey && k.state === "waiting" && !k.claimed && !k.served);
+      const o = customers.find(k => k.biz === bizKey && (k.state === "waiting" || k.state === "seatedWaiting") && !k.claimed && !k.served);
       if (o) {
         o.claimed = true; c.cust = o; c.stepIdx = -1; c.kstate = "walk";
+        // send dine-in guests to a table right away - the server brings it out
+        if (o.state === "waiting" && biz.tables) {
+          const seat = biz.tables.find(t => !t.occupant && t.dishes === 0);
+          if (seat) { seat.occupant = o; o.table = seat; o.state = "toSeat"; }
+        }
         const s0 = stationSpot(bizKey, biz.source, 0); setT(c, s0.x, s0.y);
         return;
       }
@@ -889,7 +900,8 @@ function updateKitchen(c, dt) {
       popText(ITEM_NAMES[c.carrying] + "!", c.x - 8, FLOOR_Y - 28, [255, 255, 255]);
       c.stepIdx++;
       if (c.stepIdx >= c.cust.recipe.steps.length) {
-        const so = stationSpot(bizKey, biz.out, 0); setT(c, so.x, so.y);
+        if (c.cust.table) setT(c, c.cust.table.x + 2, c.cust.table.y + 10);   // bring it out
+        else { const so = stationSpot(bizKey, biz.out, 0); setT(c, so.x, so.y); }
         c.kstate = "walk";
       }
       else {
@@ -900,27 +912,42 @@ function updateKitchen(c, dt) {
     }
   }
 }
+function payAndBenefit(c, cust) {
+  if (cust.isCrab) {
+    const price = Math.min(Math.ceil(cust.recipe.pay * 1.25), Math.floor(cust.crab.p.wallet));
+    cust.crab.p.wallet = Math.max(0, cust.crab.p.wallet - price);
+    creditBiz(cust.biz, price, cust.x, 126);
+    if (cust.crab.p.npc && bizOwner(cust.biz) === "player" && window._stats)
+      window._stats.npcSpendAtPlayer = (window._stats.npcSpendAtPlayer || 0) + price;
+    if (cust.need === "food") cust.crab.p.hunger = 0;
+    if (cust.need === "clean") cust.crab.p.dirt = 0;
+    if (cust.need === "fun") { cust.crab.p.bored = 0; cust.crab.quip = { text: "BEST DAY EVER!", t: 2.4 }; }
+    popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
+  } else {
+    const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0))
+      * (1 - ((c.p.sandy || 0) >= 0.66 ? 0.15 : 0));
+    const tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult;
+    creditBiz(cust.biz, cust.recipe.pay + tip, cust.x, 126);
+    popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
+  }
+}
 function serve(c) {
   const cust = c.cust;
+  if (cust && cust.state === "seatedWaiting") {
+    // table delivery: payment + benefits as usual, then straight to dining
+    payAndBenefit(c, cust);
+    cust.served = true; cust.happy = true; sfx.ding();
+    cust.state = "dining"; cust.dineT = 6 + Math.random() * 4;
+    if (cust.table) cust.table.dishes = 1;   // plate on the table while they eat
+    if (window._stats) window._stats.seated = (window._stats.seated || 0) + 1;
+    if (window._stats) window._stats[cust.isCrab ? "crabServes" : "tourServes"]++;
+    if (window._stats && bizOwner(cust.biz) !== "player")
+      window._stats.npcServes = (window._stats.npcServes || 0) + 1;
+    c.cust = null; c.carrying = null; c.kstate = "idle"; c.stepIdx = 0;
+    return;
+  }
   if (cust && cust.state === "waiting") {
-    if (cust.isCrab) {
-      const price = Math.min(Math.ceil(cust.recipe.pay * 1.25), Math.floor(cust.crab.p.wallet));
-      cust.crab.p.wallet = Math.max(0, cust.crab.p.wallet - price);
-      creditBiz(cust.biz, price, cust.x, 126);
-      if (cust.crab.p.npc && bizOwner(cust.biz) === "player" && window._stats)
-        window._stats.npcSpendAtPlayer = (window._stats.npcSpendAtPlayer || 0) + price;
-      if (cust.need === "food") cust.crab.p.hunger = 0;
-      if (cust.need === "clean") cust.crab.p.dirt = 0;
-      if (cust.need === "fun") { cust.crab.p.bored = 0; cust.crab.quip = { text: "BEST DAY EVER!", t: 2.4 }; }
-
-      popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
-    } else {
-      const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0))
-        * (1 - ((c.p.sandy || 0) >= 0.66 ? 0.15 : 0));
-      const tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult;
-      creditBiz(cust.biz, cust.recipe.pay + tip, cust.x, 126);
-      popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
-    }
+    payAndBenefit(c, cust);
     cust.served = true; cust.happy = true; sfx.ding();
     const tables = BIZ[cust.biz].tables, stalls = BIZ[cust.biz].stalls;
     const seat = tables ? tables.find(t => !t.occupant && t.dishes === 0) : null;
@@ -996,6 +1023,19 @@ function updateCustomers(dt) {
       const st = BIZ[k.biz].stalls.find(t => !t.occupant && !t.dirty);
       if (st) { st.occupant = k; k.stall = st; k.state = "toStall"; }
       else if (k.waitT <= 0) { k.state = "leaving"; k.happy = false; }
+    } else if (k.state === "toSeat") {
+      const t = k.table;
+      const dxs2 = t.x + 10 - k.x;
+      if (Math.abs(dxs2) > 2) k.x += Math.sign(dxs2) * Math.min(45 * dt, Math.abs(dxs2));
+      else k.state = "seatedWaiting";
+    } else if (k.state === "seatedWaiting") {
+      k.patience -= dt * 0.35;   // seated guests relax
+      if (k.patience <= 0) {
+        k.state = "leaving"; k.happy = false; k.claimed = false;
+        if (k.table) { k.table.occupant = null; k.table = null; }
+        if (window._stats) window._stats[k.isCrab ? "crabRage" : "tourRage"]++;
+        popText("!!", k.x, 120, [255, 80, 80]); sfx.angry();
+      }
     } else if (k.state === "toTable") {
       const t = k.table;
       const dxt = t.x + 10 - k.x;
@@ -1494,7 +1534,7 @@ function drawCustomer(k) {
         if (nx > -30 && nx < W) smallText(ctx, nm, nx, FLOOR_Y + 2, [100, 80, 55]);
       }
     }
-    if (k.state === "waiting" && !k.served) {
+    if ((k.state === "waiting" || k.state === "seatedWaiting") && !k.served) {
       const bx = k.x - camX - 1, by = FLOOR_Y - 36;
       if (bx > -16 && bx < W) {
         rect(ctx, bx, by, 14, 13, [30, 20, 36]);
@@ -1880,7 +1920,8 @@ function frame(now) {
           k.p.sick = null;
           popText(k.p.name + " RECOVERED!", k.x - 12, FLOOR_Y - 34, [140, 255, 160]);
           if (window._stats) window._stats.recoveries = (window._stats.recoveries || 0) + 1;
-        } else if (!k.p.npc && k.p.sick.days >= 3 && Math.random() < (cared ? 0.08 : 0.2)) {
+        } else if (!k.p.npc && k.p.sick.days >= 3 &&
+            Math.random() < Math.min(0.75, (cared ? 0.08 : 0.25) + 0.12 * Math.max(0, k.p.sick.days - 4))) {
           // the tide takes them
           abortChef(k);
           memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
@@ -1991,7 +2032,7 @@ function frame(now) {
       if (t.dirty) { px(ctx, t.x + 3 - camX, t.y - 2, [130, 220, 110]); px(ctx, t.x + 7 - camX, t.y - 1, [110, 190, 110]); px(ctx, t.x + 11 - camX, t.y - 2, [130, 220, 110]); }
     } });
   }
-  for (const k of customers) paint.push({ base: k.state === "dining" ? (k.table.y + 1) : (k.isCrab ? 165 : FLOOR_Y), f: () => drawCustomer(k) });
+  for (const k of customers) paint.push({ base: (k.state === "dining" || k.state === "seatedWaiting") && k.table ? (k.table.y + 1) : (k.isCrab ? 165 : FLOOR_Y), f: () => drawCustomer(k) });
   for (const c of allCrabs()) paint.push({ base: c.cstate === "drive" ? ROAD_Y1 : c.y, f: () => drawCrab(c) });
   paint.push({ base: FLOOR_Y, f: drawLandlord });
   paint.sort((a, b) => a.base - b.base);

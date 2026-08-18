@@ -91,7 +91,7 @@ function makeCrabPersona(i, rng) {
 }
 
 const SHIFTS = {
-  D: { label: "830-19", start: 8.5 * 60, end: 19 * 60 },   // owner-operator: long day, dinner before close
+  D: { label: "830-1830", start: 8.5 * 60, end: 18.5 * 60 },   // owner-operator: dinner hour before the shack closes
   M: { label: "8-14", start: 8 * 60, end: 14 * 60 },
   E: { label: "14-20", start: 14 * 60, end: 20 * 60 },
 };
