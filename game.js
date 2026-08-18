@@ -258,7 +258,7 @@ function updateBankWarning() {
     if (!credit.warned) {
       credit.warned = true;
       toast = { text: bankHorizon <= 0 ? "ON THIS COURSE: BANKRUPT TONIGHT!"
-        : "ON THIS COURSE: BANKRUPT IN ~" + bankHorizon + " DAY" + (bankHorizon === 1 ? "" : "S"), t: 8 };
+        : "ON THIS COURSE: BANKRUPT IN " + bankHorizon + " DAY" + (bankHorizon === 1 ? "" : "S"), t: 8 };
       sfx.angry();
       if (window._stats && window._stats.warnDay == null) window._stats.warnDay = day;
     }
@@ -510,7 +510,7 @@ function playTrack(i) {
   music = new Audio(t.src);
   music.volume = 0.55;
   music.addEventListener("ended", () => { music = null; if (musicOn) playTrack(trackIdx + 1); });
-  music.play().then(() => { toast = { text: "NOW PLAYING: " + t.name, t: 4 }; })
+  music.play().then(() => { if (!toast) toast = { text: "NOW PLAYING: " + t.name, t: 4 }; })
     .catch(() => { music = null; });
 }
 function startMusic() { if (!music && musicOn && !muted) playTrack(trackIdx); }
@@ -2892,7 +2892,7 @@ function frame(now) {
   {  // line-of-credit chips, bottom-right of the world (right above the BILL chip)
     let cy = PANEL_Y - 12;
     if (bankHorizon <= CREDIT_CFG.CHIP_DAYS && !gameOver) {
-      const wTxt = bankHorizon <= 0 ? "BANKRUPT TONIGHT!" : "BANKRUPT IN ~" + bankHorizon + "D";
+      const wTxt = bankHorizon <= 0 ? "BANKRUPT TONIGHT!" : "BANKRUPT IN " + bankHorizon + "D";
       const ww = smallTextWidth(wTxt) + 8;
       const blink = ((time * 2) | 0) % 2;
       rect(ctx, W - ww - 2, cy, ww, 10, blink ? [150, 30, 30] : [60, 16, 20]);
