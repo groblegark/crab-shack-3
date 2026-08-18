@@ -84,7 +84,7 @@ const BIZ = {
     ],
   },
   showers: {
-    name: "SUDS SHOWERS", short: "SHWR", sign: "SUDS SHOWERS", kind: "shopfront", rent: 40, owner: "sudsy",
+    name: "SUDS SHOWERS", short: "SHWR", sign: "SUDS SHOWERS", kind: "shopfront", rent: 35, owner: "sudsy",
     x0: 950, x1: 1070, door: 964,
     stations: {
       taps:  [{ x: 956, y: 136 }],
@@ -95,9 +95,9 @@ const BIZ = {
     source: "taps", out: "towel", queueX: 1076,
     park: 906, rack: 934,
     recipes: [
-      { id: "rinse", icon: "shine", pay: 6, raw: "soap",
+      { id: "rinse", icon: "shine", pay: 8, raw: "soap",
         steps: [["stall", 2.5, "shine"]] },
-      { id: "soak", icon: "suds", pay: 12, raw: "soap",
+      { id: "soak", icon: "suds", pay: 15, raw: "soap",
         steps: [["stall", 3.0, "suds"], ["scrub", 2.0, "shine"]] },
     ],
   },
@@ -194,7 +194,7 @@ let camX = 1180, followIdx = -1, tab = "crew";
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let screen = "title", hasSave = false, wiping = false;
 function newGame() { wiping = true; localStorage.removeItem(SAVE_KEY); location.reload(); }
-const CRAB_WAGE = 28, HOUSE_RENT = 12;
+const CRAB_WAGE = 26, HOUSE_RENT = 12;
 function rentAmount() { return day <= 1 ? 0 : BIZ.shack.rent; }   // shack lease (legacy name)
 function totalRent() {   // the PLAYER's nightly property bill
   if (day <= 1) return 0;
