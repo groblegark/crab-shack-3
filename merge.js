@@ -28,14 +28,12 @@
   const CHAINS = {
     shack:    { key: "shack",    tiers: ["fish_raw", "fish_cut", "taco", "plate_fish"] },
     fishing:  { key: "shack",    tiers: ["fish_raw", "fish_cut", "taco", "plate_fish"] },
-    cleaners: { key: "cleaners", tiers: ["towel_dirty", "towel_wet", "towel_clean", "uniform_clean"] },
     arcade:   { key: "arcade",   tiers: ["token", "tickets", "plush", "gold_plush"] },
     showers:  { key: "showers",  tiers: ["soap", "suds", "shine"] },
   };
   // Each goal: make N of the item at this tier index. Kid-legible, in order.
   const GOALS = {
     shack:    [[1, 2], [2, 1], [2, 3], [3, 1]],
-    cleaners: [[1, 2], [2, 1], [2, 3], [3, 1]],
     arcade:   [[1, 2], [2, 1], [2, 3], [3, 1]],
     showers:  [[1, 2], [2, 1], [2, 4]],
   };

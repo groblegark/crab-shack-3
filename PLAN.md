@@ -16,13 +16,14 @@ arcade** — other actors have the same abilities the player does.
 
 **The loop**: fishers land the catch off the pier → your kitchen buys it →
 crabs cook → servers carry plates to *seated* guests → wages go out nightly →
-crabs spend their own wallets on meals, laundry, showers, arcade → reputation
+crabs spend their own wallets on meals, showers, arcade → reputation
 compounds or collapses → the landlord collects at 20:00 either way.
 
 ### Systems (all in game.js unless noted)
-- **Businesses** (`BIZ` table, data-driven): CRAB SHACK (player), SUDS N
-  BUBBLES laundromat ($400 unlock), THE CLAWCADE ($650), SUDS SHOWERS
-  (NPC-owned by SUDSY). Each: stations, recipes, queue, rent, owner.
+- **Businesses** (`BIZ` table, data-driven): CRAB SHACK (player), THE
+  CLAWCADE ($650), SUDS SHOWERS (NPC-owned by SUDSY). (SUDS N BUBBLES, the
+  $400 laundromat, was removed 2026-08-18 — see the shipped note below; the
+  juice bar takes its shop slot with T2.) Each: stations, recipes, queue, rent, owner.
 - **Owner layer**: `OWNERS` registry + `creditBiz`/`debitBiz`/`ownerFunds`.
   The player's till IS `coins`. NPC revenue never touches player books.
 - **Crabs**: personas (name, trait, commute mode, accessory, shift, wallet,
@@ -61,7 +62,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
   ("TAP: REASSIGN" on the DOES row) plus a labeled JOB> chip on the follow
   card — the old 13px unlabeled chip was the "can't assign staff" bug.
 - **Sick crabs can move**: bed rest no longer bars essential errands — the
-  sick still buy food and drag themselves to the cleaners/showers (half
+  sick still buy food and drag themselves to the showers (half
   speed), which feeds the `cared` check that improves cure and death odds.
   Arcade nights stay off-limits. This closed the calibration-flagged spiral
   where the sick couldn't re-clean.
@@ -102,14 +103,15 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **33 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **35 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
   job-board hire/payroll/quit, stall-wedge soak, T1 trade-ledger flows,
   disease infection/cure/mortality, showers turnover, NPC economics,
   save/load (incl. boat berths), no-inflation wallet bounds, needs-drag
-  visibility.
+  visibility, laundromat-removal migration (one-shot refund) + dirt
+  serviced by showers alone.
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
   [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
   (default cores−1, deterministic either way, ~3x faster on 4 seeds).
@@ -160,7 +162,7 @@ Staged landings (each stage ships alone, suite-green, balance re-verified):
 - ~~T1~~ **shipped 2026-08-18** — IMPORTS table (fish $7 / corn $3 / water $1
   gal / power $2 kwh), tradeImport() counters (today + all-time + $ spent),
   wired: import-fish at consumeIngredient (the only charged flow, as before),
-  water per shower (8/14 gal) and wash cycle (12), corn per taco, power per
+  water per shower (8/14 gal) and wash cycle (12; flow removed with the laundromat), corn per taco, power per
   arcade serve. Ledger renders on the town notice board. Save/load
   roundtrips. Zero new charges by construction (suite scenario asserts
   spent === fish x $7 exactly).
@@ -287,18 +289,23 @@ first, connect later. Don't build the network before the node is beautiful.
   (measured — the landing commit should be near-inert like T1), then loosen
   release by release until it's fun. Balance-critical: eviction-day metrics
   are THE baseline stat, so every loosening step needs its own matrix run.
-- **REMOVE the laundry mechanic** (Matt: "not natural in any way now that we
-  have showers"). SUDS N BUBBLES goes away. This is economy surgery, not a
-  delete: it's the $400 buy-ladder rung — decided: the replacement is a
-  **juice bar landing with T2 thirst** in the immediately-following pass;
-  the removal pass itself keeps the interim retune minimal and measures the
-  curve without the laundromat income. Also: CLN-need
-  servicing folds into showers (they already reduce dirt/sandy), sick-crab
-  errands reference the cleaners, the sudsgear upgrade is laundry-specific,
-  several suite scenarios cover laundry, and existing saves can own the
-  laundromat → save migration required. Balance-moving → full matrix.
-  Sequenced AFTER the merge queue drains (T4 boat + portrait-canvas agents
-  are building against pre-removal trees); acked by the CS3 build session.
+- ~~REMOVE the laundry mechanic~~ — **shipped 2026-08-18** (Matt: "not
+  natural in any way now that we have showers"). SUDS N BUBBLES is gone:
+  BIZ/UPS/busy entries, recipes, towel/uniform items, washer/dryer/basket
+  art, the merge-mode laundry chain, the intro lease line, the tourist
+  weight, the wash-cycle water flow. CLN servicing folded into showers —
+  pickErrand sends a grubby crab to the taps at dirt ≥ 0.66 (the old
+  cleaners threshold; a shower's −0.5/−0.7 keeps dirt below the sickness
+  "cared" line). Shop grid: _biz1 is now arcade/cadegear; the vacated slot
+  is EMPTY until the **juice bar lands with T2 thirst** (next pass, which
+  also owns the retune). Save migration: stale lv keys ignored, stale job
+  "cleaners" clamps before any BIZ deref (crew → shack, npc → pier), an
+  owned laundromat refunds $400 (+$150 sudsgear) exactly once via a
+  persisted sudsRefund flag. Measured: the eviction curve is BIT-IDENTICAL
+  before/after (0/8, evictions 8-16, median 12; growth 0/6, 8-12, median
+  11) — dirt accrues in 0.25 steps and showers subtract 0.5/0.7, so no
+  crab ever organically landed in the old 0.66-0.75 gap; the fold is a
+  safety net, not a curve change. Suite 35/35.
 - **Overtime**: the player can request a crew crab work overtime for extra
   pay. Design seams: shifts already exist (shift D/N on personas), wage is a
   constant (22) paid at settlement — overtime = staying past shift end at a

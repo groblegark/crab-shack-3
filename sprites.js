@@ -510,117 +510,6 @@ const SHELTER = parseArt([
 ], PAL);
 
 // ================================================================ CS3 art
-// laundry items (9x7, same grid as food items)
-defItem("towel_dirty", [
-  ".........",
-  "KKKKKKK..",
-  "KEDEDEK..",
-  "KDEDEDK..",
-  "KEDEDEK..",
-  "KKKKKKK..",
-  ".........",
-]);
-defItem("towel_wet", [
-  ".........",
-  "KKKKKKK..",
-  "KCVCVCK..",
-  "KVCVCVK..",
-  "KCVCVCK..",
-  "KKKKKKK..",
-  ".........",
-]);
-defItem("towel_clean", [
-  ".........",
-  "KKKKKKK..",
-  "KLVLVLK..",
-  "KVLVLVK..",
-  "KLVLVLK..",
-  "KKKKKKK..",
-  ".........",
-]);
-defItem("uniform_dirty", [
-  ".KK...KK.",
-  "KLLKKKLLK",
-  "KKLDLDLKK",
-  ".KLLDLLK.",
-  ".KDLLDLK.",
-  ".KLLLLLK.",
-  ".KKKKKKK.",
-]);
-defItem("uniform_wet", [
-  ".KK...KK.",
-  "KCCKKKCCK",
-  "KKCVCVCKK",
-  ".KCCVCCK.",
-  ".KVCCVCK.",
-  ".KCCCCCK.",
-  ".KKKKKKK.",
-]);
-defItem("uniform_clean", [
-  ".KK...KK.",
-  "KLLKKKLLK",
-  "KKLLLLLKK",
-  ".KLLLLLK.",
-  ".KLLLLLK.",
-  ".KLLLLLK.",
-  ".KKKKKKK.",
-]);
-
-// laundry basket (source station, like the crate)
-const BASKET = parseArt([
-  "..KK............KK..",
-  ".KEEKKKKKKKKKKKKEEK.",
-  ".KEEDEDEDEDEDEDEEEK.",
-  "KEEDLLKDDELLDEDEEEEK",
-  "KEEELLDEDELLEDEDEEEK",
-  "KEDEDEDEDEDEDEDEDEEK",
-  ".KEEEEEEEEEEEEEEEEK.",
-  "..KEEEEEEEEEEEEEEK..",
-  "..KKKKKKKKKKKKKKKK..",
-], PAL);
-// washing machine: round window; W2 = mid-spin frame
-const WASHER = [
-  parseArt([
-    "KKKKKKKKKKKKKKKK",
-    "KMMMMMMMMMMKAKMK",
-    "KMMKKKKKMMMKKKMK",
-    "KMKCCCCCKMMMMMMK",
-    "KMKCCLCCKMMMMMMK",
-    "KMKCLCCCKMMMMMMK",
-    "KMKCCCCCKMMMMMMK",
-    "KMMKKKKKMMMMMMMK",
-    "KMMMMMMMMMMMMMMK",
-    "KKKKKKKKKKKKKKKK",
-    ".KNK.........KNK",
-  ], PAL),
-  parseArt([
-    "KKKKKKKKKKKKKKKK",
-    "KMMMMMMMMMMKAKMK",
-    "KMMKKKKKMMMKKKMK",
-    "KMKCCCCCKMMMMMMK",
-    "KMKCCCLCKMMMMMMK",
-    "KMKCCCCLKMMMMMMK",
-    "KMKCLCCCKMMMMMMK",
-    "KMMKKKKKMMMMMMMK",
-    "KMMMMMMMMMMMMMMK",
-    "KKKKKKKKKKKKKKKK",
-    ".KNK.........KNK",
-  ], PAL),
-];
-// dryer: square door with vent slots + heat light
-const DRYER = parseArt([
-  "KKKKKKKKKKKKKKKK",
-  "KUUUUUUUUUUKFKUK",
-  "KUUKKKKKKUUKKKUK",
-  "KUKNNNNNNKUUUUUK",
-  "KUKNKKKKNKUUUUUK",
-  "KUKNNNNNNKUUUUUK",
-  "KUKNKKKKNKUUUUUK",
-  "KUUKKKKKKUUUUUUK",
-  "KUUUUUUUUUUUUUUK",
-  "KKKKKKKKKKKKKKKK",
-  ".KNK.........KNK",
-], PAL);
 // pickup counter with a folded stack
 const COUNTER = parseArt([
   "......KLLK..........",
@@ -634,7 +523,7 @@ const COUNTER = parseArt([
   ".KDDK..........KDDK.",
   ".KDDK..........KDDK.",
 ], PAL);
-// smudges overlaid on a crab with a dirty uniform
+// smudges overlaid on a grubby crab
 const DIRT = parseArt([
   "................",
   "................",
