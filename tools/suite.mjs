@@ -157,8 +157,8 @@ scenario("no crab freezes mid-walk (baseline)", () => {
 
 scenario("no crab freezes mid-walk (full town)", () => {
   const sim = createSim({ seed: 4242 });
-  sim.G(`coins = 3000; tryBuy("cleaners"); tryBuy("arcade"); tryBuy("chef"); tryBuy("chef");
-    crabs[2].p.job = "cleaners"; crabs[3].p.job = "arcade";`);
+  sim.G(`coins = 3000; tryBuy("arcade"); tryBuy("chef"); tryBuy("chef");
+    crabs[2].p.job = "arcade"; crabs[3].p.job = "arcade";`);
   const det = stuckDetector(sim);
   sim.runDays(5, { onTick: det.tick, tickEvery: 20 });
   return det.worstSeconds < 18 ? true : `a crab froze ~${det.worstSeconds}s in a moving state`;
@@ -187,9 +187,9 @@ scenario("homeless: eviction to shelter and back", () => {
 
 scenario("mid-shift job toggle is safe", () => {
   const sim = createSim({ seed: 21 });
-  sim.G('coins = 2000; tryBuy("cleaners");');
+  sim.G('coins = 2000; tryBuy("arcade");');
   sim.runUntil('crabs[0].dayState === "working"', {});
-  sim.G('crabs[0].p.job = "cleaners";');   // toggle while cooking
+  sim.G('crabs[0].p.job = "arcade";');   // toggle while cooking
   sim.runDays(2);
   return sim.G("gameOver") === false || sim.G("day") > 1 ? true : "sim broke after mid-shift toggle";
 });
@@ -622,6 +622,52 @@ scenario("boat: ownership and berth roundtrip through save/load", () => {
   const c2 = createSim({ seed: 7, storage: store, fresh: false });
   const st2 = JSON.parse(c2.G('JSON.stringify((() => { const c = npcs.find(k => k.p.name === "SALTY"); return [c.p.boat == null, !!c.p.homeless]; })())'));
   return st2[0] && st2[1] ? true : "garbage berth 9 not sanitized to homeless: " + JSON.stringify(st2);
+});
+
+scenario("laundromat removal: dirt is serviced by the showers", () => {
+  // the old cleaners branch triggered at dirt 0.66; the fold must keep dirt
+  // serviceable below that same threshold (the sickness "cared" check) by
+  // showers alone - even for a crab with no sand on them at all
+  const sim = createSim({ seed: 88 });
+  sim.runUntil('crabs[0].dayState === "home" && tmin > 13 * 60', {});
+  sim.G("crabs[0].p.dirt = 0.9; crabs[0].p.sandy = 0; crabs[0].p.wallet = 60; crabs[0].errandCd = 0;");
+  const ok = sim.runUntil("(crabs[0].p.dirt || 0) < 0.66", { maxSteps: 60000,
+    onTick: (G) => G("crabs[0].p.hunger = 0.2") });   // no snack detours
+  if (!ok) return "dirty-but-not-sandy crab never got clean (dirt " + sim.G("crabs[0].p.dirt").toFixed(2) + ", state " + sim.G("crabs[0].dayState") + ")";
+  const dirt = sim.G("crabs[0].p.dirt");
+  return dirt <= 0.45 ? true : "shower barely dented the dirt: " + dirt.toFixed(2);
+});
+
+scenario("laundromat removal: old save migrates, refund fires exactly once", () => {
+  const store = new Map();
+  store.set("crabshack3_v1", JSON.stringify({
+    coins: 500, lifetime: 900, day: 5, tmin: 600, lastRentDay: 4,
+    lv: { chef: 2, cleaners: 1, sudsgear: 1, arcade: 0 },
+    memorials: [], rep: 44, townCatch: 3, rate: 0, t: Date.now(),
+    personas: [
+      { name: "PINCHY", trait: "speedy", mode: "walk", acc: "none", color: 0, shift: "M", wallet: 30, house: 0, homeless: false, job: "cleaners" },
+      { name: "CLAWDIA", trait: "tidy", mode: "bike", acc: "flower", color: 1, shift: "E", wallet: 25, house: 1, homeless: false, job: "shack" },
+    ],
+    npc: { tills: { sudsy: 150 }, personas: [{ name: "SUDSY", npc: true, wallet: 12, job: "cleaners" }] },
+  }));
+  const sim = createSim({ seed: 3, storage: store, fresh: false });
+  // stale jobs clamped before any BIZ deref: crew to the shack, npc to the pier
+  const jobs = JSON.parse(sim.G("JSON.stringify(crabs.map(c => c.p.job))"));
+  if (jobs.some(j => j !== "shack")) return "stale cleaners job not clamped: " + JSON.stringify(jobs);
+  if (sim.G('npcs[0].p.job') !== "fishing") return "SUDSY's stale cleaners job became " + sim.G("npcs[0].p.job");
+  // the owned laundromat ($400) + suds gear ($150) refunded once
+  const c0 = sim.G("Math.round(coins)");
+  if (c0 !== 1050) return "coins after refund: $" + c0 + ", expected $1050 (500 + 400 + 150)";
+  if (!sim.G("sudsRefunded")) return "refund flag not set";
+  // reload: the persisted flag (and the dropped lv keys) block a second payout
+  sim.G("save()");
+  if (!JSON.parse(store.get("crabshack3_v1")).sudsRefund) return "sudsRefund flag not persisted";
+  const sim2 = createSim({ seed: 4, storage: store, fresh: false });
+  const c1 = sim2.G("Math.round(coins)");
+  if (c1 !== 1050) return "refund fired again on reload: $" + c1;
+  // and the migrated town actually runs
+  sim2.runDays(1, { onTick: (G) => { if (G("coins") < 300) G("coins = 600"); }, tickEvery: 40 });
+  return sim2.G("isFinite(coins) && crabs.length === 2") ? true : "migrated save broke after a day";
 });
 
 // ---- runner
