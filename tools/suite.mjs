@@ -78,11 +78,50 @@ scenario("errands: crabs keep themselves fed", () => {
   return worstHunger < 1 ? true : `a crab is starving (hunger ${worstHunger})`;
 });
 
-scenario("staff meals: closing crew cooks their own dinner", () => {
+scenario("staff meals: closing crew cooks their own dinner, at retail", () => {
   const sim = createSim({ seed: 17 });
+  // organic path still works
   sim.runDays(3);
   const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
-  return (st.staffMeals || 0) >= 1 ? true : `no staff meal in 3 days (crabServes ${st.crabServes})`;
+  if ((st.staffMeals || 0) < 1) return `no staff meal in 3 days (crabServes ${st.crabServes})`;
+  // deterministic retail accounting: after settlement, one hungry broke-ish
+  // crab self-cooks the cheapest item (juice: pay 10, ingredient fruit 3)
+  sim.runUntil("tmin >= 20.6 * 60 && lastRentDay === day", {});
+  const before = JSON.parse(sim.G(`(() => {
+    for (const c of crabs) { c.p.hunger = 0; c.errandCd = 999; c.p.sandy = 0; }
+    const c = crabs[0];
+    c.p.hunger = 0.9; c.p.wallet = 30; c.errandCd = 0;   // <40: cheapest recipe, deterministic
+    return JSON.stringify({ coins: coins, wallet: c.p.wallet,
+      meals: window._stats.staffMeals || 0 });
+  })()`));
+  const done = sim.runUntil(`(window._stats.staffMeals || 0) > ${before.meals}`, { maxSteps: 60000 });
+  if (!done) return "forced staff meal never happened";
+  const after = JSON.parse(sim.G(`JSON.stringify({ coins: coins, wallet: crabs[0].p.wallet })`));
+  const juice = JSON.parse(sim.G(`JSON.stringify({ pay: BIZ.shack.recipes.find(r => r.id === "juice").pay, cost: INGREDIENT_COST.fruit })`));
+  if (Math.round(before.wallet - after.wallet) !== juice.pay)
+    return `wallet fell ${before.wallet - after.wallet}, expected retail ${juice.pay}`;
+  if (Math.round(after.coins - before.coins) !== juice.pay - juice.cost)
+    return `till gained ${after.coins - before.coins}, expected net ${juice.pay - juice.cost}`;
+  return true;
+});
+
+scenario("no wallet inflation: crew finances hold a bounded band", () => {
+  for (const seed of [1337, 42]) {
+    const sim = createSim({ seed });
+    let worstMax = 0, worstMin = 1e9, lastDay = 0;
+    sim.runDays(12, { onTick: (G) => {
+      const t = G("tmin"), d = G("day");
+      if (t >= 12 * 60 && t < 12 * 60 + 8 && G("coins") < 400) G("coins = 400");  // wages always flow
+      if (t >= 21.5 * 60 && d !== lastDay) {
+        lastDay = d;
+        worstMax = Math.max(worstMax, G("Math.max(...crabs.map(c => c.p.wallet))"));
+        worstMin = Math.min(worstMin, G("Math.min(...crabs.map(c => c.p.wallet))"));
+      }
+    }, tickEvery: 20 });
+    if (worstMax >= 150) return `seed ${seed}: wallet hit ${Math.round(worstMax)} (inflation)`;
+    if (worstMin <= -1) return `seed ${seed}: wallet went ${Math.round(worstMin)}`;
+  }
+  return true;
 });
 
 scenario("no crab freezes mid-walk (baseline)", () => {
