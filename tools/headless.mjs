@@ -85,7 +85,8 @@ const buyScript = BUY.length ? new vm.Script(`
   if (Math.abs(tmin - 12 * 60) < ${STEP} * TS) {
     for (const k of ${JSON.stringify(BUY)}) {
       const u = UPS[k];
-      if (u.lvl < u.max && coins >= upCost(u) + nightlyDue() + 30) tryBuy(k);
+      const tomorrowBill = CRAB_WAGE * (crabs.length + (k === "chef" ? 1 : 0)) + Object.keys(BIZ).filter(bizUnlocked).reduce((s, b2) => s + BIZ[b2].rent, 0);
+      if (u.lvl < u.max && coins >= upCost(u) + tomorrowBill + 30) tryBuy(k);
     }
     // keep ~1/3 of the crew on the cleaners once it's open
     if (UPS.cleaners && UPS.cleaners.lvl > 0) {
