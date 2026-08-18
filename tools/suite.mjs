@@ -1052,6 +1052,30 @@ scenario("days off: wages skip exactly and the bill dips to match", () => {
   return true;
 });
 
+scenario("fishers feed themselves: breaks + the beach roast", () => {
+  const sim = createSim({ seed: 5 });
+  sim.G("window._minH = {}");
+  sim.runDays(6, { tickEvery: 10, onTick: (G) =>
+    G("for (const c of npcs) if (c.p.fisher) { const k = c.p.name; window._minH[k] = Math.min(window._minH[k] ?? 1, c.p.hunger || 0); }") });
+  const minH = JSON.parse(sim.G("JSON.stringify(window._minH)"));
+  if (!Object.keys(minH).length) return "sampler never ran";
+  const starved = Object.entries(minH).filter(([, h]) => h > 0.5);
+  if (starved.length) return "a fisher never got a meal in 6 days: " + starved.map(([n, h]) => n + "@" + h.toFixed(2)).join(",");
+  // and the broke path exists: pin a fisher penniless + hungry mid-shift, the
+  // catch becomes lunch (no money moves)
+  sim.G("coins = 2000");   // phase 2 tests the fisher, not player survival
+  const found = sim.runUntil('tmin > 10 * 60 && tmin < 17 * 60 && npcs.some(c => c.p.job === "fishing" && c.dayState === "working")', { maxSteps: 400000,
+    onTick: (G) => { if (G("coins") < 400) G("coins = 2000"); } });
+  if (!found) return "no pure fisher ever worked the midday window (day " + sim.G("day") + ")";
+  sim.G(`{ const f = npcs.find(c => c.p.job === "fishing" && c.dayState === "working");
+    f.p.wallet = 2; f.p.hunger = 0.9; window._roastee = f.p.name; }`);
+  sim.G("townCatch = Math.max(townCatch, 6)");
+  const ok = sim.runUntil('npcs.find(c => c.p.name === window._roastee).p.hunger < 0.4', { maxSteps: 60000,
+    onTick: (G) => { G('{ const f = npcs.find(c => c.p.name === window._roastee); if (f) { f.p.wallet = 2; if (townCatch < 4) townCatch = 6; } if (coins < 400) coins = 2000; }'); } });
+  if (!ok) return "penniless fisher never roasted lunch (hunger " + sim.G('npcs.find(c => c.p.name === window._roastee).p.hunger').toFixed(2) + ")";
+  return sim.G("(window._stats.roasts || 0) >= 1") ? true : "hunger fell without a roast counted";
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

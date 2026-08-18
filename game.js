@@ -1078,6 +1078,17 @@ function updateSchedule(c, dt) {
     if (e && !e.selfCook) startErrand(c, e);
     else startCommute(c, false);
   }
+  // self-employed: a fisher answers to nobody - break whenever a need presses.
+  // The errand machinery handles the trip; the home branch re-commutes them to
+  // the pier afterward (shift window permitting), so it's a real lunch break.
+  if (c.p.job === "fishing" && c.dayState === "working" && !c.p.employer && c.errandCd <= 0) {
+    const e = pickErrand(c);
+    if (e && !e.selfCook) {
+      c.duty = false; c.errandCd = 6;
+      c.dayState = "home";
+      startErrand(c, e);
+    } else c.errandCd = 3;
+  }
   // owner-operators top their pocket up from the till
   if (c.p.npc) {
     const o = OWNERS[c.p.owner];
@@ -1479,6 +1490,24 @@ function updateStuck(c, dt) {
 function updateFishing(c, dt) {
   // stand at the spot, cast, wait, land one - the town's oldest job
   if (c.fishSpot) { c.x = c.fishSpot.x; c.y = c.fishSpot.y; }
+  if (c.roastT > 0) {   // lunch is on the driftwood fire
+    c.roastT -= dt;
+    if (c.roastT <= 0) {
+      c.p.hunger = Math.max(0, (c.p.hunger || 0) - 0.65);
+      popText("FRESH CATCH LUNCH", c.x - 12, c.y - 24, [140, 255, 160]);
+      c.quip = { text: ["CAN'T BEAT FRESH", "SEA PROVIDES", "STRAIGHT OFF THE LINE"][(Math.random() * 3) | 0], t: 2.4 };
+      if (window._stats) window._stats.roasts = (window._stats.roasts || 0) + 1;
+    }
+    return;
+  }
+  // hungry with no affordable lunch in town? eat the catch: one fish off the
+  // day's landings, no money changes claws - the town's oldest lunch, too
+  if ((c.p.hunger || 0) >= 0.55 && townCatch > 2 &&   // never the town's last fish
+      (c.p.wallet < 15 || !bizStaffed("shack"))) {
+    townCatch--; c.roastT = 5;
+    if (window._stats) window._stats.roastStarts = (window._stats.roastStarts || 0) + 1;
+    return;
+  }
   c.castT = (c.castT || 5) - dt;
   if (c.castT <= 0) {
     // a live-aboard works the deeper water off their own deck: quicker bites,

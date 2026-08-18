@@ -317,6 +317,14 @@ Staged landings (each stage ships alone, suite-green, balance re-verified):
 Sequencing rule: fixed prices and untracked externalities are *fine* — track
 first, connect later. Don't build the network before the node is beautiful.
 
+- **Fisher self-sufficiency** (Matt 2026-08-18, shipped): self-employed
+  fishers take breaks whenever a need presses (the errand loop re-commutes
+  them to the pier after), and a hungry fisher who can't afford town food
+  roasts one of the day's catch on the beach (never the town's last 2 fish —
+  no money moves). Measured: fisher min-hunger 0 weekly, no starvation
+  sickness. Baseline settled at 0/8, evictions 8-12, median 10 (roasts +
+  break-time trim fish supply slightly).
+
 ## OPEN DESIGN QUESTION — growth escape (2026-08-18, for Matt)
 The founding promise "lose by default, but a growth strategy can escape" is
 currently broken: chef+table towns die day 7-12 of revenue collapse at HIGH
