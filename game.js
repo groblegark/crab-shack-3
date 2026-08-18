@@ -168,11 +168,30 @@ function darkness() { // 0 = day, 1 = full night
 // ---------------------------------------------------------------- recipes
 const INGREDIENT_COST = { fish_raw: 5, fruit: 3, towel_dirty: 1, uniform_dirty: 1, token: 1, soap: 1 };
 const FISH_LOCAL = 4, FISH_IMPORT = 7;   // fresh off the pier vs shipped in
+// ---- T1 trade ledger: the town is a NODE. Imports tracked at fixed prices;
+// only fish actually charges money today (it always did, via ingredientCost) -
+// corn/water/power are tracked flows awaiting T2/T3. Bookkeeping ONLY.
+const IMPORTS = {
+  fish:  { name: "FISH",  unit: "EA",  price: FISH_IMPORT },
+  corn:  { name: "CORN",  unit: "EA",  price: 3 },
+  water: { name: "WATER", unit: "GAL", price: 1 },
+  power: { name: "POWER", unit: "KWH", price: 2 },
+};
+let trade = { total: { fish: 0, corn: 0, water: 0, power: 0 },
+  day: { fish: 0, corn: 0, water: 0, power: 0 }, spent: 0 };
+function tradeImport(kind, qty, dollars) {
+  trade.total[kind] += qty; trade.day[kind] += qty;
+  if (dollars) trade.spent += dollars;
+}
 function ingredientCost(raw) {
   if (raw === "fish_raw") return townCatch > 0 ? FISH_LOCAL : FISH_IMPORT;
   return INGREDIENT_COST[raw];
 }
-function consumeIngredient(raw) { if (raw === "fish_raw" && townCatch > 0) townCatch--; }
+function consumeIngredient(raw) {
+  if (raw !== "fish_raw") return;
+  if (townCatch > 0) townCatch--;
+  else tradeImport("fish", 1, FISH_IMPORT);   // shipped in - the $7 was already charged upstream
+}
 const ITEM_NAMES = {
   fish_raw: "FISH", fish_cut: "CUT FISH", fruit: "FRUIT",
   taco: "FISH TACO", juice: "JUICE", plate_fish: "GRILL FISH",
@@ -438,7 +457,7 @@ function save() {
     coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, rate: incomeRate(), t: Date.now(),
     personas: crabs.map(c => c.p),
     npc: { tills: { sudsy: OWNERS.sudsy.till }, personas: npcs.map(c => c.p) },
-    board: jobBoard, hireDay,
+    board: jobBoard, hireDay, trade,
   }));
 }
 function load() {
@@ -479,6 +498,8 @@ function load() {
   }
   jobBoard = Array.isArray(s.board) ? s.board : [];
   hireDay = s.hireDay || 0;
+  if (s.trade && s.trade.total) trade = { total: Object.assign({ fish: 0, corn: 0, water: 0, power: 0 }, s.trade.total),
+    day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0 }, s.trade.day), spent: s.trade.spent || 0 };
   const away = (Date.now() - (s.t || Date.now())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
@@ -1119,6 +1140,12 @@ function creditAccomplishment(c, cust) {
 }
 function payAndBenefit(c, cust) {
   today.served++;
+  // trade ledger: tracked input flows (T1 bookkeeping - nothing charged here)
+  if (cust.recipe) {
+    if (cust.recipe.id === "taco") tradeImport("corn", 1);          // tortilla-to-be (T3 pilot)
+    if (cust.biz === "cleaners") tradeImport("water", 12);          // a wash cycle
+    if (cust.biz === "arcade") tradeImport("power", 1);             // a machine hour
+  }
   creditAccomplishment(c, cust);
   if (c && c.p) today.byCrab[c.p.name] = (today.byCrab[c.p.name] || 0) + 1;
   if (cust.isCrab) {
@@ -1232,6 +1259,7 @@ function updateCustomers(dt) {
           k.crab.quip = { text: "SQUEAKY CLEAN!", t: 2.4 };
         }
         if (window._stats) window._stats.showersDone = (window._stats.showersDone || 0) + 1;
+        tradeImport("water", k.recipe.deep ? 14 : 8);
         popText("AHHH", k.x, 126, [140, 220, 255]);
         k.state = "outStall";
       }
@@ -2275,7 +2303,7 @@ function drawDossier() {
 
 function drawJobBoard() {
   if (!boardView) return;
-  const x = 40, y = 40, w2 = 176, h2 = 116;
+  const x = 40, y = 22, w2 = 176, h2 = 158;
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
   rect(ctx, x, y, w2, 14, [190, 140, 80]);
@@ -2285,6 +2313,16 @@ function drawJobBoard() {
   for (const j of jobBoard) {
     smallText(ctx, "HELP WANTED: " + BIZ[j.biz].name, x + 6, ly, [40, 30, 40]); ly += 7;
     smallText(ctx, "$" + j.wage + "/DAY - SEE " + OWNERS[bizOwner(j.biz)].name + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 9;
+  }
+  {
+    ly += 2; smallText(ctx, "TRADE LEDGER - IMPORTS, TODAY / ALL TIME", x + 6, ly, [58, 42, 38]); ly += 8;
+    for (const kind of Object.keys(IMPORTS)) {
+      const im = IMPORTS[kind];
+      smallText(ctx, im.name, x + 6, ly, [90, 90, 105]);
+      smallText(ctx, trade.day[kind] + " / " + trade.total[kind] + " " + im.unit + " AT $" + im.price, x + 40, ly, [110, 110, 130]);
+      ly += 7;
+    }
+    smallText(ctx, "SPENT ON IMPORTS: $" + Math.round(trade.spent) + " - FISH ONLY SO FAR", x + 6, ly, [140, 110, 40]); ly += 9;
   }
   const staff = npcs.filter(c => c.p.employer);
   if (staff.length) {
@@ -2346,6 +2384,7 @@ function frame(now) {
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
     tmin -= 1440; day++; townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
+    trade.day = { fish: 0, corn: 0, water: 0, power: 0 };
     today = newDayLog(); today.repStart = rep;
   }
   if (screen === "play" && tmin >= 20 * 60 && lastRentDay !== day) {

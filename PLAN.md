@@ -155,7 +155,14 @@ external-facing stubs.** Everything below serves that.
 
 Staged landings (each stage ships alone, suite-green, balance re-verified):
 
-- **T1 — Trade ledger (bookkeeping only, zero balance change)**: an `IMPORTS`
+- ~~T1~~ **shipped 2026-08-18** — IMPORTS table (fish $7 / corn $3 / water $1
+  gal / power $2 kwh), tradeImport() counters (today + all-time + $ spent),
+  wired: import-fish at consumeIngredient (the only charged flow, as before),
+  water per shower (8/14 gal) and wash cycle (12), corn per taco, power per
+  arcade serve. Ledger renders on the town notice board. Save/load
+  roundtrips. Zero new charges by construction (suite scenario asserts
+  spent === fish x $7 exactly).
+- **T1 — Trade ledger (bookkeeping only, zero balance change)** (original spec): an `IMPORTS`
   commodity table with *fixed prices* — corn, fresh water, electricity,
   imported fish (already exists at $7) — and running counters for quantities
   imported (exports later). Wire existing flows in: import-fish purchases,

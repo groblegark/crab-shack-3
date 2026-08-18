@@ -551,6 +551,25 @@ scenario("stalls can never wedge: abort frees them, and a soak stays clean", () 
   return worst < 60 ? true : "a stall stayed occupied " + worst.toFixed(0) + " sim-seconds";
 });
 
+scenario("T1 trade ledger: flows counted, nothing new charged", () => {
+  const sim = createSim({ seed: 55 });
+  sim.G("townCatch = 0");   // force imports from the first taco
+  sim.runDays(2, { tickEvery: 30, onTick: (G) => {
+    if (G("coins") < 300) G("coins = 600");
+    if (G("townCatch") > 0) G("townCatch = 0");   // pier luck stays dry
+  } });
+  const t = JSON.parse(sim.G("JSON.stringify(trade)"));
+  if (!(t.total.fish > 0)) return "no fish imports counted with a dry pier";
+  if (!(t.total.water > 0)) return "no water counted (showers ran: " + sim.G("window._stats.showersDone || 0") + ")";
+  if (t.spent !== t.total.fish * 7) return "spent $" + t.spent + " != fish x $7 (" + t.total.fish + ") - a tracked flow got charged";
+  // and the ledger must roundtrip
+  const store = new Map();
+  const a = createSim({ seed: 9, storage: store, fresh: false });
+  a.G("trade.total.corn = 42; trade.spent = 77; save()");
+  const b = createSim({ seed: 10, storage: store, fresh: false });
+  return b.G("trade.total.corn") === 42 && b.G("trade.spent") === 77 ? true : "trade ledger did not roundtrip";
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
