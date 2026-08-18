@@ -905,6 +905,8 @@ function updateErrand(c, dt) {
     }
     if ((k.state === "dining" || k.state === "seatedWaiting" || k.state === "toSeat") && k.table) { c.x = k.table.x + 2; c.y = k.table.y + 1; }
     else if (k.state === "showering" && k.stall) { c.x = k.stall.x + 2; c.y = k.stall.y + 4; c.hidden = true; }
+    else if ((k.state === "toStall" || k.state === "outStall") && k.climb)
+      { c.hidden = false; c.x = k.x; c.y = 166 - 26 * k.climb; }   // stepping up/down
     else { c.hidden = false; c.x = k.x; c.y = 166; }
   }
 }
@@ -1199,7 +1201,13 @@ function updateCustomers(dt) {
       const st = k.stall;
       const dxs = st.x + 3 - k.x;
       if (Math.abs(dxs) > 2) k.x += Math.sign(dxs) * Math.min(45 * dt, Math.abs(dxs));
-      else { k.state = "showering"; k.showerT = k.recipe.showerT || 5; }
+      else {
+        k.climb = Math.min(1, (k.climb || 0) + dt * 1.8);   // step up into the stall
+        if (k.climb >= 1) { k.state = "showering"; k.showerT = k.recipe.showerT || 5; }
+      }
+    } else if (k.state === "outStall") {   // hop back down to the floor, towel-fresh
+      k.climb = Math.max(0, (k.climb || 0) - dt * 2.2);
+      if (k.climb <= 0) k.state = "leaving";
     } else if (k.state === "showering") {
       k.showerT -= dt;
       if (k.showerT <= 0) {
@@ -1212,7 +1220,7 @@ function updateCustomers(dt) {
         }
         if (window._stats) window._stats.showersDone = (window._stats.showersDone || 0) + 1;
         popText("AHHH", k.x, 126, [140, 220, 255]);
-        k.state = "leaving";
+        k.state = "outStall";
       }
     } else if (k.state === "waitStall") {
       k.waitT -= dt;
@@ -1857,10 +1865,11 @@ function drawCustomer(k) {
     if (!k.isCrab) {
       k.animT += 0.016;
       const arts = CRAB_ARTS[k.color];
+      if (k.state === "showering") return;   // behind the curtain (stall draws the bather)
       const moving = k.state !== "waiting";
       const art = moving && ((k.animT * 8) | 0) % 2 ? arts.b : arts.a;
       const flip = k.state !== "leaving";
-      const cy = FLOOR_Y - 12;
+      const cy = FLOOR_Y - 12 - 26 * (k.climb || 0);
       wblit(art, k.x, cy, flip);
       const acc = ACCESSORIES[k.acc];
       if (acc) {
@@ -2551,15 +2560,16 @@ function frame(now) {
     } });
     const stalls = BIZ[key].stalls;
     if (stalls) for (const t of stalls) paint.push({ base: t.y, f: () => {
-      wblit(STALL[t.occupant ? 1 : 0], t.x, t.y - STALL[0].h);
-      if (t.occupant) {   // feet peeking under the curtain
-        const oc = t.occupant, pcol = oc.p ? oc.p.color : oc.color;
+      const bathing = t.occupant && t.occupant.state === "showering";
+      wblit(STALL[bathing ? 1 : 0], t.x, t.y - STALL[0].h);
+      if (bathing) {   // feet peeking under the curtain
+        const oc = t.occupant, pcol = oc.isCrab ? oc.crab.p.color : (oc.p ? oc.p.color : oc.color);
         const col = CRAB_COLORS[(pcol || 0) % CRAB_COLORS.length][0];
         wrect(t.x + 5, t.y - 3, 2, 2, col);
         wrect(t.x + 9, t.y - 3, 2, 2, col);
       }
-      if (t.occupant) {   // the bather's head bobs over the curtain
-        const oc = t.occupant, pcol = oc.p ? oc.p.color : oc.color;
+      if (bathing) {   // the bather's head bobs over the curtain
+        const oc = t.occupant, pcol = oc.isCrab ? oc.crab.p.color : (oc.p ? oc.p.color : oc.color);
         const pal = CRAB_COLORS[(pcol || 0) % CRAB_COLORS.length];
         const bob = Math.round(Math.sin(time * 3 + t.x) * 1.5);
         const hy = t.y - STALL[0].h + 4 + bob;
@@ -2570,7 +2580,7 @@ function frame(now) {
         px(ctx, t.x + 6 - camX, hy - 3, [255, 255, 255]);    // happy wet eyes
         px(ctx, t.x + 9 - camX, hy - 3, [255, 255, 255]);
       }
-      if (t.occupant) {   // suds drift up over the curtain while the water runs
+      if (bathing) {   // suds drift up over the curtain while the water runs
         for (let i = 0; i < 3; i++) {
           const ph = (time * 0.6 + i * 0.33 + t.x * 0.013) % 1;
           if (ph > 0.85) continue;
