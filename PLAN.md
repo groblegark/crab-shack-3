@@ -70,6 +70,23 @@ compounds or collapses → the landlord collects at 20:00 either way.
 - **UI**: title → lease-signing intro (Mr. Pincherton) → play. CREW / SHOP /
   MENU tabs, BILL chip (itemized nightly bill), follow-cam on ANY crab
   including NPCs, fast-forward >>/>>>/>>>> = 2/3/6x (F), master mute (M).
+- **Right-click orders** (crew only): with a crew crab followed, right-click
+  redirects them — open ground = walk there (breaks cleanly from any activity
+  via abortActivity, resumes schedule after a ~2.5s linger), their workplace =
+  clock in now, their home/shelter = knock off for ~2 game-hours (restDay/
+  restUntil), another business = run that errand immediately (forcedErrand
+  reuses pickErrand's pricing/staffing gates, queue cap enforced on arrival).
+  Every refusal pops ("PINCHY: CAN'T RIGHT NOW") — never silent. Townsfolk
+  refuse ("I'VE GOT MY OWN LIFE"): crew-only control is a design choice, NPC
+  agency stays intact. Desktop right-click only — touch deferred (long-press
+  collides with merge mode's hold gesture). No context menu yet ("at some
+  point"). Paired **auto-unstick** watchdog for ALL walkers: <2px net progress
+  over 1.5s while genuinely underway (stepTo ran, target >8px away — queues/
+  stations/bus/pauses never qualify) triggers a perpendicular sidestep
+  (±12px y, 6px back-off, 1.0s waypoint), alternating sides up to 4 retries,
+  then a give-up quip (a directed crab abandons the order). This is the
+  sanctioned fix for the audited still-vs-mover collision pin. Fires ~1-2x/day
+  town-wide in headless runs.
 - **Crab dossier**: clicking the follow card opens a full-screen record —
   job, shift, wallet, housing, health, need bars, claims to fame. Click or
   Esc closes. Works for every crab, crew and townsfolk alike.
@@ -78,8 +95,12 @@ compounds or collapses → the landlord collects at 20:00 either way.
 - Baseline (buy nothing): **0/8 survive, median eviction ~11-13** — the
   8-seed snapshot moves a day either way per build; at 16 seeds the tails run
   6–20+. Fully combined tree (credit LIMIT 90 + T2 thirst/juice bar, wage
-  23, 2026-08-18): 0/8, evictions 10-16, median 13. Credit LIMIT tightened
-  120→90 at the T2 merge — the two runways compounded to median 14.
+  23, 2026-08-18): 0/8, evictions 12-22, median 14. Credit LIMIT was
+  tightened 120→90 at the T2 merge; the later +1 (13→14, tails to 21-22)
+  came from town-wide auto-unstick — crabs genuinely work more hours now,
+  and LIMIT 70 measured no better, so the QoL win stands undiluted. If
+  Matt wants the knife-edge back, spawn pacing or rent are the honest
+  levers, chosen deliberately.
   Standing pressures: job-board labor competition (a hired-away fisher lowers
   townCatch, pushing the shack onto $7 import fish; SUDSY's flush-hire
   threshold till ≥ 260 spares the earliest days) and the needs-drag rework
@@ -113,7 +134,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **42 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **44 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
@@ -333,7 +354,14 @@ first, connect later. Don't build the network before the node is beautiful.
   20 vs CRAB_WAGE 22; tourists are a separate entity class rather than crabs
   with a suitcase. Direction: one simulation contract for every crab,
   differing only in starting assets/relationships.
-- **Click-to-nav + right-click redirect** (Matt 2026-08-18): agent spawned.
+- ~~Click-to-nav + right-click redirect~~ — **shipped 2026-08-18** (see the
+  "Right-click orders" systems bullet). Suite 41/41 (scripted-redirect
+  round trip + a deterministic still-vs-mover pin the watchdog must beat —
+  verified the pin reproduces with the watchdog disabled). Balance: 8-seed
+  baseline 0/8 both, evictions 10-19 med 13 -> 9-19 med 15 — inside the
+  documented per-build wobble, direction consistent with fewer lost
+  crab-hours; no price tuning. Later loosenings if wanted: townsfolk orders,
+  touch gesture, a real context menu.
 
 - **Line of credit** — **built (worktree branch, 2026-08-18), tight landing**:
   all knobs in game.js CREDIT_CFG (LIMIT 120 ~ half a night's shack rent,

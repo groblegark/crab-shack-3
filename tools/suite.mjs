@@ -816,6 +816,50 @@ scenario("juicebar economics: ledger flows, register income, staff retail", () =
   return b.G("trade.total.fruit") === 31 ? true : "fruit ledger did not roundtrip";
 });
 
+scenario("orders: redirect walks the crab there, then the schedule reclaims them", () => {
+  const sim = createSim({ seed: 1337 });
+  sim.runUntil('crabs[0].dayState === "working" && tmin > 10 * 60', {});
+  // refusals are explicit: on the clock, a business order pops instead of firing
+  sim.G("orderCrab(crabs[0], 1000, 160)");   // 1000 = SUDS SHOWERS
+  if (sim.G('crabs[0].dayState') !== "working") return "on-duty biz order should refuse, not fire";
+  if (!sim.G('floaters.some(f => f.text.includes("ON THE CLOCK"))')) return "refusal was silent";
+  // the redirect proper: open ground in the showers/shack gap
+  sim.G("orderCrab(crabs[0], 1180, 160)");
+  if (sim.G('crabs[0].dayState') !== "directed") return "order did not take: " + sim.G('crabs[0].dayState');
+  if (sim.G("crabs[0].slot") !== -1 || sim.G("!!crabs[0].cust")) return "abort leaked a station/customer hold";
+  const t0 = sim.G("tmin");
+  if (!sim.runUntil("crabs[0].order && crabs[0].order.idleT >= 0", { maxSteps: 1200 }))
+    return "never reached the goto target";
+  if (Math.abs(sim.G("crabs[0].x") - 1180) > 8) return "arrived somewhere else: " + sim.G("Math.round(crabs[0].x)");
+  if (!sim.runUntil('crabs[0].dayState === "working" && crabs[0].duty', { maxSteps: 4000 }))
+    return "schedule never reclaimed the crab";
+  const el = sim.G("tmin") - t0;
+  return el <= 60 ? true : `back at work after ${Math.round(el)} game-min (> 60)`;
+});
+
+scenario("orders: auto-unstick sidesteps a stationary pin", () => {
+  // the audited hard pin: a walker pushed straight back by a stationary
+  // anchor dead ahead on its exact lane. The watchdog must sidestep past it.
+  const sim = createSim({ seed: 77 });
+  sim.runUntil("tmin > 9 * 60", {});
+  sim.G(`{
+    const b = crabs[1];
+    abortActivity(b);
+    b.dayState = "working"; b.kstate = "work"; b.workT = b.workMax = 9999; b.workBiz = b.p.job = "shack";
+    b.x = 880; b.y = 168; b.tx = 880; b.ty = 168;
+    const w = crabs[0];
+    abortActivity(w);
+    w.x = 820; w.y = 168;
+    orderGoto(w, 930, 168);
+  }`);
+  // 25 sim-seconds is plenty: ~1.5s to hit the pin, one or two 1.5s windows
+  // to trigger, a 1s detour, and the walk out
+  if (!sim.runUntil("crabs[0].x >= 925", { maxSteps: 500 }))
+    return `walker still pinned at x=${sim.G("Math.round(crabs[0].x)")} after 25 sim-sec (unsticks: ${sim.G("window._stats.unsticks || 0")})`;
+  if (!sim.G("window._stats.unsticks")) return "walker got through without the watchdog firing (pin did not reproduce)";
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
