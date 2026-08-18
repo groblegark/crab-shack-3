@@ -1398,8 +1398,9 @@ cv.addEventListener("click", (ev) => {
   if (gameOver) { newGame(); return; }
   if (dossier) {
     // the DOES row doubles as the reassignment control for crew crabs
+    const pt = evPos(ev);
     const owned = Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player");
-    if (!dossier.p.npc && owned.length > 1 && p.y >= 48 && p.y < 59 && p.x >= 24 && p.x < 232) {
+    if (!dossier.p.npc && owned.length > 1 && pt.y >= 47 && pt.y < 57 && pt.x >= 24 && pt.x < 232) {
       const c = dossier;
       c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
       sfx.buy();
@@ -2184,7 +2185,7 @@ function drawDossier() {
   const doesTxt = p.npc
     ? (p.employer ? "WORKS AT " + BIZ[p.job].name + " FOR " + OWNERS[p.employer].name
       : p.fisher ? "FISHES OFF THE PIER" : "RUNS " + BIZ[p.job].name)
-    : "WORKS THE " + BIZ[p.job].name;
+    : "WORKS " + BIZ[p.job].name;   // short verb: leave room for TAP: REASSIGN
   row("DOES", doesTxt, [70, 90, 130]);
   if (!p.npc && Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1)
     smallText(ctx, "TAP: REASSIGN", x + w2 - 58, ly - 9, [96, 170, 220]);
