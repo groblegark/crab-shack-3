@@ -416,7 +416,7 @@ function totalRent() {   // the PLAYER's nightly property bill, due from night o
 // tonight's actual wage bill: sick crabs and crabs on their day off skip pay
 // (exactly the settlement loop's rule, so the BILL chip and MENU math match)
 function wagesOwedTonight() {
-  return crabs.reduce((s, c) => s + (c.p.sick || offToday(c) ? 0 : CRAB_WAGE), 0);
+  return crabs.reduce((s, c) => s + (c.p.sick || (offToday(c) && !c.workedToday) ? 0 : CRAB_WAGE), 0);
 }
 function nightlyDue() { return totalRent() + wagesOwedTonight(); }
 const busy = {
@@ -904,6 +904,7 @@ function updateCommute(c, dt) {
 function arriveCommute(c, atWork) {
   if (atWork) {
     c.dayState = "working"; c.duty = true; c.kstate = "idle"; c.workBiz = c.p.job;
+    c.workedToday = true;   // wages follow actual work: a mid-day rota reshuffle (job-board hire) can't unpay a worked shift
     if (c.p.job === "fishing" && c.fishSpot) { c.x = c.fishSpot.x; c.y = c.fishSpot.y; c.castT = 3 + Math.random() * 6; }
   }
   else { c.dayState = "home"; }
@@ -2392,7 +2393,7 @@ function drawPanel() {
     }
     smallText(ctx, "TONIGHT AT 20:00", 132, ROW_Y, [230, 215, 195]);
     let by = ROW_Y + MROW + 1;
-    const owedN = crabs.filter(c => !c.p.sick && !offToday(c)).length;
+    const owedN = crabs.filter(c => !c.p.sick && !(offToday(c) && !c.workedToday)).length;
     smallText(ctx, "WAGES " + owedN + "X$" + CRAB_WAGE + (owedN < crabs.length ? " (" + (crabs.length - owedN) + " OUT)" : ""), 132, by, [190, 175, 160]);
     smallText(ctx, "$" + CRAB_WAGE * owedN, 224, by, [235, 160, 130]); by += MROW;
     for (const key of Object.keys(BIZ)) {
@@ -2772,6 +2773,7 @@ function frame(now) {
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
     tmin -= 1440; day++; townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
+    for (const c of allCrabs()) c.workedToday = false;   // a new day's ledger
     trade.day = { fish: 0, corn: 0, water: 0, power: 0 }; trade.landedDay = 0;
     today = newDayLog(); today.repStart = rep;
   }
@@ -2785,8 +2787,8 @@ function frame(now) {
     // 1. wages: pay every crab you can afford
     let wages = 0;
     for (const c of crabs) {
-      if (c.p.sick) continue;      // no work, no pay
-      if (offToday(c)) continue;   // day off: same rule - the bill dips, the wallet doesn't
+      if (c.p.sick) continue;                        // no work, no pay
+      if (offToday(c) && !c.workedToday) continue;   // day off: same rule - the bill dips, the wallet doesn't
       if (coins >= CRAB_WAGE) { coins -= CRAB_WAGE; c.p.wallet += CRAB_WAGE; wages += CRAB_WAGE; }
       else popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]);
     }
@@ -2839,8 +2841,8 @@ function frame(now) {
       const emp = c.p.employer;
       if (!emp) continue;
       const o = OWNERS[emp];
-      if (c.p.sick) continue;      // no work, no pay - same deal as the crew
-      if (offToday(c)) continue;   // day off: unpaid, but the job is safe
+      if (c.p.sick) continue;                        // no work, no pay - same deal as the crew
+      if (offToday(c) && !c.workedToday) continue;   // day off: unpaid, but the job is safe
       if (o && o.till >= NPC_WAGE) { o.till -= NPC_WAGE; c.p.wallet += NPC_WAGE; }
       else {
         c.p.job = "fishing"; c.p.employer = null;
