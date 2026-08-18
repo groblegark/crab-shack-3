@@ -1,35 +1,62 @@
 # CRAB SHACK 3
 
-The town gets an economy. Same snescat toy-PPU engine (character-map
-sprites, the snescat 5x7 font, 256x240 canvas, scanlines) — now with a
-2048px world and more than one storefront on the boardwalk.
+A simulation-style beach-town economy, built on the snescat toy PPU
+(character-map pixel art, the snescat 5x7 font plus a 3x5 micro font,
+256x240 canvas, scanlines) — no libraries, no build step.
 
-## What's new over CS2
+Play: https://groblegark.github.io/crab-shack-3/
 
-- **Multiple businesses.** You start with the CRAB SHACK; save up $400
-  for SUDS N BUBBLES, the laundromat down the road (washers, dryers,
-  pickup counter, $60/night rent), then $650 for THE CLAWCADE at the
-  east end of the boardwalk (claw machines, skeeball, prize counter,
-  $80/night). Tourists queue at whichever staffed business they fancy.
-- **Staffing.** Every crab has a JOB (shown on the follow card — click
-  the > to reassign them between shack and cleaners). Same shifts and
-  commutes as CS2: walk, bike, beach buggy, or the SAND BUS, which now
-  runs three stops across the longer coast road.
-- **Needs and errands.** Working a shift builds an appetite, stains
-  the uniform, and grinds the crab down (FED, CLN, and FUN bars on the
-  follow card). Off duty, crabs run errands with their own wallets:
-  a meal at the shack, laundry at the cleaners, a claw-machine session
-  at the arcade (flush crabs splurge on GAME NIGHT). Your wage money
-  comes back through your own registers — if you staff the town well.
-  Hungry crabs work slower, dirty uniforms earn worse tips, bored crabs
-  drag their feet everywhere, and a long line sends them home grumbling.
+## The town
 
-Everything else carries over: personalities, houses and the shelter
-safety net, daily wages/house rent/shack rent settling at 20:00,
-lose-by-default balance, the follow-cam, the home screen, and the
-5-track Suno playlist by Matt Clanker.
+You run the CRAB SHACK, but you're not the only one who matters. Fisher-crabs
+work the pier — fishing is the town's default profession — and the day's catch
+stocks your kitchen ($4 fresh off the pier, $7 imported when the bucket runs
+dry). SUDSY owns the beach showers outright: her own till, her own rent, her
+own dinner at your shack. Every crab has a wallet, needs, a home, a commute,
+and opinions.
 
-Static page, no build step — GitHub Pages from main/root. `?fresh` for a
-throwaway session, `?turbo=N` for dev speed. Balance work happens in
-`tools/headless.mjs` (the real game against stubbed browser APIs at
-~1000x, seeded, multi-run).
+- **Businesses**: the shack, plus SUDS N BUBBLES (laundromat, $400) and THE
+  CLAWCADE (claw machines + skeeball, $650) to buy. SUDS SHOWERS is SUDSY's.
+- **Crew**: hire crabs, assign them between your businesses, watch them
+  commute (walk / bike / beach buggy / the SAND BUS), work shifts, and live in
+  houses you can see inside. Broke crabs move into the shelter and climb back
+  out. Neglected crabs get sick, spread it at work and in the shelter, and can
+  die — the town keeps memorials on the dune.
+- **Service**: guests are seated when their order is claimed and the server
+  carries the plate out to the table. Showers hand out a kit, the guest
+  showers, and staff turn the stall over.
+- **Money**: everything settles at 20:00 — wages out, crew house rent, your
+  business rents. Miss the lease and Mr. Pincherton takes the shack.
+  Reputation, not advertising, drives foot traffic.
+
+Start small on purpose: one grill, one board, two tables. The shop sells
+physical things — HIRE CRAB, GRILL+, BOARD+, TABLE+, unlocks and gear.
+
+**You lose by default, but just barely.** Sim-verified over 8 seeds: doing
+nothing gets you evicted around day 9–20 (median 13); hiring and seating
+guests survives 7/8 runs past day 40.
+
+## Controls
+
+Click a crab — crew, SUDSY, or a fisher — to follow them. Drag or arrow keys
+to pan, ESC to let go. CREW / SHOP / MENU tabs; the BILL chip opens tonight's
+itemized bill. `>>` / `>>>` (or F) fast-forward, M mutes, N music, B skips
+track.
+
+## Development
+
+`?fresh` starts a throwaway session, `?turbo=N` speeds the clock. Balance and
+regression work happens in the headless simulator, which runs the real game
+code at ~10 sim-days/second:
+
+```
+node tools/suite.mjs                                   # 18 scenarios, keep green
+node tools/headless.mjs --days 30 --seeds 8 --quiet    # baseline curve
+node tools/headless.mjs --days 40 --seeds 8 --buy chef,table --quiet
+```
+
+See PLAN.md for architecture, verified numbers, and the roadmap.
+
+Music by Matt Clanker, made with Suno — a rotating playlist: "Pixel Wave
+Waltz", "Regalia of the Surf", "Regalia Waltz", "Butter Pow", and "Carnival of
+the Glitch".
