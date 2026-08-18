@@ -632,7 +632,8 @@ function load() {
   jobBoard = Array.isArray(s.board) ? s.board : [];
   hireDay = s.hireDay || 0;
   if (s.trade && s.trade.total) trade = { total: Object.assign({ fish: 0, corn: 0, water: 0, power: 0 }, s.trade.total),
-    day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0 }, s.trade.day), spent: s.trade.spent || 0 };
+    day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0 }, s.trade.day), spent: s.trade.spent || 0,
+    landed: s.trade.landed || 0, landedDay: s.trade.landedDay || 0 };
   const away = (Date.now() - (s.t || Date.now())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
