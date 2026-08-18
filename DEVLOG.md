@@ -8,6 +8,54 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, evening — The bank arrives
+
+![A prosperous-looking town, and a blinking red prophecy](devlog/img/2026-08-18-doomed-town.png)
+
+*Day 10, quarter to seven. $246 in the till, reputation at 100, everyone
+home for supper. The red chip in the corner reads BANKRUPT IN 2D. Nobody at
+the counter knows yet.*
+
+The town has a bank now. Here is the deal it offers, and it is the only
+deal it offers: a **$120 line of credit at 25% a night, compounding**, $80
+minimum collected at settlement. Come up short on rent and the difference
+goes on the line instead of ending you — Mr. Pincherton gets paid either
+way now, which has done wonders for his mood. The loan is the new cliff:
+exhaust the line and miss a minimum, and the town doesn't evict you, it
+**bankrupts** you, which gets its own game-over screen and everything.
+
+Two things worth knowing about our bank:
+
+- **It is stingy because the simulation demanded it.** The original sketch
+  said the limit should be about one night's rent ($230). We ran the towns.
+  At $230, marginal shacks revolved small debts forever and dying-by-default
+  went soft. Only at $120 did the numbers stay honest. The design document
+  proposed generosity; eight simulated summers voted no.
+- **It can see the future, and it will tell you.** A pessimistic little
+  oracle replays your run rate through the settlements ahead: a chip starts
+  blinking five days from the edge, and at three days it says it out loud —
+  ON THIS COURSE: BANKRUPT IN 2 DAYS. Across eight doomed towns, the
+  warning never came later than three days out. What you do with three
+  days' notice is, of course, the game.
+
+![Eve of the end: DEBT $80/120, BANKRUPT TONIGHT!](devlog/img/2026-08-18-bankrupt-tonight.png)
+
+NPC owners bank on the same terms, which means the town itself can have a
+bad week: a broke shop now goes **dark for two nights** while the bank
+writes it off. Yes — SUDSY's showers can shutter. We are all very worried
+about SUDSY.
+
+### A production note about doom
+
+We tried to fake the screenshot above and couldn't. The oracle doesn't read
+your wallet — it reads your *history*, so a hand-staged broke town scans as
+a healthy town having a weird day and the warning stays dark. To photograph
+doom we had to grow it: seed 4, run honestly to day 10, saved the evening
+before the toast. The dread frame has to be earned. We have decided to find
+this thematically appropriate.
+
+---
+
 ## 2026-08-18, later — SUDS N BUBBLES is closing
 
 ![The lot is open beach again](devlog/img/2026-08-18-lot-now-beach.png)
