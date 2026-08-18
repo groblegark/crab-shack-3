@@ -358,6 +358,7 @@
       if (!MOBILE) return false;
       if (on) return true;
       if (typeof screen !== "undefined" && screen !== "play") return false;
+      if (typeof gameOver !== "undefined" && gameOver) return false;   // no pocket game at the eviction hearing
       if (p.y >= PANEL_Y) return false;
       const wx = p.x + camX;
       for (const c of allCrabs()) {
