@@ -222,7 +222,9 @@ function forecastBankruptcy() {
   if (!n) return Infinity;               // no run rate on the books yet
   // pessimistic run rate: a sharp break (crew death, sickness spiral) should
   // move the forecast the day it shows, not after the average catches up
-  const g = Math.min(sum / n, latest), due = nightlyDue();
+  // the replay bills FULL wages every night (steady-state, pessimistic):
+  // tonight's day-off skips are noise over a 10-settlement horizon
+  const g = Math.min(sum / n, latest), due = totalRent() + CRAB_WAGE * crabs.length;
   // income still to come before the next settlement (the town trades 8:00-20:00)
   const frac = lastRentDay === day ? 1 : Math.max(0, Math.min(1, (20 * 60 - tmin) / (12 * 60)));
   let c = coins, b = credit.bal;
@@ -257,6 +259,66 @@ function clockStr() {
   return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
 }
 function shackOpen() { return tmin >= 8 * 60 && tmin < 20 * 60; }
+
+// ---------------------------------------------------------------- week / days off
+// A 7-day week derived from the day counter (day 1 = MON). Nothing new is
+// persisted: the weekday - and everyone's weekly day off - derive from
+// day + the live roster, so old saves pick the schedule up for free.
+const WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+const WEEKDAY_FULL = ["MONDAYS", "TUESDAYS", "WEDNESDAYS", "THURSDAYS",
+  "FRIDAYS", "SATURDAYS", "SUNDAYS"];
+function weekdayIdx(d) { return (d - 1) % 7; }
+const OFF_WAKE = 9.5 * 60;   // a day off starts with a lie-in
+// STAGGERED days off, not a town-wide Sunday: each business's workers are
+// sorted by name and fanned across the week with a stride of 3 (coprime to
+// 7), so no two coworkers share an off day until a shop has 8+ staff and no
+// multi-worker shop ever goes fully dark from days off alone. Per-biz base
+// weekdays keep the single-worker shops (SUDSY's showers, a one-crab
+// arcade) closed on DIFFERENT days - and keep the whole town on deck for
+// the brutal first two days of a new lease (nobody rests MON or TUE).
+const OFF_BASE = { shack: 2, arcade: 4, showers: 6, fishing: 3 };
+let _offMap = {}, _needCover = {}, _offStamp = -1, _offN = -1;
+function refreshDaysOff() {
+  const n = crabs.length + npcs.length;
+  if (_offStamp === time && _offN === n) return;
+  _offStamp = time; _offN = n; _offMap = {}; _needCover = {};
+  const byBiz = {};
+  for (const k of allCrabs()) (byBiz[k.p.job] = byBiz[k.p.job] || []).push(k);
+  const wd = weekdayIdx(day);
+  for (const b in byBiz) {
+    const roster = byBiz[b].sort((a, c2) => a.p.name < c2.p.name ? -1 : 1);
+    const base = OFF_BASE[b] != null ? OFF_BASE[b] : 0;
+    // keyed name|job: a crew hire may legally share a townsfolk's name
+    for (let i = 0; i < roster.length; i++) _offMap[roster[i].p.name + "|" + b] = (base + i * 3) % 7;
+    if (b === "fishing") continue;   // the pier has no opening hours to cover
+    // cover days: if a resting worker's shift has nobody else on it today,
+    // the on-duty crew work a full-open double so the shop never goes
+    // shift-dark from a day off
+    const on = roster.filter(k => _offMap[k.p.name + "|" + b] !== wd);
+    const off = roster.filter(k => _offMap[k.p.name + "|" + b] === wd);
+    _needCover[b] = off.length > 0 && on.length > 0 &&
+      off.some(o => !on.some(w2 => w2.p.shift === o.p.shift || w2.p.shift === "D"));
+  }
+}
+function dayOffIdx(c) {
+  refreshDaysOff();
+  const v = _offMap[c.p.name + "|" + c.p.job];
+  return v != null ? v : 0;
+}
+function offToday(c) { return dayOffIdx(c) === weekdayIdx(day); }
+function coveringToday(c) {
+  refreshDaysOff();
+  return c.p.shift !== "D" && !offToday(c) && !!_needCover[c.p.job];
+}
+// a crab's shift for TODAY: their own, or a full-open double shift on a day
+// they cover for a resting coworker (M and E never overlap, so the covering
+// crab IS the whole roster that day - shorter hours would just be dark hours)
+const COVER_SHIFT = { label: "8-20", start: 8 * 60, end: 20 * 60 };
+function effShift(c) { return coveringToday(c) ? COVER_SHIFT : SHIFTS[c.p.shift]; }
+function bizRestingToday(b) {   // every worker on the roster is off today
+  const staff = allCrabs().filter(k => k.p.job === b);
+  return staff.length > 0 && staff.every(k => offToday(k));
+}
 function darkness() { // 0 = day, 1 = full night
   const t = tmin;
   if (t >= 5.5 * 60 && t < 7 * 60) return 1 - (t - 5.5 * 60) / 90;
@@ -351,7 +413,12 @@ function totalRent() {   // the PLAYER's nightly property bill, due from night o
   return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player")
     .reduce((s, b) => s + BIZ[b].rent, 0);
 }
-function nightlyDue() { return totalRent() + CRAB_WAGE * crabs.length; }
+// tonight's actual wage bill: sick crabs and crabs on their day off skip pay
+// (exactly the settlement loop's rule, so the BILL chip and MENU math match)
+function wagesOwedTonight() {
+  return crabs.reduce((s, c) => s + (c.p.sick || offToday(c) ? 0 : CRAB_WAGE), 0);
+}
+function nightlyDue() { return totalRent() + wagesOwedTonight(); }
 const busy = {
   shack: { board: [false, false, false], grill: [false, false, false] },
   arcade: { claw: [false, false], skee: [false, false] },
@@ -417,6 +484,21 @@ function homeSpot(c) {
 }
 // once a commute drops them at the lot, home crabs wander in and settle
 function updateHome(c, dt) {
+  // a day off is for the beach: after the lie-in, amble the sand near home
+  // between errands instead of pacing the porch
+  if (offToday(c) && !c.p.sick && tmin >= OFF_WAKE && darkness() < 0.5) {
+    if (c._offPause > 0) { c._offPause -= dt; return; }
+    if (c._offWt == null) {
+      c._offWt = Math.max(24, Math.min(WORLD_W - 40, homeX(c) + Math.random() * 240 - 120));
+      c._offWy = 150 + Math.random() * 16;
+      setT(c, c._offWt, c._offWy);
+    }
+    if (stepTo(c, c._offWt, crabMove(c) * 0.55, dt, c._offWy)) {
+      c._offWt = null; c._offPause = 2 + Math.random() * 5;
+    }
+    return;
+  }
+  c._offWt = null;
   const s = homeSpot(c);
   setT(c, s.x, s.y);
   stepTo(c, s.x, crabMove(c) * 0.7, dt, s.y);
@@ -656,6 +738,8 @@ function maybeQuip(c, dt) {
     let lines = isNight ? ["ZZZ..."] : TRAITS[c.p.trait].quips[quipContext(c)];
     if (c.p.homeless && quipContext(c) === "home" && !isNight)
       lines = ["SAVING FOR A PLACE", "SHELTER SOUP AGAIN", "I'LL BOUNCE BACK"];
+    if (offToday(c) && !c.p.sick && quipContext(c) === "home" && !isNight && tmin >= OFF_WAKE)
+      lines = ["DAY OFF!", "BEACH DAY", "THE SAND'S ALL MINE", "NOT COOKING TODAY"];
     c.quip = { text: lines[(Math.random() * lines.length) | 0], t: 2.6 };
     c.quipT = 14 + Math.random() * 18;
   }
@@ -679,7 +763,7 @@ function commuteGmin(c) {
 }
 function leaveGmin(c) {
   const late = TRAITS[c.p.trait].lateMin || 0;
-  return SHIFTS[c.p.shift].start - commuteGmin(c) - 20 + late;
+  return effShift(c).start - commuteGmin(c) - 20 + late;
 }
 
 const FLOOR_MIN = 126, FLOOR_MAX = 168;
@@ -855,6 +939,9 @@ function runJobBoard() {
     if (bizOwner(b) === "player") continue;
     const o = OWNERS[bizOwner(b)];
     if (!o || (o.darkT || 0) > 0 || jobBoard.some(j => j.biz === b)) continue;
+    // day-off staff still count here: a rest day is not a dark shop, so a
+    // weekly closure never triggers the emergency HELP WANTED posting
+    // (that gate is for broke/sick darkness only)
     const staff = allCrabs().filter(k => k.p.job === b && !k.p.sick).length;
     if ((o.till >= 260 && staff < 2) || (staff === 0 && o.till >= NPC_WAGE * 2))
       jobBoard.push({ biz: b, wage: NPC_WAGE, day });
@@ -901,10 +988,11 @@ function spawnDrifter() {
 
 // ---------------------------------------------------------------- day schedule
 function updateSchedule(c, dt) {
-  const sh = SHIFTS[c.p.shift];
+  const sh = effShift(c);   // own shift, or the long cover shift on a coworker's day off
   if (c.p.job !== "fishing" && !bizUnlocked(c.p.job)) c.p.job = "shack";
   if (!c.p.npc && c.p.job !== "fishing" && bizOwner(c.p.job) !== "player") c.p.job = "shack";   // crew can't staff NPC shops
-  if (c.dayState === "home" && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !c.p.sick) {
+  const off = offToday(c);   // one weekday in seven: no commute, no duty, no pay
+  if (c.dayState === "home" && !off && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !c.p.sick) {
     startCommute(c, true);
   }
   if (c.dayState === "working" && tmin >= sh.end) c.pendingOff = true;
@@ -933,7 +1021,8 @@ function updateSchedule(c, dt) {
   }
   // off-duty errands, while town is open and it's not almost shift time
   if (c.errandCd > 0) c.errandCd -= dt;
-  const errandWindow = tmin < leaveGmin(c) - 30 || tmin >= sh.end;   // before leaving, or after shift
+  const errandWindow = off ? tmin >= OFF_WAKE   // day off: sleep in, then the whole town is yours
+    : (tmin < leaveGmin(c) - 30 || tmin >= sh.end);   // workday: before leaving, or after shift
   const townAwake = shackOpen() || (tmin >= 20 * 60 && tmin < 23 * 60) || (tmin >= 5.5 * 60 && tmin < 8 * 60);
   if (c.dayState === "home" && townAwake && c.errandCd <= 0 && errandWindow) {
     const e = pickErrand(c);
@@ -947,10 +1036,15 @@ function updateSchedule(c, dt) {
 function bizStaffed(b) { return bizUnlocked(b) && !bizDark(b) && allCrabs().some(k => k.duty && !k.pendingOff && k.workBiz === b); }
 function pickErrand(c) {
   const staffed = bizStaffed;
+  // a day off is for spending: lower need thresholds, so the off crab eats
+  // out, soaks, and finally gets that arcade morning their shift always ate.
+  // Full retail, full queue rules - off crabs are customers, not staff.
+  const off = offToday(c) && !c.p.sick;
+  const wantFood = (c.p.hunger || 0) >= (off ? 0.4 : 0.5);
   // restaurant staff privilege: cook your own meal when the kitchen is unstaffed.
   // Charged at RETAIL, same as the register.
   // TODO: business settings - staff-meal pricing (retail/at-cost/free) becomes a per-business setting
-  if ((c.p.hunger || 0) >= 0.5 && !staffed("shack") && c.p.job === "shack" && !c.p.npc) {
+  if (wantFood && !staffed("shack") && c.p.job === "shack" && !c.p.npc) {
     const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= r.pay + 2);
     if (affordable.length) {
       affordable.sort((a, b) => a.pay - b.pay);
@@ -958,7 +1052,7 @@ function pickErrand(c) {
       return { selfCook: true, recipe: r };
     }
   }
-  if ((c.p.hunger || 0) >= 0.5 && staffed("shack")) {
+  if (wantFood && staffed("shack")) {
     const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= Math.ceil(r.pay * 1.25) + 2);
     if (affordable.length) {
       // treat yourself when flush, eat cheap when broke
@@ -970,14 +1064,14 @@ function pickErrand(c) {
   // dirt is serviced at the showers too (the laundromat is gone): a grubby
   // crab heads for the taps at the same 0.66 threshold that fed the sickness
   // "cared" check - a shower takes dirt down 0.5 (0.7 deluxe), well below it
-  const needsBath = (c.p.sandy || 0) >= 0.6 || (c.p.dirt || 0) >= 0.66
+  const needsBath = (c.p.sandy || 0) >= (off ? 0.45 : 0.6) || (c.p.dirt || 0) >= (off ? 0.5 : 0.66)
     || (c.p.sick && (c.p.dirt || 0) >= 0.4);   // the sick drag themselves to the taps - staying clean is the cure
   if (needsBath && staffed("showers") && c.workBiz !== "showers") {
     const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
     if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "showers", recipe: r, need: "spa" };
   }
   if (c.p.sick) return null;   // bed rest otherwise: no arcade nights while ill
-  if ((c.p.bored || 0) >= 0.6 && staffed("arcade")) {
+  if ((c.p.bored || 0) >= (off ? 0.35 : 0.6) && staffed("arcade")) {
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
     if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "arcade", recipe: r, need: "fun" };
   }
@@ -1052,7 +1146,7 @@ function updateErrand(c, dt) {
     const k = c.errandCust;
     if (!k) { c.dayState = "home"; startCommute(c, false); return; }
     const open = allCrabs().some(w => w.duty && w.workBiz === k.biz &&
-      (!w.pendingOff || tmin < SHIFTS[w.p.shift].end + 45));
+      (!w.pendingOff || tmin < effShift(w).end + 45));
     if (!open && k.state === "waiting" && !k.claimed) {
       k.state = "leaving"; k.happy = false;   // kitchen's dark - go home
       c.quip = { text: "CLOSED?! HMPH", t: 2.2 };
@@ -1156,7 +1250,7 @@ function updateKitchen(c, dt) {
   const eff = crabEff(c);
   const spd = crabMove(c) * 1.55 * (1 - 0.3 * (1 - eff) - 1.2 * Math.max(0, 0.85 - eff));
   if (c.kstate === "idle") {
-    const lastCall = c.pendingOff && tmin < SHIFTS[c.p.shift].end + 45;
+    const lastCall = c.pendingOff && tmin < effShift(c).end + 45;
     if (!c.pendingOff || lastCall) {
       // paying guests first; locals and crew get served in the lulls
       const pending = customers.filter(k => k.biz === bizKey &&
@@ -1292,6 +1386,10 @@ function payAndBenefit(c, cust) {
     const price = Math.ceil(cust.recipe.pay * 1.25);   // full retail, always - no broke-crab discounts
     cust.crab.p.wallet = Math.max(0, cust.crab.p.wallet - price);
     creditBiz(cust.biz, price, cust.x, 126);
+    if (window._stats && offToday(cust.crab)) {   // day-off spending, per crab (suite visibility)
+      const ob = window._stats.offBuys = window._stats.offBuys || {};
+      ob[cust.crab.p.name] = (ob[cust.crab.p.name] || 0) + 1;
+    }
     if (cust.crab.p.npc && bizOwner(cust.biz) === "player" && window._stats)
       window._stats.npcSpendAtPlayer = (window._stats.npcSpendAtPlayer || 0) + price;
     if (cust.need === "food") cust.crab.p.hunger = 0;
@@ -1463,6 +1561,17 @@ function updateCustomers(dt) {
 // ---------------------------------------------------------------- status text
 function crabStatus(c) {
   if (c.p.sick) return "SICK - DAY " + ((c.p.sick.days || 0) + 1) + " - NEEDS FOOD + REST";
+  if (offToday(c)) {   // sick beats off; off beats everything but the commute home
+    if (c.dayState === "toErrand") return "DAY OFF - OFF TO " + BIZ[c.errandBiz].short;
+    if (c.dayState === "errand") return "DAY OFF - AT " + BIZ[c.errandBiz].name;
+    if (c.dayState === "selfCook") return "DAY OFF - RAIDING THE PANTRY";
+    if (c.dayState === "toHome") return "DAY OFF - STROLLING HOME";
+    if (c.dayState === "home") {
+      if (darkness() > 0.7) return c.p.homeless ? "SLEEPING AT THE SHELTER" : "SLEEPING";
+      if (tmin < OFF_WAKE) return "DAY OFF - SLEEPING IN";
+      return "DAY OFF - BEACHCOMBING";
+    }
+  }
   if (c.p.job === "fishing" && c.dayState === "working") return "FISHING OFF THE PIER";
   if (c.dayState === "home") {
     if (darkness() > 0.7) return c.p.homeless ? "SLEEPING AT THE SHELTER" : "SLEEPING";
@@ -1476,7 +1585,7 @@ function crabStatus(c) {
     if (c.carrying) return "CARRYING " + ITEM_NAMES[c.carrying];
     if (c.kstate === "waitCash") return "SHORT ON CASH!";
     if (c.kstate === "waitSlot") return "WAITING FOR A SPOT";
-    return "ON SHIFT";
+    return coveringToday(c) ? "COVERING A COWORKER'S SHIFT" : "ON SHIFT";
   }
   if (c.dayState === "selfCook") return c.cookStep >= 3 ? "COOKING A STAFF MEAL" : "RAIDING THE PANTRY";
   if (c.dayState === "toErrand") return "OFF TO " + BIZ[c.errandBiz].name;
@@ -1953,6 +2062,10 @@ function drawBusiness(key) {
   if (!shackOpen()) {
     wrect(signX + signW / 2 - 23, 118, 46, 11, [30, 20, 36]);
     text(ctx, "CLOSED", signX + signW / 2 - 18 - camX, 120, [255, 120, 120]);
+  } else if (bizRestingToday(key)) {
+    // the whole roster is off today: an honest smalltown closed-sign day
+    wrect(signX + signW / 2 - 25, 118, 50, 11, [30, 20, 36]);
+    text(ctx, "DAY OFF", signX + signW / 2 - 22 - camX, 120, [140, 220, 255]);
   }
 }
 
@@ -2198,10 +2311,16 @@ function drawFollowCard() {
   smallText(ctx, mood, 126 - smallTextWidth(mood), 6, mcol);
   smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
   smallText(ctx, TRAITS[p.trait].label + " " + MODES[p.mode].label, 29, 13, [120, 90, 60]);
-  smallText(ctx, crabStatus(c), 29, 21, [30, 110, 60]);
-  smallText(ctx, "SHIFT " + SHIFTS[p.shift].label, 29, 28, [110, 110, 130]);
+  smallText(ctx, crabStatus(c).slice(0, 26), 29, 21, [30, 110, 60]);
+  const shiftTxt = "SHIFT " + SHIFTS[p.shift].label;
+  smallText(ctx, shiftTxt, 29, 28, [110, 110, 130]);
   const wTxt = "$" + fmt(Math.max(0, p.wallet));
   const wx3 = 126 - textWidth(wTxt, 5);
+  {   // the weekly day off, when the row has room for it
+    const offTxt = "OFF " + WEEKDAYS[dayOffIdx(c)];
+    const ox = 29 + smallTextWidth(shiftTxt) + 5;
+    if (ox + smallTextWidth(offTxt) < wx3 - 8) smallText(ctx, offTxt, ox, 28, [70, 140, 200]);
+  }
   text(ctx, wTxt, wx3, 28, p.homeless ? [190, 80, 80] : [140, 110, 40], 5);
   const trend = p.walletPrev == null ? 0 : p.wallet - p.walletPrev;
   if (trend) smallText(ctx, trend > 0 ? "+" : "-", wx3 - 6, 29, trend > 0 ? [40, 150, 70] : [190, 80, 80]);
@@ -2230,7 +2349,7 @@ function drawPanel() {
   rect(ctx, 0, PANEL_Y, W, 1, [120, 90, 70]);
   blit(ctx, COIN, 4, PANEL_Y + 2);
   textShadow(ctx, "$" + fmt(coins), 13, PANEL_Y + 2, [255, 230, 120], [30, 20, 20]);
-  text(ctx, "D" + day + " " + clockStr(), 84, PANEL_Y + 2, [220, 210, 190]);
+  text(ctx, WEEKDAYS[weekdayIdx(day)] + " D" + day + " " + clockStr(), 80, PANEL_Y + 2, [220, 210, 190], 5);
   rect(ctx, 146, PANEL_Y + 1, 19, 11, muted ? [140, 50, 50] : [30, 20, 20]);
   rect(ctx, 147, PANEL_Y + 2, 17, 9, muted ? [90, 35, 35] : [90, 70, 60]);
   blit(ctx, muted ? SPEAKER_OFF : SPEAKER_ON, 150, PANEL_Y + 3);
@@ -2273,8 +2392,9 @@ function drawPanel() {
     }
     smallText(ctx, "TONIGHT AT 20:00", 132, ROW_Y, [230, 215, 195]);
     let by = ROW_Y + MROW + 1;
-    smallText(ctx, "WAGES " + crabs.length + "X$" + CRAB_WAGE, 132, by, [190, 175, 160]);
-    smallText(ctx, "$" + CRAB_WAGE * crabs.length, 224, by, [235, 160, 130]); by += MROW;
+    const owedN = crabs.filter(c => !c.p.sick && !offToday(c)).length;
+    smallText(ctx, "WAGES " + owedN + "X$" + CRAB_WAGE + (owedN < crabs.length ? " (" + (crabs.length - owedN) + " OUT)" : ""), 132, by, [190, 175, 160]);
+    smallText(ctx, "$" + CRAB_WAGE * owedN, 224, by, [235, 160, 130]); by += MROW;
     for (const key of Object.keys(BIZ)) {
       if (!bizUnlocked(key)) continue;
       smallText(ctx, BIZ[key].short + " RENT", 132, by, [190, 175, 160]);
@@ -2516,6 +2636,7 @@ function drawDossier() {
   if (!p.npc && Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1)
     smallText(ctx, "TAP: REASSIGN", x + w2 - 58, ly - 9, [96, 170, 220]);
   row("SHIFT", SHIFTS[p.shift].label);
+  row("OFF", WEEKDAY_FULL[dayOffIdx(c)] + (offToday(c) ? " - THAT'S TODAY!" : ""), [70, 140, 200]);
   row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
   const [hl, hcol] = homeLabel(p);
   row("HOME", hl, hcol);
@@ -2598,13 +2719,13 @@ function drawReport() {
   if (!report || reportT <= 0) return;
   const creditLines = (report.drew ? 1 : 0) + (report.interest ? 1 : 0) +
     (report.loanPaid ? 1 : 0) + (report.debt ? 1 : 0);
-  const w2 = 176, x = ((W - w2) / 2) | 0, y = 24, h2 = 118 + creditLines * 8;
+  const w2 = 176, x = ((W - w2) / 2) | 0, y = 24, h2 = 118 + creditLines * 8 + (report.off ? 8 : 0);
   ctx.fillStyle = "rgba(16,12,30,0.55)";
   ctx.fillRect(0, 0, W, PANEL_Y);
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
   rect(ctx, x, y, w2, 11, [190, 140, 80]);
-  text(ctx, "DAY " + report.day + " REPORT", x + 34, y + 2, [40, 24, 16]);
+  text(ctx, WEEKDAYS[weekdayIdx(report.day)] + " - DAY " + report.day + " REPORT", x + 22, y + 2, [40, 24, 16]);
   let ly = y + 16;
   const line = (label, val, col) => {
     smallText(ctx, label, x + 6, ly, [110, 100, 110]);
@@ -2625,6 +2746,7 @@ function drawReport() {
   line("WORD OF MOUTH", report.repEnd + (dRep >= 0 ? "  +" + dRep : "  " + dRep),
     dRep >= 0 ? [40, 110, 60] : [180, 60, 60]);
   ly += 2;
+  if (report.off) smallText(ctx, "DAY OFF: " + report.off, x + 6, ly, [70, 140, 200]), ly += 8;
   if (report.best) smallText(ctx, "BUSIEST CLAW: " + report.best + " x" + report.bestN, x + 6, ly, [70, 90, 130]), ly += 8;
   for (const n of report.died) smallText(ctx, n + " HAS PASSED AWAY", x + 6, ly, [180, 60, 60]), ly += 7;
   for (const n of report.sick) smallText(ctx, n + " FELL ILL", x + 6, ly, [120, 150, 90]), ly += 7;
@@ -2663,7 +2785,8 @@ function frame(now) {
     // 1. wages: pay every crab you can afford
     let wages = 0;
     for (const c of crabs) {
-      if (c.p.sick) continue;   // no work, no pay
+      if (c.p.sick) continue;      // no work, no pay
+      if (offToday(c)) continue;   // day off: same rule - the bill dips, the wallet doesn't
       if (coins >= CRAB_WAGE) { coins -= CRAB_WAGE; c.p.wallet += CRAB_WAGE; wages += CRAB_WAGE; }
       else popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]);
     }
@@ -2716,7 +2839,8 @@ function frame(now) {
       const emp = c.p.employer;
       if (!emp) continue;
       const o = OWNERS[emp];
-      if (c.p.sick) continue;   // no work, no pay - same deal as the crew
+      if (c.p.sick) continue;      // no work, no pay - same deal as the crew
+      if (offToday(c)) continue;   // day off: unpaid, but the job is safe
       if (o && o.till >= NPC_WAGE) { o.till -= NPC_WAGE; c.p.wallet += NPC_WAGE; }
       else {
         c.p.job = "fishing"; c.p.employer = null;
@@ -2812,10 +2936,12 @@ function frame(now) {
     if (fin.ok) {
       credit.bal = fin.bal; coins = fin.funds;
       earnHist.push({ t: time, amt: fin.drew - rent - fin.paid });
+      const offNames = allCrabs().filter(c => offToday(c)).map(c => c.p.name);
       report = {
         day, served: today.served, revenue: Math.round(today.revenue), rage: today.rage,
         wages, rent, sick: today.sick.slice(0, 3), died: today.died.slice(0, 2),
         recovered: today.recovered.slice(0, 2), moved: today.moved.slice(0, 2),
+        off: offNames.slice(0, 4).join(", "),
         repStart: Math.round(today.repStart), repEnd: Math.round(rep),
         best: Object.keys(today.byCrab).sort((a, b) => today.byCrab[b] - today.byCrab[a])[0],
         bestN: 0, coins: Math.round(coins),
