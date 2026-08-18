@@ -1151,7 +1151,7 @@ function drawCustomer(k) {
         wblit(acc.art, k.x + ax, cy + acc.dy, flip);
       }
       if (k.state === "waiting") {
-        const nm = k.name.split(" ")[0].slice(0, 6);
+        const nm = k.name.split(" ")[0].slice(0, 4);   // 4 chars fits the 13px queue slots
         const nx = k.x + 8 - smallTextWidth(nm) / 2 - camX;
         if (nx > -30 && nx < W) smallText(ctx, nm, nx, FLOOR_Y + 2, [100, 80, 55]);
       }
