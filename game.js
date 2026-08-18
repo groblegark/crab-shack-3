@@ -10,10 +10,10 @@ const ctx = cv.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 
 // ---------------------------------------------------------------- geometry
-const WORLD_W = 2048;
+const WORLD_W = 2192;
 const SKY_H = 58, SHORE_Y = 86, FLOOR_Y = 166, PANEL_Y = 176;
 const ROAD_Y0 = 90, ROAD_Y1 = 112, LOT_BOTTOM = 152;
-const HOUSE_XS = [30, 100, 170, 240, 310, 380].map(x => x);
+const HOUSE_XS = [30, 100, 170, 240, 310, 380, 512, 2064, 2128];   // promenade row, one by the shelter, two beach cottages past the pier
 const BUS_STOPS = [163, 660, 1180];
 const BUS_TERMINUS = [100, 1240];
 const STATION_BOTTOM = 152;
@@ -220,7 +220,7 @@ let camX = 1180, followIdx = -1, followNpc = null, tab = "crew";
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
 let today = newDayLog();
-let report = null, reportT = 0;
+let report = null, reportT = 0, dossier = null;
 function newDayLog() {
   return { served: 0, revenue: 0, rage: 0, sick: [], died: [], recovered: [],
     moved: [], byCrab: {}, repStart: 30, catchStart: 0 };
@@ -266,29 +266,28 @@ let npcs = [];
 function allCrabs() { return npcs.length ? crabs.concat(npcs) : crabs; }
 function initNpcs() {
   const p = { name: "SUDSY", npc: true, owner: "sudsy", trait: "cheery", mode: "walk",
-    acc: "showercap", color: CRAB_COLORS.length - 1, shift: "D", house: 0, homeX: 1148,
+    acc: "showercap", color: CRAB_COLORS.length - 1, shift: "D", house: 0, homeless: true,
     wallet: 25, job: "showers", hunger: 0, dirt: 0, bored: 0, sandy: 0 };
   const c = newCrab(p);
-  c.workBiz = "showers"; c.x = p.homeX; c.y = 158;
+  c.workBiz = "showers"; c.x = 1148; c.y = 158;
   const fishers = [
-    { name: "SALTY", trait: "grumpy", acc: "cap", color: 4, homeX: 1840, spot: 0 },
-    { name: "DRIFT", trait: "dreamy", acc: "none", color: 2, homeX: 2010, spot: 1 },
+    { name: "SALTY", trait: "grumpy", acc: "cap", color: 4, x0: 1840, spot: 0 },
+    { name: "DRIFT", trait: "dreamy", acc: "none", color: 2, x0: 2010, spot: 1 },
   ].map((f, i) => {
     const fp = { name: f.name, npc: true, fisher: true, trait: f.trait, mode: "walk",
-      acc: f.acc, color: f.color, shift: "D", house: 0, homeX: f.homeX,
+      acc: f.acc, color: f.color, shift: "D", house: 0, homeless: true,
       wallet: 18, job: "fishing", hunger: 0.3, dirt: 0.2, bored: 0, sandy: 0.3 };
     const fc = newCrab(fp);
     fc.fishSpot = FISHING_SPOTS[f.spot];
-    fc.x = f.homeX; fc.y = 158;
+    fc.x = f.x0; fc.y = 158;
     return fc;
   });
   npcs = [c].concat(fishers);
 }
 function homeX(c) { return homeSpot(c).x; }
 function homeSpot(c) {
-  if (c.p.homeX) return { x: c.p.homeX, y: 158 };   // owner-operators nook by their stand
   if (c.p.homeless) {
-    const cot = [6, 24, 44][Math.max(0, crabs.indexOf(c)) % 3];
+    const cot = [6, 20, 34, 48][Math.max(0, allCrabs().indexOf(c)) % 4];
     return { x: SHELTER_X + cot, y: 155 };
   }
   const hx = HOUSE_XS[c.p.house];
@@ -310,6 +309,7 @@ function newCrab(persona) {
   if (persona.dirt == null) persona.dirt = 0;
   if (persona.bored == null) persona.bored = 0;
   if (persona.sick === undefined) persona.sick = null;
+  if (persona.npc && persona.homeless === undefined) { persona.homeless = true; delete persona.homeX; }
   if (!persona.made) persona.made = {};   // dish id -> lifetime count
   if (persona.sandy == null) persona.sandy = 0;
   return {
@@ -598,7 +598,7 @@ function updateCommute(c, dt) {
     if (stepTo(c, dest, wspd, dt, 167)) arriveCommute(c, toWork);
   } else if (c.cstate === "drive") {     // bike/buggy: ride to park spot, walk rest
     const b = BIZ[c.p.job];
-    const park = toWork ? (m === "buggy" ? b.park + c.p.house * 18 : b.rack + c.p.house * 7) : homeX(c);
+    const park = toWork ? (m === "buggy" ? b.park + (c.p.house % 6) * 18 : b.rack + (c.p.house % 6) * 7) : homeX(c);
     if (stepTo(c, park, vspd, dt, 150)) {
       if (toWork) { c.cstate = "walkFromPark"; }
       else arriveCommute(c, false);
@@ -607,7 +607,7 @@ function updateCommute(c, dt) {
     if (stepTo(c, dest, wspd, dt, 167)) arriveCommute(c, true);
   } else if (c.cstate === "walkToVehicle") {   // heading home: fetch parked ride
     const b = BIZ[c.p.job];
-    const park = m === "buggy" ? b.park + c.p.house * 18 : b.rack + c.p.house * 7;
+    const park = m === "buggy" ? b.park + (c.p.house % 6) * 18 : b.rack + (c.p.house % 6) * 7;
     if (stepTo(c, park, wspd, dt, 150)) c.cstate = "drive";
   } else if (c.cstate === "walkToStop") {
     setT(c, BUS_STOPS[c.busFrom], 148);
@@ -682,7 +682,9 @@ function updateSchedule(c, dt) {
   // owner-operators top their pocket up from the till
   if (c.p.npc) {
     const o = OWNERS[c.p.owner];
-    if (o && c.p.wallet < 15 && o.till >= 30) { o.till -= 30; c.p.wallet += 30; }
+    const need = c.p.homeless ? 60 : 15;   // save up for a place of her own
+    if (o && c.p.wallet < need && o.till >= 90) { o.till -= 30; c.p.wallet += 30; }
+    else if (o && c.p.wallet < 15 && o.till >= 30) { o.till -= 30; c.p.wallet += 30; }
   }
   // off-duty errands, while town is open and it's not almost shift time
   if (c.errandCd > 0) c.errandCd -= dt;
@@ -720,16 +722,17 @@ function pickErrand(c) {
       return { biz: "shack", recipe: r, need: "food" };
     }
   }
-  if (c.p.sick) return null;   // bed rest: food handled above, nothing else
   if ((c.p.dirt || 0) >= 0.66 && staffed("cleaners")) {
     const r = BIZ.cleaners.recipes[1];   // uniform service
     if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "cleaners", recipe: r, need: "clean" };
   }
-  const needsBath = (c.p.sandy || 0) >= 0.6 || ((c.p.dirt || 0) >= 0.75 && !staffed("cleaners"));
-  if (needsBath && staffed("showers") && !c.p.npc) {
+  const needsBath = (c.p.sandy || 0) >= 0.6 || ((c.p.dirt || 0) >= 0.75 && !staffed("cleaners"))
+    || (c.p.sick && (c.p.dirt || 0) >= 0.4);   // the sick drag themselves to the taps - staying clean is the cure
+  if (needsBath && staffed("showers") && c.workBiz !== "showers") {
     const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
     if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "showers", recipe: r, need: "spa" };
   }
+  if (c.p.sick) return null;   // bed rest otherwise: no arcade nights while ill
   if ((c.p.bored || 0) >= 0.6 && staffed("arcade")) {
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
     if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "arcade", recipe: r, need: "fun" };
@@ -1225,7 +1228,7 @@ function tryBuy(key) {
       const free = CRAB_NAMES.find(n => !usedNames.has(n));
       if (free) p2.name = free;
     }
-    const used = new Set(crabs.filter(k => !k.p.homeless).map(k => k.p.house));
+    const used = new Set(allCrabs().filter(k => !k.p.homeless).map(k => k.p.house));
     p2.homeless = true;
     for (let h = 0; h < HOUSE_XS.length; h++) if (!used.has(h)) { p2.house = h; p2.homeless = false; break; }
     const c = newCrab(p2);
@@ -1305,6 +1308,7 @@ cv.addEventListener("click", (ev) => {
     return;
   }
   if (gameOver) { newGame(); return; }
+  if (dossier) { dossier = null; return; }
   if (reportT > 0) { reportT = 0; return; }
   startMusic();
   const p = evPos(ev);
@@ -1351,6 +1355,11 @@ cv.addEventListener("click", (ev) => {
     popText("NEW JOB: " + BIZ[c.p.job].name, c.x - 20, FLOOR_Y - 34, [140, 255, 160]);
     return;
   }
+  // a click on the follow card itself opens the crab's full record
+  {
+    const fc2 = followNpc || (followIdx >= 0 && crabs[followIdx]);
+    if (fc2 && p.x >= 2 && p.x < 130 && p.y >= 2 && p.y < 54) { dossier = fc2; sfx.ding(); return; }
+  }
   // world: click any crab - crew or townsfolk - to follow them
   const wx = p.x + camX;
   for (const c of allCrabs()) {
@@ -1368,7 +1377,7 @@ addEventListener("keydown", (e) => {
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; }
-  if (e.key === "Escape") { followIdx = -1; followNpc = null; }
+  if (e.key === "Escape") { if (dossier) { dossier = null; return; } followIdx = -1; followNpc = null; }
 });
 
 // ---------------------------------------------------------------- drawing
@@ -1448,7 +1457,7 @@ function drawTown() {
   for (let x = 6; x < WORLD_W; x += 22) wrect(x, ROAD_Y0 + 9, 10, 2, [230, 220, 120]);
   wrect(0, ROAD_Y1, WORLD_W, 3, [214, 196, 156]);   // shoulder
   // houses face the promenade (owned ones get the owner's roof color)
-  for (const c of crabs)
+  for (const c of allCrabs())
     if (!c.p.homeless) wblit(HOUSES2[c.p.color % HOUSES2.length], HOUSE_XS[c.p.house], HOME_BOTTOM - HOUSES2[0].h);
   // the crab shelter
   wblit(SHELTER2, SHELTER_X, HOME_BOTTOM - SHELTER2.h);
@@ -1704,6 +1713,7 @@ function crabMood(c) {
   return ["SUNNY", [40, 150, 70]];
 }
 function drawFollowCard() {
+  if (dossier) return;   // the full record is open - don't double up
   const c = followNpc || (followIdx >= 0 && crabs[followIdx]);
   if (!c) return;
   const p = c.p;
@@ -1717,6 +1727,7 @@ function drawFollowCard() {
   text(ctx, p.name, 29, 5, [40, 30, 40]);
   const [mood, mcol] = crabMood(c);
   smallText(ctx, mood, 126 - smallTextWidth(mood), 6, mcol);
+  smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
   smallText(ctx, TRAITS[p.trait].label + " " + MODES[p.mode].label, 29, 13, [120, 90, 60]);
   smallText(ctx, crabStatus(c), 29, 21, [30, 110, 60]);
   smallText(ctx, "SHIFT " + SHIFTS[p.shift].label, 29, 28, [110, 110, 130]);
@@ -1931,6 +1942,62 @@ function drawGameOver() {
   const bl = ((time * 2) | 0) % 2;
   if (bl) text(ctx, "CLICK TO START OVER", cx2 - 56, 137, [40, 110, 60], 6);
 }
+function homeLabel(p) {
+  if (p.homeless) return ["SLEEPS AT THE SHELTER", [190, 80, 80]];
+  if (p.house >= 7) return ["BEACH COTTAGE BY THE PIER", [90, 140, 190]];
+  if (p.house === 6) return ["HOUSE BY THE SHELTER", [90, 130, 90]];
+  return ["HOUSE " + (p.house + 1) + " ON THE PROMENADE", [90, 130, 90]];
+}
+function drawDossier() {
+  if (!dossier) return;
+  const c = dossier, p = c.p;
+  const x = 24, y = 16, w2 = 208, h2 = 168;
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 22, [58, 42, 38]);
+  rect(ctx, x + 4, y + 3, 20, 26, [200, 230, 245]);
+  blit(ctx, CRAB_ARTS[p.color].a, x + 6, y + 11);
+  const acc = ACCESSORIES[c.duty ? "toque" : p.acc];
+  if (acc) blit(ctx, acc.art, x + 6 + acc.dx, y + 11 + acc.dy);
+  text(ctx, p.name, x + 30, y + 4, [255, 240, 210]);
+  smallText(ctx, TRAITS[p.trait].label + " - " + MODES[p.mode].label + (p.npc ? " - TOWNSFOLK" : " - CREW"), x + 30, y + 14, [210, 190, 170]);
+  let ly = y + 34;
+  const row = (label, val, col) => {
+    smallText(ctx, label, x + 8, ly, [120, 110, 125]);
+    smallText(ctx, val, x + 56, ly, col || [40, 30, 40]);
+    ly += 9;
+  };
+  row("DOES", p.npc ? (p.fisher ? "FISHES OFF THE PIER" : "RUNS " + BIZ[p.job].name) : "WORKS THE " + BIZ[p.job].name, [70, 90, 130]);
+  row("SHIFT", SHIFTS[p.shift].label);
+  row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
+  const [hl, hcol] = homeLabel(p);
+  row("HOME", hl, hcol);
+  row("NOW", crabStatus(c).slice(0, 34));
+  if (p.sick) row("HEALTH", "SICK - DAY " + ((p.sick.days || 0) + 1), [190, 80, 80]);
+  ly += 2;
+  const bars = [["FED", 1 - (p.hunger || 0)], ["CLEAN", 1 - (p.dirt || 0)],
+    ["FUN", 1 - (p.bored || 0)], ["UNSANDY", 1 - (p.sandy || 0)]];
+  for (const [label, frac] of bars) {
+    smallText(ctx, label, x + 8, ly, [110, 110, 130]);
+    rect(ctx, x + 44, ly, 100, 5, [30, 20, 36]);
+    rect(ctx, x + 45, ly + 1, Math.round(98 * Math.max(0, frac)), 3,
+      frac > 0.5 ? [96, 200, 120] : frac > 0.25 ? [235, 200, 90] : [235, 90, 90]);
+    ly += 8;
+  }
+  ly += 3;
+  smallText(ctx, "CLAIMS TO FAME", x + 8, ly, [58, 42, 38]); ly += 8;
+  const made = Object.entries(p.made || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (!made.length) smallText(ctx, "NONE YET - GIVE IT TIME", x + 8, ly, [150, 140, 160]), ly += 8;
+  for (const [id, n] of made) {
+    let tier = "";
+    for (const [need, , label] of MASTERY) if (n >= need) { tier = label; break; }
+    smallText(ctx, (ITEM_NAMES[id] || id.toUpperCase()) + " X" + n + (tier ? " - " + tier : ""), x + 8, ly,
+      tier ? [140, 110, 40] : [90, 90, 105]);
+    ly += 8;
+  }
+  smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
+}
+
 function drawReport() {
   if (!report || reportT <= 0) return;
   const w2 = 176, x = ((W - w2) / 2) | 0, y = 24, h2 = 118;
@@ -1998,11 +2065,11 @@ function frame(now) {
     if (wages > 0) earnHist.push({ t: time, amt: -wages });
     // 2. house rent from each crab's own wallet; broke crabs move to the shelter
     let evictedNames = [];
-    for (const c of crabs) {
-      c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.05);
+    for (const c of allCrabs()) {
+      if (!c.p.npc) c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.05);
       if (c.p.homeless) {
-        // shelter is free; move back into a free house once savings allow
-        const used = new Set(crabs.filter(k => !k.p.homeless).map(k => k.p.house));
+        // shelter is free; move into a free house once savings allow
+        const used = new Set(allCrabs().filter(k => !k.p.homeless).map(k => k.p.house));
         let free = -1;
         for (let h = 0; h < HOUSE_XS.length; h++) if (!used.has(h)) { free = h; break; }
         if (free >= 0 && c.p.wallet >= MOVE_IN_COST + HOUSE_RENT) {
@@ -2204,6 +2271,7 @@ function frame(now) {
   drawSwoop();
   drawFloaters(dt);
   drawNight();
+  drawDossier();
   drawReport();
   drawFollowCard();
   {  // town reputation chip, top-right of the world

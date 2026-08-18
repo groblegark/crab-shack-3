@@ -45,12 +45,27 @@ compounds or collapses → the landlord collects at 20:00 either way.
   scales with rep. Chip in the world's top-right corner.
 - **2D movement**: crabs have x/y, soft-body collision, solid stations/tables/
   stalls, lane routing (`routedStep`), head-on passing, y-sorted painter.
+- **Housing market (everyone)**: 9 lots — the promenade row (0–5), one by the
+  shelter (6), two beach cottages past the pier (7–8). NPCs have no private
+  nooks any more: everyone homeless sleeps on shelter cots, pays $10 house
+  rent when housed, and moves up at settlement when wallet ≥ move-in ($35) +
+  rent. Fishers fund it at $2/catch; SUDSY pays herself a bigger owner draw
+  while homeless. World is 2192 wide.
+- **Sick crabs can move**: bed rest no longer bars essential errands — the
+  sick still buy food and drag themselves to the cleaners/showers (half
+  speed), which feeds the `cared` check that improves cure and death odds.
+  Arcade nights stay off-limits. This closed the calibration-flagged spiral
+  where the sick couldn't re-clean.
 - **UI**: title → lease-signing intro (Mr. Pincherton) → play. CREW / SHOP /
   MENU tabs, BILL chip (itemized nightly bill), follow-cam on ANY crab
-  including NPCs, fast-forward >>/>>> (F), master mute (M).
+  including NPCs, fast-forward >>/>>>/>>>> = 2/3/6x (F), master mute (M).
+- **Crab dossier**: clicking the follow card opens a full-screen record —
+  job, shift, wallet, housing, health, need bars, claims to fame. Click or
+  Esc closes. Works for every crab, crew and townsfolk alike.
 
 ### Verified balance (8 seeds, tools/headless.mjs)
-- Baseline (buy nothing): **0/8 survive, evicted day 9–22, median 13**.
+- Baseline (buy nothing): **0/8 survive, evicted day 9–14, median 11**
+  (tightened slightly when strict retail + sick mobility landed; same shape).
 - Hire-and-seat strategy (`--buy chef,table`): **2/6 alive at day 40**.
 - Constants: shack rent 230, wage 22, house rent 10, hires 60×2.0,
   showers 5/10, fish pay 13. **Rent is charged from night one** — you open
@@ -68,9 +83,10 @@ compounds or collapses → the landlord collects at 20:00 either way.
   re-clean, so cheap showers matter); buy *timing* beat buy prices.
 
 ## Tools (the load-bearing part)
-- `node tools/suite.mjs` — **18 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **20 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
-  detection (baseline + full town), 3x-dt stability, homeless recovery,
+  detection (baseline + full town), 6x-dt stability, homeless recovery,
+  NPC housing ladder, sick-crab mobility,
   disease infection/cure/mortality, showers turnover, NPC economics,
   save/load, no-inflation wallet bounds.
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]` — CLI.
@@ -108,10 +124,12 @@ compounds or collapses → the landlord collects at 20:00 either way.
    (TODO in the settlement block); no mortality for NPCs either.
 6. Staff-bused table service for a fancier restaurant tier.
 7. Cosmetics: closed-eye sleep sprites, taller shower-stall art (curtain reads
-   as a wall fixture at the y136 row), followable-NPC polish.
-8. **Secret mobile merge mode** (in progress, branch `merge-mode`): a
-   touch-only hidden mode where you play as a crab and merge icons — built for
-   Matt's kids. Early draft pending approval.
+   as a wall fixture at the y136 row), followable-NPC polish, and **pier plank
+   art** — PIER_X0/X1/Y exist and fishers stand there, but no planks were ever
+   drawn; they fish standing on the road's far edge.
+8. ~~Secret mobile merge mode~~ — **shipped**: touch-only hidden mode (hold a
+   crab until the thought bubble fills), per-crab boards, goal ladder pays
+   into the till ($60/session cap). Lives in merge.js, desktop-inert.
 9. **Portrait-phone canvas** — the screen fills a phone's width but the 256x240
    aspect leaves dead space above/below on tall screens. A real fix is a taller
    canvas in portrait (e.g. 256x288, extra rows going to the UI panel): `H` is

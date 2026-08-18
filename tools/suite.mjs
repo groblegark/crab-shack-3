@@ -293,6 +293,38 @@ scenario("npc: SUDSY dines at the player shack", () => {
     : "SUDSY never bought food at the shack in 5 days (hunger " + sim.G("npcs[0].p.hunger").toFixed(2) + ", wallet " + sim.G("Math.round(npcs[0].p.wallet)") + ")";
 });
 
+scenario("housing: npcs sleep at the shelter, then move up", () => {
+  const sim = createSim({ seed: 31 });
+  // fresh town: all three townsfolk start at the shelter, no nooks
+  const flags = JSON.parse(sim.G("JSON.stringify(npcs.map(c => [c.p.name, !!c.p.homeless, c.p.homeX || 0]))"));
+  for (const [name, homeless, nook] of flags) {
+    if (!homeless) return name + " started housed";
+    if (nook) return name + " still has a nook homeX";
+  }
+  // at midnight everyone homeless is bedded down at the shelter
+  sim.runUntil("tmin >= 23.8 * 60", { maxSteps: 400000 });
+  const spots = JSON.parse(sim.G("JSON.stringify(allCrabs().filter(c => c.p.homeless && c.cstate === 'none').map(c => [c.p.name, Math.round(c.x)]))"));
+  for (const [name, x] of spots)
+    if (Math.abs(x - 470) > 60) return name + " slept at x=" + x + ", not the shelter";
+  // a flush SUDSY rents a house at the next settlement
+  sim.G("npcs[0].p.wallet = 120");
+  sim.runUntil("day >= 2 && tmin > 10", { maxSteps: 400000, onTick: (G) => { if (G("coins") < 200) G("coins = 400"); }, tickEvery: 50 });
+  if (sim.G("npcs[0].p.homeless")) return "SUDSY stayed homeless with $120 (wallet now " + sim.G("Math.round(npcs[0].p.wallet)") + ")";
+  const h = sim.G("npcs[0].p.house");
+  const clash = sim.G(`allCrabs().filter(c => !c.p.homeless && c.p.house === ${h}).length`);
+  return clash === 1 ? true : "house " + h + " has " + clash + " tenants";
+});
+
+scenario("sick crabs can still wash (mobility + cure path)", () => {
+  const sim = createSim({ seed: 88 });
+  sim.runUntil('crabs[0].dayState === "home" && tmin > 13 * 60', {});
+  sim.G("crabs[0].p.sick = { days: 0 }; crabs[0].p.sandy = 0.9; crabs[0].p.dirt = 0.5; crabs[0].p.wallet = 60; crabs[0].errandCd = 0;");
+  const ok = sim.runUntil("(crabs[0].p.sandy || 0) === 0", { maxSteps: 60000,
+    // isolate mobility: no snack detours, no midnight recovery roll ending the illness
+    onTick: (G) => { G("crabs[0].p.hunger = 0.2; if (!crabs[0].p.sick) crabs[0].p.sick = { days: 1 }"); } });
+  return ok ? true : "sick crab never reached the showers (sandy " + sim.G("crabs[0].p.sandy").toFixed(2) + ", state " + sim.G("crabs[0].dayState") + ")";
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
