@@ -15,8 +15,8 @@ dry). SUDSY owns the beach showers outright: her own till, her own rent, her
 own dinner at your shack. Every crab has a wallet, needs, a home, a commute,
 and opinions.
 
-- **Businesses**: the shack, plus SUDS N BUBBLES (laundromat, $400) and THE
-  CLAWCADE (claw machines + skeeball, $650) to buy. SUDS SHOWERS is SUDSY's.
+- **Businesses**: the shack, plus THE CLAWCADE (claw machines + skeeball,
+  $650) to buy. SUDS SHOWERS is SUDSY's.
 - **Crew**: hire crabs, assign them between your businesses, watch them
   commute (walk / bike / beach buggy / the SAND BUS), work shifts, and live in
   houses you can see inside. Broke crabs move into the shelter and climb back
