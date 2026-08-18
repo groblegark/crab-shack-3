@@ -108,12 +108,14 @@ scenario("staff meals: closing crew cooks their own dinner, at retail", () => {
   // last-call lingering can keep the shack staffed past close: wait for a truly dark kitchen
   sim.runUntil('!allCrabs().some(k => k.duty && k.workBiz === "shack") && tmin >= 20.5 * 60 && tmin < 22.5 * 60', { maxSteps: 120000 });
   const before = JSON.parse(sim.G(`(() => {
-    for (const c of crabs) { c.p.hunger = 0; c.errandCd = 999; c.p.sandy = 0; }
+    for (const c of crabs) { c.p.hunger = 0; c.p.thirst = 0; c.errandCd = 999; c.p.sandy = 0; }
     const c = crabs[0];
     c.p.hunger = 0.9; c.p.wallet = 30; c.errandCd = 0;   // <40: cheapest recipe, deterministic
-    // he may be mid-commute when we force this - park him at home so the
-    // home-errand check is live inside tonight's town-awake window
-    if (c.dayState !== "working") { c.dayState = "home"; }
+    // he may be mid-commute - or mid-POUR since T2 - when we force this:
+    // abortChef is the sanctioned interrupt (it releases a selfCook's grill
+    // grip; forcing dayState alone deadlocks him against his own lock), then
+    // park him at home so the errand check is live in the town-awake window
+    if (c.dayState !== "working") { abortChef(c); c.dayState = "home"; }
     return JSON.stringify({ paid: window._stats.staffMealPaid || 0, cost: window._stats.staffMealCost || 0,
       meals: window._stats.staffMeals || 0 });
   })()`));
