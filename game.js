@@ -19,6 +19,9 @@ const BUS_TERMINUS = [100, 1240];
 const STATION_BOTTOM = 152;
 const QUEUE_DX = 13, QUEUE_MAX = 4;
 const SHELTER_X = 444, MOVE_IN_COST = 35;
+const PIER_X0 = 1870, PIER_X1 = 2040, PIER_Y = 96;   // planks over the east break
+const FISHING_SPOTS = [{ x: 1900, y: PIER_Y }, { x: 1956, y: PIER_Y }];
+let townCatch = 6;   // the day's landed fish, crate-side
 const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
 
 // ---------------------------------------------------------------- businesses
@@ -162,6 +165,12 @@ function darkness() { // 0 = day, 1 = full night
 
 // ---------------------------------------------------------------- recipes
 const INGREDIENT_COST = { fish_raw: 5, fruit: 3, towel_dirty: 1, uniform_dirty: 1, token: 1, soap: 1 };
+const FISH_LOCAL = 4, FISH_IMPORT = 7;   // fresh off the pier vs shipped in
+function ingredientCost(raw) {
+  if (raw === "fish_raw") return townCatch > 0 ? FISH_LOCAL : FISH_IMPORT;
+  return INGREDIENT_COST[raw];
+}
+function consumeIngredient(raw) { if (raw === "fish_raw" && townCatch > 0) townCatch--; }
 const ITEM_NAMES = {
   fish_raw: "FISH", fish_cut: "CUT FISH", fruit: "FRUIT",
   taco: "FISH TACO", juice: "JUICE", plate_fish: "GRILL FISH",
@@ -246,7 +255,19 @@ function initNpcs() {
     wallet: 25, job: "showers", hunger: 0, dirt: 0, bored: 0, sandy: 0 };
   const c = newCrab(p);
   c.workBiz = "showers"; c.x = p.homeX; c.y = 158;
-  npcs = [c];
+  const fishers = [
+    { name: "SALTY", trait: "grumpy", acc: "cap", color: 4, homeX: 1840, spot: 0 },
+    { name: "DRIFT", trait: "dreamy", acc: "none", color: 2, homeX: 2010, spot: 1 },
+  ].map((f, i) => {
+    const fp = { name: f.name, npc: true, fisher: true, trait: f.trait, mode: "walk",
+      acc: f.acc, color: f.color, shift: "D", house: 0, homeX: f.homeX,
+      wallet: 18, job: "fishing", hunger: 0.3, dirt: 0.2, bored: 0, sandy: 0.3 };
+    const fc = newCrab(fp);
+    fc.fishSpot = FISHING_SPOTS[f.spot];
+    fc.x = f.homeX; fc.y = 158;
+    return fc;
+  });
+  npcs = [c].concat(fishers);
 }
 function homeX(c) { return homeSpot(c).x; }
 function homeSpot(c) {
@@ -440,8 +461,9 @@ function nearestStop(x) {
   }
   return best;
 }
+function jobDoor(c) { return c.p.job === "fishing" ? (c.fishSpot ? c.fishSpot.x : PIER_X0 + 20) : BIZ[c.p.job].door; }
 function commuteGmin(c) {
-  const dist = Math.abs(BIZ[c.p.job].door - homeX(c));
+  const dist = Math.abs(jobDoor(c) - homeX(c));
   const m = c.p.mode;
   if (m === "bus") return 100;                       // walk + wait + ride, rough
   return dist / (MODES[m].speed * TRAITS[c.p.trait].move * shoesMult()) * TS + 12;
@@ -536,7 +558,7 @@ function clampY(y) { return Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, y)); }
 function startCommute(c, toWork) {
   c.dayState = toWork ? "toWork" : "toHome";
   const m = c.p.mode;
-  const dest = toWork ? BIZ[c.p.job].door : homeX(c);
+  const dest = toWork ? jobDoor(c) : homeX(c);
   if (m === "bus") {
     c.busFrom = nearestStop(c.x); c.busTo = nearestStop(dest);
     c.cstate = c.busFrom === c.busTo ? "travel" : "walkToStop";
@@ -547,7 +569,7 @@ function startCommute(c, toWork) {
 
 function updateCommute(c, dt) {
   const toWork = c.dayState === "toWork";
-  const dest = toWork ? BIZ[c.p.job].door : homeX(c);
+  const dest = toWork ? jobDoor(c) : homeX(c);
   const m = c.p.mode, tr = TRAITS[c.p.trait];
   const wspd = crabMove(c), vspd = MODES[m].speed * tr.move * shoesMult();
 
@@ -587,7 +609,10 @@ function updateCommute(c, dt) {
 }
 
 function arriveCommute(c, atWork) {
-  if (atWork) { c.dayState = "working"; c.duty = true; c.kstate = "idle"; c.workBiz = c.p.job; }
+  if (atWork) {
+    c.dayState = "working"; c.duty = true; c.kstate = "idle"; c.workBiz = c.p.job;
+    if (c.p.job === "fishing" && c.fishSpot) { c.x = c.fishSpot.x; c.y = c.fishSpot.y; c.castT = 3 + Math.random() * 6; }
+  }
   else { c.dayState = "home"; }
 }
 
@@ -615,7 +640,7 @@ function updateBus(dt) {
 // ---------------------------------------------------------------- day schedule
 function updateSchedule(c, dt) {
   const sh = SHIFTS[c.p.shift];
-  if (!bizUnlocked(c.p.job)) c.p.job = "shack";
+  if (c.p.job !== "fishing" && !bizUnlocked(c.p.job)) c.p.job = "shack";
   if (c.dayState === "home" && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !c.p.sick) {
     startCommute(c, true);
   }
@@ -703,7 +728,8 @@ function updateSelfCook(c, dt) {
       const r = c.cookRecipe;
       c.p.wallet = Math.max(0, c.p.wallet - r.pay);
       creditBiz("shack", r.pay, c.x, FLOOR_Y - 40);          // retail into the till
-      debitBiz("shack", INGREDIENT_COST[r.raw], c.x, FLOOR_Y - 34);  // till buys the ingredients
+      debitBiz("shack", ingredientCost(r.raw), c.x, FLOOR_Y - 34);  // till buys the ingredients
+      consumeIngredient(r.raw);
       if (window._stats) {
         window._stats.staffMealPaid = (window._stats.staffMealPaid || 0) + r.pay;
         window._stats.staffMealCost = (window._stats.staffMealCost || 0) + INGREDIENT_COST[r.raw];
@@ -811,6 +837,19 @@ function abortChef(c) {
   if (c.cleanStall) { c.cleanStall.cleaning = false; c.cleanStall = null; c.kstate = "idle"; }
   c.kstate = "idle"; c.cust = null; c.carrying = null; c.stepIdx = 0;
 }
+function updateFishing(c, dt) {
+  // stand at the spot, cast, wait, land one - the town's oldest job
+  if (c.fishSpot) { c.x = c.fishSpot.x; c.y = c.fishSpot.y; }
+  c.castT = (c.castT || 5) - dt;
+  if (c.castT <= 0) {
+    c.castT = 14 + Math.random() * 18;
+    townCatch++;
+    c.p.wallet += 2;   // the market pays small money for each landed fish
+    popText("CATCH!", c.x - 4, c.y - 24, [140, 220, 255]);
+    if (window._stats) window._stats.catches = (window._stats.catches || 0) + 1;
+    if (Math.random() < 0.25) c.quip = { text: ["BIG ONE!", "THEY'RE BITING", "SEA PROVIDES"][(Math.random() * 3) | 0], t: 2.2 };
+  }
+}
 function updateKitchen(c, dt) {
   if (c.cust && (c.cust.state === "leaving" || c.cust.served)) { abortChef(c); return; }
   const bizKey = c.workBiz, biz = BIZ[bizKey];
@@ -843,8 +882,9 @@ function updateKitchen(c, dt) {
   } else if (c.kstate === "walk") {
     if (routedStep(c, spd, dt)) {
       if (c.stepIdx === -1) {
-        if (ownerFunds(bizKey) < INGREDIENT_COST[c.cust.recipe.raw]) { c.kstate = "waitCash"; return; }
-        debitBiz(bizKey, INGREDIENT_COST[c.cust.recipe.raw], c.x, FLOOR_Y - 40);
+        if (ownerFunds(bizKey) < ingredientCost(c.cust.recipe.raw)) { c.kstate = "waitCash"; return; }
+        debitBiz(bizKey, ingredientCost(c.cust.recipe.raw), c.x, FLOOR_Y - 40);
+        consumeIngredient(c.cust.recipe.raw);
         c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1;
       }
       else if (c.stepIdx >= c.cust.recipe.steps.length) serve(c);
@@ -870,8 +910,9 @@ function updateKitchen(c, dt) {
       popText("SPARKLING", c.x - 6, FLOOR_Y - 30, [140, 220, 255]);
     }
   } else if (c.kstate === "waitCash") {
-    if (ownerFunds(bizKey) >= INGREDIENT_COST[c.cust.recipe.raw]) {
-      debitBiz(bizKey, INGREDIENT_COST[c.cust.recipe.raw], c.x, FLOOR_Y - 40);
+    if (ownerFunds(bizKey) >= ingredientCost(c.cust.recipe.raw)) {
+      debitBiz(bizKey, ingredientCost(c.cust.recipe.raw), c.x, FLOOR_Y - 40);
+      consumeIngredient(c.cust.recipe.raw);
       c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1;
     }
   } else if (c.kstate === "waitSlot") {
@@ -1076,6 +1117,7 @@ function updateCustomers(dt) {
 // ---------------------------------------------------------------- status text
 function crabStatus(c) {
   if (c.p.sick) return "SICK - DAY " + ((c.p.sick.days || 0) + 1) + " - NEEDS FOOD + REST";
+  if (c.p.fisher && c.dayState === "working") return "FISHING OFF THE PIER";
   if (c.dayState === "home") {
     if (darkness() > 0.7) return c.p.homeless ? "SLEEPING AT THE SHELTER" : "SLEEPING";
     return c.p.homeless ? "AT THE SHELTER" : "CHILLING AT HOME";
@@ -1494,6 +1536,7 @@ function drawCrab(c) {
   }
   if ((c.p.dirt || 0) >= 0.66) wblit(DIRT, c.x, y, c.flip);
   if (c.p.sick && ((c.animT * 2) | 0) % 2) wblit(SICK_MARK, c.x + 10, y - 8);
+  if (c.p.fisher && c.dayState === "working") wblit(ROD[((c.animT * 2) | 0) % 2], c.x + 12, y - 3, c.flip);
   if (c.carrying) wblit(ITEMS[c.carrying], c.x + 4, y - 7);
   if (working && c.workMax > 0.7) {
     const frac = 1 - c.workT / c.workMax;
@@ -1832,7 +1875,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000) * TURBO * (1 + ffMode);
   last = now; time += dt;
   if (!gameOver && screen === "play") tmin += dt * TS;
-  if (tmin >= 1440) { tmin -= 1440; day++; }
+  if (tmin >= 1440) { tmin -= 1440; day++; townCatch = Math.min(townCatch, 4); }
   if (screen === "play" && tmin >= 20 * 60 && lastRentDay !== day) {
     lastRentDay = day;
     for (const c of crabs) c.p.walletPrev = c.p.wallet;
@@ -1988,6 +2031,7 @@ function frame(now) {
     if (c.dayState === "toWork" || c.dayState === "toHome") updateCommute(c, dt);
     else if (c.dayState === "toErrand" || c.dayState === "errand") updateErrand(c, dt);
     else if (c.dayState === "selfCook") updateSelfCook(c, dt);
+    else if (c.dayState === "working" && c.p.job === "fishing") updateFishing(c, dt);
     else if (c.dayState === "working") updateKitchen(c, dt);
     else if (c.dayState === "home") updateHome(c, dt);
     maybeQuip(c, dt);
