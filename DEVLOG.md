@@ -8,6 +8,54 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, later still — The boss gets claws (and the pin is dead)
+
+![PINCHY, mid-grill, declines management's input](devlog/img/2026-08-18-order-refusal.png)
+
+*Management right-clicked. PINCHY: ON THE CLOCK. The grill comes first.*
+
+You can point at things now. Follow one of your crew, right-click anywhere
+in the world, and a little flag drops: the crab walks there and the card
+reads AS ORDERED. Right-click a station to clock them in, their house to
+knock them off early, the kitchen to make them eat a taco RIGHT NOW — at
+full retail, obviously; the wage precedent cuts both ways.
+
+But this is a simulation town, so the order is a *request with authority*,
+not a teleport. PINCHY, mid-grill at 2 PM, answers the boss's flag with a
+red pop — ON THE CLOCK — and keeps grilling. The same right-click that
+evening gets a cheerful ON IT! and a stroll, after which the schedule
+tucks him into bed like nothing happened. And the townsfolk? Right-click a
+crab who doesn't work for you and they decline with I'VE GOT MY OWN LIFE —
+which is the whole design philosophy of this game in six words.
+
+![Night orders: TIRED, AS ORDERED, marching past the sleepers](devlog/img/2026-08-18-as-ordered.png)
+
+### The pin is dead
+
+Since the first audit this project has carried a documented horror: two
+crabs could grind against each other — one standing perfectly still, one
+pushing — and hold that pose FOREVER, a soft-lock shaped like an argument.
+Every walker in town now carries a watchdog: no progress for a second and
+a half, sidestep, try again; if geometry truly defeats them, they say so
+out loud and go do something else. In testing, CLAWD planted himself in
+the middle of the boardwalk like a bollard with opinions; PINCHY ground
+against him for a moment, stepped up the sand, and carried on. As the
+town's owner put it, in a line that deserves to run verbatim:
+
+> Unsticking crabs is not an unreasonable activity. They are crabs after all.
+
+### The epitaph line
+
+Here is the strange arithmetic of the day: none of today's quality-of-life
+work was balance work, and all of it moved the balance the same direction.
+Median eviction went 12 → 14 across the arc — every recovered crab-hour
+(un-stuck walkers, un-squatted stations, locals who don't die in queues)
+made the town live a little longer. We checked the honest levers and left
+them alone. **The town is dying more slowly because it works better.** Put
+that on the laundromat's headstone too.
+
+---
+
 ## 2026-08-18, night — The crabs were thirsty, so the town poured
 
 ![CLAWDIA, parched, off to the juice bar — as PINCHY pours the first cooler](devlog/img/2026-08-18-first-pour.png)
