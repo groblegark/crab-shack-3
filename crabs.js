@@ -94,3 +94,11 @@ const SHIFTS = {
   M: { label: "8-14", start: 8 * 60, end: 14 * 60 },
   E: { label: "14-20", start: 14 * 60, end: 20 * 60 },
 };
+
+// walk-in customers are crabs too, and everybody has a name
+const CUSTOMER_NAMES = [
+  "GARY", "SHELLY", "EBB", "FLO", "BARNABY", "PEARL", "SANDRO", "MISTY",
+  "CLACKERS", "NIPPY", "BRINY", "KRILL BILL", "ANEMONE", "WAVY DAVE",
+  "MOLT", "SCAMPI", "ROE", "MAUDE", "SNAPPY", "BUOY", "SALTINE", "DIP",
+  "TIDEPOOL TIM", "SURF MOM", "PLANKTON PETE", "BIG PALP",
+];
