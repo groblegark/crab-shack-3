@@ -204,7 +204,11 @@ first, connect later. Don't build the network before the node is beautiful.
   (tired crabs get dirty/hungry/sick faster — the stats→performance work
   slots straight in here). Control could live in the dossier next to
   TAP: REASSIGN. Balance-moving → needs the headless matrix; sequence it
-  after T1 with the other economy stages.
+  after T1 with the other economy stages. **Visible OT powerup**: a crab on
+  overtime must be readable at a glance to everyone — a little powerup
+  marker on the sprite (think coffee-cup / lightning bolt over the shell,
+  same family as the merge-mode thought bubble), plus an OT tag on the
+  follow card / dossier.
 
 ## Conventions
 - Suite green before push; economy changes need a matrix re-run.
