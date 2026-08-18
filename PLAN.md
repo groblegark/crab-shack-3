@@ -134,10 +134,12 @@ compounds or collapses → the landlord collects at 20:00 either way.
 5. **NPC eviction / move-outs** — NPC owners currently skip rent when short
    (TODO in the settlement block); no mortality for NPCs either.
 6. Staff-bused table service for a fancier restaurant tier.
-7. Cosmetics: closed-eye sleep sprites, taller shower-stall art (curtain reads
-   as a wall fixture at the y136 row), followable-NPC polish, and **pier plank
-   art** — PIER_X0/X1/Y exist and fishers stand there, but no planks were ever
-   drawn; they fish standing on the road's far edge.
+7. Cosmetics — mostly **shipped**: pier plank art (boardwalk over the east
+   break, pilings, railing, night lamp, perched gull), closed-eye sleep
+   sprites with breathing + Z drift, taller shower stalls (curtain with a
+   feet gap), grill smoke, shower suds, beach memorials now actually drawn,
+   dossier portrait/flavor-line polish, gull-cry + catch-splash sfx.
+   Remaining: followable-NPC polish.
 8. ~~Secret mobile merge mode~~ — **shipped**: touch-only hidden mode (hold a
    crab until the thought bubble fills), per-crab boards, goal ladder pays
    into the till ($60/session cap). Lives in merge.js, desktop-inert.

@@ -62,12 +62,28 @@ const _CRAB_LEGS_W = [
   "KRRK...KK.......",
   ".KK.............",
 ];
+// fast asleep: eyestalks drooped, lids shut, legs folded under the shell
+const _CRAB_SLEEP = [
+  "................",
+  "..KK........KK..",
+  ".KRRK......KRRK.",
+  ".KKKK......KKKK.",
+  "..KRRRRRRRRRRK..",
+  ".KRTRRRRRRRRTRK.",
+  "KRRRRKRRRRKRRRRK",
+  "KRRRRRRRRRRRRRRK",
+  ".KRRTRRRRRRTRRK.",
+  ".KRRK.KRRK.KRRK.",
+  "..KK...KK...KK..",
+  "................",
+];
 function crabArt(bodyCol, shadeCol) {
   const p = swap(PAL, { R: bodyCol, T: shadeCol });
   return {
     a: parseArt(_CRAB_TOP.concat(_CRAB_LEGS_A), p),
     b: parseArt(_CRAB_TOP.concat(_CRAB_LEGS_B), p),
     w: parseArt(_CRAB_TOP.concat(_CRAB_LEGS_W), p),
+    s: parseArt(_CRAB_SLEEP, p),
   };
 }
 const CRAB_COLORS = [
@@ -280,6 +296,15 @@ const GULL = [
   parseArt(["KK.....KK", ".KK...KK.", "..KLKLK..", "....K...."], PAL),
   parseArt([".........", "..K...K..", ".KKLKLKK.", "....K...."], PAL),
 ];
+// a gull at rest, wings folded, sizing up the bait bucket
+const GULL_SIT = parseArt([
+  "...KK..",
+  "..KLLKQ",
+  ".KLLLK.",
+  "KMMLLK.",
+  ".KKKK..",
+  "...K.K.",
+], PAL);
 const COIN = parseArt([
   ".KKKK.",
   "KAALAK",
@@ -779,14 +804,21 @@ const TAPS = parseArt([
   "KKKKKKKKK.......",
   ".KNK..KNK.......",
 ], PAL);
-// shower stall: open frame, or curtain drawn + steam when running
+// shower stall: tall frame with a curtain rail; the curtain drops to
+// ankle height when a guest is inside (feet gap at the bottom)
 const STALL = [
   parseArt([
     "KKKKKKKKKKKKKKKK",
     "KVVVVVVVVVVVVVVK",
+    "KVKKKKKKKKKKKKVK",
     "KVK..........KVK",
     "KVK...KMMK...KVK",
     "KVK...KMKK...KVK",
+    "KVK..........KVK",
+    "KVK....C.....KVK",
+    "KVK..........KVK",
+    "KVK..........KVK",
+    "KVK..........KVK",
     "KVK..........KVK",
     "KVK..........KVK",
     "KVK..........KVK",
@@ -796,6 +828,7 @@ const STALL = [
   parseArt([
     "KKKKKKKKKKKKKKKK",
     "KVVVVVVVVVVVVVVK",
+    "KVKKKKKKKKKKKKVK",
     "KVLCLLCLLCLLCLVK",
     "KVLCLLCLLCLLCLVK",
     "KVLCLLCLLCLLCLVK",
@@ -803,7 +836,12 @@ const STALL = [
     "KVLCLLCLLCLLCLVK",
     "KVLCLLCLLCLLCLVK",
     "KVLCLLCLLCLLCLVK",
-    "KKKKKKKKKKKKKKKK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVKLKKLKKLKKLKVK",
+    "KVK..........KVK",
+    "KKK..........KKK",
   ], PAL),
 ];
 // scrub bench: towels + soap bar

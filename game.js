@@ -383,6 +383,9 @@ const sfx = {
   angry: () => { beep(220, .15, "sawtooth", .03); beep(160, .2, "sawtooth", .03, .12); },
   ding: () => beep(1560, .1, "triangle", .05),
   bus: () => beep(300, .2, "triangle", .04),
+  // ambient color, kept very quiet
+  gull: () => { beep(1760, .12, "triangle", .02); beep(1320, .16, "triangle", .018, .12); },
+  splash: () => { beep(520, .05, "sine", .03); beep(300, .09, "sine", .025, .05); },
 };
 
 // ---------------------------------------------------------------- economy
@@ -950,6 +953,7 @@ function updateFishing(c, dt) {
     townCatch++;
     c.p.wallet += 2;   // the market pays small money for each landed fish
     popText("CATCH!", c.x - 4, c.y - 24, [140, 220, 255]);
+    sfx.splash();
     if (window._stats) window._stats.catches = (window._stats.catches || 0) + 1;
     if (Math.random() < 0.25) c.quip = { text: ["BIG ONE!", "THEY'RE BITING", "SEA PROVIDES"][(Math.random() * 3) | 0], t: 2.2 };
   }
@@ -1550,6 +1554,63 @@ function drawBG() {
   }
 }
 
+function drawPier() {
+  // the east break: the sea cuts a channel under the boardwalk, and the
+  // coast road crosses it on planks - SALTY and DRIFT fish off the rail.
+  const bx0 = PIER_X0 - 4, bx1 = PIER_X1 + 4;      // water channel
+  const dx0 = PIER_X0 - 14, dx1 = PIER_X1 + 14;    // plank deck bridging it
+  if (bx1 - camX < -20 || dx0 - camX > W + 20) return;
+  // channel water, with the same wave dashes as the open sea
+  wrect(bx0, SHORE_Y, bx1 - bx0, 124 - SHORE_Y, [40, 140, 220]);
+  for (let y = SHORE_Y + 3; y < 120; y += 5)
+    for (let x = bx0; x < bx1; x += 24) {
+      const off = ((Math.sin(time * 1.3 + y) * 8) | 0) + ((y * 7) % 13);
+      if (x + off > bx0 && x + off + 10 < bx1) wrect(x + off, y, 10, 1, [96, 200, 255]);
+    }
+  // foam where the channel laps the sand
+  const f = (Math.sin(time * 0.9 + 2) * 2) | 0;
+  wrect(bx0, 122 + Math.max(0, f), bx1 - bx0, 2, [230, 250, 255]);
+  wrect(bx0, SHORE_Y, 1, 124 - SHORE_Y, [170, 220, 250]);
+  wrect(bx1 - 1, SHORE_Y, 1, 124 - SHORE_Y, [170, 220, 250]);
+  // pilings sunk into the water under the deck
+  for (let x = dx0 + 16; x < dx1 - 8; x += 34) {
+    wrect(x, 104, 4, 13, [120, 80, 45]);
+    wrect(x + 3, 104, 1, 13, [90, 60, 35]);
+    wrect(x - 1, 115 + (((x / 34) | 0) % 2), 6, 1, [180, 230, 250]);   // waterline ripple
+  }
+  // railing along the sea side
+  for (let x = dx0 + 4; x < dx1 - 4; x += 24) {
+    wrect(x, 76, 2, 10, [140, 90, 50]);
+    wrect(x, 76, 2, 1, [190, 140, 80]);
+  }
+  wrect(dx0 + 2, 78, dx1 - dx0 - 4, 2, [160, 110, 60]);
+  // plank deck (ends rest on the sand past the channel)
+  wrect(dx0, 86, dx1 - dx0, 18, [206, 156, 94]);
+  wrect(dx0, 86, dx1 - dx0, 1, [236, 196, 130]);
+  for (let r = 0; r < 4; r++) {
+    const y = 90 + r * 4;
+    wrect(dx0, y, dx1 - dx0, 1, [176, 126, 72]);
+    for (let x = dx0 + 5 + ((r * 9) % 16); x < dx1 - 1; x += 16) wrect(x, y - 3, 1, 3, [186, 136, 78]);
+  }
+  wrect(dx0, 103, dx1 - dx0, 1, [120, 80, 45]);
+  wrect(dx0, 104, dx1 - dx0, 1, [90, 60, 35]);
+  // bait bucket between the fishing spots
+  wblit(BUCKET, 1928, 97);
+  // a gull loiters on the rail, eyeing the bucket (it clears off now and then)
+  if ((time % 47) < 34 && darkness() < 0.8) {
+    const hop = ((time * 2) | 0) % 8 === 0 ? -1 : 0;
+    wblit(GULL_SIT, 1988, 73 + hop, ((time / 9) | 0) % 2 === 0);
+  }
+  // lamp post on the east end for the night tide
+  wrect(dx1 - 8, 66, 2, 20, [70, 60, 90]);
+  wrect(dx1 - 9, 62, 4, 4, [30, 20, 36]);
+  wrect(dx1 - 8, 63, 2, 2, darkness() > 0.4 ? [255, 230, 120] : [204, 208, 220]);
+  if (darkness() > 0.4) {   // soft halo once it's lit
+    wrect(dx1 - 10, 63, 1, 2, [190, 160, 80]); wrect(dx1 - 5, 63, 1, 2, [190, 160, 80]);
+    wrect(dx1 - 8, 61, 2, 1, [190, 160, 80]); wrect(dx1 - 8, 66, 2, 1, [190, 160, 80]);
+  }
+}
+
 function drawTown() {
   // coast road runs the full length of town, behind everything
   wrect(0, ROAD_Y0, WORLD_W, ROAD_Y1 - ROAD_Y0, [120, 116, 130]);
@@ -1557,6 +1618,7 @@ function drawTown() {
   wrect(0, ROAD_Y1 - 2, WORLD_W, 2, [90, 86, 100]);
   for (let x = 6; x < WORLD_W; x += 22) wrect(x, ROAD_Y0 + 9, 10, 2, [230, 220, 120]);
   wrect(0, ROAD_Y1, WORLD_W, 3, [214, 196, 156]);   // shoulder
+  drawPier();
   // houses face the promenade (owned ones get the owner's roof color)
   for (const c of allCrabs())
     if (!c.p.homeless) wblit(HOUSES2[c.p.color % HOUSES2.length], HOUSE_XS[c.p.house], HOME_BOTTOM - HOUSES2[0].h);
@@ -1574,6 +1636,8 @@ function drawTown() {
     smallText(ctx, "SHELTER", SHELTER_X + 22 - camX, HOME_BOTTOM - SHELTER2.h + 3, [30, 20, 36]);
     smallText(ctx, "SHELTER", SHELTER_X + 21 - camX, HOME_BOTTOM - SHELTER2.h + 2, [240, 235, 220]);
   }
+  // the town remembers: driftwood memorials on the dune west of the shelter
+  for (const m of memorials) wblit(MEMORIAL, m.x, 150 - MEMORIAL.h);
   // bus stops on the shoulder
   for (const s of BUS_STOPS) wblit(BUS_STOP, s - 3, ROAD_Y1 + 3);
   // scenery fills the beach pockets between lots
@@ -1668,12 +1732,26 @@ function drawStation(key, kind, i) {
   if (kind === "claw") art = CLAW_MACHINE[isBusy ? ((time * 4) | 0) % 2 : 0];
   if (kind === "stall") art = STALL[isBusy ? 1 : 0];
   wblit(art, st.x, st.y - art.h);
-  if (kind === "grill" && isBusy) wblit(FLAME[((time * 8) | 0) % 2], st.x + 6, st.y - GRILL.h - 4);
+  if (kind === "grill" && isBusy) {
+    wblit(FLAME[((time * 8) | 0) % 2], st.x + 6, st.y - GRILL.h - 4);
+    // a wisp of smoke curls off the hot grill
+    for (let i = 0; i < 3; i++) {
+      const ph = (time * 0.55 + i * 0.37 + st.x * 0.011) % 1;
+      if (ph > 0.8) continue;
+      const sx = st.x + 7 + i * 2 + ((Math.sin(time * 1.2 + i * 2.1 + st.x) * 2) | 0);
+      const sy = st.y - GRILL.h - 8 - ph * 12;
+      const s = ph < 0.45 ? 2 : 1;
+      wrect(sx, sy, s, s, ph < 0.3 ? [168, 168, 182] : [206, 206, 220]);
+    }
+  }
 }
 
+let _swoopT = 99;
 function drawSwoop() {
   // every so often a gull dives at the snack queue
   const T = time % 41;
+  if (T < _swoopT && darkness() <= 0.5) sfx.gull();   // one cry per dive
+  _swoopT = T;
   if (T > 5.5 || darkness() > 0.5) return;
   const t = T / 5.5;
   const wx2 = BIZ.shack.queueX + 180 - t * 220;
@@ -1692,6 +1770,9 @@ function drawBus() {
   }
 }
 
+// toque on duty, personal accessory otherwise; fishers never cook
+function crabHat(c) { return c.duty && !c.p.fisher ? "toque" : c.p.acc; }
+
 function drawCrab(c) {
   if (c.hidden) return;
   const arts = CRAB_ARTS[c.p.color];
@@ -1702,11 +1783,14 @@ function drawCrab(c) {
   }
   const working = (c.kstate === "work" || c.kstate === "cleaningStall") && c.dayState === "working";
   const moving = c.dayState !== "home" || Math.hypot((c.tx || c.x) - c.x, (c.ty || c.y) - c.y) > 2;
+  const sleeping = !moving && c.dayState === "home" && darkness() > 0.7;
   let art;
-  if (working) art = ((c.animT * 6) | 0) % 2 ? arts.w : arts.a;
+  if (sleeping) art = arts.s;
+  else if (working) art = ((c.animT * 6) | 0) % 2 ? arts.w : arts.a;
   else if (moving) art = ((c.animT * 8) | 0) % 2 ? arts.a : arts.b;
   else art = arts.a;
-  const bob = working ? -(((c.animT * 6) | 0) % 2) : 0;
+  const bob = sleeping ? (Math.sin(time * 1.6 + c.animT) > 0 ? 1 : 0)   // slow breathing
+    : working ? -(((c.animT * 6) | 0) % 2) : 0;
   let y = c.y - 12 + bob;
   if (riding && c.p.mode === "bike") {
     wblit(BIKE, c.x - 2, ROAD_Y1 - 8, c.flip);
@@ -1715,14 +1799,21 @@ function drawCrab(c) {
   } else {
     wblit(art, c.x, y, c.flip);
   }
-  // hat: toque on duty, personal accessory otherwise
-  const accKey = c.duty ? "toque" : c.p.acc;
+  // hat: toque on duty, personal accessory otherwise (fishers keep their own)
+  const accKey = crabHat(c);
   const acc = ACCESSORIES[accKey];
   if (acc) {
     const ax = c.flip ? 16 - acc.dx - acc.art.w : acc.dx;
     wblit(acc.art, c.x + ax, y + acc.dy, c.flip);
   }
   if ((c.p.dirt || 0) >= 0.66) wblit(DIRT, c.x, y, c.flip);
+  if (sleeping) {   // a little Z drifts up from the shell
+    const ph = (time * 0.45 + c.animT * 0.37) % 1;
+    if (ph < 0.75) {
+      const zx = c.x + 13 + ((Math.sin(ph * 9 + c.animT) * 2) | 0) - camX;
+      if (zx > -4 && zx < W) smallText(ctx, "Z", zx, y - 2 - ph * 13, ph < 0.4 ? [200, 210, 235] : [150, 160, 195]);
+    }
+  }
   if (c.p.sick && ((c.animT * 2) | 0) % 2) wblit(SICK_MARK, c.x + 10, y - 8);
   if (c.p.fisher && c.dayState === "working") wblit(ROD[((c.animT * 2) | 0) % 2], c.x + 12, y - 3, c.flip);
   if (c.carrying) wblit(ITEMS[c.carrying], c.x + 4, y - 7);
@@ -1831,7 +1922,7 @@ function drawFollowCard() {
   rect(ctx, 3, 3, wcard - 2, 50, [255, 250, 235]);
   rect(ctx, 5, 6, 20, 26, [200, 230, 245]);
   blit(ctx, CRAB_ARTS[p.color].a, 7, 14);
-  const acc = ACCESSORIES[c.duty ? "toque" : p.acc];
+  const acc = ACCESSORIES[crabHat(c)];
   if (acc) blit(ctx, acc.art, 7 + acc.dx, 14 + acc.dy);
   text(ctx, p.name, 29, 5, [40, 30, 40]);
   const [mood, mcol] = crabMood(c);
@@ -2057,20 +2148,34 @@ function homeLabel(p) {
   if (p.house === 6) return ["HOUSE BY THE SHELTER", [90, 130, 90]];
   return ["HOUSE " + (p.house + 1) + " ON THE PROMENADE", [90, 130, 90]];
 }
+const _art2Cache = {};
+function art2(key, art) {   // lazily scaled 2x art for the dossier portrait
+  return _art2Cache[key] || (_art2Cache[key] = scale2(art));
+}
 function drawDossier() {
   if (!dossier) return;
   const c = dossier, p = c.p;
-  const x = 24, y = 16, w2 = 208, h2 = 168;
+  const x = 24, y = 6, w2 = 208, h2 = 168;   // sits fully above the panel
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
-  rect(ctx, x, y, w2, 22, [58, 42, 38]);
-  rect(ctx, x + 4, y + 3, 20, 26, [200, 230, 245]);
-  blit(ctx, CRAB_ARTS[p.color].a, x + 6, y + 11);
-  const acc = ACCESSORIES[c.duty ? "toque" : p.acc];
-  if (acc) blit(ctx, acc.art, x + 6 + acc.dx, y + 11 + acc.dy);
-  text(ctx, p.name, x + 30, y + 4, [255, 240, 210]);
-  smallText(ctx, TRAITS[p.trait].label + " - " + MODES[p.mode].label + (p.npc ? " - TOWNSFOLK" : " - CREW"), x + 30, y + 14, [210, 190, 170]);
-  let ly = y + 34;
+  rect(ctx, x, y, w2, 32, [58, 42, 38]);
+  // full-body portrait at 2x, wearing their real accessory (no work toque)
+  rect(ctx, x + 4, y + 4, 40, 30, [200, 230, 245]);
+  blit(ctx, art2("c" + p.color, CRAB_ARTS[p.color].a), x + 8, y + 8);
+  const acc = ACCESSORIES[p.acc];
+  if (acc) blit(ctx, art2("a" + p.acc, acc.art), x + 8 + acc.dx * 2, y + 8 + acc.dy * 2);
+  text(ctx, p.name, x + 48, y + 5, [255, 240, 210]);
+  smallText(ctx, TRAITS[p.trait].label + " - " + MODES[p.mode].label + (p.npc ? " - TOWNSFOLK" : " - CREW"), x + 48, y + 15, [210, 190, 170]);
+  // what they're saying (their live quip, or a line true to their trait)
+  {
+    let line = c.quip && c.quip.text;
+    if (!line) {
+      const lines = TRAITS[p.trait].quips[quipContext(c)] || [];
+      if (lines.length) line = lines[(p.name.length * 7 + p.color * 3 + day) % lines.length];
+    }
+    if (line) smallText(ctx, "'" + line + "'", x + 48, y + 24, [255, 215, 150]);
+  }
+  let ly = y + 42;
   const row = (label, val, col) => {
     smallText(ctx, label, x + 8, ly, [120, 110, 125]);
     smallText(ctx, val, x + 56, ly, col || [40, 30, 40]);
@@ -2103,7 +2208,12 @@ function drawDossier() {
   smallText(ctx, "CLAIMS TO FAME", x + 8, ly, [58, 42, 38]); ly += 8;
   const made = Object.entries(p.made || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
   if (!made.length) smallText(ctx, "NONE YET - GIVE IT TIME", x + 8, ly, [150, 140, 160]), ly += 8;
-  for (const [id, n] of made) {
+  for (let i = 0; i < made.length; i++) {
+    if (ly > y + h2 - 12 && i < made.length - 1) {   // keep inside the card
+      smallText(ctx, "+" + (made.length - i) + " MORE", x + 8, ly, [150, 140, 160]);
+      break;
+    }
+    const [id, n] = made[i];
     let tier = "";
     for (const [need, , label] of MASTERY) if (n >= need) { tier = label; break; }
     smallText(ctx, (ITEM_NAMES[id] || id.toUpperCase()) + " X" + n + (tier ? " - " + tier : ""), x + 8, ly,
@@ -2414,6 +2524,21 @@ function frame(now) {
     const stalls = BIZ[key].stalls;
     if (stalls) for (const t of stalls) paint.push({ base: t.y, f: () => {
       wblit(STALL[t.occupant ? 1 : 0], t.x, t.y - STALL[0].h);
+      if (t.occupant) {   // feet peeking under the curtain
+        const oc = t.occupant, pcol = oc.p ? oc.p.color : oc.color;
+        const col = CRAB_COLORS[(pcol || 0) % CRAB_COLORS.length][0];
+        wrect(t.x + 5, t.y - 3, 2, 2, col);
+        wrect(t.x + 9, t.y - 3, 2, 2, col);
+      }
+      if (t.occupant) {   // suds drift up over the curtain while the water runs
+        for (let i = 0; i < 3; i++) {
+          const ph = (time * 0.6 + i * 0.33 + t.x * 0.013) % 1;
+          if (ph > 0.85) continue;
+          const sx = t.x + 3 + i * 4 + ((Math.sin(time * 1.5 + i * 2.1) * 2) | 0);
+          const s = ph < 0.5 ? 2 : 1;
+          wrect(sx, t.y - STALL[0].h - 2 - ph * 8, s, s, i % 2 ? [96, 200, 255] : [88, 205, 188]);
+        }
+      }
       if (t.dirty) { px(ctx, t.x + 3 - camX, t.y - 2, [130, 220, 110]); px(ctx, t.x + 7 - camX, t.y - 1, [110, 190, 110]); px(ctx, t.x + 11 - camX, t.y - 2, [130, 220, 110]); }
     } });
   }
