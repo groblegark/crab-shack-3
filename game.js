@@ -60,8 +60,28 @@ const BIZ = {
         steps: [["washer", 3.0, "uniform_wet"], ["dryer", 2.5, "uniform_clean"]] },
     ],
   },
+  arcade: {
+    name: "CLAWCADE", short: "CADE", sign: "THE CLAWCADE", kind: "shopfront", rent: 80,
+    x0: 1620, x1: 1800, door: 1636,
+    stations: {
+      booth: [{ x: 1630, y: 136 }],
+      claw:  [{ x: 1666, y: 136 }, { x: 1688, y: 136 }],
+      skee:  [{ x: 1718, y: 160 }, { x: 1740, y: 160 }],
+      prize: [{ x: 1772, y: 160 }],
+    },
+    source: "booth", out: "prize", queueX: 1804,
+    park: 1546, rack: 1600,
+    recipes: [
+      { id: "clawgame", icon: "plush", pay: 13, raw: "token",
+        steps: [["claw", 3.5, "plush"]] },
+      { id: "skeerun", icon: "tickets", pay: 9, raw: "token",
+        steps: [["skee", 2.8, "tickets"]] },
+      { id: "gamenight", icon: "gold_plush", pay: 18, raw: "token",
+        steps: [["skee", 2.5, "tickets"], ["claw", 3.0, "gold_plush"]] },
+    ],
+  },
 };
-const bizUnlocked = (b) => b === "shack" || UPS.cleaners.lvl > 0;
+const bizUnlocked = (b) => b === "shack" || (b === "cleaners" ? UPS.cleaners.lvl > 0 : UPS.arcade.lvl > 0);
 
 // ---------------------------------------------------------------- clock
 const TS = 4;                     // game minutes per real second
@@ -80,12 +100,13 @@ function darkness() { // 0 = day, 1 = full night
 }
 
 // ---------------------------------------------------------------- recipes
-const INGREDIENT_COST = { fish_raw: 5, fruit: 3, towel_dirty: 1, uniform_dirty: 1 };
+const INGREDIENT_COST = { fish_raw: 5, fruit: 3, towel_dirty: 1, uniform_dirty: 1, token: 1 };
 const ITEM_NAMES = {
   fish_raw: "FISH", fish_cut: "CUT FISH", fruit: "FRUIT",
   taco: "FISH TACO", juice: "JUICE", plate_fish: "GRILL FISH",
   towel_dirty: "TOWELS", towel_wet: "WET TOWELS", towel_clean: "FRESH TOWELS",
   uniform_dirty: "LAUNDRY", uniform_wet: "WET WASH", uniform_clean: "CLEAN PRESS",
+  token: "TOKENS", plush: "CLAW PLUSH", tickets: "TICKET RUN", gold_plush: "GOLD PLUSH",
 };
 
 // ---------------------------------------------------------------- upgrades
@@ -97,6 +118,7 @@ const UPS = {
   expand: { name: "EXPAND",    base: 90, mult: 2.6, max: 2, lvl: 0 },
   ads:    { name: "ADS",       base: 45, mult: 1.9, max: 8, lvl: 0 },
   cleaners: { name: "CLEANERS", base: 400, mult: 1, max: 1, lvl: 0 },
+  arcade:   { name: "ARCADE",   base: 650, mult: 1, max: 1, lvl: 0 },
 };
 for (const k in UPS) UPS[k].key = k;
 function upCost(u) { return Math.ceil(u.base * Math.pow(u.mult, u.key === "chef" ? u.lvl - 2 : u.lvl)); }
@@ -127,6 +149,7 @@ function nightlyDue() { return totalRent() + CRAB_WAGE * crabs.length; }
 const busy = {
   shack: { board: [false, false, false], grill: [false, false, false] },
   cleaners: { washer: [false, false], dryer: [false, false] },
+  arcade: { claw: [false, false], skee: [false, false] },
 };
 const bus = { x: 360, dir: 1, state: "drive", dwellT: 0, riders: [] };
 let earnHist = [];
@@ -160,6 +183,7 @@ function newCrab(persona) {
   if (persona.job == null) persona.job = "shack";
   if (persona.hunger == null) persona.hunger = 0;
   if (persona.dirt == null) persona.dirt = 0;
+  if (persona.bored == null) persona.bored = 0;
   return {
     p: persona,
     x: homeX({ p: persona }), y: 160, tx: 0, ty: 160,
@@ -175,7 +199,7 @@ function newCrab(persona) {
 }
 function crabMove(c) {
   const t = TRAITS[c.p.trait];
-  return 40 * t.move * shoesMult();
+  return 40 * t.move * shoesMult() * (1 - 0.2 * Math.max(0, (c.p.bored || 0) - 0.5));
 }
 function crabWork(c) { return TRAITS[c.p.trait].work; }
 
@@ -341,7 +365,7 @@ function collide(dt) {
       const dx = b.x - a.x, dy = (b.y - a.y) * 1.8;   // wide sprites: ellipse
       const d = Math.hypot(dx, dy);
       if (d < 12 && d > 0.01) {
-        const push = (12 - d) / 2 * Math.min(1, dt * 12);
+        const push = Math.min((12 - d) / 2 * Math.min(1, dt * 12), 4);
         const ux = dx / d, uy = dy / d / 1.8;
         a.x -= ux * push; a.y = clampY(a.y - uy * push);
         b.x += ux * push; b.y = clampY(b.y + uy * push);
@@ -361,8 +385,9 @@ function collide(dt) {
           const dx = c.x + 8 - cx, dy = c.y - st.y;
           if (Math.abs(dx) < 13 && dy > -10 && dy < 6) {
             // deflect briskly (faster than walk speed, so nobody grinds on a counter)
-            if (Math.abs(dx) > Math.abs(dy) * 1.6) c.x += (dx > 0 ? 1 : -1) * 95 * dt;
-            else c.y = clampY(c.y + (dy > -2 ? 1 : -1) * 95 * dt);
+            const push = Math.min(95 * dt, 5);   // stable at fast-forward
+            if (Math.abs(dx) > Math.abs(dy) * 1.6) c.x += (dx > 0 ? 1 : -1) * push;
+            else c.y = clampY(c.y + (dy > -2 ? 1 : -1) * push);
           }
         }
       }
@@ -459,6 +484,7 @@ function updateSchedule(c, dt) {
     if (c.carrying) c.carrying = null;
     c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25);  // a shift works up an appetite
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and stains the uniform
+    c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
     startCommute(c, false);
   }
   // off-duty errands, while town is open and it's not almost shift time
@@ -487,15 +513,19 @@ function pickErrand(c) {
     const r = BIZ.cleaners.recipes[1];   // uniform service
     if (c.p.wallet >= r.pay + 2) return { biz: "cleaners", recipe: r, need: "clean" };
   }
+  if ((c.p.bored || 0) >= 0.6 && staffed("arcade")) {
+    const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
+    if (c.p.wallet >= r.pay + 2) return { biz: "arcade", recipe: r, need: "fun" };
+  }
   return null;
 }
 function startErrand(c, e) {
   c.dayState = "toErrand"; c.errandBiz = e.biz; c.errand = e;
-  setT(c, BIZ[e.biz].queueX + 4, 164);
+  setT(c, BIZ[e.biz].queueX + 4, 166);
 }
 function updateErrand(c, dt) {
   if (c.dayState === "toErrand") {
-    if (stepTo(c, c.tx, crabMove(c), dt, 164)) {
+    if (routedStep(c, crabMove(c), dt)) {
       const cust = { biz: c.errandBiz, recipe: c.errand.recipe, isCrab: true, crab: c,
         need: c.errand.need, x: c.x, spawnX: c.x, state: "waiting",
         patience: 90, maxPatience: 90, claimed: false, served: false };   // locals will wait
@@ -505,7 +535,7 @@ function updateErrand(c, dt) {
   } else if (c.dayState === "errand") {
     const k = c.errandCust;
     if (!k) { c.dayState = "home"; startCommute(c, false); return; }
-    c.x = k.x; c.y = 164;   // stand in the queue
+    c.x = k.x; c.y = 166;   // stand in the queue, same line as tourists
   }
 }
 function finishErrand(k) {
@@ -630,6 +660,7 @@ function serve(c) {
       earn(price, cust.x, 126);
       if (cust.need === "food") cust.crab.p.hunger = 0;
       if (cust.need === "clean") cust.crab.p.dirt = 0;
+      if (cust.need === "fun") { cust.crab.p.bored = 0; cust.crab.quip = { text: "BEST DAY EVER!", t: 2.4 }; }
       popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
     } else {
       const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0));
@@ -687,7 +718,7 @@ function updateCustomers(dt) {
     // tourists pick a staffed business
     const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && crabs.some(c => c.duty && c.workBiz === b));
     if (open.length) {
-      const weights = open.map(b => b === "shack" ? 0.7 : 0.3);
+      const weights = open.map(b => b === "shack" ? 0.55 : b === "cleaners" ? 0.2 : 0.25);
       let r = Math.random() * weights.reduce((a, v) => a + v, 0), pick = open[0];
       for (let i = 0; i < open.length; i++) { r -= weights[i]; if (r <= 0) { pick = open[i]; break; } }
       const inQueue = customers.filter(k => k.biz === pick && k.state !== "leaving").length;
@@ -729,7 +760,12 @@ const BUTTONS = [];
   for (let i = 0; i < 6; i++)
     BUTTONS.push({ key: keys[i], x: 4 + (i % 3) * 84, y: 199 + ((i / 3) | 0) * 20, w: 80, h: 18 });
 }
-function buttonKey(b) { return b.key === "_slot6" ? (UPS.cleaners.lvl > 0 ? "shoes" : "cleaners") : b.key; }
+function buttonKey(b) {
+  if (b.key !== "_slot6") return b.key;
+  if (UPS.cleaners.lvl === 0) return "cleaners";
+  if (UPS.arcade.lvl === 0) return "arcade";
+  return "shoes";
+}
 function tryBuy(key) {
   const u = UPS[key];
   if (u.lvl >= u.max || coins < upCost(u)) return;
@@ -737,6 +773,10 @@ function tryBuy(key) {
   if (key === "cleaners") {
     toast = { text: "SUDS N BUBBLES IS YOURS! ASSIGN A CRAB TO STAFF IT", t: 7 };
     popText("GRAND OPENING!", BIZ.cleaners.x0 + 40, 100, [140, 255, 160]);
+  }
+  if (key === "arcade") {
+    toast = { text: "THE CLAWCADE IS YOURS! THE CREW WILL LOVE THIS", t: 7 };
+    popText("GRAND OPENING!", BIZ.arcade.x0 + 40, 100, [140, 255, 160]);
   }
   if (key === "chef") {
     const p2 = makeCrabPersona(crabs.length + ((Math.random() * 6) | 0));
@@ -862,9 +902,10 @@ cv.addEventListener("click", (ev) => {
     return;
   }
   // follow-card job toggle
-  if (followIdx >= 0 && UPS.cleaners.lvl > 0 && p.x >= 58 && p.x < 71 && p.y >= 33 && p.y < 45) {
+  if (followIdx >= 0 && (UPS.cleaners.lvl > 0 || UPS.arcade.lvl > 0) && p.x >= 58 && p.x < 71 && p.y >= 33 && p.y < 45) {
     const c = crabs[followIdx];
-    c.p.job = c.p.job === "shack" ? "cleaners" : "shack";
+    const owned = Object.keys(BIZ).filter(bizUnlocked);
+    c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
     sfx.buy();
     popText("NEW JOB: " + BIZ[c.p.job].name, c.x - 20, FLOOR_Y - 34, [140, 255, 160]);
     return;
@@ -988,7 +1029,8 @@ function drawTown() {
 }
 
 const STATION_ART = { crate: CRATE, board: BOARD, grill: GRILL, pass: PASS,
-  basket: BASKET, washer: null, dryer: DRYER, counter: COUNTER };
+  basket: BASKET, washer: null, dryer: DRYER, counter: COUNTER,
+  booth: TOKEN_BOOTH, claw: null, skee: SKEEBALL, prize: PRIZE_COUNTER };
 
 function drawBusiness(key) {
   const b = BIZ[key];
@@ -1060,6 +1102,7 @@ function drawStation(key, kind, i) {
   const isBusy = busy[key] && busy[key][kind] && busy[key][kind][i];
   let art = STATION_ART[kind];
   if (kind === "washer") art = WASHER[isBusy ? ((time * 6) | 0) % 2 : 0];
+  if (kind === "claw") art = CLAW_MACHINE[isBusy ? ((time * 4) | 0) % 2 : 0];
   wblit(art, st.x, st.y - art.h);
   if (kind === "grill" && isBusy) wblit(FLAME[((time * 8) | 0) % 2], st.x + 6, st.y - GRILL.h - 4);
 }
@@ -1235,7 +1278,7 @@ function drawFollowCard() {
   if (trend) smallText(ctx, trend > 0 ? "+" : "-", wx3 - 6, 29, trend > 0 ? [40, 150, 70] : [190, 80, 80]);
   // job + needs
   smallText(ctx, "JOB:" + BIZ[p.job].short, 6, 36, [70, 90, 130]);
-  if (UPS.cleaners.lvl > 0) {
+  if (UPS.cleaners.lvl > 0 || UPS.arcade.lvl > 0) {
     rect(ctx, 60, 35, 9, 8, [96, 170, 220]);
     smallText(ctx, ">", 62, 36, [255, 255, 255]);
   }

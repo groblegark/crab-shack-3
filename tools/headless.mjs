@@ -88,13 +88,15 @@ const buyScript = BUY.length ? new vm.Script(`
       const tomorrowBill = CRAB_WAGE * (crabs.length + (k === "chef" ? 1 : 0)) + Object.keys(BIZ).filter(bizUnlocked).reduce((s, b2) => s + BIZ[b2].rent, 0);
       if (u.lvl < u.max && coins >= upCost(u) + tomorrowBill + 30) tryBuy(k);
     }
-    // keep ~1/3 of the crew on the cleaners once it's open
-    if (UPS.cleaners && UPS.cleaners.lvl > 0) {
-      const want = Math.floor(crabs.length / 3);
-      let have = crabs.filter(c => c.p.job === "cleaners").length;
-      for (const c of crabs) {
-        if (have >= want) break;
-        if (c.p.job === "shack") { c.p.job = "cleaners"; have++; }
+    // spread staff: ~1/3 to cleaners, ~1/4 to arcade once owned
+    for (const [biz2, frac] of [["cleaners", 3], ["arcade", 4]]) {
+      if (UPS[biz2] && UPS[biz2].lvl > 0) {
+        const want = Math.floor(crabs.length / frac);
+        let have = crabs.filter(c => c.p.job === biz2).length;
+        for (const c of crabs) {
+          if (have >= want) break;
+          if (c.p.job === "shack") { c.p.job = biz2; have++; }
+        }
       }
     }
   }`) : null;

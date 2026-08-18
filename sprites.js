@@ -573,3 +573,108 @@ const DIRT = parseArt([
   ".....D..D.......",
   "...D.......D....",
 ], swap(PAL, { D: [110, 90, 60] }));
+
+// ================================================================ arcade art
+// claw machine: glass cab full of plushies, claw on a gantry
+const CLAW_MACHINE = [
+  parseArt([
+    "KKKKKKKKKKKKKK",
+    "KPPPPPPPPPPPPK",
+    "KPKKKKKKKKKKPK",
+    "KPKCCCCCCCKKPK",
+    "KPKCC-CCCCKKPK",
+    "KPKCCCCCCCKKPK",
+    "KPKYGPOYGPKKPK",
+    "KPKKKKKKKKKKPK",
+    "KPPPPPKAKPPPPK",
+    "KPPPPPKKKPPPPK",
+    "KKKKKKKKKKKKKK",
+    ".KNK......KNK.",
+  ], swap(PAL, { P: [200, 120, 255], "-": [250, 250, 255] })),
+  parseArt([
+    "KKKKKKKKKKKKKK",
+    "KPPPPPPPPPPPPK",
+    "KPKKKKKKKKKKPK",
+    "KPKCCCC-CCKKPK",
+    "KPKCCCCCCCKKPK",
+    "KPKCCCC+CCKKPK",
+    "KPKYGPOYGPKKPK",
+    "KPKKKKKKKKKKPK",
+    "KPPPPPKAKPPPPK",
+    "KPPPPPKKKPPPPK",
+    "KKKKKKKKKKKKKK",
+    ".KNK......KNK.",
+  ], swap(PAL, { P: [200, 120, 255], "-": [250, 250, 255], "+": [255, 216, 96] })),
+];
+// skeeball lane: sloped ramp with score rings
+const SKEEBALL = parseArt([
+  "..........KKKK",
+  ".......KKKAOAK",
+  "....KKKOAOAOAK",
+  ".KKKNNNNNNNNNK",
+  "KNNNNNNNNNNNNK",
+  "KNUNUNUNUNUNUK",
+  "KNNNNNNNNNNNNK",
+  "KKKKKKKKKKKKKK",
+  ".KNK.......KNK",
+], PAL);
+// token booth (source): ticket window with a coin tray
+const TOKEN_BOOTH = parseArt([
+  "KKKKKKKKKKKKKKKKKK",
+  "KPPPPPPPPPPPPPPPPK",
+  "KPKKKKKKKKKKKKKKPK",
+  "KPKCCCCCCCCCCCCKPK",
+  "KPKCCCAACCAACCCKPK",
+  "KPKKKKKKKKKKKKKKPK",
+  "KPPPPAAAAAAAAPPPPK",
+  "KKKKKKKKKKKKKKKKKK",
+  ".KNK..........KNK.",
+], swap(PAL, { P: [200, 120, 255] }))
+// prize counter (out): plush shelf
+const PRIZE_COUNTER = parseArt([
+  "KYYK..KGGK..KPPK....",
+  "KYYK..KGGK..KPPK....",
+  "KKKKKKKKKKKKKKKKKKKK",
+  "KEEEEEEEEEEEEEEEEEEK",
+  "KEDEEEEDEEEEDEEEEDEK",
+  "KKKKKKKKKKKKKKKKKKKK",
+  ".KDDK..........KDDK.",
+  ".KDDK..........KDDK.",
+], PAL);
+// prize items
+defItem("token", [
+  ".........",
+  "..KKKK...",
+  ".KAALAK..",
+  ".KALAAK..",
+  ".KAAAAK..",
+  "..KKKK...",
+  ".........",
+]);
+defItem("plush", [
+  ".KK..KK..",
+  "KGGKKGGK.",
+  "KGGGGGGK.",
+  ".KGBGBGK.",
+  ".KGGGGK..",
+  "KGGKKGGK.",
+  ".KK..KK..",
+]);
+defItem("tickets", [
+  ".........",
+  "KAAKAAK..",
+  "KLLKLLK..",
+  "KAAKAAK..",
+  "KLLKLLK..",
+  "KAAKAAK..",
+  ".........",
+]);
+defItem("gold_plush", [
+  ".KK..KK..",
+  "KAAKKAAK.",
+  "KAAAAAAK.",
+  ".KABABAK.",
+  ".KAAAAK..",
+  "KAAKKAAK.",
+  ".KK..KK..",
+]);
