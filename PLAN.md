@@ -313,6 +313,15 @@ first, connect later. Don't build the network before the node is beautiful.
   follow card / dossier.
 
 ## Conventions
+- **Devlog** (DEVLOG.md + devlog/img/, owned by the coordinator session):
+  patch-notes-as-little-stories in the Minecraft-notes voice — bugs and
+  features framed as things that happened to the town. Each entry carries
+  lots of screenshots (playwright driver in the coordinator's scratchpad;
+  serve on :8931, arrow keys pan the cam 24px/press) and a "Tales from the
+  sim" section narrated from a seeded headless run. **Editorial rule from
+  Matt: keep the focus on INDIVIDUAL crabs — named crabs doing specific
+  things beat aggregate stats for stories.** Build sessions: ping the
+  coordinator after merge batches so entries stay current.
 - Suite green before push; economy changes need a matrix re-run.
 - Big features → fork subagents in git worktrees (they don't push; the parent
   reviews screenshots + suite output, merges, re-verifies, pushes).
