@@ -816,7 +816,6 @@ function updateCommute(c, dt) {
 }
 
 function arriveCommute(c, atWork) {
-  c.cstate = "";   // dismount! a stale "drive" left cyclists rendered on their bikes all night
   if (atWork) {
     c.dayState = "working"; c.duty = true; c.kstate = "idle"; c.workBiz = c.p.job;
     if (c.p.job === "fishing" && c.fishSpot) { c.x = c.fishSpot.x; c.y = c.fishSpot.y; c.castT = 3 + Math.random() * 6; }
@@ -2006,7 +2005,7 @@ function crabHat(c) { return c.duty && !c.p.fisher ? "toque" : c.p.acc; }
 function drawCrab(c) {
   if (c.hidden) return;
   const arts = CRAB_ARTS[c.p.color];
-  const riding = (c.cstate === "drive");
+  const riding = c.cstate === "drive" && (c.dayState === "toWork" || c.dayState === "toHome");
   if (riding && c.p.mode === "buggy") {
     wblit(BUGGIES2[c.p.color], c.x - 16, ROAD_Y1 - BUGGIES2[0].h, c.flip);
     return;
@@ -2211,8 +2210,8 @@ function drawFollowCard() {
     rect(ctx, 58, 35, 28, 8, [96, 170, 220]);
     smallText(ctx, "JOB>", 60, 36, [255, 255, 255]);
   }
-  const eff = crabEff(c);
-  if (!p.sick && eff < 0.995)
+  const eff = crabEff(c) * (p.sick ? 0.5 : 1);   // illness halves everything - show it
+  if (eff < 0.995)
     smallText(ctx, "PACE " + Math.round(eff * 100) + "%", 74, 36, eff < 0.8 ? [190, 80, 80] : [200, 110, 40]);
   const bars = [["FED", 1 - (p.hunger || 0), 6], ["CLN", 1 - (p.dirt || 0), 37],
     ["FUN", 1 - (p.bored || 0), 68], ["SPA", 1 - (p.sandy || 0), 99]];
@@ -2520,9 +2519,10 @@ function drawDossier() {
   row("HOME", hl, hcol);
   row("NOW", crabStatus(c).slice(0, 34));
   if (p.sick) row("HEALTH", "SICK - DAY " + ((p.sick.days || 0) + 1), [190, 80, 80]);
-  const eff = crabEff(c);
-  if (!p.sick && eff < 0.995) {
+  const eff = crabEff(c) * (p.sick ? 0.5 : 1);
+  if (eff < 0.995) {
     const why = [];
+    if (p.sick) why.push("SICK");
     if ((p.hunger || 0) > 0.3) why.push("HUNGRY");
     if ((p.dirt || 0) > 0.6) why.push("GRUBBY");
     row("PACE", "WORKING AT " + Math.round(eff * 100) + "%" + (why.length ? " - " + why.join(", ") : ""),
@@ -2582,9 +2582,9 @@ function drawJobBoard() {
   }
   const staff = npcs.filter(c => c.p.employer);
   if (staff.length) {
-    ly += 2; smallText(ctx, "ON TOWN PAYROLLS", x + 6, ly, [58, 42, 38]); ly += 8;
+    ly += 2; smallText(ctx, "WHO WORKS FOR WHOM", x + 6, ly, [58, 42, 38]); ly += 8;
     for (const c of staff.slice(0, 4)) {
-      smallText(ctx, c.p.name + " - " + BIZ[c.p.job].name, x + 6, ly, [90, 90, 105]); ly += 7;
+      smallText(ctx, c.p.name + " - " + BIZ[c.p.job].name + ", PAID BY " + OWNERS[c.p.employer].name, x + 6, ly, [90, 90, 105]); ly += 7;
     }
   }
   smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
@@ -2949,7 +2949,7 @@ function frame(now) {
     } });
   }
   for (const k of customers) paint.push({ base: (k.state === "dining" || k.state === "seatedWaiting") && k.table ? (k.table.y + 1) : (k.isCrab ? 165 : FLOOR_Y), f: () => drawCustomer(k) });
-  for (const c of allCrabs()) paint.push({ base: c.cstate === "drive" ? ROAD_Y1 : c.y, f: () => drawCrab(c) });
+  for (const c of allCrabs()) paint.push({ base: c.cstate === "drive" && (c.dayState === "toWork" || c.dayState === "toHome") ? ROAD_Y1 : c.y, f: () => drawCrab(c) });
   paint.push({ base: FLOOR_Y, f: drawLandlord });
   paint.sort((a, b) => a.base - b.base);
   for (const e of paint) e.f();

@@ -277,6 +277,23 @@ first, connect later. Don't build the network before the node is beautiful.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Tiredness replaces sandiness** (Matt 2026-08-18): drop the SPA/sandy need;
+  in its place TIRED, accrued by work/errands, repaired by SLEEP — faster in
+  your own bed (house/boat) than on a shelter cot. Showers become dirt-only.
+  SEQUENCE AFTER the T2 thirst merge — T2 is concurrently rewriting the needs
+  bars, sickness-risk table, and quips; doing both at once guarantees a
+  semantic collision. Touches: needs bars/dossier, sickness risk (sandy ≥
+  0.95 term), shower recipes/needsBath, crew shift-end bumps, suite pins.
+- **Per-owner everything; all crabs equal** (Matt 2026-08-18): "no public
+  utilities, no town payroll — per-owner … all crabs should be equal in the
+  simulation, they just start with different stuff." Language pass done
+  (job-board card now reads WHO WORKS FOR WHOM, PAID BY <owner>). Mechanical
+  equality audit still open: NPCs currently CANNOT die (crew can); NPC_WAGE
+  20 vs CRAB_WAGE 22; tourists are a separate entity class rather than crabs
+  with a suitcase. Direction: one simulation contract for every crab,
+  differing only in starting assets/relationships.
+- **Click-to-nav + right-click redirect** (Matt 2026-08-18): agent spawned.
+
 - **Line of credit** — **built (worktree branch, 2026-08-18), tight landing**:
   all knobs in game.js CREDIT_CFG (LIMIT 120 ~ half a night's shack rent,
   RATE 0.25/night compounding, MIN_PAY 80 auto-collected). Rent shortfalls

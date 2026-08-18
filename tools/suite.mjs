@@ -87,12 +87,19 @@ scenario("dining: outdoor tables, guests bus their own", () => {
 
 scenario("errands: crabs keep themselves fed", () => {
   const sim = createSim({ seed: 7 });
-  sim.runDays(4);
+  sim.runDays(3);
+  // over the LAST day, every crab must get a real meal in (hunger dips below
+  // 0.5 at some point) - a moment-in-time hunger sample flakes on late shifts
+  sim.G("window._minH = {}");
+  sim.runDays(4, { tickEvery: 8, onTick: (G) =>
+    G("for (const c of crabs) window._minH[c.p.name] = Math.min(window._minH[c.p.name] ?? 1, c.p.hunger || 0)") });
   const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
   const fed = (st.crabServes || 0) + (st.staffMeals || 0);
   if (fed < 2) return `only ${fed} crab meals in 4 days (rage ${st.crabRage})`;
-  const worstHunger = sim.G("Math.max(...crabs.map(c => c.p.hunger || 0))");
-  return worstHunger < 1 ? true : `a crab is starving (hunger ${worstHunger})`;
+  const minH = JSON.parse(sim.G("JSON.stringify(window._minH)"));
+  if (!Object.keys(minH).length) return "sampler never ran (runDays day-bound bug)";
+  const starved = Object.entries(minH).filter(([, h]) => h > 0.5);
+  return starved.length === 0 ? true : "went unfed all day: " + starved.map(([n, h]) => n + "@" + h.toFixed(2)).join(",");
 });
 
 scenario("staff meals: closing crew cooks their own dinner, at retail", () => {
