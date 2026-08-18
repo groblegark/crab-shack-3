@@ -42,9 +42,11 @@
 
   // ---------------------------------------------------------------- layout
   const COLS = 4, ROWS = 4;
-  const BX = 10, BY = 44, CW = 59, CH = 36;          // board origin + cell size
-  const SPAWN = { x: 10, y: 202, w: 150, h: 32 };
-  const BACK  = { x: 168, y: 202, w: 78, h: 32 };
+  const BX = 10, BY = 58, CW = 59, CH = 33;          // board origin + cell size
+  const CREW_Y = 29, CREW_H = 27;                    // pick-your-crab strip
+  const MSG_Y = 191;                                 // banner / tip lane
+  const SPAWN = { x: 10, y: 206, w: 150, h: 30 };
+  const BACK  = { x: 168, y: 206, w: 78, h: 30 };
 
   // ---------------------------------------------------------------- state
   let on = false;              // is the board up?
@@ -58,6 +60,7 @@
   let fullT = 0;               // "board's full" nudge
   let everMerged = false;      // until then, show the how-to-play nudge
   let gifted = 0;              // coins sent to the till this session (capped)
+  let saved = {};              // per-crab board state, so switching resumes
   const GIFT = 6, GIFT_CAP = 60;
 
   // long-press discovery
@@ -79,6 +82,14 @@
 
   function goal() { return GOALS[chainKey][goalIdx] || null; }
 
+  function stripSlots() {
+    const crew = (typeof crabs !== "undefined" && crabs.length) ? crabs.slice(0, 8) : [];
+    if (crab && !crew.some(c => c.p.name === crab.p.name)) crew.push(crab);
+    const w = Math.min(52, ((W - 8) / Math.max(1, crew.length)) | 0);
+    const x0 = ((W - w * crew.length) / 2) | 0;
+    return crew.map((c, i) => ({ c, x: x0 + i * w, w }));
+  }
+
   function burst(x, y, color) {
     for (let i = 0; i < 10; i++) {
       const a = (i / 10) * Math.PI * 2;
@@ -87,18 +98,30 @@
   }
 
   // ---------------------------------------------------------------- opening
+  function stash() {
+    if (crab) saved[crab.p.name] = { cells: cells.slice(), goalIdx, goalMade };
+  }
   function open(c) {
+    stash();
     crab = c;
     chainKey = (CHAINS[c.p.job] || CHAINS.shack).key;
     chain = CHAINS[c.p.job] || CHAINS.shack;
-    cells = new Array(COLS * ROWS).fill(-1);
-    sel = -1; goalIdx = 0; goalMade = 0; goalsDone = 0; pops = []; fullT = 0; everMerged = false;
-    for (let i = 0; i < 5; i++) spawn();          // a few to start with
+    const keep = saved[c.p.name];
+    if (keep) {
+      cells = keep.cells.slice(); goalIdx = keep.goalIdx; goalMade = keep.goalMade;
+    } else {
+      cells = new Array(COLS * ROWS).fill(-1);
+      goalIdx = 0; goalMade = 0;
+      for (let i = 0; i < 5; i++) spawn();        // a few to start with
+    }
+    sel = -1; pops = []; fullT = 0;
+    if (!on) { goalsDone = 0; everMerged = false; }   // fresh visit from town
     banner = "YOU ARE " + c.p.name + "!"; bannerT = 2.4;
-    on = true; swallowUp = true;
+    on = true;
     if (typeof sfx !== "undefined") sfx.ding();
   }
   function close() {
+    stash();
     on = false; sel = -1; press = null;
     if (crab && goalsDone > 0 && typeof popText === "function") {
       popText(crab.p.name + " HELPED!", crab.x - 12, (crab.y || 160) - 30, [255, 230, 120]);
@@ -188,23 +211,33 @@
     for (let y = 4; y < H; y += 8) rect(ctx, 0, y, W, 1, [32, 50, 86]);
 
     // header: who you are + what you're making
-    rect(ctx, 0, 0, W, 42, [30, 20, 36]);
-    rect(ctx, 2, 2, W - 4, 38, [255, 250, 235]);
-    if (crab) drawCrabHead(crab, 8, 18);
-    if (crab) text(ctx, crab.p.name, 30, 6, [40, 24, 16]);
+    rect(ctx, 0, 0, W, 28, [30, 20, 36]);
+    rect(ctx, 2, 2, W - 4, 24, [255, 250, 235]);
+    if (crab) text(ctx, crab.p.name, 8, 5, [40, 24, 16]);
     const g = goal();
     if (g) {
-      smallText(ctx, "MAKE " + g[1] + " " + itemName(g[0]), 30, 17, [70, 90, 130]);
+      smallText(ctx, "MAKE " + g[1] + " " + itemName(g[0]), 8, 16, [70, 90, 130]);
       // progress pips
       for (let i = 0; i < g[1]; i++) {
-        const px2 = 30 + i * 9;
-        rect(ctx, px2, 26, 7, 7, [200, 190, 175]);
-        if (i < goalMade) rect(ctx, px2 + 1, 27, 5, 5, [96, 200, 120]);
+        const px2 = 8 + (smallTextWidth("MAKE " + g[1] + " " + itemName(g[0])) + 6) + i * 9;
+        rect(ctx, px2, 15, 7, 7, [200, 190, 175]);
+        if (i < goalMade) rect(ctx, px2 + 1, 16, 5, 5, [96, 200, 120]);
       }
-      drawBig(itemArt(g[0]), W - 40, 8, 3);
+      drawBig(itemArt(g[0]), W - 32, 2, 3);
     } else {
-      smallText(ctx, "ALL DONE! KEEP PLAYING", 30, 20, [40, 110, 60]);
-      smallText(ctx, "JOBS FINISHED: " + goalsDone, 30, 29, [110, 100, 110]);
+      smallText(ctx, "ALL DONE! KEEP PLAYING - JOBS: " + goalsDone, 8, 16, [40, 110, 60]);
+    }
+
+    // crew strip: tap a crab to be them instead
+    const strip = stripSlots();
+    for (const s of strip) {
+      const me = crab && s.c.p.name === crab.p.name;
+      rect(ctx, s.x, CREW_Y, s.w - 2, CREW_H, me ? [255, 230, 120] : [30, 20, 36]);
+      rect(ctx, s.x + 1, CREW_Y + 1, s.w - 4, CREW_H - 2, me ? [255, 250, 235] : [46, 66, 104]);
+      drawCrabHead(s.c, (s.x + (s.w - 18) / 2) | 0, CREW_Y + 4);
+      const nm = s.c.p.name.slice(0, 6);
+      smallText(ctx, nm, s.x + (((s.w - 2 - smallTextWidth(nm)) / 2) | 0), CREW_Y + 20,
+        me ? [40, 24, 16] : [170, 190, 220]);
     }
 
     // the board
@@ -239,20 +272,20 @@
     if (bannerT > 0 && banner) {
       bannerT -= dt;
       const w2 = textWidth(banner) + 12, x = ((W - w2) / 2) | 0;
-      rect(ctx, x, 189, w2, 13, [30, 20, 36]);
-      rect(ctx, x + 1, 190, w2 - 2, 11, [255, 250, 235]);
-      text(ctx, banner, x + 6, 192, [200, 120, 40]);
+      rect(ctx, x, MSG_Y, w2, 13, [30, 20, 36]);
+      rect(ctx, x + 1, MSG_Y + 1, w2 - 2, 11, [255, 250, 235]);
+      text(ctx, banner, x + 6, MSG_Y + 3, [200, 120, 40]);
     }
     if (!everMerged && bannerT <= 0) {
       const tip = "TAP TWO THE SAME!";
       const w3 = textWidth(tip) + 12, x3 = ((W - w3) / 2) | 0;
-      rect(ctx, x3, 189, w3, 13, [30, 20, 36]);
-      rect(ctx, x3 + 1, 190, w3 - 2, 11, [255, 250, 235]);
-      text(ctx, tip, x3 + 6, 192, ((time * 2) | 0) % 2 ? [40, 110, 60] : [80, 150, 90]);
+      rect(ctx, x3, MSG_Y, w3, 13, [30, 20, 36]);
+      rect(ctx, x3 + 1, MSG_Y + 1, w3 - 2, 11, [255, 250, 235]);
+      text(ctx, tip, x3 + 6, MSG_Y + 3, ((time * 2) | 0) % 2 ? [40, 110, 60] : [80, 150, 90]);
     }
     if (fullT > 0) {
       fullT -= dt;
-      smallText(ctx, "BOARD IS FULL - MERGE SOME!", 66, 192, [255, 200, 120]);
+      smallText(ctx, "BOARD IS FULL - MERGE SOME!", 66, MSG_Y + 4, [255, 200, 120]);
     }
   }
 
@@ -260,14 +293,51 @@
     if (!press) return;
     press.t += dt;
     const c = press.crab;
+    const f = Math.min(1, Math.max(0, (press.t - HINT_AT) / (OPEN_AT - HINT_AT)));
     if (press.t < HINT_AT) return;
-    const f = Math.min(1, (press.t - HINT_AT) / (OPEN_AT - HINT_AT));
-    const bx = (c.x - camX + 8) | 0, by = (c.y - 30) | 0;
-    if (bx < -10 || bx > W + 10) return;
-    rect(ctx, bx - 9, by, 20, 12, [30, 20, 36]);
-    rect(ctx, bx - 8, by + 1, 18, 10, [255, 250, 235]);
-    rect(ctx, bx - 6, by + 4, Math.round(14 * f), 4, [255, 200, 60]);
-    if (f >= 1) { open(c); press = null; }
+
+    // rising beeps as it fills - impossible to miss
+    const step = Math.floor(f * 6);
+    if (step !== press.beeped) {
+      press.beeped = step;
+      if (typeof beep === "function") beep(360 + f * 640, 0.06, "square", 0.035);
+    }
+
+    const bx = Math.max(30, Math.min(W - 30, (c.x - camX + 8) | 0));
+    const by = Math.max(34, (c.y - 44) | 0);
+    if (c.x - camX < -20 || c.x - camX > W + 20) return;
+
+    // fat wobbling thought bubble
+    const wob = Math.sin(press.t * 10) * 1.5;
+    const R = 26 + wob;
+    ctx.fillStyle = "rgb(30,20,36)";
+    ctx.beginPath(); ctx.arc(bx, by, R + 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgb(255,250,235)";
+    ctx.beginPath(); ctx.arc(bx, by, R, 0, Math.PI * 2); ctx.fill();
+    // trailing thought dots down to the crab
+    rect(ctx, bx - 2, by + R + 3, 5, 5, [255, 250, 235]);
+    rect(ctx, bx - 1, by + R + 10, 3, 3, [255, 250, 235]);
+
+    // pie fill around the rim
+    ctx.strokeStyle = "rgb(255,200,60)";
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(bx, by, R - 3, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
+
+    // the crab's face hopping with excitement inside the bubble
+    const hop = Math.abs(Math.sin(press.t * 12)) * (4 + f * 5);
+    const art = CRAB_ARTS[c.p.color % CRAB_ARTS.length].a;
+    blit(ctx, art, bx - 8, by - 6 - hop);
+    const acc = ACCESSORIES[c.duty ? "toque" : c.p.acc];
+    if (acc) blit(ctx, acc.art, bx - 8 + acc.dx, by - 6 - hop + acc.dy);
+    // sparkles once it is nearly there
+    if (f > 0.6) {
+      for (let i = 0; i < 4; i++) {
+        const a = press.t * 6 + i * Math.PI / 2;
+        px(ctx, bx + Math.cos(a) * (R - 8), by + Math.sin(a) * (R - 8), [255, 230, 120]);
+      }
+    }
+    smallText(ctx, "HOLD!", bx - smallTextWidth("HOLD!") / 2, by + R - 10, [200, 120, 40]);
+    if (f >= 1) { open(c); swallowUp = true; press = null; }
   }
 
   // ---------------------------------------------------------------- exports
@@ -292,7 +362,7 @@
       for (const c of allCrabs()) {
         if (c.hidden) continue;
         if (Math.abs(wx - (c.x + 8)) < 14 && Math.abs(p.y - (c.y - 6)) < 16) {
-          press = { crab: c, t: 0, x: p.x, y: p.y };
+          press = { crab: c, t: 0, x: p.x, y: p.y, beeped: -1 };
           return false;   // let a normal tap still follow this crab
         }
       }
@@ -316,6 +386,14 @@
       if (p) {
         if (hit(BACK, p)) { close(); return true; }
         if (hit(SPAWN, p)) { if (spawn() && typeof sfx !== "undefined") sfx.buy(); return true; }
+        if (p.y >= CREW_Y && p.y < CREW_Y + CREW_H) {
+          for (const s of stripSlots()) {
+            if (p.x >= s.x && p.x < s.x + s.w) {
+              if (!crab || s.c.p.name !== crab.p.name) open(s.c);
+              return true;
+            }
+          }
+        }
         tapBoard(p);
       }
       return true;
