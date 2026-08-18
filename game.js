@@ -533,9 +533,11 @@ function updateSchedule(c, dt) {
   // off-duty errands, while town is open and it's not almost shift time
   if (c.errandCd > 0) c.errandCd -= dt;
   const errandWindow = tmin < leaveGmin(c) - 30 || tmin >= sh.end;   // before leaving, or after shift
-  if (c.dayState === "home" && shackOpen() && c.errandCd <= 0 && errandWindow) {
+  const townAwake = shackOpen() || (tmin >= 20 * 60 && tmin < 23 * 60) || (tmin >= 5.5 * 60 && tmin < 8 * 60);
+  if (c.dayState === "home" && townAwake && c.errandCd <= 0 && errandWindow) {
     const e = pickErrand(c);
-    if (e) startErrand(c, e);
+    if (e && e.selfCook) startSelfCook(c);
+    else if (e && !e.selfCook && shackOpen()) startErrand(c, e);
     else c.errandCd = 2;
   }
 }
@@ -543,6 +545,11 @@ function updateSchedule(c, dt) {
 // ---------------------------------------------------------------- errands
 function pickErrand(c) {
   const staffed = (b) => bizUnlocked(b) && crabs.some(k => k.duty && k.workBiz === b);
+  // restaurant staff privilege: cook your own meal when the kitchen is unstaffed
+  if ((c.p.hunger || 0) >= 0.5 && !staffed("shack") && c.p.job === "shack") {
+    const cost = INGREDIENT_COST.fruit;   // staff meal: cheapest ingredients, at cost
+    if (c.p.wallet >= cost + 1) return { selfCook: true };
+  }
   if ((c.p.hunger || 0) >= 0.5 && staffed("shack")) {
     const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= r.pay + 2);
     if (affordable.length) {
@@ -561,6 +568,43 @@ function pickErrand(c) {
     if (c.p.wallet >= r.pay + 2) return { biz: "arcade", recipe: r, need: "fun" };
   }
   return null;
+}
+function startSelfCook(c) {
+  c.dayState = "selfCook"; c.cookStep = 0;
+  const s0 = stationSpot("shack", "crate", 0); setT(c, s0.x, s0.y);
+}
+function updateSelfCook(c, dt) {
+  if (c.cookStep === 0) {                      // to the crate
+    if (routedStep(c, crabMove(c), dt)) {
+      const cost = INGREDIENT_COST.fruit;
+      c.p.wallet = Math.max(0, c.p.wallet - cost);
+      coins += cost;                            // covers the pantry: net zero for the house
+      c.carrying = "fruit"; c.cookStep = 1; c.workT = 0.6;
+    }
+  } else if (c.cookStep === 1) {               // grab
+    c.workT -= dt;
+    if (c.workT <= 0) {
+      const g = tryAcquire("shack", "grill");
+      if (g >= 0) {
+        c.slotKind = "grill"; c.slot = g;
+        const sp = stationSpot("shack", "grill", g); setT(c, sp.x, sp.y);
+        c.workBiz = "shack"; c.cookStep = 2;
+      }
+    }
+  } else if (c.cookStep === 2) {               // to the grill
+    if (routedStep(c, crabMove(c), dt)) { c.workT = 3; c.cookStep = 3; }
+  } else if (c.cookStep === 3) {               // cook + eat
+    c.workT -= dt;
+    if (c.workT <= 0) {
+      release(c); c.carrying = null;
+      c.p.hunger = 0; c.cookStep = 0;
+      popText("STAFF MEAL!", c.x - 8, FLOOR_Y - 30, [140, 255, 160]);
+      if (window._stats) window._stats.staffMeals = (window._stats.staffMeals || 0) + 1;
+      c.quip = { text: "CHEF'S PRIVILEGE", t: 2.4 };
+      c.errandCd = 25; c.dayState = "home";
+      startCommute(c, false);
+    }
+  }
 }
 function startErrand(c, e) {
   c.dayState = "toErrand"; c.errandBiz = e.biz; c.errand = e;
@@ -831,6 +875,7 @@ function crabStatus(c) {
     if (c.kstate === "waitSlot") return "WAITING FOR A SPOT";
     return "ON SHIFT";
   }
+  if (c.dayState === "selfCook") return c.cookStep >= 3 ? "COOKING A STAFF MEAL" : "RAIDING THE PANTRY";
   if (c.dayState === "toErrand") return "OFF TO " + BIZ[c.errandBiz].name;
   if (c.dayState === "errand") return "IN LINE AT " + BIZ[c.errandBiz].name;
   const toWork = c.dayState === "toWork";
@@ -1675,6 +1720,7 @@ function frame(now) {
     updateSchedule(c, dt);
     if (c.dayState === "toWork" || c.dayState === "toHome") updateCommute(c, dt);
     else if (c.dayState === "toErrand" || c.dayState === "errand") updateErrand(c, dt);
+    else if (c.dayState === "selfCook") updateSelfCook(c, dt);
     else if (c.dayState === "working") updateKitchen(c, dt);
     else if (c.dayState === "home") updateHome(c, dt);
     maybeQuip(c, dt);

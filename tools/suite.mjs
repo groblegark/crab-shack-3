@@ -68,11 +68,21 @@ scenario("dishes: dining, busing, washing all flow", () => {
   return true;
 });
 
-scenario("errands: crabs feed themselves", () => {
+scenario("errands: crabs keep themselves fed", () => {
   const sim = createSim({ seed: 7 });
   sim.runDays(4);
   const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
-  return st.crabServes >= 1 ? true : `no crab errand completed in 4 days (rage ${st.crabRage})`;
+  const fed = (st.crabServes || 0) + (st.staffMeals || 0);
+  if (fed < 2) return `only ${fed} crab meals in 4 days (rage ${st.crabRage})`;
+  const worstHunger = sim.G("Math.max(...crabs.map(c => c.p.hunger || 0))");
+  return worstHunger < 1 ? true : `a crab is starving (hunger ${worstHunger})`;
+});
+
+scenario("staff meals: closing crew cooks their own dinner", () => {
+  const sim = createSim({ seed: 17 });
+  sim.runDays(3);
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  return (st.staffMeals || 0) >= 1 ? true : `no staff meal in 3 days (crabServes ${st.crabServes})`;
 });
 
 scenario("no crab freezes mid-walk (baseline)", () => {
