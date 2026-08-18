@@ -121,6 +121,49 @@ compounds or collapses → the landlord collects at 20:00 either way.
   it (−20% prep time) for that dish only, announced in a toast and shown on
   their follow card. Rewards watching a specific crab grow into a specialist.
 
+## The trade horizon (Matt, 2026-08-18) — land it by degrees
+
+**North star**: the town is one **node** in a wider trade network. Everything
+is produced *idle-style* — like Overcooked, crabs must go to stations to keep
+things running (this eventually reaches power stations, but that's far off).
+The town imports what it can't make and will eventually export what it can;
+other idle economies get built as sibling nodes and connected together
+slowly, as the infrastructure builds itself out.
+
+**Current target: a complete and beautiful "fishing town node" with
+external-facing stubs.** Everything below serves that.
+
+Staged landings (each stage ships alone, suite-green, balance re-verified):
+
+- **T1 — Trade ledger (bookkeeping only, zero balance change)**: an `IMPORTS`
+  commodity table with *fixed prices* — corn, fresh water, electricity,
+  imported fish (already exists at $7) — and running counters for quantities
+  imported (exports later). Wire existing flows in: import-fish purchases,
+  showers/laundry consume water, arcade consumes electricity. A TRADE ledger
+  view (notice board or MENU tab). Not connected to anything yet — the point
+  is the tracked flows exist before anything depends on them.
+- **T2 — Thirst**: a THIRST need parallel to FED (we already have juice,
+  `raw: "fruit"`). Crabs and guests drink; juice ingredients come through the
+  import ledger. Needs a full headless matrix re-run — a new need is a new
+  death spiral candidate.
+- **T3 — Ingredient sourcing for everything**: recipes get real ingredient
+  lists (corn → tortillas → FISH TACO is the pilot; the `raw:` field and
+  `consumeIngredient()` are the embryo). A pantry + a receiving station where
+  imports physically arrive (morning delivery), and a crab has to work the
+  station to restock — production is idle-style, not a passive rate.
+- **T4 — The boat**: a live-aboard boat fishers can buy — a housing rung
+  (shelter → house → boat for fishers) that also **increases catch** (fish
+  further out). NPC fishers save toward it via the existing housing-ladder
+  logic; the player gets one too if they fish (interacts with backlog
+  "player-avatar crab" + "fishing expansion").
+- **T5 — Exports + external-facing stubs**: an export dock — surplus catch
+  (and later goods) sold off-node at fixed prices, both directions visible in
+  the ledger. Every commodity flows through named ledger entries so future
+  sibling nodes (farm, power station) can plug in without surgery.
+
+Sequencing rule: fixed prices and untracked externalities are *fine* — track
+first, connect later. Don't build the network before the node is beautiful.
+
 ## Backlog (rough priority)
 1. **Business settings** — per-business config (staff-meal pricing
    retail/at-cost/free is already TODO-marked in game.js; then prices, hours,
@@ -130,7 +173,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
    wholesale off the pier is the natural next one.
 3. **Player-avatar crab** — make `owner: "player"` also a walkable crab.
 4. **Fishing expansion** — hire fishers directly; fired/unhired crew return to
-   the pier; weather/catch variance; quotas; a boat.
+   the pier; weather/catch variance; quotas; a boat (see trade horizon T4).
 5. **NPC eviction / move-outs** — NPC owners currently skip rent when short
    (TODO in the settlement block); no mortality for NPCs either.
 6. Staff-bused table service for a fancier restaurant tier.
