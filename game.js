@@ -2032,20 +2032,34 @@ function homeLabel(p) {
   if (p.house === 6) return ["HOUSE BY THE SHELTER", [90, 130, 90]];
   return ["HOUSE " + (p.house + 1) + " ON THE PROMENADE", [90, 130, 90]];
 }
+const _art2Cache = {};
+function art2(key, art) {   // lazily scaled 2x art for the dossier portrait
+  return _art2Cache[key] || (_art2Cache[key] = scale2(art));
+}
 function drawDossier() {
   if (!dossier) return;
   const c = dossier, p = c.p;
-  const x = 24, y = 16, w2 = 208, h2 = 168;
+  const x = 24, y = 6, w2 = 208, h2 = 168;   // sits fully above the panel
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
-  rect(ctx, x, y, w2, 22, [58, 42, 38]);
-  rect(ctx, x + 4, y + 3, 20, 26, [200, 230, 245]);
-  blit(ctx, CRAB_ARTS[p.color].a, x + 6, y + 11);
-  const acc = ACCESSORIES[c.duty ? "toque" : p.acc];
-  if (acc) blit(ctx, acc.art, x + 6 + acc.dx, y + 11 + acc.dy);
-  text(ctx, p.name, x + 30, y + 4, [255, 240, 210]);
-  smallText(ctx, TRAITS[p.trait].label + " - " + MODES[p.mode].label + (p.npc ? " - TOWNSFOLK" : " - CREW"), x + 30, y + 14, [210, 190, 170]);
-  let ly = y + 34;
+  rect(ctx, x, y, w2, 32, [58, 42, 38]);
+  // full-body portrait at 2x, wearing their real accessory (no work toque)
+  rect(ctx, x + 4, y + 4, 40, 30, [200, 230, 245]);
+  blit(ctx, art2("c" + p.color, CRAB_ARTS[p.color].a), x + 8, y + 8);
+  const acc = ACCESSORIES[p.acc];
+  if (acc) blit(ctx, art2("a" + p.acc, acc.art), x + 8 + acc.dx * 2, y + 8 + acc.dy * 2);
+  text(ctx, p.name, x + 48, y + 5, [255, 240, 210]);
+  smallText(ctx, TRAITS[p.trait].label + " - " + MODES[p.mode].label + (p.npc ? " - TOWNSFOLK" : " - CREW"), x + 48, y + 15, [210, 190, 170]);
+  // what they're saying (their live quip, or a line true to their trait)
+  {
+    let line = c.quip && c.quip.text;
+    if (!line) {
+      const lines = TRAITS[p.trait].quips[quipContext(c)] || [];
+      if (lines.length) line = lines[(p.name.length * 7 + p.color * 3 + day) % lines.length];
+    }
+    if (line) smallText(ctx, "'" + line + "'", x + 48, y + 24, [255, 215, 150]);
+  }
+  let ly = y + 42;
   const row = (label, val, col) => {
     smallText(ctx, label, x + 8, ly, [120, 110, 125]);
     smallText(ctx, val, x + 56, ly, col || [40, 30, 40]);
@@ -2072,7 +2086,12 @@ function drawDossier() {
   smallText(ctx, "CLAIMS TO FAME", x + 8, ly, [58, 42, 38]); ly += 8;
   const made = Object.entries(p.made || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
   if (!made.length) smallText(ctx, "NONE YET - GIVE IT TIME", x + 8, ly, [150, 140, 160]), ly += 8;
-  for (const [id, n] of made) {
+  for (let i = 0; i < made.length; i++) {
+    if (ly > y + h2 - 12 && i < made.length - 1) {   // keep inside the card
+      smallText(ctx, "+" + (made.length - i) + " MORE", x + 8, ly, [150, 140, 160]);
+      break;
+    }
+    const [id, n] = made[i];
     let tier = "";
     for (const [need, , label] of MASTERY) if (n >= need) { tier = label; break; }
     smallText(ctx, (ITEM_NAMES[id] || id.toUpperCase()) + " X" + n + (tier ? " - " + tier : ""), x + 8, ly,
