@@ -75,7 +75,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ### Verified balance (8 seeds, tools/headless.mjs)
 - Baseline (buy nothing): **0/8 survive, median eviction ~11-12** — the
   8-seed snapshot moves a day either way per build; at 16 seeds the tails run
-  6–20+. Post-merge numbers below are re-measured on the combined tree.
+  6–20+. Combined tree (job board + needs drag, 2026-08-18): 0/8, evictions 7-13, median 12.
   Standing pressures: job-board labor competition (a hired-away fisher lowers
   townCatch, pushing the shack onto $7 import fish; SUDSY's flush-hire
   threshold till ≥ 260 spares the earliest days) and the needs-drag rework
