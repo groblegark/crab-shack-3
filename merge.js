@@ -375,8 +375,19 @@
     },
     touchMove(p) {
       if (!MOBILE) return false;
-      if (press && (Math.abs(p.x - press.x) > 6 || Math.abs(p.y - press.y) > 6)) press = null;
-      return on;          // in merge mode, swallow drags so the town can't pan
+      // real thumbs drift: ~16 canvas px (~24 CSS px on a phone) over the hold
+      // is jitter, not a pan. Past that it's a deliberate drag - hand it back.
+      if (press && (Math.abs(p.x - press.x) > 16 || Math.abs(p.y - press.y) > 16)) press = null;
+      // swallow while a hold is arming so the camera can't pan out from under
+      // the finger (the pan fight was killing real-device holds)
+      return on || !!press;
+    },
+    // iOS/Android fire touchcancel when the system claims the gesture - never
+    // leave a phantom press armed (it would fill with no finger down)
+    touchCancel() {
+      if (!MOBILE) return false;
+      press = null;
+      return on;
     },
     // tiny window for scripted testing; harmless in play
     _debug: () => ({ on, cells: cells.slice(), goalIdx, goalMade, goalsDone, gifted,

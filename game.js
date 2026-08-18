@@ -1963,6 +1963,10 @@ cv.addEventListener("touchmove", (ev) => {
   if (Math.abs(p.x - dragStartX) > 6) { dragMoved = true; followIdx = -1; followNpc = null; followCust = null; }
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 }, { passive: false });
+cv.addEventListener("touchcancel", () => {
+  dragging = false; dragMoved = false;
+  if (window.MergeMode && MergeMode.touchCancel) MergeMode.touchCancel();
+}, { passive: true });
 cv.addEventListener("touchend", (ev) => {
   const t = ev.changedTouches && ev.changedTouches[0];
   if (window.MergeMode && MergeMode.touchEnd(t ? evPos(t) : null)) { dragging = false; dragMoved = false; return; }
