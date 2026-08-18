@@ -763,7 +763,20 @@ addEventListener("mousemove", (ev) => {
   if (Math.abs(p.x - dragStartX) > 4) { dragMoved = true; followIdx = -1; }
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 });
-addEventListener("mouseup", () => { dragging = false; });
+addEventListener("mouseup", () => { dragging = false; setTimeout(() => { dragMoved = false; }, 50); });
+cv.addEventListener("touchstart", (ev) => {
+  const t = ev.touches[0];
+  const p = evPos(t);
+  if (p.y < PANEL_Y) { dragging = true; dragStartX = p.x; dragCamX = camX; dragMoved = false; }
+}, { passive: true });
+cv.addEventListener("touchmove", (ev) => {
+  if (!dragging) return;
+  ev.preventDefault();
+  const p = evPos(ev.touches[0]);
+  if (Math.abs(p.x - dragStartX) > 6) { dragMoved = true; followIdx = -1; }
+  if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
+}, { passive: false });
+cv.addEventListener("touchend", () => { setTimeout(() => { dragging = false; dragMoved = false; }, 50); });
 function evPos(ev) {
   const r = cv.getBoundingClientRect();
   return { x: (ev.clientX - r.left) * (cv.width / r.width), y: (ev.clientY - r.top) * (cv.height / r.height) };
