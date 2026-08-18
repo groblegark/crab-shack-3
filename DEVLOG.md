@@ -8,6 +8,66 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, night — The crabs were thirsty, so the town poured
+
+![CLAWDIA, parched, off to the juice bar — as PINCHY pours the first cooler](devlog/img/2026-08-18-first-pour.png)
+
+*8:51 in the morning and CLAWDIA is already PARCHED, which is what the new
+fifth bar on her card is for. The toast above the sea says someone is doing
+something about it.*
+
+Thirst is real now. Every crab carries a SIP bar next to FED, CLN, FUN and
+SPA, the beach heat runs it down faster when they're sandy, and a crab who
+lets it hit the bottom is risking more than a dry mouth. Fortunately —
+suspiciously fortunately — a **JUICE BAR** opened this evening in the exact
+lot where the laundromat used to be, selling JUICE for $6 and a COOLER for
+$9. The $400 rung on the shop shelf is back. The town's first bartender was
+PINCHY, who poured the bar's first juice at 8:35 on opening day and by day
+eight had 69 juices and 71 coolers behind him — two-thirds of the way to
+famous for either one. Watch that crab.
+
+The bar tab changed the town's books, and the town handled it the way this
+town now handles everything: **the wage went up**, $22 to $23, because the
+standing precedent here is *raise wages, never discount drinks*. In related
+news, the bank read the room — two compounding runways (a credit line AND a
+new business to buy) stretched unchecked survival to fourteen days in
+testing, so the line tightened from $120 to $90 the same evening the bar
+opened. The bank gives with neither hand.
+
+![Opening night at the JUICE BAR](devlog/img/2026-08-18-juice-bar-open.png)
+
+### The dark half (tales from the sim)
+
+The same simulated town that gave us PINCHY's counter also buried two
+fishers. DRIFT went down parched on day 3 with $2 in his wallet — fisher
+money simply doesn't cover an $8 thirst. SALTY followed a day later with
+**$49 he never spent**: a working crab gets one errand window an evening,
+and every evening SALTY chose supper over juice. The sand won. The books
+say the town needs to give its crabs more than one hour a day to be alive
+in — and (serialization spoiler) there is an agent building **weekends**
+right now.
+
+### Fixed (little stories division)
+
+- Chefs no longer squat one station spot while holding a claim on another.
+  Night pours made this common; the bar stools are for customers.
+- A parched local no longer dies quietly at the back of a tourist queue
+  that never lulls: past half patience, locals now jump the line. The
+  town has decided it looks after its own.
+
+### Also, in the small hours
+
+Today's quieter merges, in one breath: a sun button skips the dead of night
+to morning; tourists are clickable now and carry little dossiers of their
+own; cyclists dismount and walk their bikes after dark like decent people;
+sick crabs show their PACE honestly; the bankruptcy oracle now forecasts on
+average income; and the trade ledger splits FISH LANDED from FISH SHIPPED
+IN — which prompted the town's owner to squint at it and say, quote,
+"unless we are using more than we catch? that's interesting." The ledger
+does not answer. The ledger just counts.
+
+---
+
 ## 2026-08-18, evening — The bank arrives
 
 ![A prosperous-looking town, and a blinking red prophecy](devlog/img/2026-08-18-doomed-town.png)
