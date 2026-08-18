@@ -649,7 +649,11 @@ function newCustomer(bizKey) {
   const biz = BIZ[bizKey];
   const r = biz.recipes[(Math.random() * biz.recipes.length) | 0];
   const spawnX = biz.queueX + 150;
-  return { biz: bizKey, recipe: r, art: TOURIST_ARTS[(Math.random() * TOURIST_ARTS.length) | 0],
+  return { biz: bizKey, recipe: r,
+    name: CUSTOMER_NAMES[(Math.random() * CUSTOMER_NAMES.length) | 0],
+    color: (Math.random() * CRAB_COLORS.length) | 0,
+    acc: ACC_KEYS[(Math.random() * ACC_KEYS.length) | 0],
+    animT: Math.random() * 9,
     x: spawnX, spawnX, state: "arriving", patience: 50, maxPatience: 50,
     claimed: false, served: false };
 }
@@ -662,7 +666,7 @@ function updateCustomers(dt) {
         k.x -= 45 * dt;
         if (k.x <= slot) {
           k.x = slot; k.state = "waiting";
-          popText(ITEM_NAMES[k.recipe.icon] + "?", k.x - 10, FLOOR_Y - 42, [255, 255, 255]);
+          popText((k.isCrab ? k.crab.p.name : k.name.split(" ")[0]) + ": " + ITEM_NAMES[k.recipe.icon] + "?", k.x - 26, FLOOR_Y - 42, [255, 255, 255]);
         }
       } else {
         if (k.x > slot) k.x = Math.max(slot, k.x - 45 * dt);
@@ -1097,7 +1101,25 @@ function drawCrab(c) {
 
 function drawCustomer(k) {
   {
-    if (!k.isCrab) wblit(k.art, k.x, FLOOR_Y - 19, k.state !== "leaving");
+    if (!k.isCrab) {
+      k.animT += 0.016;
+      const arts = CRAB_ARTS[k.color];
+      const moving = k.state !== "waiting";
+      const art = moving && ((k.animT * 8) | 0) % 2 ? arts.b : arts.a;
+      const flip = k.state !== "leaving";
+      const cy = FLOOR_Y - 12;
+      wblit(art, k.x, cy, flip);
+      const acc = ACCESSORIES[k.acc];
+      if (acc) {
+        const ax = flip ? 16 - acc.dx - acc.art.w : acc.dx;
+        wblit(acc.art, k.x + ax, cy + acc.dy, flip);
+      }
+      if (k.state === "waiting") {
+        const nm = k.name.split(" ")[0].slice(0, 6);
+        const nx = k.x + 8 - smallTextWidth(nm) / 2 - camX;
+        if (nx > -30 && nx < W) smallText(ctx, nm, nx, FLOOR_Y + 2, [100, 80, 55]);
+      }
+    }
     if (k.state === "waiting" && !k.served) {
       const bx = k.x - camX - 1, by = FLOOR_Y - 36;
       if (bx > -16 && bx < W) {
