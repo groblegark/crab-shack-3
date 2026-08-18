@@ -842,3 +842,21 @@ defItem("shine", [
   "....K....",
   ".........",
 ]);
+
+// sickness bubble + beach memorial
+const SICK_MARK = parseArt([
+  ".GG.G.",
+  "G..G.G",
+  ".GG.G.",
+], swap(PAL, { G: [130, 220, 110] }));
+const MEMORIAL = parseArt([
+  "...KKKK...",
+  "..KMMMMK..",
+  ".KMMLLMMK.",
+  ".KMLMMLMK.",
+  ".KMMMMMMK.",
+  ".KMMLLMMK.",
+  ".KMMMMMMK.",
+  "KKKKKKKKKK",
+  "KGGKGGKGGK",
+], PAL);

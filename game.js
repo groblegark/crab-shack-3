@@ -179,6 +179,7 @@ let crabs = [], customers = [], floaters = [];
 let spawnT = 3, toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x
 let camX = 1180, followIdx = -1, tab = "crew";
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
+let memorials = [];   // { x, name } - the town remembers
 let screen = "title", hasSave = false, wiping = false;
 function newGame() { wiping = true; localStorage.removeItem(SAVE_KEY); location.reload(); }
 const CRAB_WAGE = 18, HOUSE_RENT = 8;
@@ -252,6 +253,7 @@ function newCrab(persona) {
   if (persona.hunger == null) persona.hunger = 0;
   if (persona.dirt == null) persona.dirt = 0;
   if (persona.bored == null) persona.bored = 0;
+  if (persona.sick === undefined) persona.sick = null;
   if (persona.sandy == null) persona.sandy = 0;
   return {
     p: persona,
@@ -268,7 +270,7 @@ function newCrab(persona) {
 }
 function crabMove(c) {
   const t = TRAITS[c.p.trait];
-  return 40 * t.move * shoesMult() * (1 - 0.2 * Math.max(0, (c.p.bored || 0) - 0.5));
+  return 40 * t.move * shoesMult() * (1 - 0.2 * Math.max(0, (c.p.bored || 0) - 0.5)) * (c.p.sick ? 0.5 : 1);
 }
 function crabWork(c) { return TRAITS[c.p.trait].work; }
 
@@ -356,7 +358,7 @@ function save() {
   if (FRESH || wiping) return;
   const lv = {}; for (const k in UPS) lv[k] = UPS[k].lvl;
   localStorage.setItem(SAVE_KEY, JSON.stringify({
-    coins, lifetime, lv, day, tmin, lastRentDay, gameOver, rate: incomeRate(), t: Date.now(),
+    coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rate: incomeRate(), t: Date.now(),
     personas: crabs.map(c => c.p),
     npc: { tills: { sudsy: OWNERS.sudsy.till }, personas: npcs.map(c => c.p) },
   }));
@@ -370,6 +372,7 @@ function load() {
   day = s.day || 1; tmin = s.tmin != null ? s.tmin : 7 * 60;
   lastRentDay = s.lastRentDay || 0;
   if (s.gameOver) { gameOver = true; screen = "play"; }
+  memorials = Array.isArray(s.memorials) ? s.memorials : [];
   for (const k in UPS) if (s.lv && s.lv[k] != null) UPS[k].lvl = s.lv[k];
   if (Array.isArray(s.personas) && s.personas.length) {
     crabs = s.personas.map((p2, i) => {
@@ -585,7 +588,7 @@ function updateBus(dt) {
 function updateSchedule(c, dt) {
   const sh = SHIFTS[c.p.shift];
   if (!bizUnlocked(c.p.job)) c.p.job = "shack";
-  if (c.dayState === "home" && tmin >= leaveGmin(c) && tmin < sh.end - 30) {
+  if (c.dayState === "home" && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !c.p.sick) {
     startCommute(c, true);
   }
   if (c.dayState === "working" && tmin >= sh.end) c.pendingOff = true;
@@ -595,8 +598,11 @@ function updateSchedule(c, dt) {
     c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25);  // a shift works up an appetite
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and stains the uniform
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
-    c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.25);    // beach work is gritty work
-    startCommute(c, false);
+    c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.15);    // beach work is gritty work
+    // grab dinner on the way home instead of trekking back later
+    const e = !c.p.sick && pickErrand(c);
+    if (e && !e.selfCook) startErrand(c, e);
+    else startCommute(c, false);
   }
   // owner-operators top their pocket up from the till
   if (c.p.npc) {
@@ -633,17 +639,19 @@ function pickErrand(c) {
       return { biz: "shack", recipe: r, need: "food" };
     }
   }
+  if (c.p.sick) return null;   // bed rest: food handled above, nothing else
   if ((c.p.dirt || 0) >= 0.66 && staffed("cleaners")) {
     const r = BIZ.cleaners.recipes[1];   // uniform service
     if (c.p.wallet >= r.pay + 2) return { biz: "cleaners", recipe: r, need: "clean" };
   }
+  const needsBath = (c.p.sandy || 0) >= 0.6 || ((c.p.dirt || 0) >= 0.75 && !staffed("cleaners"));
+  if (needsBath && staffed("showers") && !c.p.npc) {
+    const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
+    if (c.p.wallet >= r.pay + 2) return { biz: "showers", recipe: r, need: "spa" };
+  }
   if ((c.p.bored || 0) >= 0.6 && staffed("arcade")) {
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
     if (c.p.wallet >= r.pay + 2) return { biz: "arcade", recipe: r, need: "fun" };
-  }
-  if ((c.p.sandy || 0) >= 0.6 && staffed("showers") && !c.p.npc) {
-    const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
-    if (c.p.wallet >= r.pay + 2) return { biz: "showers", recipe: r, need: "spa" };
   }
   return null;
 }
@@ -864,6 +872,7 @@ function serve(c) {
       if (cust.need === "food") cust.crab.p.hunger = 0;
       if (cust.need === "clean") cust.crab.p.dirt = 0;
       if (cust.need === "fun") { cust.crab.p.bored = 0; cust.crab.quip = { text: "BEST DAY EVER!", t: 2.4 }; }
+      if (cust.need === "spa") cust.crab.p.dirt = Math.max(0, (cust.crab.p.dirt || 0) - 0.5);
       if (cust.need === "spa") { cust.crab.p.sandy = 0; cust.crab.quip = { text: "SQUEAKY CLEAN!", t: 2.4 }; }
       popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
     } else {
@@ -956,6 +965,7 @@ function updateCustomers(dt) {
 
 // ---------------------------------------------------------------- status text
 function crabStatus(c) {
+  if (c.p.sick) return "SICK - DAY " + ((c.p.sick.days || 0) + 1) + " - NEEDS FOOD + REST";
   if (c.dayState === "home") {
     if (darkness() > 0.7) return c.p.homeless ? "SLEEPING AT THE SHELTER" : "SLEEPING";
     return c.p.homeless ? "AT THE SHELTER" : "CHILLING AT HOME";
@@ -1373,6 +1383,7 @@ function drawCrab(c) {
     wblit(acc.art, c.x + ax, y + acc.dy, c.flip);
   }
   if ((c.p.dirt || 0) >= 0.66) wblit(DIRT, c.x, y, c.flip);
+  if (c.p.sick && ((c.animT * 2) | 0) % 2) wblit(SICK_MARK, c.x + 10, y - 8);
   if (c.carrying) wblit(ITEMS[c.carrying], c.x + 4, y - 7);
   if (working && c.workMax > 0.7) {
     const frac = 1 - c.workT / c.workMax;
@@ -1586,7 +1597,7 @@ function drawPanel() {
       blit(ctx, CRAB_ARTS[c.p.color].a, bx + 4, 206);
       const acc = ACCESSORIES[c.duty ? "toque" : c.p.acc];
       if (acc) blit(ctx, acc.art, bx + 4 + acc.dx, 206 + acc.dy);
-      rect(ctx, bx + 18, 201, 4, 4, c.duty ? [96, 232, 120] : [150, 140, 140]);
+      rect(ctx, bx + 18, 201, 4, 4, c.p.sick ? [130, 220, 110] : c.duty ? [96, 232, 120] : [150, 140, 140]);
       smallText(ctx, c.p.name.slice(0, 5), bx + 1, 224, [220, 210, 190]);
     }
     if (!crabs.length) text(ctx, "NO CREW YET", 8, 206, [190, 170, 150]);
@@ -1719,6 +1730,7 @@ function frame(now) {
     // 1. wages: pay every crab you can afford
     let wages = 0;
     for (const c of crabs) {
+      if (c.p.sick) continue;   // no work, no pay
       if (coins >= CRAB_WAGE) { coins -= CRAB_WAGE; c.p.wallet += CRAB_WAGE; wages += CRAB_WAGE; }
       else popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]);
     }
@@ -1759,6 +1771,57 @@ function frame(now) {
     for (const c of npcs) {
       c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.1);
       c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.05);
+    }
+    // 2.5 epidemiology: neglect breeds illness; illness spreads; rest + care cures
+    {
+      const everyone = allCrabs();
+      const sickNow = everyone.filter(k => k.p.sick);
+      for (const k of everyone) {
+        if (k.p.sick) continue;
+        let risk = 0;
+        if ((k.p.hunger || 0) >= 0.95) risk += 0.12;
+        if ((k.p.dirt || 0) >= 0.95) risk += 0.12;
+        if ((k.p.sandy || 0) >= 0.95) risk += 0.06;
+        for (const s2 of sickNow) {
+          const coworkers = s2.workBiz === k.workBiz && k.dayState !== "home" && !s2.p.npc;
+          const shelterMates = k.p.homeless && s2.p.homeless;
+          if (coworkers || shelterMates) risk += 0.08;
+        }
+        if (risk > 0 && Math.random() < Math.min(0.5, risk)) {
+          k.p.sick = { days: 0 };
+          if (window._stats) {
+            const why = [];
+            if ((k.p.hunger || 0) >= 0.9) why.push("hunger");
+            if ((k.p.dirt || 0) >= 0.9) why.push("dirt");
+            if ((k.p.sandy || 0) >= 0.9) why.push("sandy");
+            if (why.length === 0) why.push("contagion");
+            window._stats.causes = window._stats.causes || {};
+            for (const w of why) window._stats.causes[w] = (window._stats.causes[w] || 0) + 1;
+          }
+          popText(k.p.name + " FELL ILL", k.x - 10, FLOOR_Y - 34, [130, 220, 110]);
+          if (window._stats) window._stats.infections = (window._stats.infections || 0) + 1;
+        }
+      }
+      for (const k of everyone) {
+        if (!k.p.sick) continue;
+        k.p.sick.days++;
+        const cared = (k.p.hunger || 0) < 0.5 && (k.p.dirt || 0) < 0.66;
+        if (Math.random() < (cared ? 0.4 : 0.12)) {
+          k.p.sick = null;
+          popText(k.p.name + " RECOVERED!", k.x - 12, FLOOR_Y - 34, [140, 255, 160]);
+          if (window._stats) window._stats.recoveries = (window._stats.recoveries || 0) + 1;
+        } else if (!k.p.npc && k.p.sick.days >= 3 && Math.random() < (cared ? 0.08 : 0.2)) {
+          // the tide takes them
+          abortChef(k);
+          memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
+          crabs = crabs.filter(c2 => c2 !== k);
+          UPS.chef.lvl = Math.max(1, crabs.length);
+          if (followIdx >= crabs.length) followIdx = -1;
+          toast = { text: k.p.name + " HAS PASSED AWAY. THE TOWN GRIEVES.", t: 8 };
+          if (window._stats) window._stats.deaths = (window._stats.deaths || 0) + 1;
+          sfx.angry();
+        }
+      }
     }
     // 3. property rents across every business you hold: miss and it's over
     const rent = totalRent();

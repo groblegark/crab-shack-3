@@ -85,8 +85,11 @@ const buyScript = BUY.length ? new vm.Script(`
   if (Math.abs(tmin - 12 * 60) < ${STEP} * TS) {
     for (const k of ${JSON.stringify(BUY)}) {
       const u = UPS[k];
+      if (u.lvl >= u.max) continue;
       const tomorrowBill = CRAB_WAGE * (crabs.length + (k === "chef" ? 1 : 0)) + Object.keys(BIZ).filter(bizUnlocked).reduce((s, b2) => s + BIZ[b2].rent, 0);
-      if (u.lvl < u.max && coins >= upCost(u) + tomorrowBill + 30) tryBuy(k);
+      const buffer = (k === "cleaners" || k === "arcade") ? 10 : 30;
+      if (coins >= upCost(u) + tomorrowBill + buffer) tryBuy(k);
+      else if (k === "cleaners" || k === "arcade") break;   // save hard for unlocks only
     }
     // spread staff: ~1/3 to cleaners, ~1/4 to arcade once owned
     for (const [biz2, frac] of [["cleaners", 3], ["arcade", 4]]) {
