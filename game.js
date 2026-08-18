@@ -168,8 +168,8 @@ const CREDIT_CFG = {
   LIMIT: 120,          // max drawn balance (~half a night's shack rent)
   RATE: 0.25,          // nightly compounding interest on the drawn balance
   MIN_PAY: 80,         // minimum payment auto-collected nightly while drawn
-  WARN_DAYS: 3,        // forecast horizon that fires the bankruptcy toast
-  CHIP_DAYS: 5,        // forecast horizon that shows the warning chip
+  WARN_DAYS: 4,        // forecast horizon that fires the bankruptcy toast
+  CHIP_DAYS: 6,        // forecast horizon that shows the warning chip
   NPC_DARK_NIGHTS: 2,  // NPC bankruptcy: shop shuttered this many nights
 };
 // ==========================================================================
@@ -220,9 +220,10 @@ function forecastBankruptcy() {
     if (prev && prev.after != null) { sum += latest = log[i].close - prev.after; n++; }
   }
   if (!n) return Infinity;               // no run rate on the books yet
-  // pessimistic run rate: a sharp break (crew death, sickness spiral) should
-  // move the forecast the day it shows, not after the average catches up
-  const g = Math.min(sum / n, latest), due = nightlyDue();
+  // run rate = AVERAGE income (Matt: one bad day shouldn't cry wolf over a
+  // healthy average). A genuine collapse still registers within a day or two
+  // as the average absorbs it - and the chip's 5-day horizon buys the slack.
+  const g = sum / n, due = nightlyDue();
   // income still to come before the next settlement (the town trades 8:00-20:00)
   const frac = lastRentDay === day ? 1 : Math.max(0, Math.min(1, (20 * 60 - tmin) / (12 * 60)));
   let c = coins, b = credit.bal;
