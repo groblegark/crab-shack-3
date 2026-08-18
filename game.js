@@ -12,6 +12,16 @@ ctx.imageSmoothingEnabled = false;
 // ---------------------------------------------------------------- geometry
 const WORLD_W = 2192;
 const SKY_H = 58, SHORE_Y = 86, FLOOR_Y = 166, PANEL_Y = 176;
+// Portrait phones get a taller canvas (index.html sets SCREEN_H before ppu.js
+// derives H). The world always keeps rows 0..PANEL_Y - every extra row goes to
+// the panel below, so tabs and crew cards get real tap targets on a phone.
+const TALL = H > 240;                                       // portrait-phone panel
+const TAB_Y = PANEL_Y + 11, TAB_H = TALL ? 16 : 10;         // crew/shop/new/bill row
+const ROW_Y = TAB_Y + TAB_H + 2;                            // panel content top
+const TAB_TX = TAB_Y + ((TAB_H - 5) >> 1);                  // small-text baseline in that row
+const CARD = TALL ? 34 : 24, CARD_STEP = TALL ? 37 : 27;    // crew card size + pitch
+const BTN_H = TALL ? 26 : 18, BTN_STEP = TALL ? 30 : 20;    // shop button size + pitch
+const MROW = TALL ? 8 : 6;                                  // menu-tab line pitch
 const ROAD_Y0 = 90, ROAD_Y1 = 112, LOT_BOTTOM = 152;
 const HOUSE_XS = [30, 100, 170, 240, 310, 380, 512, 2064, 2128];   // promenade row, one by the shelter, two beach cottages past the pier
 const BUS_STOPS = [163, 660, 1180];
@@ -1355,7 +1365,7 @@ const BUTTONS = [];
 {
   const keys = ["chef", "grill", "board", "table", "_biz1", "_biz2"];
   for (let i = 0; i < 6; i++)
-    BUTTONS.push({ key: keys[i], x: 4 + (i % 3) * 84, y: 199 + ((i / 3) | 0) * 20, w: 80, h: 18 });
+    BUTTONS.push({ key: keys[i], x: 4 + (i % 3) * 84, y: ROW_Y + ((i / 3) | 0) * BTN_STEP, w: 80, h: BTN_H });
 }
 function buttonKey(b) {
   if (b.key === "_biz1") return UPS.cleaners.lvl === 0 ? "cleaners" : "sudsgear";
@@ -1481,7 +1491,7 @@ cv.addEventListener("click", (ev) => {
   if (dragMoved) return;
   // panel
   if (p.y >= PANEL_Y) {
-    if (p.y < 186) {
+    if (p.y < TAB_Y - 1) {
       if (p.x > 233) { ffMode = ffMode === 3 ? 0 : 3; sfx.ding(); return; }
       if (p.x > 217) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }
       if (p.x > 203) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }
@@ -1489,7 +1499,7 @@ cv.addEventListener("click", (ev) => {
       if (p.x > 168) { toggleMusic(); return; }
       if (p.x >= 145 && p.x <= 166) { toggleMute(); if (!muted) sfx.ding(); return; }
     }
-    if (p.y >= 187 && p.y < 197) {
+    if (p.y >= TAB_Y && p.y < TAB_Y + TAB_H) {
       if (p.x >= 4 && p.x < 36) { tab = "crew"; return; }
       if (p.x >= 38 && p.x < 70) { tab = "shop"; return; }
       if (p.x >= 128 && p.x < 158) {
@@ -1504,8 +1514,8 @@ cv.addEventListener("click", (ev) => {
         if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) { tryBuy(buttonKey(b)); return; }
     } else if (tab === "crew") {   // menu tab: no invisible crew cards to click
       for (let i = 0; i < crabs.length; i++) {
-        const bx = 4 + i * 27;
-        if (p.x >= bx && p.x < bx + 24 && p.y >= 199 && p.y < 223) {
+        const bx = 4 + i * CARD_STEP;
+        if (p.x >= bx && p.x < bx + CARD && p.y >= ROW_Y && p.y < ROW_Y + CARD) {
           followIdx = followIdx === i ? -1 : i; followNpc = null; return;
         }
       }
@@ -2039,48 +2049,48 @@ function drawPanel() {
   // tabs
   for (const [i, t] of [["crew", 0], ["shop", 1]].map((v, i) => [i, v[0]])) {
     const x = 4 + i * 34, active = tab === t;
-    rect(ctx, x, 187, 32, 10, active ? [190, 140, 80] : [90, 70, 60]);
-    smallText(ctx, t.toUpperCase(), x + 4, 189, active ? [40, 24, 16] : [160, 140, 130]);
+    rect(ctx, x, TAB_Y, 32, TAB_H, active ? [190, 140, 80] : [90, 70, 60]);
+    smallText(ctx, t.toUpperCase(), x + 4, TAB_TX, active ? [40, 24, 16] : [160, 140, 130]);
   }
   const rate = incomeRate();
   const rateTxt = rate >= 100 ? "$" + Math.round(rate) + "/S" : "$" + rate.toFixed(1) + "/S";
-  text(ctx, rateTxt.slice(0, 7), 84, 189, [170, 150, 135]);
+  text(ctx, rateTxt.slice(0, 7), 84, TAB_TX, [170, 150, 135]);
   {
     const conf = newConfirmT > 0;
-    rect(ctx, 128, 187, 30, 10, conf ? [140, 40, 40] : [90, 70, 60]);
-    smallText(ctx, conf ? "SURE?" : "NEW", 128 + (conf ? 3 : 7), 189, conf ? [255, 200, 200] : [160, 140, 130]);
+    rect(ctx, 128, TAB_Y, 30, TAB_H, conf ? [140, 40, 40] : [90, 70, 60]);
+    smallText(ctx, conf ? "SURE?" : "NEW", 128 + (conf ? 3 : 7), TAB_TX, conf ? [255, 200, 200] : [160, 140, 130]);
   }
   const due = nightlyDue();
   const rTxt = "BILL $" + fmt(due);
   const chipW = textWidth(rTxt, 5) + 8;
   const crunch = coins < due && tmin >= 18 * 60 && tmin < 20 * 60 && ((time * 2) | 0) % 2;
-  rect(ctx, 252 - chipW, 186, chipW, 11, crunch ? [150, 40, 40] : tab === "menu" ? [190, 140, 80] : [90, 70, 60]);
-  text(ctx, rTxt, 252 - chipW + 4, 188, coins < due ? [255, 140, 140] : tab === "menu" ? [40, 24, 16] : [200, 185, 170], 5);
+  rect(ctx, 252 - chipW, TAB_Y - 1, chipW, TAB_H + 1, crunch ? [150, 40, 40] : tab === "menu" ? [190, 140, 80] : [90, 70, 60]);
+  text(ctx, rTxt, 252 - chipW + 4, TAB_TX - 1, coins < due ? [255, 140, 140] : tab === "menu" ? [40, 24, 16] : [200, 185, 170], 5);
 
   if (tab === "menu") {
-    smallText(ctx, "MENU - PRICE / COST", 4, 199, [230, 215, 195]);
-    let my = 206;
+    smallText(ctx, "MENU - PRICE / COST", 4, ROW_Y, [230, 215, 195]);
+    let my = ROW_Y + MROW + 1;
     for (const key of Object.keys(BIZ)) {
       if (!bizUnlocked(key)) continue;
       for (const r of BIZ[key].recipes) {
         smallText(ctx, ITEM_NAMES[r.icon], 4, my, [190, 175, 160]);
         smallText(ctx, "$" + r.pay + " / $" + INGREDIENT_COST[r.raw], 72, my, [140, 200, 150]);
-        my += 6;
+        my += MROW;
       }
     }
-    smallText(ctx, "TONIGHT AT 20:00", 132, 199, [230, 215, 195]);
-    let by = 206;
+    smallText(ctx, "TONIGHT AT 20:00", 132, ROW_Y, [230, 215, 195]);
+    let by = ROW_Y + MROW + 1;
     smallText(ctx, "WAGES " + crabs.length + "X$" + CRAB_WAGE, 132, by, [190, 175, 160]);
-    smallText(ctx, "$" + CRAB_WAGE * crabs.length, 224, by, [235, 160, 130]); by += 6;
+    smallText(ctx, "$" + CRAB_WAGE * crabs.length, 224, by, [235, 160, 130]); by += MROW;
     for (const key of Object.keys(BIZ)) {
       if (!bizUnlocked(key)) continue;
       smallText(ctx, BIZ[key].short + " RENT", 132, by, [190, 175, 160]);
-      smallText(ctx, "$" + BIZ[key].rent, 224, by, [235, 160, 130]); by += 6;
+      smallText(ctx, "$" + BIZ[key].rent, 224, by, [235, 160, 130]); by += MROW;
     }
     smallText(ctx, "TOTAL", 132, by, [230, 215, 195]);
     smallText(ctx, "$" + fmt(due), 224, by, coins < due ? [255, 140, 140] : [255, 230, 120]);
-    smallText(ctx, "CRABS PAY THEIR OWN", 132, by + 8, [150, 135, 125]);
-    smallText(ctx, "$" + HOUSE_RENT + " HOUSE RENT", 132, by + 14, [150, 135, 125]);
+    smallText(ctx, "CRABS PAY THEIR OWN", 132, by + MROW + 2, [150, 135, 125]);
+    smallText(ctx, "$" + HOUSE_RENT + " HOUSE RENT", 132, by + 2 * MROW + 2, [150, 135, 125]);
   } else if (tab === "shop") {
     for (const b of BUTTONS) {
       const key = buttonKey(b);
@@ -2091,22 +2101,27 @@ function drawPanel() {
       rect(ctx, b.x + 1, b.y + 1, b.w - 2, b.h - 2, afford ? (key === "cleaners" ? [96, 170, 220] : [190, 140, 80]) : [96, 78, 68]);
       const nameCol = afford ? [40, 24, 16] : [160, 145, 135];
       const lvl = key === "chef" ? String(u.lvl) : (u.lvl > 0 && key !== "cleaners" ? String(u.lvl) : "");
-      smallText(ctx, u.name + (lvl ? " " + lvl : ""), b.x + 3, b.y + 2, nameCol);
-      text(ctx, maxed ? "MAX" : "$" + fmt(cost), b.x + 3, b.y + 10, maxed ? [160, 145, 135] : afford ? [80, 45, 20] : [140, 125, 115], 5);
+      smallText(ctx, u.name + (lvl ? " " + lvl : ""), b.x + 3, b.y + (TALL ? 5 : 2), nameCol);
+      text(ctx, maxed ? "MAX" : "$" + fmt(cost), b.x + 3, b.y + (TALL ? 14 : 10), maxed ? [160, 145, 135] : afford ? [80, 45, 20] : [140, 125, 115], 5);
     }
   } else {
     for (let i = 0; i < crabs.length; i++) {
-      const c = crabs[i], bx = 4 + i * 27;
+      const c = crabs[i], bx = 4 + i * CARD_STEP;
       const sel = followIdx === i;
-      rect(ctx, bx, 199, 24, 24, sel ? [255, 230, 120] : [30, 20, 20]);
-      rect(ctx, bx + 1, 200, 22, 22, [200, 230, 245]);
-      blit(ctx, CRAB_ARTS[c.p.color].a, bx + 4, 206);
-      const acc = ACCESSORIES[c.duty ? "toque" : c.p.acc];
-      if (acc) blit(ctx, acc.art, bx + 4 + acc.dx, 206 + acc.dy);
-      rect(ctx, bx + 18, 201, 4, 4, c.p.sick ? [130, 220, 110] : c.duty ? [96, 232, 120] : [150, 140, 140]);
-      smallText(ctx, c.p.name.slice(0, 5), bx + 1, 224, [220, 210, 190]);
+      rect(ctx, bx, ROW_Y, CARD, CARD, sel ? [255, 230, 120] : [30, 20, 20]);
+      rect(ctx, bx + 1, ROW_Y + 1, CARD - 2, CARD - 2, [200, 230, 245]);
+      const hat = c.duty ? "toque" : c.p.acc, acc = ACCESSORIES[hat];
+      if (TALL) {   // room for the full 2x portrait
+        blit(ctx, art2("c" + c.p.color, CRAB_ARTS[c.p.color].a), bx + 1, ROW_Y + 7);
+        if (acc) blit(ctx, art2("a" + hat, acc.art), bx + 1 + acc.dx * 2, ROW_Y + 7 + acc.dy * 2);
+      } else {
+        blit(ctx, CRAB_ARTS[c.p.color].a, bx + 4, ROW_Y + 7);
+        if (acc) blit(ctx, acc.art, bx + 4 + acc.dx, ROW_Y + 7 + acc.dy);
+      }
+      rect(ctx, bx + CARD - 6, ROW_Y + 2, 4, 4, c.p.sick ? [130, 220, 110] : c.duty ? [96, 232, 120] : [150, 140, 140]);
+      smallText(ctx, c.p.name.slice(0, TALL ? 8 : 5), bx + 1, ROW_Y + CARD + 1, [220, 210, 190]);
     }
-    if (!crabs.length) text(ctx, "NO CREW YET", 8, 206, [190, 170, 150]);
+    if (!crabs.length) text(ctx, "NO CREW YET", 8, ROW_Y + 7, [190, 170, 150]);
   }
 }
 

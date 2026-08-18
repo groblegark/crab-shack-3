@@ -227,12 +227,15 @@ first, connect later. Don't build the network before the node is beautiful.
 8. ~~Secret mobile merge mode~~ — **shipped**: touch-only hidden mode (hold a
    crab until the thought bubble fills), per-crab boards, goal ladder pays
    into the till ($60/session cap). Lives in merge.js, desktop-inert.
-9. **Portrait-phone canvas** — the screen fills a phone's width but the 256x240
-   aspect leaves dead space above/below on tall screens. A real fix is a taller
-   canvas in portrait (e.g. 256x288, extra rows going to the UI panel): `H` is
-   baked into ppu.js and panel draw coordinates, so it's a contained but real
-   refactor. Wheel/trackpad panning, no-zoom, no pull-to-refresh, and crisp
-   half-step scaling are already in.
+9. ~~Portrait-phone canvas~~ — **shipped**: portrait viewports get a 256x288
+   canvas (index.html sets `SCREEN_H` before ppu.js derives `H`; a mode-flip
+   on rotate reloads, losslessly, after a 250ms settle). The world keeps rows
+   0..PANEL_Y in every mode; the extra 48 rows go to the panel — 16px tabs,
+   34x34 crew cards with 2x portraits, 80x26 shop buttons, 8px menu pitch —
+   via TALL/TAB_Y/ROW_Y/CARD/BTN_H consts that evaluate to the old numbers on
+   240 (desktop frame is pixel-identical; verified byte-identical
+   screenshots). Merge mode's cell height and button lanes now derive from H
+   too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
 - **REMOVE the laundry mechanic** (Matt: "not natural in any way now that we

@@ -42,12 +42,16 @@
   const CHEERS = ["NICE ONE!", "YES!", "PERFECT!", "LOOK AT THAT!", "SO GOOD!"];
 
   // ---------------------------------------------------------------- layout
+  // Derived from the canvas height so the portrait-phone screen (H=288, see
+  // index.html) just gets taller cells; on the classic 240 these come out to
+  // the original CH=33 / MSG_Y=191 / buttons at 206.
   const COLS = 4, ROWS = 4;
-  const BX = 10, BY = 58, CW = 59, CH = 33;          // board origin + cell size
+  const BX = 10, BY = 58, CW = 59;                   // board origin + cell width
+  const CH = ((H - BY - 50) / ROWS) | 0;             // cell height: fill down to the button lane
   const CREW_Y = 29, CREW_H = 27;                    // pick-your-crab strip
-  const MSG_Y = 191;                                 // banner / tip lane
-  const SPAWN = { x: 10, y: 206, w: 150, h: 30 };
-  const BACK  = { x: 168, y: 206, w: 78, h: 30 };
+  const MSG_Y = BY + ROWS * CH + 1;                  // banner / tip lane
+  const SPAWN = { x: 10, y: MSG_Y + 15, w: 150, h: 30 };
+  const BACK  = { x: 168, y: MSG_Y + 15, w: 78, h: 30 };
 
   // ---------------------------------------------------------------- state
   let on = false;              // is the board up?

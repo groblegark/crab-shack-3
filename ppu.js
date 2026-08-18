@@ -1,8 +1,11 @@
 // A toy SNES PPU for the browser, ported from snescat/ppu.py.
 // 256x240 framebuffer on a <canvas>, character-map sprite parsing,
 // masked blits, and the snescat 5x7 bitmap font.
+// Portrait phones get a taller 256x288 screen: index.html measures the
+// viewport and sets window.SCREEN_H before this file loads. Everything
+// else (and the headless sim) keeps the classic 240.
 
-const W = 256, H = 240;
+const W = 256, H = (typeof window !== "undefined" && window.SCREEN_H) || 240;
 
 // Crush to 5 bits per channel like the SNES 15-bit BGR palette.
 function q15(c) { return [c[0] & 0xF8, c[1] & 0xF8, c[2] & 0xF8]; }
