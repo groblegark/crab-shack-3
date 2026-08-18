@@ -51,6 +51,15 @@ compounds or collapses → the landlord collects at 20:00 either way.
   rent when housed, and moves up at settlement when wallet ≥ move-in ($35) +
   rent. Fishers fund it at $2/catch; SUDSY pays herself a bigger owner draw
   while homeless. World is 2192 wide.
+- **Job board / labor market**: a notice board at x716 (clickable — postings +
+  town payrolls). Each morning at 7:30 (`runJobBoard`) NPC owners post when
+  flush (till ≥ 260, staff < 2) or when their shop went dark; jobless fishers
+  take postings ($20/day, `p.employer`); a posting unfilled for a full day
+  pulls a drifter off the morning bus (cap 8 npcs, they start homeless with a
+  fishSpot fallback). Owners pay staff from their till at settlement or the
+  staff quit back to the pier. Crew reassignment now lives in the dossier
+  ("TAP: REASSIGN" on the DOES row) plus a labeled JOB> chip on the follow
+  card — the old 13px unlabeled chip was the "can't assign staff" bug.
 - **Sick crabs can move**: bed rest no longer bars essential errands — the
   sick still buy food and drag themselves to the cleaners/showers (half
   speed), which feeds the `cared` check that improves cure and death odds.
@@ -64,8 +73,10 @@ compounds or collapses → the landlord collects at 20:00 either way.
   Esc closes. Works for every crab, crew and townsfolk alike.
 
 ### Verified balance (8 seeds, tools/headless.mjs)
-- Baseline (buy nothing): **0/8 survive, evicted day 9–14, median 11**
-  (tightened slightly when strict retail + sick mobility landed; same shape).
+- Baseline (buy nothing): **0/8 survive, evicted day 9–15, median 12**. The job
+  board added labor competition (a hired-away fisher lowers townCatch, pushing
+  the shack onto $7 import fish) — SUDSY's flush-hire threshold sits at
+  till ≥ 260 to keep that pressure off the earliest days.
 - Hire-and-seat strategy (`--buy chef,table`): **2/6 alive at day 40**.
 - Constants: shack rent 230, wage 22, house rent 10, hires 60×2.0,
   showers 5/10, fish pay 13. **Rent is charged from night one** — you open
@@ -83,10 +94,10 @@ compounds or collapses → the landlord collects at 20:00 either way.
   re-clean, so cheap showers matter); buy *timing* beat buy prices.
 
 ## Tools (the load-bearing part)
-- `node tools/suite.mjs` — **20 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **22 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
-  NPC housing ladder, sick-crab mobility,
+  NPC housing ladder, sick-crab mobility, job-board hire/payroll/quit,
   disease infection/cure/mortality, showers turnover, NPC economics,
   save/load, no-inflation wallet bounds.
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]` — CLI.

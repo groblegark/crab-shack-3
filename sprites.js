@@ -849,6 +849,25 @@ const SICK_MARK = parseArt([
   "G..G.G",
   ".GG.G.",
 ], swap(PAL, { G: [130, 220, 110] }));
+const NOTICE_BOARD = parseArt([
+  "KKKKKKKKKKKK",
+  "KEEEEEEEEEEK",
+  "KELLLKELLLEK",
+  "KELKLKELKLEK",
+  "KELLLKELKLEK",
+  "KELKLKELLLEK",
+  "KELLLKEEEEEK",
+  "KEEEEEELLLEK",
+  "KEYLLKEELKEK",
+  "KEYLKKELLLEK",
+  "KEEEEEEEEEEK",
+  "KKKKKKKKKKKK",
+  "..KDD..KDD..",
+  "..KDD..KDD..",
+  "..KDD..KDD..",
+  ".KDDDKKDDDK.",
+], PAL);
+
 const MEMORIAL = parseArt([
   "...KKKK...",
   "..KMMMMK..",

@@ -19,8 +19,9 @@ const BUS_TERMINUS = [100, 1240];
 const STATION_BOTTOM = 152;
 const QUEUE_DX = 13, QUEUE_MAX = 5, TOURIST_QUEUE_MAX = 4;   // tourists keep 4; the 5th slot is reserved for locals
 const SHELTER_X = 444, MOVE_IN_COST = 35;
+const JOB_BOARD_X = 716, NPC_WAGE = 20;   // the town labor market
 const PIER_X0 = 1870, PIER_X1 = 2040, PIER_Y = 96;   // planks over the east break
-const FISHING_SPOTS = [{ x: 1900, y: PIER_Y }, { x: 1956, y: PIER_Y }];
+const FISHING_SPOTS = [{ x: 1900, y: PIER_Y }, { x: 1956, y: PIER_Y }, { x: 2012, y: PIER_Y }];
 let townCatch = 6;   // the day's landed fish, crate-side
 let rep = 30;        // word of mouth (0-100): happy guests talk, rage-quits talk louder
 const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
@@ -220,7 +221,8 @@ let camX = 1180, followIdx = -1, followNpc = null, tab = "crew";
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
 let today = newDayLog();
-let report = null, reportT = 0, dossier = null;
+let report = null, reportT = 0, dossier = null, boardView = false;
+let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
   return { served: 0, revenue: 0, rage: 0, sick: [], died: [], recovered: [],
     moved: [], byCrab: {}, repStart: 30, catchStart: 0 };
@@ -259,6 +261,7 @@ function scale2(art) {
 }
 const HOUSES2 = HOUSES.map(scale2);
 const SHELTER2 = scale2(SHELTER);
+const NOTICE2 = scale2(NOTICE_BOARD);
 const BUS2 = scale2(BUS);
 const BUGGIES2 = BUGGIES.map(scale2);
 
@@ -418,6 +421,7 @@ function save() {
     coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, rate: incomeRate(), t: Date.now(),
     personas: crabs.map(c => c.p),
     npc: { tills: { sudsy: OWNERS.sudsy.till }, personas: npcs.map(c => c.p) },
+    board: jobBoard, hireDay,
   }));
 }
 function load() {
@@ -441,8 +445,17 @@ function load() {
   } else return false;
   if (s.npc) {
     if (s.npc.tills && s.npc.tills.sudsy != null) OWNERS.sudsy.till = s.npc.tills.sudsy;
-    if (s.npc.personas && s.npc.personas[0] && npcs[0]) Object.assign(npcs[0].p, s.npc.personas[0]);
+    if (Array.isArray(s.npc.personas)) s.npc.personas.forEach((p2, i) => {
+      if (npcs[i]) Object.assign(npcs[i].p, p2);
+      else {   // a drifter who moved to town mid-save
+        const c = newCrab(Object.assign({ npc: true }, p2));
+        if (p2.fisher) c.fishSpot = FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
+        c.x = homeX(c); npcs.push(c);
+      }
+    });
   }
+  jobBoard = Array.isArray(s.board) ? s.board : [];
+  hireDay = s.hireDay || 0;
   const away = (Date.now() - (s.t || Date.now())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
@@ -653,6 +666,58 @@ function updateBus(dt) {
   }
   if (cx > BUS_TERMINUS[1] + 40) { bus.dir = -1; bus.lastStop = -1; }
   if (cx < BUS_TERMINUS[0] - 40) { bus.dir = 1; bus.lastStop = -1; }
+}
+
+// ---------------------------------------------------------------- job board
+// Owners post when the till supports a second claw (or the shop went dark);
+// fishers take steady wages over pier luck; a posting nobody wants for a full
+// day reaches a drifter, who rolls in on the morning bus.
+function runJobBoard() {
+  for (const b of Object.keys(BIZ)) {
+    if (bizOwner(b) === "player") continue;
+    const o = OWNERS[bizOwner(b)];
+    if (!o || jobBoard.some(j => j.biz === b)) continue;
+    const staff = allCrabs().filter(k => k.p.job === b && !k.p.sick).length;
+    if ((o.till >= 260 && staff < 2) || (staff === 0 && o.till >= NPC_WAGE * 2))
+      jobBoard.push({ biz: b, wage: NPC_WAGE, day });
+  }
+  for (const j of jobBoard.slice()) {
+    const cands = npcs.filter(k => k.p.fisher && k.p.job === "fishing" && !k.p.sick && !k.p.employer);
+    let hire = null;
+    if (cands.length) {
+      cands.sort((a, b2) => a.p.wallet - b2.p.wallet);   // the broke sign up first
+      hire = cands[0];
+    } else if (j.day < day && npcs.length < 8) {
+      hire = spawnDrifter();
+    }
+    if (hire) {
+      hire.p.job = j.biz; hire.p.employer = bizOwner(j.biz);
+      // clock out of the old life cleanly - updateSchedule will commute them to the new job
+      hire.duty = false; hire.pendingOff = false; hire.kstate = "idle";
+      hire.carrying = null; hire.dayState = "home"; hire.cstate = ""; hire.workBiz = j.biz;
+      jobBoard.splice(jobBoard.indexOf(j), 1);
+      today.moved.push(hire.p.name + " HIRED AT " + BIZ[j.biz].name);
+      toast = { text: hire.p.name + " TOOK THE " + BIZ[j.biz].name + " JOB", t: 5 };
+      popText("HIRED!", hire.x - 6, FLOOR_Y - 34, [140, 255, 160]);
+      sfx.ding();
+    }
+  }
+}
+function spawnDrifter() {
+  const p2 = makeCrabPersona((Math.random() * 12) | 0);
+  const used = new Set(allCrabs().map(k => k.p.name));
+  if (used.has(p2.name)) {
+    const free = CRAB_NAMES.find(n => !used.has(n));
+    if (free) p2.name = free;
+  }
+  Object.assign(p2, { npc: true, fisher: true, homeless: true, wallet: 12, job: "fishing", shift: "D" });
+  const c = newCrab(p2);
+  c.fishSpot = FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
+  c.x = BUS_STOPS[0]; c.y = 158;   // stepped off the morning bus with one bag
+  npcs.push(c);
+  today.moved.push(c.p.name + " NEW IN TOWN");
+  toast = { text: c.p.name + " GOT OFF THE BUS - NEW IN TOWN", t: 5 };
+  return c;
 }
 
 // ---------------------------------------------------------------- day schedule
@@ -1214,11 +1279,11 @@ function tryBuy(key) {
   if (u.lvl >= u.max || coins < upCost(u)) return;
   coins -= upCost(u); u.lvl++;
   if (key === "cleaners") {
-    toast = { text: "SUDS N BUBBLES IS YOURS! ASSIGN A CRAB TO STAFF IT", t: 7 };
+    toast = { text: "SUDS N BUBBLES IS YOURS! CLICK A CRAB, THEN ITS CARD, TO REASSIGN", t: 8 };
     popText("GRAND OPENING!", BIZ.cleaners.x0 + 40, 100, [140, 255, 160]);
   }
   if (key === "arcade") {
-    toast = { text: "THE CLAWCADE IS YOURS! THE CREW WILL LOVE THIS", t: 7 };
+    toast = { text: "THE CLAWCADE IS YOURS! CLICK A CRAB, THEN ITS CARD, TO STAFF IT", t: 8 };
     popText("GRAND OPENING!", BIZ.arcade.x0 + 40, 100, [140, 255, 160]);
   }
   if (key === "chef") {
@@ -1308,7 +1373,19 @@ cv.addEventListener("click", (ev) => {
     return;
   }
   if (gameOver) { newGame(); return; }
-  if (dossier) { dossier = null; return; }
+  if (dossier) {
+    // the DOES row doubles as the reassignment control for crew crabs
+    const owned = Object.keys(BIZ).filter(bizUnlocked);
+    if (!dossier.p.npc && owned.length > 1 && p.y >= 48 && p.y < 59 && p.x >= 24 && p.x < 232) {
+      const c = dossier;
+      c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
+      sfx.buy();
+      popText("NEW JOB: " + BIZ[c.p.job].name, c.x - 20, FLOOR_Y - 34, [140, 255, 160]);
+      return;
+    }
+    dossier = null; return;
+  }
+  if (boardView) { boardView = false; return; }
   if (reportT > 0) { reportT = 0; return; }
   startMusic();
   const p = evPos(ev);
@@ -1347,7 +1424,7 @@ cv.addEventListener("click", (ev) => {
     return;
   }
   // follow-card job toggle
-  if (followIdx >= 0 && !followNpc && (UPS.cleaners.lvl > 0 || UPS.arcade.lvl > 0) && p.x >= 58 && p.x < 71 && p.y >= 33 && p.y < 45) {
+  if (followIdx >= 0 && !followNpc && (UPS.cleaners.lvl > 0 || UPS.arcade.lvl > 0) && p.x >= 56 && p.x < 90 && p.y >= 33 && p.y < 46) {
     const c = crabs[followIdx];
     const owned = Object.keys(BIZ).filter(bizUnlocked);
     c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
@@ -1360,8 +1437,12 @@ cv.addEventListener("click", (ev) => {
     const fc2 = followNpc || (followIdx >= 0 && crabs[followIdx]);
     if (fc2 && p.x >= 2 && p.x < 130 && p.y >= 2 && p.y < 54) { dossier = fc2; sfx.ding(); return; }
   }
-  // world: click any crab - crew or townsfolk - to follow them
   const wx = p.x + camX;
+  // the job board is readable
+  if (wx >= JOB_BOARD_X - 2 && wx < JOB_BOARD_X + 28 && p.y >= HOME_BOTTOM - 40 && p.y < HOME_BOTTOM + 4) {
+    boardView = true; sfx.ding(); return;
+  }
+  // world: click any crab - crew or townsfolk - to follow them
   for (const c of allCrabs()) {
     if (!c.hidden && Math.abs(wx - (c.x + 8)) < 12 && Math.abs(p.y - (c.y - 6)) < 14) {
       if (c.p.npc) { followNpc = c; followIdx = -1; }
@@ -1459,6 +1540,14 @@ function drawTown() {
   // houses face the promenade (owned ones get the owner's roof color)
   for (const c of allCrabs())
     if (!c.p.homeless) wblit(HOUSES2[c.p.color % HOUSES2.length], HOUSE_XS[c.p.house], HOME_BOTTOM - HOUSES2[0].h);
+  // the town job board
+  wblit(NOTICE2, JOB_BOARD_X, HOME_BOTTOM - NOTICE2.h);
+  if (JOB_BOARD_X - camX > -60 && JOB_BOARD_X - camX < W) {
+    smallText(ctx, "JOBS", JOB_BOARD_X + 5 - camX, HOME_BOTTOM - NOTICE2.h - 7, [30, 20, 36]);
+    smallText(ctx, "JOBS", JOB_BOARD_X + 4 - camX, HOME_BOTTOM - NOTICE2.h - 8, [255, 230, 120]);
+    if (jobBoard.length)
+      smallText(ctx, "" + jobBoard.length, JOB_BOARD_X + 26 - camX, HOME_BOTTOM - NOTICE2.h - 8, [255, 150, 60]);
+  }
   // the crab shelter
   wblit(SHELTER2, SHELTER_X, HOME_BOTTOM - SHELTER2.h);
   if (SHELTER_X - camX > -80 && SHELTER_X - camX < W) {
@@ -1739,8 +1828,8 @@ function drawFollowCard() {
   // job + needs
   smallText(ctx, "JOB:" + (p.npc ? (p.fisher ? "PIER" : "OWN") : BIZ[p.job].short), 6, 36, [70, 90, 130]);
   if (UPS.cleaners.lvl > 0 || UPS.arcade.lvl > 0) {
-    rect(ctx, 60, 35, 9, 8, [96, 170, 220]);
-    smallText(ctx, ">", 62, 36, [255, 255, 255]);
+    rect(ctx, 58, 35, 28, 8, [96, 170, 220]);
+    smallText(ctx, "JOB>", 60, 36, [255, 255, 255]);
   }
   const bars = [["FED", 1 - (p.hunger || 0), 6], ["CLN", 1 - (p.dirt || 0), 37],
     ["FUN", 1 - (p.bored || 0), 68], ["SPA", 1 - (p.sandy || 0), 99]];
@@ -1967,7 +2056,13 @@ function drawDossier() {
     smallText(ctx, val, x + 56, ly, col || [40, 30, 40]);
     ly += 9;
   };
-  row("DOES", p.npc ? (p.fisher ? "FISHES OFF THE PIER" : "RUNS " + BIZ[p.job].name) : "WORKS THE " + BIZ[p.job].name, [70, 90, 130]);
+  const doesTxt = p.npc
+    ? (p.employer ? "WORKS AT " + BIZ[p.job].name + " FOR " + OWNERS[p.employer].name
+      : p.fisher ? "FISHES OFF THE PIER" : "RUNS " + BIZ[p.job].name)
+    : "WORKS THE " + BIZ[p.job].name;
+  row("DOES", doesTxt, [70, 90, 130]);
+  if (!p.npc && Object.keys(BIZ).filter(bizUnlocked).length > 1)
+    smallText(ctx, "TAP: REASSIGN", x + w2 - 58, ly - 9, [96, 170, 220]);
   row("SHIFT", SHIFTS[p.shift].label);
   row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
   const [hl, hcol] = homeLabel(p);
@@ -1994,6 +2089,29 @@ function drawDossier() {
     smallText(ctx, (ITEM_NAMES[id] || id.toUpperCase()) + " X" + n + (tier ? " - " + tier : ""), x + 8, ly,
       tier ? [140, 110, 40] : [90, 90, 105]);
     ly += 8;
+  }
+  smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
+}
+
+function drawJobBoard() {
+  if (!boardView) return;
+  const x = 40, y = 40, w2 = 176, h2 = 116;
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 14, [190, 140, 80]);
+  text(ctx, "TOWN JOB BOARD", x + 24, y + 3, [40, 24, 16]);
+  let ly = y + 20;
+  if (!jobBoard.length) { smallText(ctx, "NO OPENINGS - THE TOWN'S ALL BUSY", x + 6, ly, [110, 110, 130]); ly += 9; }
+  for (const j of jobBoard) {
+    smallText(ctx, "HELP WANTED: " + BIZ[j.biz].name, x + 6, ly, [40, 30, 40]); ly += 7;
+    smallText(ctx, "$" + j.wage + "/DAY - SEE " + OWNERS[bizOwner(j.biz)].name + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 9;
+  }
+  const staff = npcs.filter(c => c.p.employer);
+  if (staff.length) {
+    ly += 2; smallText(ctx, "ON TOWN PAYROLLS", x + 6, ly, [58, 42, 38]); ly += 8;
+    for (const c of staff.slice(0, 4)) {
+      smallText(ctx, c.p.name + " - " + BIZ[c.p.job].name, x + 6, ly, [90, 90, 105]); ly += 7;
+    }
   }
   smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
 }
@@ -2090,6 +2208,19 @@ function frame(now) {
     if (evictedNames.length) {
       toast = { text: evictedNames.join(", ") + " MOVED TO THE SHELTER", t: 6 };
       sfx.angry();
+    }
+    // 2a2. npc payroll: owners pay their staff from the till - or lose them to the pier
+    for (const c of npcs) {
+      const emp = c.p.employer;
+      if (!emp) continue;
+      const o = OWNERS[emp];
+      if (c.p.sick) continue;   // no work, no pay - same deal as the crew
+      if (o && o.till >= NPC_WAGE) { o.till -= NPC_WAGE; c.p.wallet += NPC_WAGE; }
+      else {
+        c.p.job = "fishing"; c.p.employer = null;
+        today.moved.push(c.p.name + " QUIT - BACK TO THE PIER");
+        toast = { text: c.p.name + " QUIT: " + (o ? o.name : "THE BOSS") + " COULDN'T PAY", t: 6 };
+      }
     }
     // 2b. peer owners settle their own books (no NPC eviction cascade yet - TODO)
     for (const b of Object.keys(BIZ)) {
@@ -2208,6 +2339,7 @@ function frame(now) {
   }
   if (!gameOver) {
   updateBus(dt);
+  if (tmin >= 7.5 * 60 && hireDay !== day) { hireDay = day; runJobBoard(); }
   updateCustomers(dt);
   for (const c of allCrabs()) {
     c.animT += dt;
@@ -2272,6 +2404,7 @@ function frame(now) {
   drawFloaters(dt);
   drawNight();
   drawDossier();
+  drawJobBoard();
   drawReport();
   drawFollowCard();
   {  // town reputation chip, top-right of the world

@@ -57,11 +57,12 @@ export function createSim({ seed = 1337, storage = null, fresh = true } = {}) {
   return {
     C, G, sandbox, store,
     // run until a predicate (a G-expression) is true, or maxSteps elapse
-    runUntil(expr, { step = 50, maxSteps = 400000 } = {}) {
+    runUntil(expr, { step = 50, maxSteps = 400000, onTick = null, tickEvery = 20 } = {}) {
       const s = stepScript(step);
       const check = new vm.Script(expr);
       for (let i = 0; i < maxSteps; i++) {
         s.runInContext(C);
+        if (onTick && i % tickEvery === 0) onTick(G);
         if (i % 20 === 0 && check.runInContext(C)) return true;
       }
       return false;

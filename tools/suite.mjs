@@ -325,6 +325,40 @@ scenario("sick crabs can still wash (mobility + cure path)", () => {
   return ok ? true : "sick crab never reached the showers (sandy " + sim.G("crabs[0].p.sandy").toFixed(2) + ", state " + sim.G("crabs[0].dayState") + ")";
 });
 
+scenario("job board: a flush SUDSY hires a fisher; payroll flows", () => {
+  const sim = createSim({ seed: 77 });
+  const keepSolvent = (G) => { if (G("coins") < 200) G("coins = 400"); };
+  sim.G("OWNERS.sudsy.till = 400");
+  sim.runUntil("tmin >= 9 * 60", { maxSteps: 300000, onTick: keepSolvent, tickEvery: 50 });
+  const emp = JSON.parse(sim.G("JSON.stringify(npcs.filter(c => c.p.employer).map(c => [c.p.name, c.p.job, Math.round(c.p.wallet)]))"));
+  if (!emp.length) return "no one took the job (board: " + sim.G("JSON.stringify(jobBoard)") + ")";
+  if (emp[0][1] !== "showers") return "hired into " + emp[0][1] + ", expected showers";
+  const name = emp[0][0], w0 = emp[0][2];
+  // works the day, gets paid at settlement (wallet also buys meals - allow drift)
+  sim.runUntil("day >= 2 && tmin > 10", { maxSteps: 900000, onTick: keepSolvent, tickEvery: 50 });
+  const still = sim.G(`!!npcs.find(c => c.p.name === "${name}").p.employer`);
+  if (!still) return name + " lost the job with a $400 till";
+  const w1 = sim.G(`Math.round(npcs.find(c => c.p.name === "${name}").p.wallet)`);
+  if (w1 < w0 - 15) return "employed but never paid: $" + w0 + " -> $" + w1;
+  // and the showers ran with TWO staff at some point is implied by employment; check duty linkage
+  return sim.G(`npcs.find(c => c.p.name === "${name}").workBiz`) === "showers" ? true
+    : "employee never actually worked the showers";
+});
+
+scenario("job board: unpaid staff quit back to the pier", () => {
+  const sim = createSim({ seed: 78 });
+  const keepSolvent = (G) => { if (G("coins") < 200) G("coins = 400"); };
+  sim.G("OWNERS.sudsy.till = 400");
+  sim.runUntil("npcs.some(c => c.p.employer)", { maxSteps: 300000, onTick: keepSolvent, tickEvery: 50 });
+  // the money dries up - and stays dry (her shop keeps trading, so pin it)
+  sim.runUntil("day >= 2 && tmin > 10", { maxSteps: 900000, tickEvery: 50,
+    onTick: (G) => { keepSolvent(G); if (G("OWNERS.sudsy.till") > 5) G("OWNERS.sudsy.till = 5"); } });
+  const quit = sim.G("npcs.every(c => !c.p.employer)");
+  if (!quit) return "staff kept working for a $5 till";
+  return sim.G('npcs.filter(c => c.p.fisher).every(c => c.p.job === "fishing" || !!c.p.sick)') ? true
+    : "quit but did not return to fishing";
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
