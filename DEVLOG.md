@@ -8,6 +8,43 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, later — SUDS N BUBBLES is closing
+
+![The lot is open beach again](devlog/img/2026-08-18-lot-now-beach.png)
+
+The laundromat is gone. Not burned down, not bankrupt — *retired*, on the
+strength of the most damning measurement this project has produced.
+
+Here is the eulogy the numbers wrote. Before shutting it down we ran the
+town for fourteen simulated days with the laundromat, and fourteen without.
+The runs came out **bit-identical** — same fortunes, same evictions, same
+everything, down to the random number stream. Crab grime, it turns out,
+comes in chunks the showers already handle whole; not one crab in any
+simulated summer ever stood in the narrow band of dirtiness that only a
+washing machine could fix. SUDS N BUBBLES was, provably, a business the
+town never needed. The town is not sad. The town did not notice.
+
+- The lot between the job board and the showers is open beach again. It
+  will not stay empty long. (See "coming up," below the fold: the crabs
+  are getting thirsty.)
+- The shop shelf where the laundromat sat now has a gap. Something about
+  juice will fill it.
+- Towns from older saves get the fair end of it: owners wake to a buyout —
+  **LAUNDROMAT CLOSED — SHOWERS TOOK OVER. +$550** — and any crab who
+  worked the washers is quietly reassigned by morning: crew to the shack,
+  townsfolk back to the pier. Nobody is unemployed. Everybody is cleaner
+  than they've ever been.
+
+![The buyout lands: $1050 in the till](devlog/img/2026-08-18-refund-toast.png)
+
+### Fixed (one little story)
+
+- The NOW PLAYING music banner had been stomping on important announcements
+  — in testing it ate the laundromat buyout toast, which is a heck of a
+  thing to eat. The band now yields the stage when the town has news.
+
+---
+
 ## 2026-08-18 — The town gets books, boats, and working plumbing
 
 ![The shack on a bright morning](devlog/img/2026-08-18-shack-morning.png)
