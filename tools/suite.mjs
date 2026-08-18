@@ -492,6 +492,60 @@ scenario("all crew dead: town survives, rehire recovers", () => {
   return sim.G("crabs.length === 1 && isFinite(crabs[0].p.wallet)") ? true : "rehired crab broke";
 });
 
+scenario("boat: flush fisher climbs the ladder; catch rate rises", () => {
+  const sim = createSim({ seed: 41 });
+  // keep the town steady so the fishers fish: player solvent, job board quiet,
+  // needs topped up (no errand detours, no sickness rolls stealing pier time)
+  const steady = (G) => {
+    if (G("coins") < 200) G("coins = 400");
+    G('OWNERS.sudsy.till = 0;' +
+      'for (const c of npcs) if (c.p.fisher) { c.p.hunger = 0.2; c.p.dirt = 0.2; c.p.sandy = 0.2; c.p.bored = 0.2; c.p.sick = null; }');
+  };
+  // days 1-2: SALTY's pier rate
+  sim.runUntil("day >= 3 && tmin > 10", { maxSteps: 900000, onTick: steady, tickEvery: 40 });
+  const before = sim.G('(window._stats.catchesBy || {}).SALTY || 0') / 2;
+  if (before < 3) return `SALTY only landed ${before * 2} fish in 2 pier days`;
+  // house him and hand over boat savings; the settlement ladder must do the rest
+  sim.G('{ const c = npcs.find(k => k.p.name === "SALTY"); c.p.homeless = false; c.p.house = 5; c.p.wallet = BOAT_COST + MOORING_FEE + 20; }');
+  sim.runUntil("day >= 4 && tmin > 10", { maxSteps: 900000, onTick: steady, tickEvery: 40 });
+  const st = JSON.parse(sim.G('JSON.stringify((() => { const c = npcs.find(k => k.p.name === "SALTY"); return [c.p.boat, c.p.house, !!c.p.homeless, Math.round(c.p.wallet)]; })())'));
+  if (st[0] == null) return "flush housed fisher never moved aboard: " + JSON.stringify(st);
+  if (st[1] != null) return "moved aboard but kept house " + st[1];
+  if (st[2]) return "boat owner flagged homeless";
+  if (sim.G('allCrabs().filter(c => !c.p.homeless && c.p.house === 5).length') !== 0)
+    return "old house 5 did not free up";
+  if (!sim.G('/ABOARD/.test(homeLabel(npcs.find(k => k.p.name === "SALTY").p)[0])'))
+    return "homeLabel does not say ABOARD: " + sim.G('homeLabel(npcs.find(k => k.p.name === "SALTY").p)[0]');
+  // days 4-5: rate from the boat
+  const mark = sim.G('(window._stats.catchesBy || {}).SALTY || 0');
+  sim.runUntil("day >= 6 && tmin > 10", { maxSteps: 1200000, onTick: steady, tickEvery: 40 });
+  const after = (sim.G('(window._stats.catchesBy || {}).SALTY || 0') - mark) / 2;
+  return after >= before * 1.3 && after >= before + 2 ? true
+    : `catch rate barely moved: ${before}/day off the pier vs ${after}/day aboard`;
+});
+
+scenario("boat: ownership and berth roundtrip through save/load", () => {
+  const store = new Map();
+  const a = createSim({ seed: 5, storage: store, fresh: false });
+  a.runDays(2);
+  a.G('{ const c = npcs.find(k => k.p.name === "SALTY"); c.p.homeless = false; c.p.house = null; c.p.boat = 2; c.fishSpot = boatSpot(2); save(); }');
+  const b = createSim({ seed: 6, storage: store, fresh: false });
+  const st = JSON.parse(b.G('JSON.stringify((() => { const c = npcs.find(k => k.p.name === "SALTY"); return [c.p.boat, !!c.p.homeless, c.p.house, c.fishSpot, homeLabel(c.p)[0]]; })())'));
+  if (st[0] !== 2) return "berth lost: came back as " + JSON.stringify(st);
+  if (st[1]) return "boat owner migrated to homeless on load";
+  if (st[2] != null) return "boat owner grew a house on load: " + st[2];
+  const spot = JSON.parse(b.G("JSON.stringify(boatSpot(2))"));
+  if (st[3].x !== spot.x || st[3].y !== spot.y) return "fishSpot not re-aimed at the boat: " + JSON.stringify(st[3]);
+  if (!/ABOARD THE/.test(st[4])) return "homeLabel wrong after load: " + st[4];
+  // a save with a garbage berth index must sanitize, not crash
+  const raw = JSON.parse(store.get("crabshack3_v1"));
+  raw.npc.personas.find(p => p.name === "SALTY").boat = 9;
+  store.set("crabshack3_v1", JSON.stringify(raw));
+  const c2 = createSim({ seed: 7, storage: store, fresh: false });
+  const st2 = JSON.parse(c2.G('JSON.stringify((() => { const c = npcs.find(k => k.p.name === "SALTY"); return [c.p.boat == null, !!c.p.homeless]; })())'));
+  return st2[0] && st2[1] ? true : "garbage berth 9 not sanitized to homeless: " + JSON.stringify(st2);
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

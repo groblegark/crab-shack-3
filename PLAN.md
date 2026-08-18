@@ -94,12 +94,13 @@ compounds or collapses → the landlord collects at 20:00 either way.
   re-clean, so cheap showers matter); buy *timing* beat buy prices.
 
 ## Tools (the load-bearing part)
-- `node tools/suite.mjs` — **22 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **30 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
-  NPC housing ladder, sick-crab mobility, job-board hire/payroll/quit,
-  disease infection/cure/mortality, showers turnover, NPC economics,
-  save/load, no-inflation wallet bounds.
+  NPC housing ladder, boat rung + catch boost, sick-crab mobility,
+  job-board hire/payroll/quit, disease infection/cure/mortality, showers
+  turnover, NPC economics, save/load (incl. boat berths), no-inflation
+  wallet bounds.
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]` — CLI.
   Its buyer models a sensible player: hourly purchase checks, reserve = cost +
   tonight's bill + cushion, saves (doesn't skip) for the big unlocks, rehires
@@ -151,11 +152,19 @@ Staged landings (each stage ships alone, suite-green, balance re-verified):
   `consumeIngredient()` are the embryo). A pantry + a receiving station where
   imports physically arrive (morning delivery), and a crab has to work the
   station to restock — production is idle-style, not a passive rate.
-- **T4 — The boat**: a live-aboard boat fishers can buy — a housing rung
-  (shelter → house → boat for fishers) that also **increases catch** (fish
-  further out). NPC fishers save toward it via the existing housing-ladder
-  logic; the player gets one too if they fish (interacts with backlog
-  "player-avatar crab" + "fishing expansion").
+- **T4 — The boat** — **shipped**: a live-aboard boat as the fisher-only top
+  housing rung (shelter → house → boat), bought at the same nightly
+  settlement that runs the rest of the ladder. Numbers: $75 + $2/night
+  mooring fee (vs $35 move-in + $10 rent); 3 named berths (PEARL, GULLWING,
+  SQUALL) moored off the pier's seaward rail, hull trim in the owner's
+  color. A boat is owned outright — a broke night runs a tab, never an
+  eviction — and the vacated house frees for the next climber. Owners fish
+  from their own deck: ~12 fish/day vs ~5-6 off the pier (faster casts +
+  20% double hauls). Sim-verified: fishers reach the boat organically
+  ~day 23-25 (3 of 4 seeds), and the baseline eviction curve is untouched
+  (0/8, median 11, identical day list) because boats land after the
+  do-nothing window. The player's boat waits on backlog "player-avatar
+  crab" + "fishing expansion".
 - **T5 — Exports + external-facing stubs**: an export dock — surplus catch
   (and later goods) sold off-node at fixed prices, both directions visible in
   the ledger. Every commodity flows through named ledger entries so future
