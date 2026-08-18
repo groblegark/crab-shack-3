@@ -716,6 +716,7 @@ function runJobBoard() {
     if (hire) {
       hire.p.job = j.biz; hire.p.employer = bizOwner(j.biz);
       // clock out of the old life cleanly - updateSchedule will commute them to the new job
+      abortErrand(hire);
       hire.duty = false; hire.pendingOff = false; hire.kstate = "idle";
       hire.carrying = null; hire.dayState = "home"; hire.cstate = ""; hire.workBiz = j.biz;
       jobBoard.splice(jobBoard.indexOf(j), 1);
@@ -951,6 +952,18 @@ function tryAcquire(bizKey, kind) {
 function release(c) {
   if (c.slotKind && c.slot >= 0) busy[c.workBiz][c.slotKind][c.slot] = false;
   c.slot = -1; c.slotKind = null;
+}
+function abortErrand(c) {
+  // a crab yanked out of an errand (death, sudden hire) must release everything
+  // the errand held: a stall left occupied is NEVER cleaned or reused (cleaners
+  // require !occupant), a table likewise, and the ghost order pollutes the queue
+  const k = c.errandCust;
+  if (!k) return;
+  if (k.stall) { k.stall.occupant = null; k.stall.dirty = true; k.stall = null; }
+  if (k.table) { k.table.occupant = null; k.table = null; }
+  k.done = true; k.state = "leaving"; k.claimed = false;
+  customers = customers.filter(q => q !== k);
+  c.errandCust = null;
 }
 function abortChef(c) {
   release(c);   // covers kitchen work AND a selfCook grip on a grill (e.g. death mid-meal)
@@ -2440,7 +2453,7 @@ function frame(now) {
         } else if (!k.p.npc && k.p.sick.days >= 3 &&
             Math.random() < Math.min(0.75, (cared ? 0.08 : 0.25) + 0.12 * Math.max(0, k.p.sick.days - 4))) {
           // the tide takes them
-          abortChef(k);
+          abortChef(k); abortErrand(k);
           memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
           today.died.push(k.p.name);
           const followed = followIdx >= 0 ? crabs[followIdx] : null;

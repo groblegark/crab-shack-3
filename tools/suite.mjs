@@ -523,6 +523,34 @@ scenario("needs bite: needy crew serve measurably fewer dishes", () => {
     : `needy crew served ${needy} vs well-kept ${kept} - impairment not visible (need <85%)`;
 });
 
+scenario("stalls can never wedge: abort frees them, and a soak stays clean", () => {
+  const sim = createSim({ seed: 21 });
+  // targeted: stage a mid-shower errand crab, yank them out via abortErrand
+  sim.runUntil('crabs[0].dayState === "home" && tmin > 12 * 60', { maxSteps: 300000 });
+  sim.G(`{
+    const st = BIZ.showers.stalls[0];
+    const k = { biz: "showers", isCrab: true, crab: crabs[0], state: "showering", showerT: 9,
+      stall: st, x: st.x, spawnX: st.x, claimed: true, served: false, recipe: BIZ.showers.recipes[0] };
+    st.occupant = k; customers.push(k); crabs[0].errandCust = k; crabs[0].dayState = "errand";
+    abortErrand(crabs[0]);
+  }`);
+  if (sim.G("BIZ.showers.stalls[0].occupant !== null")) return "abortErrand left the stall occupied";
+  if (!sim.G("BIZ.showers.stalls[0].dirty")) return "aborted stall not marked dirty";
+  if (sim.G('customers.some(k => k.stall === BIZ.showers.stalls[0])')) return "ghost customer survived";
+  // soak: two full days, no stall may stay occupied longer than a real shower cycle
+  let worst = 0;
+  const held = {};
+  sim.runDays(2, { tickEvery: 4, onTick: (G) => {
+    if (G("coins") < 300) G("coins = 600");
+    const occ = JSON.parse(G('JSON.stringify(BIZ.showers.stalls.map(t => !!t.occupant))'));
+    occ.forEach((o, i) => {
+      held[i] = o ? (held[i] || 0) + 0.2 * 4 : 0;   // 4 ticks x 50ms sim-steps... measured in sim-seconds
+      worst = Math.max(worst, held[i]);
+    });
+  } });
+  return worst < 60 ? true : "a stall stayed occupied " + worst.toFixed(0) + " sim-seconds";
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
