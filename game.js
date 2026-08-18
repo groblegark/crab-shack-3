@@ -303,7 +303,7 @@ function save() {
   if (FRESH || wiping) return;
   const lv = {}; for (const k in UPS) lv[k] = UPS[k].lvl;
   localStorage.setItem(SAVE_KEY, JSON.stringify({
-    coins, lifetime, lv, day, tmin, lastRentDay, rate: incomeRate(), t: Date.now(),
+    coins, lifetime, lv, day, tmin, lastRentDay, gameOver, rate: incomeRate(), t: Date.now(),
     personas: crabs.map(c => c.p),
   }));
 }
@@ -315,8 +315,14 @@ function load() {
   coins = s.coins || 0; lifetime = s.lifetime || 0;
   day = s.day || 1; tmin = s.tmin != null ? s.tmin : 7 * 60;
   lastRentDay = s.lastRentDay || 0;
+  if (s.gameOver) { gameOver = true; screen = "play"; }
   for (const k in UPS) if (s.lv && s.lv[k] != null) UPS[k].lvl = s.lv[k];
-  if (s.personas) crabs = s.personas.map(newCrab);
+  if (Array.isArray(s.personas) && s.personas.length) {
+    crabs = s.personas.map((p2, i) => {
+      const base = makeCrabPersona(i);
+      return newCrab(Object.assign(base, p2));   // missing fields fall back to sane defaults
+    });
+  } else return false;
   const away = (Date.now() - (s.t || Date.now())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
@@ -475,7 +481,8 @@ function updateCommute(c, dt) {
     const park = m === "buggy" ? b.park + c.p.house * 18 : b.rack + c.p.house * 7;
     if (stepTo(c, park, wspd, dt, 150)) c.cstate = "drive";
   } else if (c.cstate === "walkToStop") {
-    if (stepTo(c, BUS_STOPS[c.busFrom], wspd, dt, 148)) c.cstate = "waitBus";
+    setT(c, BUS_STOPS[c.busFrom], 148);
+    if (routedStep(c, wspd, dt)) c.cstate = "waitBus";
   } else if (c.cstate === "waitBus") {
     if (bus.state === "dwell" && Math.abs(bus.x + BUS2.w / 2 - BUS_STOPS[c.busFrom]) < 6) {
       c.hidden = true; c.cstate = "onBus"; sfx.bus();
@@ -501,10 +508,12 @@ function updateBus(dt) {
     if (bus.dwellT <= 0) { bus.state = "drive"; bus.passed = false; }
     return;
   }
+  const prevCx = bus.x + BUS2.w / 2;
   bus.x += bus.dir * 100 * dt;
   const cx = bus.x + BUS2.w / 2;
   for (const s of BUS_STOPS) {
-    if (Math.abs(cx - s) < 3 && bus.lastStop !== s) {
+    const crossed = (prevCx - s) * (cx - s) <= 0;   // stop lies within this frame's travel
+    if (crossed && bus.lastStop !== s) {
       bus.state = "dwell"; bus.dwellT = 2.0; bus.lastStop = s;
       bus.x = s - BUS2.w / 2;
       return;
@@ -544,7 +553,7 @@ function updateSchedule(c, dt) {
 
 // ---------------------------------------------------------------- errands
 function pickErrand(c) {
-  const staffed = (b) => bizUnlocked(b) && crabs.some(k => k.duty && k.workBiz === b);
+  const staffed = (b) => bizUnlocked(b) && crabs.some(k => k.duty && !k.pendingOff && k.workBiz === b);
   // restaurant staff privilege: cook your own meal when the kitchen is unstaffed
   if ((c.p.hunger || 0) >= 0.5 && !staffed("shack") && c.p.job === "shack") {
     const cost = INGREDIENT_COST.fruit;   // staff meal: cheapest ingredients, at cost
@@ -622,6 +631,12 @@ function updateErrand(c, dt) {
   } else if (c.dayState === "errand") {
     const k = c.errandCust;
     if (!k) { c.dayState = "home"; startCommute(c, false); return; }
+    const open = crabs.some(w => w.duty && !w.pendingOff && w.workBiz === k.biz);
+    if (!open && k.state === "waiting" && !k.claimed) {
+      k.state = "leaving"; k.happy = false;   // kitchen's dark - go home
+      c.quip = { text: "CLOSED?! HMPH", t: 2.2 };
+      return;
+    }
     c.x = k.x; c.y = 166;   // stand in the queue, same line as tourists
   }
 }
@@ -662,7 +677,7 @@ function release(c) {
   c.slot = -1; c.slotKind = null;
 }
 function abortChef(c) {
-  if (c.kstate === "work" || c.kstate === "washing") release(c);
+  if (c.kstate === "work" || c.kstate === "washing" || c.kstate === "toSlot") release(c);
   if (c.busTable) { c.busTable.busing = false; c.busTable = null; }
   c.kstate = "idle"; c.cust = null; c.carrying = null; c.stepIdx = 0;
 }
@@ -692,6 +707,8 @@ function updateKitchen(c, dt) {
     if (routedStep(c, spd, dt)) {
       if (c.stepIdx === -1) {
         if (coins < INGREDIENT_COST[c.cust.recipe.raw]) { c.kstate = "waitCash"; return; }
+        expense(INGREDIENT_COST[c.cust.recipe.raw], c.x, FLOOR_Y - 40);
+        c.paidIngredient = true;
         c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1;
       }
       else if (c.stepIdx >= c.cust.recipe.steps.length) serve(c);
@@ -726,7 +743,11 @@ function updateKitchen(c, dt) {
       popText("SQUEAKY CLEAN", c.x - 10, FLOOR_Y - 30, [140, 220, 255]);
     }
   } else if (c.kstate === "waitCash") {
-    if (coins >= INGREDIENT_COST[c.cust.recipe.raw]) { c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1; }
+    if (coins >= INGREDIENT_COST[c.cust.recipe.raw]) {
+      expense(INGREDIENT_COST[c.cust.recipe.raw], c.x, FLOOR_Y - 40);
+      c.paidIngredient = true;
+      c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1;
+    }
   } else if (c.kstate === "waitSlot") {
     const kind = c.cust.recipe.steps[c.stepIdx][0];
     const s = tryAcquire(bizKey, kind);
@@ -747,8 +768,8 @@ function updateKitchen(c, dt) {
     c.workT -= dt;
     if (c.workT <= 0) {
       if (c.stepIdx === -1) {
-        c.carrying = c.cust.recipe.raw;
-        expense(INGREDIENT_COST[c.carrying], c.x, FLOOR_Y - 40);
+        c.carrying = c.cust.recipe.raw;   // already paid for at grab start
+        c.paidIngredient = false;
       }
       else { c.carrying = c.cust.recipe.steps[c.stepIdx][2]; release(c); }
       popText(ITEM_NAMES[c.carrying] + "!", c.x - 8, FLOOR_Y - 28, [255, 255, 255]);
@@ -806,7 +827,8 @@ function newCustomer(bizKey) {
     claimed: false, served: false };
 }
 function updateCustomers(dt) {
-  const qi = { shack: 0, cleaners: 0 };
+  const qi = {};
+  for (const b of Object.keys(BIZ)) qi[b] = 0;
   for (const k of customers) {
     if (k.state === "arriving" || k.state === "waiting") {
       const slot = BIZ[k.biz].queueX + (qi[k.biz]++) * QUEUE_DX;
@@ -913,6 +935,11 @@ function tryBuy(key) {
   }
   if (key === "chef") {
     const p2 = makeCrabPersona(crabs.length + ((Math.random() * 6) | 0));
+    const usedNames = new Set(crabs.map(k => k.p.name));
+    if (usedNames.has(p2.name)) {
+      const free = CRAB_NAMES.find(n => !usedNames.has(n));
+      if (free) p2.name = free;
+    }
     const used = new Set(crabs.filter(k => !k.p.homeless).map(k => k.p.house));
     p2.homeless = true;
     for (let h = 0; h < HOUSE_XS.length; h++) if (!used.has(h)) { p2.house = h; p2.homeless = false; break; }
@@ -981,7 +1008,7 @@ cv.addEventListener("click", (ev) => {
   if (dragMoved) return;
   // panel
   if (p.y >= PANEL_Y) {
-    if (p.y < 188) {
+    if (p.y < 186) {
       if (p.x > 228) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }
       if (p.x > 212) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }
       if (p.x > 188) { soundOn = !soundOn; if (soundOn) sfx.ding(); return; }
@@ -998,31 +1025,7 @@ cv.addEventListener("click", (ev) => {
       }
       if (p.x >= 168) { tab = tab === "menu" ? "crew" : "menu"; sfx.ding(); return; }
     }
-    if (tab === "menu") {
-    smallText(ctx, "MENU - PRICE / COST", 4, 199, [230, 215, 195]);
-    let my = 206;
-    for (const key of Object.keys(BIZ)) {
-      if (!bizUnlocked(key)) continue;
-      for (const r of BIZ[key].recipes) {
-        smallText(ctx, ITEM_NAMES[r.icon], 4, my, [190, 175, 160]);
-        smallText(ctx, "$" + r.pay + " / $" + INGREDIENT_COST[r.raw], 72, my, [140, 200, 150]);
-        my += 6;
-      }
-    }
-    smallText(ctx, "TONIGHT AT 20:00", 132, 199, [230, 215, 195]);
-    let by = 206;
-    smallText(ctx, "WAGES " + crabs.length + "X$" + CRAB_WAGE, 132, by, [190, 175, 160]);
-    smallText(ctx, "$" + CRAB_WAGE * crabs.length, 224, by, [235, 160, 130]); by += 6;
-    for (const key of Object.keys(BIZ)) {
-      if (!bizUnlocked(key)) continue;
-      smallText(ctx, BIZ[key].short + " RENT", 132, by, [190, 175, 160]);
-      smallText(ctx, "$" + (day <= 1 && key === "shack" ? 0 : BIZ[key].rent), 224, by, [235, 160, 130]); by += 6;
-    }
-    smallText(ctx, "TOTAL", 132, by, [230, 215, 195]);
-    smallText(ctx, "$" + fmt(due), 224, by, coins < due ? [255, 140, 140] : [255, 230, 120]);
-    smallText(ctx, "CRABS PAY THEIR OWN", 132, by + 8, [150, 135, 125]);
-    smallText(ctx, "$" + HOUSE_RENT + " HOUSE RENT", 132, by + 14, [150, 135, 125]);
-  } else if (tab === "shop") {
+    if (tab === "shop") {
       for (const b of BUTTONS)
         if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) { tryBuy(buttonKey(b)); return; }
     } else {
@@ -1048,7 +1051,7 @@ cv.addEventListener("click", (ev) => {
   const wx = p.x + camX;
   for (let i = 0; i < crabs.length; i++) {
     const c = crabs[i];
-    if (!c.hidden && Math.abs(wx - (c.x + 8)) < 12 && p.y > FLOOR_Y - 26 && p.y < FLOOR_Y + 4) {
+    if (!c.hidden && Math.abs(wx - (c.x + 8)) < 12 && Math.abs(p.y - (c.y - 6)) < 14) {
       followIdx = i; return;
     }
   }
@@ -1447,7 +1450,8 @@ function drawPanel() {
     smallText(ctx, t.toUpperCase(), x + 4, 189, active ? [40, 24, 16] : [160, 140, 130]);
   }
   const rate = incomeRate();
-  text(ctx, "$" + rate.toFixed(1) + "/S", 84, 189, [170, 150, 135]);
+  const rateTxt = rate >= 100 ? "$" + Math.round(rate) + "/S" : "$" + rate.toFixed(1) + "/S";
+  text(ctx, rateTxt.slice(0, 7), 84, 189, [170, 150, 135]);
   {
     const conf = newConfirmT > 0;
     rect(ctx, 128, 187, 30, 10, conf ? [140, 40, 40] : [90, 70, 60]);
@@ -1617,11 +1621,12 @@ function drawGameOver() {
 }
 function drawToast() {
   if (!toast) return;
-  const w2 = textWidth(toast.text) + 12;
-  const x = ((W - w2) / 2) | 0, y = 62;
+  const sp = textWidth(toast.text) + 12 > 252 ? 5 : 6;
+  const w2 = Math.min(252, textWidth(toast.text, sp) + 12);
+  const x = Math.max(2, ((W - w2) / 2) | 0), y = 62;
   rect(ctx, x, y, w2, 13, [30, 20, 36]);
   rect(ctx, x + 1, y + 1, w2 - 2, 11, [255, 250, 230]);
-  text(ctx, toast.text, x + 6, y + 3, [90, 50, 30]);
+  text(ctx, toast.text, x + 6, y + 3, [90, 50, 30], sp);
 }
 
 // ---------------------------------------------------------------- main loop
@@ -1694,6 +1699,7 @@ function frame(now) {
     return;
   }
   if (screen === "title") {
+    if (newConfirmT > 0) newConfirmT -= dt;
     // attract mode: slow ping-pong pan across the town
     const span = WORLD_W - W, s = (time * 9) % (2 * span);
     camX = s < span ? s : 2 * span - s;
