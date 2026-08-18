@@ -8,6 +8,62 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, closing time — Sleep, Saturdays, and one broken promise
+
+![CLAWDIA, exhausted, in her own doorway](devlog/img/2026-08-18-dead-on-my-feet.png)
+
+*19:37. CLAWDIA has been on her feet since two. The lit doorway is hers,
+and that is the whole point of the new system.*
+
+Last two merges of the day, and they're a pair: the town learned to be
+tired, and then it learned to rest.
+
+**Tiredness is in; sandiness is out.** Beach grit was a chore; exhaustion
+is a *condition*. The ZZZ bar joined every card, exhaustion breeds
+sickness worse than sand ever did, and — here's the design — **sleep
+quality is a housing perk**. A night in your own bed (or your own boat)
+restores you whole; a shelter cot gives you half. SUDSY's day 9, from the
+sim: shutters the taps, treats herself to a Clawcade night, walks 1,400
+pixels home, gets in at 1:30 AM pinned at TIRED 1.00 muttering DEAD ON MY
+FEET — sleeps four and a half hours in her own bed and opens on time
+anyway. The fishers who snored ten hours on shelter cots woke up stiffer
+than she did. The housing ladder finally pays out in the currency that
+matters.
+
+**And weekends.** Seven-day week now, and every working crab gets one
+staggered weekday off — no pay, no duty, and (this is the fix the juice
+bar was waiting for) **the errand gates open all day**. You'll remember
+SALTY died with $49 he never had an evening free to spend. No more. Here
+is PINCHY's first Saturday, from seed 1337: slept to 9:30, took a $7 rinse
+at SUDSY's, went beachcombing past the pier, hit the CLAWCADE at 13:17 and
+spent $12 on fun at full retail, asleep by 19:54 with his FUN bar full
+**for the first time since the lease was signed**. Single-worker shops
+close honestly for the day under a DAY OFF placard; two-worker shops
+run a full-open double instead.
+
+![CLAWDIA's day off at the CLAWCADE](devlog/img/2026-08-18-day-off.png)
+
+*OFF WED, says the card. THE GRILL DANCES, says the marquee. The FUN bar
+is about to have the best afternoon of its life.*
+
+And the arithmetic held its promise from the last entry: rest recovered
+the crab-hours that credit and juice had spent, and the knife-edge came
+back on its own — median eviction is 11 again, no tuning, all systems on.
+
+### One broken promise, on the record
+
+An honest ledger includes the red ink, so: today's stack — real wages,
+weekends, credit, thirst — has measurably broken the founding promise
+that *a town that buys growth can escape*. Right now a chef-and-table
+town dies of revenue collapse around day 7–12 at HIGH reputation, and
+the probes say it isn't the bank's fault — it's the unit economics of
+growth itself under the new costs. The suite holds a regression floor so
+it can't quietly get worse, and the fix is an open design question the
+owner gets to answer, not a knob to twiddle in the dark. The town works
+better than it ever has. Making it *winnable* again is tomorrow's story.
+
+---
+
 ## 2026-08-18, later still — The boss gets claws (and the pin is dead)
 
 ![PINCHY, mid-grill, declines management's input](devlog/img/2026-08-18-order-refusal.png)
