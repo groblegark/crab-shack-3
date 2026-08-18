@@ -30,16 +30,18 @@ function stuckDetector(sim) {
   };
 }
 
-scenario("baseline always loses (day 6-14)", () => {
+scenario("baseline always loses (day 6-16)", () => {
+  // the shape that matters: EVERY do-nothing town is evicted, in the window the
+  // 8-seed headless matrix showed (8-16, median 11 as of the job-board build)
   const days = [];
-  for (const seed of [1337, 2674, 4011]) {
+  for (const seed of [1337, 2674, 4011, 5348]) {
     const sim = createSim({ seed });
     sim.runDays(30);
     if (!sim.G("gameOver")) return `seed ${seed} survived 30d with $${sim.G("Math.round(coins)")}`;
     days.push(sim.G("day"));
   }
   const med = days.sort((a, b) => a - b)[1];
-  return near(med, 6, 14) ? true : `median eviction day ${med} outside 6-14 (${days})`;
+  return near(med, 6, 16) ? true : `median eviction day ${med} outside 6-16 (${days})`;
 });
 
 scenario("growth strategy can escape", () => {
@@ -193,17 +195,18 @@ scenario("disease: sustained neglect breeds sickness", () => {
   const sim = createSim({ seed: 71 });
   // pin needs at max moments before each settlement (errands would otherwise
   // un-pin them during the day)
-  for (let d = 0; d < 6; d++) {
-    sim.runUntil("tmin >= 19.9 * 60 && lastRentDay !== day", { maxSteps: 80000 });
+  // risk at maxed neglect is 0.19/crab/night - run enough nights that a healthy
+  // outcome is a real anomaly (12 nights x 2 crabs: P(no one sick) ~ 0.6%), and
+  // keep the town solvent so eviction can't cut the sample short
+  for (let d = 0; d < 12; d++) {
+    sim.runUntil("tmin >= 19.9 * 60 && lastRentDay !== day", { maxSteps: 80000,
+      onTick: (G) => { if (G("coins") < 300) G("coins = 600"); } });
     sim.G('for (const c of crabs) { c.p.hunger = 1; c.p.dirt = 1; c.p.sandy = 1; }');
     sim.runUntil("lastRentDay === day", { maxSteps: 20000 });
-    if (sim.G("gameOver")) break;
     if (sim.G("crabs.some(c => c.p.sick) || (window._stats.deaths || 0) > 0")) return true;
     sim.runUntil("tmin < 10", { maxSteps: 40000 });
-    if (sim.G("gameOver")) break;
   }
-  return sim.G("crabs.some(c => c.p.sick) || (window._stats.deaths || 0) > 0")
-    ? true : "no crab fell ill after 6 nights of maxed neglect";
+  return "no crab fell ill after 12 nights of maxed neglect";
 });
 
 scenario("disease: care cures, neglect can kill", () => {
@@ -357,6 +360,136 @@ scenario("job board: unpaid staff quit back to the pier", () => {
   if (!quit) return "staff kept working for a $5 till";
   return sim.G('npcs.filter(c => c.p.fisher).every(c => c.p.job === "fishing" || !!c.p.sick)') ? true
     : "quit but did not return to fishing";
+});
+
+scenario("save/load: townsfolk keep wallets and houses", () => {
+  const store = new Map();
+  const a = createSim({ seed: 5, storage: store, fresh: false });
+  a.runDays(2);
+  a.G("npcs[1].p.wallet = 77; npcs[1].p.homeless = false; npcs[1].p.house = 8; save()");
+  const b = createSim({ seed: 6, storage: store, fresh: false });
+  const rows = JSON.parse(b.G("JSON.stringify(npcs.map(c => [c.p.name, c.p.wallet, !!c.p.homeless, c.p.house]))"));
+  const salty = rows.find(r => r[0] === "SALTY");
+  if (!salty) return "SALTY missing after reload";
+  if (salty[1] !== 77 || salty[2] !== false || salty[3] !== 8)
+    return "SALTY came back as " + JSON.stringify(salty) + ", expected [SALTY,77,false,8]";
+  return true;
+});
+
+scenario("old save (homeX era) migrates; corrupt save rejected clean", () => {
+  const store = new Map();
+  store.set("crabshack3_v1", JSON.stringify({
+    coins: 500, lifetime: 900, day: 5, tmin: 600, lastRentDay: 4,
+    lv: { chef: 2 }, memorials: [], rep: 44, townCatch: 3, rate: 0, t: Date.now(),
+    personas: [
+      { name: "PINCHY", trait: "speedy", mode: "walk", acc: "none", color: 0, shift: "M", wallet: 30, homeX: 60 },
+      { name: "CLAWDIA", trait: "tidy", mode: "bike", acc: "flower", color: 1, shift: "E", wallet: 25, homeX: 120 },
+    ],
+    npc: { tills: { sudsy: 150 }, personas: [{ name: "SUDSY", npc: true, homeX: 444, wallet: 12 }] },
+  }));
+  const sim = createSim({ seed: 3, storage: store, fresh: false });
+  const crew = JSON.parse(sim.G("JSON.stringify(crabs.map(c => [c.p.homeless, c.p.house, c.p.homeX]))"));
+  for (const [homeless, house, nook] of crew) {
+    if (homeless !== false) return "migrated crew member not housed: " + JSON.stringify(crew);
+    if (house == null || nook != null) return "stray homeX / missing house: " + JSON.stringify(crew);
+  }
+  if (sim.G("npcs[0].p.homeX != null")) return "SUDSY kept her nook homeX";
+  sim.runDays(6);
+  if (sim.G("!isFinite(coins)")) return "coins went " + sim.G("coins");
+  // corrupt save (empty personas) must not half-load
+  const store2 = new Map();
+  store2.set("crabshack3_v1", JSON.stringify({ coins: 9, day: 30, gameOver: true, lv: { chef: 6 }, rep: 2, personas: [] }));
+  const sim2 = createSim({ seed: 3, storage: store2, fresh: false });
+  const st = JSON.parse(sim2.G("JSON.stringify([day, UPS.chef.lvl, gameOver, Math.round(coins)])"));
+  return (st[0] === 1 && st[1] === 2 && st[2] === false && st[3] === 150)
+    ? true : "corrupt save leaked state: [day,chefLvl,gameOver,coins]=" + JSON.stringify(st);
+});
+
+scenario("queue hard cap holds for locals too", () => {
+  const sim = createSim({ seed: 4242 });
+  sim.G(`coins = 5000; tryBuy("chef"); tryBuy("chef"); tryBuy("chef"); tryBuy("chef");`);
+  let worst = 0, forced = 0;
+  sim.runDays(3, { tickEvery: 5, onTick: (G) => {
+    const t = G("tmin");
+    if (G("coins") < 300) G("coins = 800");
+    if (t > 14.5 * 60 && t < 19 * 60 && forced < 40 && Math.round(t) % 30 === 0) {
+      forced++;   // pile every off-duty local into the shack line at once
+      G(`for (const c of allCrabs()) if (c.dayState === "home") {
+           c.p.hunger = 0.9; c.p.wallet = 60; c.errandCd = 0; }`);
+    }
+    worst = Math.max(worst, G(`Math.max(...Object.keys(BIZ).map(b =>
+      customers.filter(k => k.biz === b && (k.state === "waiting" || k.state === "arriving")).length))`));
+  } });
+  return worst <= sim.G("QUEUE_MAX") ? true : `queue hit ${worst} (cap ${sim.G("QUEUE_MAX")})`;
+});
+
+scenario("death cleanup: slots freed, orders unclaimed, follow survives", () => {
+  const sim = createSim({ seed: 9 });
+  sim.G(`coins = 5000; tryBuy("chef"); tryBuy("chef");`);
+  // direct abort semantics: a selfCook death must free the grill, a chef death must unclaim the order
+  sim.runUntil("crabs.some(c => c.cust)", { maxSteps: 200000 });
+  const claim = sim.G(`(() => {
+    const c = crabs.find(c => c.cust); const k = c.cust;
+    abortChef(c);
+    return (k.claimed ? "stillClaimed" : "ok");
+  })()`);
+  if (claim !== "ok") return "aborted chef left the order claimed";
+  const leak = sim.G(`(() => {
+    const c = crabs[0];
+    const prev = { ds: c.dayState, wb: c.workBiz };
+    c.dayState = "selfCook"; c.cookStep = 2; c.workBiz = "shack";
+    c.slotKind = "grill"; c.slot = 0; busy.shack.grill[0] = true;
+    abortChef(c);
+    const leaked = busy.shack.grill[0];
+    c.dayState = prev.ds; c.workBiz = prev.wb;
+    return leaked;
+  })()`);
+  if (leak) return "selfCook death leaked a grill slot";
+  // full sim-reachable death: follow + dossier bookkeeping
+  sim.G("followIdx = crabs.length - 1; dossier = crabs[0];");
+  const followedName = sim.G("crabs[crabs.length - 1].p.name");
+  for (let d = 0; d < 10 && !sim.G("(window._stats.deaths || 0) > 0") && !sim.G("gameOver"); d++) {
+    sim.G(`if (coins < 500) coins = 900;
+      if (crabs[0]) { if (!crabs[0].p.sick) crabs[0].p.sick = { days: 9 }; crabs[0].p.hunger = 1; crabs[0].p.dirt = 1; }`);
+    sim.runUntil("lastRentDay === day", { maxSteps: 60000 });
+    sim.runUntil("tmin < 10", { maxSteps: 60000 });
+  }
+  if (!sim.G("(window._stats.deaths || 0) > 0")) return "no death in 10 nights of terminal neglect";
+  if (sim.G("dossier !== null")) return "dossier stayed open on a dead crab";
+  const nowFollowing = sim.G("followIdx >= 0 && crabs[followIdx] ? crabs[followIdx].p.name : 'none'");
+  if (nowFollowing !== followedName) return `follow slipped from ${followedName} to ${nowFollowing}`;
+  const orphan = sim.G(`(() => {
+    for (const bk of Object.keys(busy)) for (const kind of Object.keys(busy[bk]))
+      for (let i = 0; i < busy[bk][kind].length; i++)
+        if (busy[bk][kind][i] && !allCrabs().some(c => c.workBiz === bk && c.slotKind === kind && c.slot === i))
+          return bk + "." + kind + "[" + i + "]";
+    return "";
+  })()`);
+  return orphan === "" ? true : "orphaned station lock at " + orphan;
+});
+
+scenario("crew never staff npc-owned shops", () => {
+  const sim = createSim({ seed: 13 });
+  sim.G('crabs[0].p.job = "showers";');   // the old toggle bug could write this into a save
+  sim.runUntil("tmin > 7.2 * 60", { maxSteps: 4000 });
+  const job = sim.G("crabs[0].p.job");
+  if (job !== "shack") return "crew job stayed " + job;
+  // and the whole crew stays on player books over a day
+  sim.runDays(1);
+  const bad = sim.G(`crabs.filter(c => bizOwner(c.p.job) !== "player").length`);
+  return bad === 0 ? true : bad + " crew working for NPC owners";
+});
+
+scenario("all crew dead: town survives, rehire recovers", () => {
+  const sim = createSim({ seed: 19 });
+  sim.runUntil("tmin > 10 * 60", {});
+  sim.G("for (const c of crabs.slice()) { abortChef(c); crabs = crabs.filter(k => k !== c); } UPS.chef.lvl = 1; followIdx = 0; coins = 800;");
+  sim.runDays(2, { onTick: (G) => { if (G("coins") < 400) G("coins = 800"); }, tickEvery: 40 });
+  if (sim.G("!isFinite(coins)")) return "coins went " + sim.G("coins");
+  sim.G('tryBuy("chef")');
+  if (sim.G("crabs.length") !== 1) return "rehire after wipeout failed";
+  sim.runDays(1, { onTick: (G) => { if (G("coins") < 400) G("coins = 800"); }, tickEvery: 40 });
+  return sim.G("crabs.length === 1 && isFinite(crabs[0].p.wallet)") ? true : "rehired crab broke";
 });
 
 // ---- runner

@@ -312,7 +312,9 @@ function newCrab(persona) {
   if (persona.dirt == null) persona.dirt = 0;
   if (persona.bored == null) persona.bored = 0;
   if (persona.sick === undefined) persona.sick = null;
-  if (persona.npc && persona.homeless === undefined) { persona.homeless = true; delete persona.homeX; }
+  if (persona.homeless === undefined) persona.homeless = !!persona.npc;   // old saves: crew were housed, npcs slept rough
+  delete persona.homeX;   // pre-housing-market nook field
+  if (!persona.homeless && (persona.house == null || HOUSE_XS[persona.house] == null)) persona.homeless = true;
   if (!persona.made) persona.made = {};   // dish id -> lifetime count
   if (persona.sandy == null) persona.sandy = 0;
   return {
@@ -429,6 +431,7 @@ function load() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) {}
   if (!s) return false;
+  if (!Array.isArray(s.personas) || !s.personas.length) return false;   // reject before touching state
   coins = s.coins || 0; lifetime = s.lifetime || 0;
   day = s.day || 1; tmin = s.tmin != null ? s.tmin : 7 * 60;
   lastRentDay = s.lastRentDay || 0;
@@ -437,22 +440,27 @@ function load() {
   if (typeof s.rep === "number") rep = s.rep;
   if (typeof s.townCatch === "number") townCatch = s.townCatch;
   for (const k in UPS) if (s.lv && s.lv[k] != null) UPS[k].lvl = s.lv[k];
-  if (Array.isArray(s.personas) && s.personas.length) {
-    crabs = s.personas.map((p2, i) => {
-      const base = makeCrabPersona(i);
-      return newCrab(Object.assign(base, p2));   // missing fields fall back to sane defaults
-    });
-  } else return false;
+  crabs = s.personas.map((p2, i) => {
+    const base = makeCrabPersona(i);
+    return newCrab(Object.assign(base, p2));   // missing fields fall back to sane defaults
+  });
   if (s.npc) {
     if (s.npc.tills && s.npc.tills.sudsy != null) OWNERS.sudsy.till = s.npc.tills.sudsy;
-    if (Array.isArray(s.npc.personas)) s.npc.personas.forEach((p2, i) => {
-      if (npcs[i]) Object.assign(npcs[i].p, p2);
-      else {   // a drifter who moved to town mid-save
-        const c = newCrab(Object.assign({ npc: true }, p2));
-        if (p2.fisher) c.fishSpot = FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
+    // every townsfolk persona comes back (wallet, homeless, house), matched by
+    // name; unmatched ones are drifters who moved to town mid-save - rebuild them
+    if (Array.isArray(s.npc.personas)) for (const sp of s.npc.personas) {
+      if (!sp) continue;
+      const n = npcs.find(k => k.p.name === sp.name);
+      if (n) {
+        Object.assign(n.p, sp);
+        delete n.p.homeX;   // pre-housing-market nook field
+        if (!n.p.homeless && (n.p.house == null || HOUSE_XS[n.p.house] == null)) n.p.homeless = true;
+      } else {
+        const c = newCrab(Object.assign({ npc: true }, sp));
+        if (sp.fisher) c.fishSpot = FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
         c.x = homeX(c); npcs.push(c);
       }
-    });
+    }
   }
   jobBoard = Array.isArray(s.board) ? s.board : [];
   hireDay = s.hireDay || 0;
@@ -594,7 +602,7 @@ function startCommute(c, toWork) {
     c.busFrom = nearestStop(c.x); c.busTo = nearestStop(dest);
     c.cstate = c.busFrom === c.busTo ? "travel" : "walkToStop";
   }
-  else if (m === "walk") c.cstate = "travel";
+  else if (m === "walk" || c.p.job === "fishing") c.cstate = "travel";   // no bike rack on the pier
   else c.cstate = toWork ? "drive" : "walkToVehicle";  // bike/buggy parked at work
 }
 
@@ -710,7 +718,7 @@ function spawnDrifter() {
     const free = CRAB_NAMES.find(n => !used.has(n));
     if (free) p2.name = free;
   }
-  Object.assign(p2, { npc: true, fisher: true, homeless: true, wallet: 12, job: "fishing", shift: "D" });
+  Object.assign(p2, { npc: true, fisher: true, homeless: true, wallet: 12, job: "fishing", shift: "D", mode: "walk" });
   const c = newCrab(p2);
   c.fishSpot = FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
   c.x = BUS_STOPS[0]; c.y = 158;   // stepped off the morning bus with one bag
@@ -724,6 +732,7 @@ function spawnDrifter() {
 function updateSchedule(c, dt) {
   const sh = SHIFTS[c.p.shift];
   if (c.p.job !== "fishing" && !bizUnlocked(c.p.job)) c.p.job = "shack";
+  if (!c.p.npc && c.p.job !== "fishing" && bizOwner(c.p.job) !== "player") c.p.job = "shack";   // crew can't staff NPC shops
   if (c.dayState === "home" && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !c.p.sick) {
     startCommute(c, true);
   }
@@ -855,6 +864,14 @@ function startErrand(c, e) {
 function updateErrand(c, dt) {
   if (c.dayState === "toErrand") {
     if (routedStep(c, crabMove(c), dt)) {
+      // the 5-slot line is a hard cap for locals too: full line, come back later
+      const q = customers.filter(k => k.biz === c.errandBiz && (k.state === "waiting" || k.state === "arriving")).length;
+      if (q >= QUEUE_MAX) {
+        c.quip = { text: "LINE'S TOO LONG", t: 2.4 };
+        c.errandCd = 12; c.dayState = "home";
+        startCommute(c, false);
+        return;
+      }
       const cust = { biz: c.errandBiz, recipe: c.errand.recipe, isCrab: true, crab: c,
         need: c.errand.need, x: c.x, spawnX: c.x, state: "waiting",
         patience: 90, maxPatience: 90, claimed: false, served: false };   // locals will wait
@@ -919,8 +936,9 @@ function release(c) {
   c.slot = -1; c.slotKind = null;
 }
 function abortChef(c) {
-  if (c.kstate === "work" || c.kstate === "toSlot") release(c);
-  if (c.cleanStall) { c.cleanStall.cleaning = false; c.cleanStall = null; c.kstate = "idle"; }
+  release(c);   // covers kitchen work AND a selfCook grip on a grill (e.g. death mid-meal)
+  if (c.cust && !c.cust.served) c.cust.claimed = false;   // let another chef pick the order up
+  if (c.cleanStall) { c.cleanStall.cleaning = false; c.cleanStall = null; }
   c.kstate = "idle"; c.cust = null; c.carrying = null; c.stepIdx = 0;
 }
 function updateFishing(c, dt) {
@@ -1088,6 +1106,7 @@ function payAndBenefit(c, cust) {
 }
 function serve(c) {
   const cust = c.cust;
+  if (cust && cust.state === "toSeat") return;   // guest still walking to the table: wait a beat, retry next frame
   if (cust && cust.state === "seatedWaiting") {
     // table delivery: payment + benefits as usual, then straight to dining
     payAndBenefit(c, cust);
@@ -1312,7 +1331,7 @@ cv.addEventListener("mousedown", (ev) => {
 addEventListener("mousemove", (ev) => {
   if (!dragging) return;
   const p = evPos(ev);
-  if (Math.abs(p.x - dragStartX) > 4) { dragMoved = true; followIdx = -1; }
+  if (Math.abs(p.x - dragStartX) > 4) { dragMoved = true; followIdx = -1; followNpc = null; }
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 });
 addEventListener("mouseup", () => { dragging = false; setTimeout(() => { dragMoved = false; }, 50); });
@@ -1327,7 +1346,7 @@ cv.addEventListener("touchmove", (ev) => {
   if (!dragging) return;
   ev.preventDefault();
   const p = evPos(ev.touches[0]);
-  if (Math.abs(p.x - dragStartX) > 6) { dragMoved = true; followIdx = -1; }
+  if (Math.abs(p.x - dragStartX) > 6) { dragMoved = true; followIdx = -1; followNpc = null; }
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 }, { passive: false });
 cv.addEventListener("touchend", (ev) => {
@@ -1375,7 +1394,7 @@ cv.addEventListener("click", (ev) => {
   if (gameOver) { newGame(); return; }
   if (dossier) {
     // the DOES row doubles as the reassignment control for crew crabs
-    const owned = Object.keys(BIZ).filter(bizUnlocked);
+    const owned = Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player");
     if (!dossier.p.npc && owned.length > 1 && p.y >= 48 && p.y < 59 && p.x >= 24 && p.x < 232) {
       const c = dossier;
       c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
@@ -1413,7 +1432,7 @@ cv.addEventListener("click", (ev) => {
     if (tab === "shop") {
       for (const b of BUTTONS)
         if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) { tryBuy(buttonKey(b)); return; }
-    } else {
+    } else if (tab === "crew") {   // menu tab: no invisible crew cards to click
       for (let i = 0; i < crabs.length; i++) {
         const bx = 4 + i * 27;
         if (p.x >= bx && p.x < bx + 24 && p.y >= 199 && p.y < 223) {
@@ -1426,7 +1445,8 @@ cv.addEventListener("click", (ev) => {
   // follow-card job toggle
   if (followIdx >= 0 && !followNpc && (UPS.cleaners.lvl > 0 || UPS.arcade.lvl > 0) && p.x >= 56 && p.x < 90 && p.y >= 33 && p.y < 46) {
     const c = crabs[followIdx];
-    const owned = Object.keys(BIZ).filter(bizUnlocked);
+    // crew work only the player's businesses - never an NPC-owned shop
+    const owned = Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player");
     c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
     sfx.buy();
     popText("NEW JOB: " + BIZ[c.p.job].name, c.x - 20, FLOOR_Y - 34, [140, 255, 160]);
@@ -1456,8 +1476,8 @@ addEventListener("keydown", (e) => {
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
-  if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; }
-  if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; }
+  if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; }
+  if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; }
   if (e.key === "Escape") { if (dossier) { dossier = null; return; } followIdx = -1; followNpc = null; }
 });
 
@@ -2061,7 +2081,7 @@ function drawDossier() {
       : p.fisher ? "FISHES OFF THE PIER" : "RUNS " + BIZ[p.job].name)
     : "WORKS THE " + BIZ[p.job].name;
   row("DOES", doesTxt, [70, 90, 130]);
-  if (!p.npc && Object.keys(BIZ).filter(bizUnlocked).length > 1)
+  if (!p.npc && Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1)
     smallText(ctx, "TAP: REASSIGN", x + w2 - 58, ly - 9, [96, 170, 220]);
   row("SHIFT", SHIFTS[p.shift].label);
   row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
@@ -2276,9 +2296,11 @@ function frame(now) {
           abortChef(k);
           memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
           today.died.push(k.p.name);
+          const followed = followIdx >= 0 ? crabs[followIdx] : null;
           crabs = crabs.filter(c2 => c2 !== k);
           UPS.chef.lvl = Math.max(1, crabs.length);
-          if (followIdx >= crabs.length) followIdx = -1;
+          followIdx = followed ? crabs.indexOf(followed) : -1;   // keep following the same crab, not the same slot
+          if (dossier === k) dossier = null;   // no records for ghosts
           toast = { text: k.p.name + " HAS PASSED AWAY. THE TOWN GRIEVES.", t: 8 };
           if (window._stats) window._stats.deaths = (window._stats.deaths || 0) + 1;
           sfx.angry();
