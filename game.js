@@ -152,7 +152,7 @@ const BIZ = {
 //   shack/biz rents (nightly)      owner till  -> DESTROYED (Mr. Pincherton)
 // Crew wallets are fed only by wages; every sink above must keep the
 // steady-state wallet bounded (see suite: "no wallet inflation").
-const OWNERS = { sudsy: { id: "sudsy", name: "SUDSY", till: 200 } };
+const OWNERS = { sudsy: { id: "sudsy", name: "SUDSY", till: 200, credit: 0, darkT: 0 } };
 const bizOwner = (b) => BIZ[b].owner || "player";
 function ownerFunds(b) { return bizOwner(b) === "player" ? coins : OWNERS[bizOwner(b)].till; }
 function creditBiz(b, amt, x, y) {
@@ -169,6 +169,103 @@ function debitBiz(b, amt, x, y, label) {
 }
 const bizUnlocked = (b) => b === "shack" || bizOwner(b) !== "player"
   || (b === "cleaners" ? UPS.cleaners.lvl > 0 : UPS.arcade.lvl > 0);
+
+// ---------------------------------------------------------------- line of credit
+// Every business owner (player and NPC alike) carries a small compounding
+// line of credit: a rent/bill shortfall at settlement DRAWS on the line
+// instead of instant eviction, interest compounds nightly, and a minimum
+// payment is auto-collected. Missing the minimum with the line exhausted =
+// BANKRUPT: the game-over cliff for the player (this is the new eviction);
+// NPC owners go dark for a couple nights instead.
+// ======================= CREDIT CONFIG (play knobs) =======================
+// Deliberately SHORT and SMALL on landing: limit ~ one night's shack rent,
+// tuned so the eviction/bankruptcy curve sits within +1 day of the
+// documented no-credit baseline (PLAN.md). Loosen stepwise, one knob at a
+// time, with a fresh headless matrix per step - eviction-day is THE stat.
+const CREDIT_CFG = {
+  LIMIT: 120,          // max drawn balance (~half a night's shack rent)
+  RATE: 0.25,          // nightly compounding interest on the drawn balance
+  MIN_PAY: 80,         // minimum payment auto-collected nightly while drawn
+  WARN_DAYS: 3,        // forecast horizon that fires the bankruptcy toast
+  CHIP_DAYS: 5,        // forecast horizon that shows the warning chip
+  NPC_DARK_NIGHTS: 2,  // NPC bankruptcy: shop shuttered this many nights
+};
+// ==========================================================================
+let credit = { bal: 0, warned: false };   // the player's line (NPCs: OWNERS[o].credit)
+let bankrupt = false;                     // gameOver flavor: the bank, not the landlord
+// One owner's nightly credit settlement (pure math - shared by the player
+// hook, the NPC hook and the forecaster): interest compounds on the carried
+// balance, the night's bill draws on the line when funds are short, then the
+// minimum payment auto-collects from what's left. ok:false = BANKRUPT
+// (obligations missed with the line exhausted); funds are left untouched.
+function settleCreditLine(bal, funds, due) {
+  const r = { bal, funds, drew: 0, interest: 0, paid: 0, ok: true };
+  if (r.bal > 0) { r.interest = Math.ceil(r.bal * CREDIT_CFG.RATE); r.bal += r.interest; }
+  const minDue = r.bal > 0 ? Math.min(r.bal, CREDIT_CFG.MIN_PAY) : 0;
+  if (r.funds < due) {
+    const need = Math.ceil(due - r.funds);
+    if (need <= CREDIT_CFG.LIMIT - r.bal) { r.bal += need; r.funds += need; r.drew = need; }
+    else { r.ok = false; return r; }              // can't even draw the bill
+  }
+  r.funds -= due;
+  if (minDue > 0) {
+    if (r.funds >= minDue) { r.funds -= minDue; r.bal -= minDue; r.paid = minDue; }
+    else if (CREDIT_CFG.LIMIT - r.bal < minDue) r.ok = false;   // missed + exhausted
+    // else: payment missed but headroom remains - the balance just compounds
+  }
+  return r;
+}
+function creditDueTonight() {   // cash the bank will auto-collect at 20:00
+  if (credit.bal <= 0) return 0;
+  return Math.min(credit.bal + Math.ceil(credit.bal * CREDIT_CFG.RATE), CREDIT_CFG.MIN_PAY);
+}
+function bizDark(b) {   // an NPC shop shuttered by the bank after a bankruptcy
+  const o = OWNERS[bizOwner(b)];
+  return !!(o && (o.darkT || 0) > 0);
+}
+// Bankruptcy prediction (design rule: the player is warned IN ADVANCE).
+// Seeded by the headless buyer's reserve math (cost + tonight's bill +
+// cushion), rolled forward: take the recent net-per-day run rate from the
+// day ledger and replay the upcoming settlements - wages + rents + debt
+// service, drawing on the line exactly as settleCreditLine will. Returns
+// how many settlements away the line fails (0 = the next one), or Infinity.
+let bankHorizon = Infinity;
+function forecastBankruptcy() {
+  const log = window.dayLog || [];
+  let sum = 0, n = 0, latest = null;
+  for (let i = Math.max(1, log.length - 3); i < log.length; i++) {
+    const prev = log[i - 1];
+    if (prev && prev.after != null) { sum += latest = log[i].close - prev.after; n++; }
+  }
+  if (!n) return Infinity;               // no run rate on the books yet
+  // pessimistic run rate: a sharp break (crew death, sickness spiral) should
+  // move the forecast the day it shows, not after the average catches up
+  const g = Math.min(sum / n, latest), due = nightlyDue();
+  // income still to come before the next settlement (the town trades 8:00-20:00)
+  const frac = lastRentDay === day ? 1 : Math.max(0, Math.min(1, (20 * 60 - tmin) / (12 * 60)));
+  let c = coins, b = credit.bal;
+  for (let d = 0; d < 10; d++) {
+    c += g * (d === 0 ? frac : 1);
+    const r = settleCreditLine(b, c, due);
+    if (!r.ok) return d;
+    b = r.bal; c = r.funds;
+  }
+  return Infinity;
+}
+function updateBankWarning() {
+  bankHorizon = forecastBankruptcy();
+  if (bankHorizon <= CREDIT_CFG.WARN_DAYS) {
+    if (!credit.warned) {
+      credit.warned = true;
+      toast = { text: bankHorizon <= 0 ? "ON THIS COURSE: BANKRUPT TONIGHT!"
+        : "ON THIS COURSE: BANKRUPT IN ~" + bankHorizon + " DAY" + (bankHorizon === 1 ? "" : "S"), t: 8 };
+      sfx.angry();
+      if (window._stats && window._stats.warnDay == null) window._stats.warnDay = day;
+    }
+    if (window._stats && window._stats.chipDay == null) window._stats.chipDay = day;
+  } else if (bankHorizon > CREDIT_CFG.WARN_DAYS + 2) credit.warned = false;   // re-arm after real recovery
+  if (bankHorizon <= CREDIT_CFG.CHIP_DAYS && window._stats && window._stats.chipDay == null) window._stats.chipDay = day;
+}
 
 // ---------------------------------------------------------------- clock
 const TS = 4;                     // game minutes per real second
@@ -479,8 +576,12 @@ function save() {
   const lv = {}; for (const k in UPS) lv[k] = UPS[k].lvl;
   localStorage.setItem(SAVE_KEY, JSON.stringify({
     coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, rate: incomeRate(), t: Date.now(),
+    bankrupt, credit: { bal: Math.round(credit.bal), warned: credit.warned },
+    dayLog: (window.dayLog || []).slice(-6),   // keeps the forecaster warm across reloads
     personas: crabs.map(c => c.p),
-    npc: { tills: { sudsy: OWNERS.sudsy.till }, personas: npcs.map(c => c.p) },
+    npc: { tills: { sudsy: OWNERS.sudsy.till },
+      credit: { sudsy: { bal: OWNERS.sudsy.credit || 0, darkT: OWNERS.sudsy.darkT || 0 } },
+      personas: npcs.map(c => c.p) },
     board: jobBoard, hireDay, trade,
   }));
 }
@@ -494,6 +595,9 @@ function load() {
   day = s.day || 1; tmin = s.tmin != null ? s.tmin : 7 * 60;
   lastRentDay = s.lastRentDay || 0;
   if (s.gameOver) { gameOver = true; screen = "play"; }
+  bankrupt = !!s.bankrupt;
+  if (s.credit) { credit.bal = s.credit.bal || 0; credit.warned = !!s.credit.warned; }   // old saves: zero balance
+  if (Array.isArray(s.dayLog)) window.dayLog = s.dayLog;
   memorials = Array.isArray(s.memorials) ? s.memorials : [];
   if (typeof s.rep === "number") rep = s.rep;
   if (typeof s.townCatch === "number") townCatch = s.townCatch;
@@ -504,6 +608,10 @@ function load() {
   });
   if (s.npc) {
     if (s.npc.tills && s.npc.tills.sudsy != null) OWNERS.sudsy.till = s.npc.tills.sudsy;
+    if (s.npc.credit && s.npc.credit.sudsy) {
+      OWNERS.sudsy.credit = s.npc.credit.sudsy.bal || 0;
+      OWNERS.sudsy.darkT = s.npc.credit.sudsy.darkT || 0;
+    }
     // every townsfolk persona comes back (wallet, homeless, house), matched by
     // name; unmatched ones are drifters who moved to town mid-save - rebuild them
     if (Array.isArray(s.npc.personas)) for (const sp of s.npc.personas) {
@@ -747,7 +855,7 @@ function runJobBoard() {
   for (const b of Object.keys(BIZ)) {
     if (bizOwner(b) === "player") continue;
     const o = OWNERS[bizOwner(b)];
-    if (!o || jobBoard.some(j => j.biz === b)) continue;
+    if (!o || (o.darkT || 0) > 0 || jobBoard.some(j => j.biz === b)) continue;
     const staff = allCrabs().filter(k => k.p.job === b && !k.p.sick).length;
     if ((o.till >= 260 && staff < 2) || (staff === 0 && o.till >= NPC_WAGE * 2))
       jobBoard.push({ biz: b, wage: NPC_WAGE, day });
@@ -837,7 +945,7 @@ function updateSchedule(c, dt) {
 }
 
 // ---------------------------------------------------------------- errands
-function bizStaffed(b) { return bizUnlocked(b) && allCrabs().some(k => k.duty && !k.pendingOff && k.workBiz === b); }
+function bizStaffed(b) { return bizUnlocked(b) && !bizDark(b) && allCrabs().some(k => k.duty && !k.pendingOff && k.workBiz === b); }
 function pickErrand(c) {
   const staffed = bizStaffed;
   // restaurant staff privilege: cook your own meal when the kitchen is unstaffed.
@@ -1342,7 +1450,7 @@ function updateCustomers(dt) {
   spawnT -= dt;
   if (spawnT <= 0 && shackOpen()) {
     // tourists pick a staffed business
-    const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && allCrabs().some(c => c.duty && c.workBiz === b));
+    const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && !bizDark(b) && allCrabs().some(c => c.duty && c.workBiz === b));
     if (open.length) {
       const weights = open.map(b => b === "shack" ? 0.5 : b === "cleaners" ? 0.18 : b === "arcade" ? 0.22 : 0.1);
       let r = Math.random() * weights.reduce((a, v) => a + v, 0), pick = open[0];
@@ -2105,8 +2213,8 @@ function drawPanel() {
     rect(ctx, 128, TAB_Y, 30, TAB_H, conf ? [140, 40, 40] : [90, 70, 60]);
     smallText(ctx, conf ? "SURE?" : "NEW", 128 + (conf ? 3 : 7), TAB_TX, conf ? [255, 200, 200] : [160, 140, 130]);
   }
-  const due = nightlyDue();
-  const rTxt = "BILL $" + fmt(due);
+  const due = nightlyDue() + creditDueTonight();
+  const rTxt = "BILL $" + fmt(due) + (credit.bal > 0 ? " D$" + fmt(Math.round(credit.bal)) : "");
   const chipW = textWidth(rTxt, 5) + 8;
   const crunch = coins < due && tmin >= 18 * 60 && tmin < 20 * 60 && ((time * 2) | 0) % 2;
   rect(ctx, 252 - chipW, TAB_Y - 1, chipW, TAB_H + 1, crunch ? [150, 40, 40] : tab === "menu" ? [190, 140, 80] : [90, 70, 60]);
@@ -2131,6 +2239,12 @@ function drawPanel() {
       if (!bizUnlocked(key)) continue;
       smallText(ctx, BIZ[key].short + " RENT", 132, by, [190, 175, 160]);
       smallText(ctx, "$" + BIZ[key].rent, 224, by, [235, 160, 130]); by += MROW;
+    }
+    if (credit.bal > 0) {
+      smallText(ctx, "LOAN PAYMENT", 132, by, [190, 175, 160]);
+      smallText(ctx, "$" + creditDueTonight(), 224, by, [235, 160, 130]); by += MROW;
+      smallText(ctx, "DEBT AT " + Math.round(CREDIT_CFG.RATE * 100) + "%/NT", 132, by, [190, 175, 160]);
+      smallText(ctx, "$" + fmt(Math.round(credit.bal)), 224, by, [235, 130, 130]); by += MROW;
     }
     smallText(ctx, "TOTAL", 132, by, [230, 215, 195]);
     smallText(ctx, "$" + fmt(due), 224, by, coins < due ? [255, 140, 140] : [255, 230, 120]);
@@ -2264,10 +2378,17 @@ function drawGameOver() {
   const cx2 = W / 2;
   rect(ctx, cx2 - 88, 66, 176, 84, [30, 20, 36]);
   rect(ctx, cx2 - 86, 68, 172, 80, [255, 250, 235]);
-  textShadow(ctx, "EVICTED!", cx2 - textWidth("EVICTED!") / 2, 76, [230, 60, 70], [120, 30, 40]);
-  text(ctx, "THE LANDLORD CRAB TOOK", cx2 - 66, 92, [90, 60, 50], 6);
-  text(ctx, "BACK THE SHACK", cx2 - 41, 101, [90, 60, 50], 6);
-  text(ctx, "NIGHTLY RENT OWED $" + fmt(totalRent()), cx2 - 66, 114, [140, 60, 60], 6);
+  if (bankrupt) {
+    textShadow(ctx, "BANKRUPT!", cx2 - textWidth("BANKRUPT!") / 2, 76, [230, 60, 70], [120, 30, 40]);
+    text(ctx, "THE BANK CALLED IN THE", cx2 - 66, 92, [90, 60, 50], 6);
+    text(ctx, "SHACK'S LINE OF CREDIT", cx2 - 65, 101, [90, 60, 50], 6);
+    text(ctx, "DEBT UNPAID $" + fmt(Math.round(credit.bal)), cx2 - 66, 114, [140, 60, 60], 6);
+  } else {
+    textShadow(ctx, "EVICTED!", cx2 - textWidth("EVICTED!") / 2, 76, [230, 60, 70], [120, 30, 40]);
+    text(ctx, "THE LANDLORD CRAB TOOK", cx2 - 66, 92, [90, 60, 50], 6);
+    text(ctx, "BACK THE SHACK", cx2 - 41, 101, [90, 60, 50], 6);
+    text(ctx, "NIGHTLY RENT OWED $" + fmt(totalRent()), cx2 - 66, 114, [140, 60, 60], 6);
+  }
   smallText(ctx, "SURVIVED " + day + " DAYS  EARNED $" + fmt(lifetime), cx2 - 78, 124, [90, 90, 110]);
   const bl = ((time * 2) | 0) % 2;
   if (bl) text(ctx, "CLICK TO START OVER", cx2 - 56, 137, [40, 110, 60], 6);
@@ -2398,7 +2519,9 @@ function drawJobBoard() {
 
 function drawReport() {
   if (!report || reportT <= 0) return;
-  const w2 = 176, x = ((W - w2) / 2) | 0, y = 24, h2 = 118;
+  const creditLines = (report.drew ? 1 : 0) + (report.interest ? 1 : 0) +
+    (report.loanPaid ? 1 : 0) + (report.debt ? 1 : 0);
+  const w2 = 176, x = ((W - w2) / 2) | 0, y = 24, h2 = 118 + creditLines * 8;
   ctx.fillStyle = "rgba(16,12,30,0.55)";
   ctx.fillRect(0, 0, W, PANEL_Y);
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
@@ -2416,6 +2539,10 @@ function drawReport() {
   line("WALKED OUT ANGRY", report.rage, report.rage > 2 ? [180, 60, 60] : [110, 100, 110]);
   line("WAGES PAID", "-$" + fmt(report.wages), [150, 70, 60]);
   line("RENT", "-$" + fmt(report.rent), [150, 70, 60]);
+  if (report.drew) line("DREW ON CREDIT", "+$" + fmt(report.drew), [200, 130, 40]);
+  if (report.interest) line("LOAN INTEREST", "+$" + fmt(report.interest), [180, 60, 60]);
+  if (report.loanPaid) line("LOAN PAYMENT", "-$" + fmt(report.loanPaid), [150, 70, 60]);
+  if (report.debt) line("DEBT OUTSTANDING", "$" + fmt(report.debt), [180, 60, 60]);
   line("IN THE TILL", "$" + fmt(report.coins), [90, 70, 40]);
   const dRep = report.repEnd - report.repStart;
   line("WORD OF MOUTH", report.repEnd + (dRep >= 0 ? "  +" + dRep : "  " + dRep),
@@ -2518,11 +2645,25 @@ function frame(now) {
         toast = { text: c.p.name + " QUIT: " + (o ? o.name : "THE BOSS") + " COULDN'T PAY", t: 6 };
       }
     }
-    // 2b. peer owners settle their own books (no NPC eviction cascade yet - TODO)
+    // 2b. peer owners settle their own books on the same line of credit:
+    // shortfalls draw on the line; a busted line shutters the shop (dark)
+    // for CREDIT_CFG.NPC_DARK_NIGHTS nights and the bank writes the debt off
+    // (survivable - NPC bankruptcy is a setback, not a death)
     for (const b of Object.keys(BIZ)) {
       if (bizOwner(b) === "player") continue;
       const o = OWNERS[bizOwner(b)];
-      if (o && o.till >= BIZ[b].rent && day > 1) o.till -= BIZ[b].rent;
+      if (!o || day <= 1) continue;
+      if ((o.darkT || 0) > 0) {
+        if (--o.darkT === 0) toast = { text: BIZ[b].name + " IS BACK IN BUSINESS", t: 6 };
+        continue;
+      }
+      const nf = settleCreditLine(o.credit || 0, o.till, BIZ[b].rent);
+      if (nf.ok) { o.credit = nf.bal; o.till = nf.funds; }
+      else {
+        o.credit = 0; o.darkT = CREDIT_CFG.NPC_DARK_NIGHTS;
+        today.moved.push(o.name + " WENT BANKRUPT - " + BIZ[b].short + " DARK");
+        toast = { text: o.name + " WENT BANKRUPT! " + BIZ[b].name + " GOES DARK", t: 7 };
+      }
     }
     for (const c of npcs) {
       c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.1);
@@ -2583,11 +2724,15 @@ function frame(now) {
         }
       }
     }
-    // 3. property rents across every business you hold: miss and it's over
+    // 3. property rents + loan service (THE credit hook): a shortfall draws
+    // on the line of credit instead of instant eviction; interest compounds
+    // and the minimum payment auto-collects inside settleCreditLine.
+    // ok:false is the new cliff - BANKRUPT (see CREDIT_CFG).
     const rent = totalRent();
-    if (coins >= rent) {
-      coins -= rent;
-      earnHist.push({ t: time, amt: -rent });
+    const fin = settleCreditLine(credit.bal, coins, rent);
+    if (fin.ok) {
+      credit.bal = fin.bal; coins = fin.funds;
+      earnHist.push({ t: time, amt: fin.drew - rent - fin.paid });
       report = {
         day, served: today.served, revenue: Math.round(today.revenue), rage: today.rage,
         wages, rent, sick: today.sick.slice(0, 3), died: today.died.slice(0, 2),
@@ -2595,18 +2740,23 @@ function frame(now) {
         repStart: Math.round(today.repStart), repEnd: Math.round(rep),
         best: Object.keys(today.byCrab).sort((a, b) => today.byCrab[b] - today.byCrab[a])[0],
         bestN: 0, coins: Math.round(coins),
+        drew: fin.drew, interest: fin.interest, loanPaid: fin.paid, debt: Math.round(credit.bal),
       };
       if (report.best) report.bestN = today.byCrab[report.best];
       reportT = 11;
-
+      const dl = (window.dayLog || [])[(window.dayLog || []).length - 1];
+      if (dl) dl.after = Math.round(coins);   // forecaster: post-settlement till
       if (rent > 0) popText("-$" + rent + " RENT", BIZ.shack.door, 110, [255, 120, 120]);
+      if (fin.drew > 0) popText("+$" + fin.drew + " ON CREDIT", BIZ.shack.door, 100, [255, 190, 90]);
       sfx.buy(); save();
     } else {
-      gameOver = true; toast = null; save();
+      gameOver = true; bankrupt = true; toast = null; save();
       if (music) { music.pause(); music = null; }
       sfx.angry();
     }
   }
+
+  if (screen === "play" && !gameOver) updateBankWarning();
 
   if (screen === "intro") {
     camX = clampCam(BIZ.shack.x0 - 20);
@@ -2738,6 +2888,23 @@ function frame(now) {
     const rw = smallTextWidth(rTxt) + 8;
     rect(ctx, W - rw - 2, 2, rw, 10, [30, 20, 36]);
     smallText(ctx, rTxt, W - rw + 2, 4, rep >= 50 ? [140, 220, 140] : rep >= 25 ? [220, 205, 185] : [235, 130, 130]);
+  }
+  {  // line-of-credit chips, bottom-right of the world (right above the BILL chip)
+    let cy = PANEL_Y - 12;
+    if (bankHorizon <= CREDIT_CFG.CHIP_DAYS && !gameOver) {
+      const wTxt = bankHorizon <= 0 ? "BANKRUPT TONIGHT!" : "BANKRUPT IN ~" + bankHorizon + "D";
+      const ww = smallTextWidth(wTxt) + 8;
+      const blink = ((time * 2) | 0) % 2;
+      rect(ctx, W - ww - 2, cy, ww, 10, blink ? [150, 30, 30] : [60, 16, 20]);
+      smallText(ctx, wTxt, W - ww + 2, cy + 2, blink ? [255, 230, 230] : [235, 130, 130]);
+      cy -= 12;
+    }
+    if (credit.bal > 0) {
+      const dTxt = "DEBT $" + fmt(Math.round(credit.bal)) + "/" + CREDIT_CFG.LIMIT;
+      const dw = smallTextWidth(dTxt) + 8;
+      rect(ctx, W - dw - 2, cy, dw, 10, [30, 20, 36]);
+      smallText(ctx, dTxt, W - dw + 2, cy + 2, [255, 190, 90]);
+    }
   }
   drawPanel();
   drawToast();
