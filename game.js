@@ -1219,16 +1219,22 @@ addEventListener("mouseup", () => { dragging = false; setTimeout(() => { dragMov
 cv.addEventListener("touchstart", (ev) => {
   const t = ev.touches[0];
   const p = evPos(t);
+  if (window.MergeMode && MergeMode.touchStart(p)) return;
   if (p.y < PANEL_Y) { dragging = true; dragStartX = p.x; dragCamX = camX; dragMoved = false; }
 }, { passive: true });
 cv.addEventListener("touchmove", (ev) => {
+  if (window.MergeMode && MergeMode.touchMove(evPos(ev.touches[0]))) { ev.preventDefault(); return; }
   if (!dragging) return;
   ev.preventDefault();
   const p = evPos(ev.touches[0]);
   if (Math.abs(p.x - dragStartX) > 6) { dragMoved = true; followIdx = -1; }
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 }, { passive: false });
-cv.addEventListener("touchend", () => { setTimeout(() => { dragging = false; dragMoved = false; }, 50); });
+cv.addEventListener("touchend", (ev) => {
+  const t = ev.changedTouches && ev.changedTouches[0];
+  if (window.MergeMode && MergeMode.touchEnd(t ? evPos(t) : null)) { dragging = false; dragMoved = false; return; }
+  setTimeout(() => { dragging = false; dragMoved = false; }, 50);
+});
 // horizontal wheel / trackpad swipe pans the town (shift+wheel too)
 cv.addEventListener("wheel", (ev) => {
   if (screen !== "play") return;
@@ -1246,6 +1252,7 @@ function evPos(ev) {
 function clampCam(x) { return Math.max(0, Math.min(WORLD_W - W, x)); }
 
 cv.addEventListener("click", (ev) => {
+  if (window.MergeMode && MergeMode.active()) return;
   if (screen === "title") {
     const p = evPos(ev);
     const bx = W / 2 - 50;
@@ -2125,6 +2132,7 @@ function frame(now) {
   drawPanel();
   drawToast();
   if (gameOver) drawGameOver();
+  if (window.MergeMode) MergeMode.frame(dt);
   requestAnimationFrame(frame);
 }
 
