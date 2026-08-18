@@ -83,24 +83,27 @@ G('soundOn = false; musicOn = false; screen = "play"; window._headless = true; w
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);
 const buyScript = BUY.length ? new vm.Script(`
   if (tmin >= 9 * 60 && tmin <= 19 * 60 && Math.abs(tmin - Math.round(tmin / 60) * 60) < ${STEP} * TS / 2) {
+    // a sensible player: buy anything on the plan you can afford while keeping
+    // tonight's bill covered; unlocks get saved for rather than skipped
+    const playerBill = (extraHire) => CRAB_WAGE * (crabs.length + (extraHire ? 1 : 0)) +
+      totalRent() + 40;   // conservative: keep a real cushion past tonight
     for (const k of ${JSON.stringify(BUY)}) {
       const u = UPS[k];
-      if (u.lvl >= u.max) continue;
-      const tomorrowBill = CRAB_WAGE * (crabs.length + (k === "chef" ? 1 : 0)) + Object.keys(BIZ).filter(bizUnlocked).reduce((s, b2) => s + BIZ[b2].rent, 0);
-      const buffer = (k === "cleaners" || k === "arcade") ? 10 : 30;
-      if (coins >= upCost(u) + tomorrowBill + buffer) tryBuy(k);
-      else if (k === "cleaners" || k === "arcade") break;   // save hard for unlocks only
+      if (!u || u.lvl >= u.max) continue;
+      const reserve = upCost(u) + playerBill(k === "chef") + 30;
+      if (coins >= reserve) tryBuy(k);
+      else if (k === "cleaners" || k === "arcade") break;   // save for the big unlocks
     }
-    // spread staff: ~1/3 to cleaners, ~1/4 to arcade once owned
-    for (const [biz2, frac] of [["cleaners", 3], ["arcade", 4]]) {
-      if (UPS[biz2] && UPS[biz2].lvl > 0) {
-        const want = Math.floor(crabs.length / frac);
-        let have = crabs.filter(c => c.p.job === biz2).length;
-        for (const c of crabs) {
-          if (have >= want) break;
-          if (c.p.job === "shack") { c.p.job = biz2; have++; }
-        }
-      }
+    // rehire after a death so a plague doesn't permanently shrink the crew
+    window._peakCrew = Math.max(window._peakCrew || 0, crabs.length);
+    if (crabs.length < window._peakCrew && UPS.chef.lvl < UPS.chef.max &&
+        coins >= upCost(UPS.chef) + playerBill(true) + 30) tryBuy("chef");
+    // staff side businesses only if the shack keeps coverage on that crab's shift
+    for (const biz2 of ["cleaners", "arcade"]) {
+      if (!bizUnlocked(biz2) || crabs.some(c => c.p.job === biz2)) continue;
+      const mover = crabs.find(c => c.p.job === "shack" &&
+        crabs.some(o => o !== c && o.p.job === "shack" && o.p.shift === c.p.shift));
+      if (mover) mover.p.job = biz2;
     }
   }`) : null;
 const dayRows = [];

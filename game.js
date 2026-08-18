@@ -17,7 +17,7 @@ const HOUSE_XS = [30, 100, 170, 240, 310, 380].map(x => x);
 const BUS_STOPS = [163, 660, 1180];
 const BUS_TERMINUS = [100, 1240];
 const STATION_BOTTOM = 152;
-const QUEUE_DX = 13, QUEUE_MAX = 4;
+const QUEUE_DX = 13, QUEUE_MAX = 5, TOURIST_QUEUE_MAX = 4;   // tourists keep 4; the 5th slot is reserved for locals
 const SHELTER_X = 444, MOVE_IN_COST = 35;
 const PIER_X0 = 1870, PIER_X1 = 2040, PIER_Y = 96;   // planks over the east break
 const FISHING_SPOTS = [{ x: 1900, y: PIER_Y }, { x: 1956, y: PIER_Y }];
@@ -28,7 +28,7 @@ const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
 // ---------------------------------------------------------------- businesses
 const BIZ = {
   shack: {
-    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 250, owner: "player",
+    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 255, owner: "player",
     x0: 1220, x1: 1560, door: 1247,
     stations: {
       crate: [{ x: 1232, y: 136 }],
@@ -868,7 +868,10 @@ function updateKitchen(c, dt) {
   if (c.kstate === "idle") {
     const lastCall = c.pendingOff && tmin < SHIFTS[c.p.shift].end + 45;
     if (!c.pendingOff || lastCall) {
-      const o = customers.find(k => k.biz === bizKey && (k.state === "waiting" || k.state === "seatedWaiting") && !k.claimed && !k.served);
+      // paying guests first; locals and crew get served in the lulls
+      const pending = customers.filter(k => k.biz === bizKey &&
+        (k.state === "waiting" || k.state === "seatedWaiting") && !k.claimed && !k.served);
+      const o = pending.find(k => !k.isCrab) || pending[0];
       if (o) {
         o.claimed = true; c.cust = o; c.stepIdx = -1; c.kstate = "walk";
         // send dine-in guests to a table right away - the server brings it out
@@ -1121,8 +1124,10 @@ function updateCustomers(dt) {
       const weights = open.map(b => b === "shack" ? 0.5 : b === "cleaners" ? 0.18 : b === "arcade" ? 0.22 : 0.1);
       let r = Math.random() * weights.reduce((a, v) => a + v, 0), pick = open[0];
       for (let i = 0; i < open.length; i++) { r -= weights[i]; if (r <= 0) { pick = open[i]; break; } }
-      const inQueue = customers.filter(k => k.biz === pick && k.state !== "leaving").length;
-      if (inQueue < QUEUE_MAX) customers.push(newCustomer(pick));
+      // tourists never take the last slot - your own crew and neighbours eat too
+      const tourQueue = customers.filter(k => k.biz === pick && !k.isCrab && k.state !== "leaving").length;
+      const allQueue = customers.filter(k => k.biz === pick && k.state !== "leaving").length;
+      if (tourQueue < TOURIST_QUEUE_MAX && allQueue < QUEUE_MAX) customers.push(newCustomer(pick));
     }
     spawnT = spawnEvery() * (0.7 + Math.random() * 0.6);
   }

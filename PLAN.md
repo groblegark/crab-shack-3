@@ -50,10 +50,19 @@ compounds or collapses → the landlord collects at 20:00 either way.
   including NPCs, fast-forward >>/>>> (F), master mute (M).
 
 ### Verified balance (8 seeds, tools/headless.mjs)
-- Baseline (buy nothing): **0/8 survive, evicted day 9–20, median 13**.
-- Hire-and-seat strategy (`--buy chef,table`): **7/8 alive at day 40**.
-- Constants: shack rent 250, wage 22, house rent 10, hires 60×2.0,
+- Baseline (buy nothing): **0/8 survive, evicted day 10–19, median 13**.
+- Hire-and-seat strategy (`--buy chef,table`): **3/8 alive at day 40**, and the
+  losses now come late (day 16+, median 33) rather than early collapses.
+- Constants: shack rent 255, wage 22, house rent 10, hires 60×2.0,
   showers 5/10, fish pay 13.
+- **Queue**: 5 slots, of which tourists may fill 4 — the 5th is reserved for
+  locals (crew + neighbours). Staff claim paying guests first and serve locals
+  in the lulls.
+- History worth knowing: an earlier build measured 7/8 escape, but that number
+  was inflated by a bug — at saturated reputation tourists filled every slot
+  and locals never got served (free revenue, no service cost, and a quiet
+  sickness spiral). Fixing it made growth genuinely harder. If escape needs to
+  come up, prefer capacity/throughput levers over re-hiding the locals.
 - Causal notes from calibration: rep saturates for every town so *capacity*
   (chef count) binds; crew deaths were the escape-killer (sick crabs can't
   re-clean, so cheap showers matter); buy *timing* beat buy prices.
@@ -65,6 +74,10 @@ compounds or collapses → the landlord collects at 20:00 either way.
   disease infection/cure/mortality, showers turnover, NPC economics,
   save/load, no-inflation wallet bounds.
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]` — CLI.
+  Its buyer models a sensible player: hourly purchase checks, reserve = cost +
+  tonight's bill + cushion, saves (doesn't skip) for the big unlocks, rehires
+  after a death, and only staffs a side business if the shack keeps shift
+  coverage.
 - `tools/simlib.mjs` — the sim core: real game files in a vm with stubbed
   browser APIs, seeded RNG, `runUntil`/`runDays`. ~10 sim-days/sec.
 - Dev flags: `?fresh` (no save), `?turbo=N`.
