@@ -2363,6 +2363,12 @@ function frame(now) {
     const stalls = BIZ[key].stalls;
     if (stalls) for (const t of stalls) paint.push({ base: t.y, f: () => {
       wblit(STALL[t.occupant ? 1 : 0], t.x, t.y - STALL[0].h);
+      if (t.occupant) {   // feet peeking under the curtain
+        const oc = t.occupant, pcol = oc.p ? oc.p.color : oc.color;
+        const col = CRAB_COLORS[(pcol || 0) % CRAB_COLORS.length][0];
+        wrect(t.x + 5, t.y - 3, 2, 2, col);
+        wrect(t.x + 9, t.y - 3, 2, 2, col);
+      }
       if (t.occupant) {   // suds drift up over the curtain while the water runs
         for (let i = 0; i < 3; i++) {
           const ph = (time * 0.6 + i * 0.33 + t.x * 0.013) % 1;

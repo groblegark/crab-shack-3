@@ -804,14 +804,21 @@ const TAPS = parseArt([
   "KKKKKKKKK.......",
   ".KNK..KNK.......",
 ], PAL);
-// shower stall: open frame, or curtain drawn + steam when running
+// shower stall: tall frame with a curtain rail; the curtain drops to
+// ankle height when a guest is inside (feet gap at the bottom)
 const STALL = [
   parseArt([
     "KKKKKKKKKKKKKKKK",
     "KVVVVVVVVVVVVVVK",
+    "KVKKKKKKKKKKKKVK",
     "KVK..........KVK",
     "KVK...KMMK...KVK",
     "KVK...KMKK...KVK",
+    "KVK..........KVK",
+    "KVK....C.....KVK",
+    "KVK..........KVK",
+    "KVK..........KVK",
+    "KVK..........KVK",
     "KVK..........KVK",
     "KVK..........KVK",
     "KVK..........KVK",
@@ -821,6 +828,7 @@ const STALL = [
   parseArt([
     "KKKKKKKKKKKKKKKK",
     "KVVVVVVVVVVVVVVK",
+    "KVKKKKKKKKKKKKVK",
     "KVLCLLCLLCLLCLVK",
     "KVLCLLCLLCLLCLVK",
     "KVLCLLCLLCLLCLVK",
@@ -828,7 +836,12 @@ const STALL = [
     "KVLCLLCLLCLLCLVK",
     "KVLCLLCLLCLLCLVK",
     "KVLCLLCLLCLLCLVK",
-    "KKKKKKKKKKKKKKKK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVLCLLCLLCLLCLVK",
+    "KVKLKKLKKLKKLKVK",
+    "KVK..........KVK",
+    "KKK..........KKK",
   ], PAL),
 ];
 // scrub bench: towels + soap bar
