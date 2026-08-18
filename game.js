@@ -95,6 +95,24 @@ const BIZ = {
         steps: [["skee", 2.5, "tickets"], ["claw", 3.0, "gold_plush"]] },
     ],
   },
+  juicebar: {
+    // the vacated cleaners lot: a squeeze-and-go stand east of the job board
+    name: "JUICE BAR", short: "JUICE", sign: "JUICE BAR", kind: "shopfront", rent: 55, owner: "player",
+    x0: 752, x1: 880, door: 766,
+    stations: {
+      fruitbin: [{ x: 758, y: 136 }],
+      juicer:   [{ x: 794, y: 136 }, { x: 816, y: 136 }],
+      bar:      [{ x: 848, y: 160 }],
+    },
+    source: "fruitbin", out: "bar", queueX: 884,
+    park: 600, rack: 668,
+    recipes: [
+      { id: "juice", icon: "juice", pay: 6, raw: "fruit",
+        steps: [["juicer", 1.8, "juice"]] },
+      { id: "cooler", icon: "cooler", pay: 9, raw: "fruit", raw2: "water",
+        steps: [["juicer", 2.4, "cooler"]] },
+    ],
+  },
   showers: {
     name: "SUDS SHOWERS", short: "SHWR", sign: "SUDS SHOWERS", kind: "shopfront", rent: 35, owner: "sudsy",
     x0: 940, x1: 1120, door: 954,
@@ -150,7 +168,7 @@ function debitBiz(b, amt, x, y, label) {
   else OWNERS[bizOwner(b)].till -= amt;
 }
 const bizUnlocked = (b) => b === "shack" || bizOwner(b) !== "player"
-  || UPS.arcade.lvl > 0;
+  || !!(UPS[b] && UPS[b].lvl > 0);
 
 // ---------------------------------------------------------------- line of credit
 // Every business owner (player and NPC alike) carries a small compounding
@@ -165,7 +183,7 @@ const bizUnlocked = (b) => b === "shack" || bizOwner(b) !== "player"
 // documented no-credit baseline (PLAN.md). Loosen stepwise, one knob at a
 // time, with a fresh headless matrix per step - eviction-day is THE stat.
 const CREDIT_CFG = {
-  LIMIT: 120,          // max drawn balance (~half a night's shack rent)
+  LIMIT: 90,           // max drawn balance (tightened from 120 when T2 landed - runways compound)
   RATE: 0.25,          // nightly compounding interest on the drawn balance
   MIN_PAY: 80,         // minimum payment auto-collected nightly while drawn
   WARN_DAYS: 4,        // forecast horizon that fires the bankruptcy toast
@@ -277,9 +295,10 @@ const IMPORTS = {
   corn:  { name: "CORN",  unit: "EA",  price: 3 },
   water: { name: "WATER", unit: "GAL", price: 1 },
   power: { name: "POWER", unit: "KWH", price: 2 },
+  fruit: { name: "FRUIT", unit: "EA",  price: 2 },
 };
-let trade = { total: { fish: 0, corn: 0, water: 0, power: 0 },
-  day: { fish: 0, corn: 0, water: 0, power: 0 }, spent: 0,
+let trade = { total: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 },
+  day: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, spent: 0,
   landedDay: 0, landed: 0 };   // pier production - NOT an import
 function tradeImport(kind, qty, dollars) {
   trade.total[kind] += qty; trade.day[kind] += qty;
@@ -289,17 +308,24 @@ function ingredientCost(raw) {
   if (raw === "fish_raw") return townCatch > 0 ? FISH_LOCAL : FISH_IMPORT;
   return INGREDIENT_COST[raw];
 }
-function consumeIngredient(raw) {
+function consumeIngredient(raw, recipe) {
+  if (raw === "fruit") tradeImport("fruit", 1);                   // every drink counts its fruit (T1 tracking)
+  if (recipe && recipe.raw2 === "water") {
+    tradeImport("water", 1); // the COOLER's gallon of fresh water
+    if (window._stats) window._stats.coolersMade = (window._stats.coolersMade || 0) + 1;
+  }
   if (raw !== "fish_raw") return;
   if (townCatch > 0) townCatch--;
   else tradeImport("fish", 1, FISH_IMPORT);   // shipped in - the $7 was already charged upstream
 }
 const ITEM_NAMES = {
   fish_raw: "FISH", fish_cut: "CUT FISH", fruit: "FRUIT",
-  taco: "FISH TACO", juice: "JUICE", plate_fish: "GRILL FISH",
+  taco: "FISH TACO", juice: "JUICE", cooler: "COOLER", plate_fish: "GRILL FISH",
   token: "TOKENS", plush: "CLAW PLUSH", tickets: "TICKET RUN", gold_plush: "GOLD PLUSH",
   soap: "SOAP", suds: "DELUXE SOAK", shine: "QUICK RINSE", dirty_dishes: "DIRTY DISHES",
 };
+
+const DRINKS = { juice: 1, cooler: 1 };   // recipes that quench THIRST wherever they're bought
 
 // ---------------------------------------------------------------- upgrades
 const UPS = {
@@ -307,6 +333,7 @@ const UPS = {
   grill: { name: "GRILL+",    base: 120, mult: 1.6, max: 2, lvl: 0 },
   board: { name: "BOARD+",    base: 90, mult: 1.6, max: 2, lvl: 0 },
   table: { name: "TABLE+",    base: 60, mult: 1.5, max: 2, lvl: 0 },
+  juicebar: { name: "JUICE BAR", base: 400, mult: 1, max: 1, lvl: 0 },
   arcade:   { name: "ARCADE",   base: 650, mult: 1, max: 1, lvl: 0 },
   cadegear: { name: "CADE GEAR+", base: 180, mult: 1, max: 1, lvl: 0 },
 };
@@ -317,6 +344,7 @@ function stationCap(bizKey, kind) {
   if (bizKey === "shack" && kind === "grill") return 1 + UPS.grill.lvl;
   if (bizKey === "shack" && kind === "board") return 1 + UPS.board.lvl;
   if (bizKey === "arcade" && (kind === "claw" || kind === "skee")) return 1 + UPS.cadegear.lvl;
+  if (bizKey === "juicebar" && kind === "juicer") return 2;
   return 1;
 }
 // the shack opens with two tables; more are bought
@@ -346,7 +374,7 @@ function newDayLog() {
 }
 let screen = "title", hasSave = false, wiping = false;
 function newGame() { wiping = true; localStorage.removeItem(SAVE_KEY); location.reload(); }
-const CRAB_WAGE = 22, HOUSE_RENT = 10;
+const CRAB_WAGE = 23, HOUSE_RENT = 10;   // wage raised 22 -> 24 with T2 thirst: crews drink at retail, the wage keeps their wallets liquid
 function rentAmount() { return BIZ.shack.rent; }   // shack lease (legacy name); due from night one
 function totalRent() {   // the PLAYER's nightly property bill, due from night one
   return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player")
@@ -355,6 +383,7 @@ function totalRent() {   // the PLAYER's nightly property bill, due from night o
 function nightlyDue() { return totalRent() + CRAB_WAGE * crabs.length; }
 const busy = {
   shack: { board: [false, false, false], grill: [false, false, false] },
+  juicebar: { juicer: [false, false] },
   arcade: { claw: [false, false], skee: [false, false] },
   showers: {},
 };
@@ -443,6 +472,7 @@ function newCrab(persona) {
   if (!persona.homeless && persona.boat == null && (persona.house == null || HOUSE_XS[persona.house] == null)) persona.homeless = true;
   if (!persona.made) persona.made = {};   // dish id -> lifetime count
   if (persona.sandy == null) persona.sandy = 0;
+  if (persona.thirst == null) persona.thirst = 0;
   return {
     p: persona,
     x: homeX({ p: persona }), y: 160, tx: 0, ty: 160,
@@ -458,7 +488,10 @@ function newCrab(persona) {
 }
 function crabMove(c) {
   const t = TRAITS[c.p.trait];
-  return 40 * t.move * (1 - 0.2 * Math.max(0, (c.p.bored || 0) - 0.5)) * (c.p.sick ? 0.5 : 1);
+  // parched crabs trudge (-15% at thirst >= 0.8). Deliberately NO crabEff
+  // prep-drag term for thirst - one new spiral pressure at a time (PLAN T2).
+  return 40 * t.move * (1 - 0.2 * Math.max(0, (c.p.bored || 0) - 0.5)) * (c.p.sick ? 0.5 : 1)
+    * ((c.p.thirst || 0) >= 0.8 ? 0.85 : 1);
 }
 function crabWork(c) { return TRAITS[c.p.trait].work; }
 // needs -> output: a well-kept crab works at 1.0. Let hunger or dirt slide
@@ -568,10 +601,11 @@ function save() {
     npc: { tills: { sudsy: OWNERS.sudsy.till },
       credit: { sudsy: { bal: OWNERS.sudsy.credit || 0, darkT: OWNERS.sudsy.darkT || 0 } },
       personas: npcs.map(c => c.p) },
-    board: jobBoard, hireDay, trade, sudsRefund: sudsRefunded,
+    board: jobBoard, hireDay, trade, sudsRefund: sudsRefunded, firstPour,
   }));
 }
 let sudsRefunded = false;   // laundromat-removal migration: refund paid out (persisted)
+let firstPour = false;      // the juice bar's first-ever drink (persisted: one headline per town)
 function load() {
   if (FRESH) return false;
   let s = null;
@@ -632,9 +666,10 @@ function load() {
   }
   jobBoard = Array.isArray(s.board) ? s.board : [];
   hireDay = s.hireDay || 0;
-  if (s.trade && s.trade.total) trade = { total: Object.assign({ fish: 0, corn: 0, water: 0, power: 0 }, s.trade.total),
-    day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0 }, s.trade.day), spent: s.trade.spent || 0,
+  if (s.trade && s.trade.total) trade = { total: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, s.trade.total),
+    day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, s.trade.day), spent: s.trade.spent || 0,
     landed: s.trade.landed || 0, landedDay: s.trade.landedDay || 0 };
+  firstPour = !!s.firstPour;
   const away = (Date.now() - (s.t || Date.now())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
@@ -657,6 +692,8 @@ function maybeQuip(c, dt) {
     let lines = isNight ? ["ZZZ..."] : TRAITS[c.p.trait].quips[quipContext(c)];
     if (c.p.homeless && quipContext(c) === "home" && !isNight)
       lines = ["SAVING FOR A PLACE", "SHELTER SOUP AGAIN", "I'LL BOUNCE BACK"];
+    if ((c.p.thirst || 0) >= 0.8 && !isNight)
+      lines = ["PARCHED...", "SO DRY", "JUICE. PLEASE."];
     c.quip = { text: lines[(Math.random() * lines.length) | 0], t: 2.6 };
     c.quipT = 14 + Math.random() * 18;
   }
@@ -917,6 +954,7 @@ function updateSchedule(c, dt) {
     c.duty = false; c.pendingOff = false;
     if (c.carrying) c.carrying = null;
     c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25);  // a shift works up an appetite
+    c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * ((c.p.sandy || 0) > 0.5 ? 1.5 : 1));  // dry work - worse in the beach heat
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and grubbies up the shell
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
     c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.15);    // beach work is gritty work
@@ -968,6 +1006,27 @@ function pickErrand(c) {
       return { biz: "shack", recipe: r, need: "food" };
     }
   }
+  // thirst sits between food and clean: cheap, casual, frequent. The juice
+  // bar is the spot when staffed; the shack pours its own juice otherwise -
+  // and staff can pour their own at a dark bar, charged retail like meals
+  if ((c.p.thirst || 0) >= 0.45) {
+    const drinkAt = staffed("juicebar") ? "juicebar" : staffed("shack") ? "shack" : null;
+    if (drinkAt) {
+      const drinks = BIZ[drinkAt].recipes.filter(r => DRINKS[r.id] && c.p.wallet >= Math.ceil(r.pay * 1.25) + 2);
+      if (drinks.length) {
+        drinks.sort((a, b) => a.pay - b.pay);
+        const r = c.p.wallet > 40 ? drinks[drinks.length - 1] : drinks[0];   // a COOLER when flush
+        return { biz: drinkAt, recipe: r, need: "drink" };
+      }
+    } else if (!c.p.npc && (c.p.job === "shack" || c.p.job === "juicebar")
+        && bizUnlocked(c.p.job) && !staffed(c.p.job)) {
+      const drinks = BIZ[c.p.job].recipes.filter(r => DRINKS[r.id] && c.p.wallet >= r.pay + 2);
+      if (drinks.length) {
+        drinks.sort((a, b) => a.pay - b.pay);
+        return { selfCook: true, biz: c.p.job, recipe: drinks[0], need: "drink" };
+      }
+    }
+  }
   // dirt is serviced at the showers too (the laundromat is gone): a grubby
   // crab heads for the taps at the same 0.66 threshold that fed the sickness
   // "cared" check - a shower takes dirt down 0.5 (0.7 deluxe), well below it
@@ -986,16 +1045,18 @@ function pickErrand(c) {
 }
 function startSelfCook(c, e) {
   c.dayState = "selfCook"; c.cookStep = 0; c.cookRecipe = e.recipe;
-  const s0 = stationSpot("shack", "crate", 0); setT(c, s0.x, s0.y);
+  c.cookBiz = e.biz || "shack"; c.cookNeed = e.need || "food";
+  const s0 = stationSpot(c.cookBiz, BIZ[c.cookBiz].source, 0); setT(c, s0.x, s0.y);
 }
 function updateSelfCook(c, dt) {
-  if (c.cookStep === 0) {                      // to the crate: ring yourself up first
+  const sb = c.cookBiz || "shack", wk = sb === "juicebar" ? "juicer" : "grill";
+  if (c.cookStep === 0) {                      // to the source bin: ring yourself up first
     if (routedStep(c, crabMove(c), dt)) {
       const r = c.cookRecipe;
       c.p.wallet = Math.max(0, c.p.wallet - r.pay);
-      creditBiz("shack", r.pay, c.x, FLOOR_Y - 40);          // retail into the till
-      debitBiz("shack", ingredientCost(r.raw), c.x, FLOOR_Y - 34);  // till buys the ingredients
-      consumeIngredient(r.raw);
+      creditBiz(sb, r.pay, c.x, FLOOR_Y - 40);          // retail into the till
+      debitBiz(sb, ingredientCost(r.raw), c.x, FLOOR_Y - 34);  // till buys the ingredients
+      consumeIngredient(r.raw, r);
       if (window._stats) {
         window._stats.staffMealPaid = (window._stats.staffMealPaid || 0) + r.pay;
         window._stats.staffMealCost = (window._stats.staffMealCost || 0) + INGREDIENT_COST[r.raw];
@@ -1006,23 +1067,25 @@ function updateSelfCook(c, dt) {
   } else if (c.cookStep === 1) {               // grab
     c.workT -= dt;
     if (c.workT <= 0) {
-      const g = tryAcquire("shack", "grill");
+      const g = tryAcquire(sb, wk);
       if (g >= 0) {
-        c.slotKind = "grill"; c.slot = g;
-        const sp = stationSpot("shack", "grill", g); setT(c, sp.x, sp.y);
-        c.workBiz = "shack"; c.cookStep = 2;
+        c.slotKind = wk; c.slot = g;
+        const sp = stationSpot(sb, wk, g); setT(c, sp.x, sp.y);
+        c.workBiz = sb; c.cookStep = 2;
       }
     }
-  } else if (c.cookStep === 2) {               // to the grill
-    if (routedStep(c, crabMove(c), dt)) { c.workT = 3; c.cookStep = 3; }
-  } else if (c.cookStep === 3) {               // cook + eat
+  } else if (c.cookStep === 2) {               // to the grill (or the juicer)
+    if (routedStep(c, crabMove(c), dt)) { c.workT = c.cookNeed === "drink" ? 1.5 : 3; c.cookStep = 3; }
+  } else if (c.cookStep === 3) {               // cook + eat (or blend + drink)
     c.workT -= dt;
     if (c.workT <= 0) {
       release(c); c.carrying = null;
-      c.p.hunger = 0; c.cookStep = 0;
-      popText("STAFF MEAL!", c.x - 8, FLOOR_Y - 30, [140, 255, 160]);
+      if (c.cookNeed === "drink" || DRINKS[c.cookRecipe.id]) c.p.thirst = 0;
+      if (c.cookNeed !== "drink") c.p.hunger = 0;
+      c.cookStep = 0;
+      popText(c.cookNeed === "drink" ? "STAFF POUR!" : "STAFF MEAL!", c.x - 8, FLOOR_Y - 30, [140, 255, 160]);
       if (window._stats) window._stats.staffMeals = (window._stats.staffMeals || 0) + 1;
-      c.quip = { text: "CHEF'S PRIVILEGE", t: 2.4 };
+      c.quip = { text: c.cookNeed === "drink" ? "BARKEEP'S PRIVILEGE" : "CHEF'S PRIVILEGE", t: 2.4 };
       c.errandCd = 25; c.dayState = "home";
       startCommute(c, false);
     }
@@ -1159,10 +1222,14 @@ function updateKitchen(c, dt) {
   if (c.kstate === "idle") {
     const lastCall = c.pendingOff && tmin < SHIFTS[c.p.shift].end + 45;
     if (!c.pendingOff || lastCall) {
-      // paying guests first; locals and crew get served in the lulls
+      // paying guests first; locals and crew get served in the lulls - but a
+      // local past half patience jumps the line: the juice bar's steady
+      // tourist stream never lulls on its own, and a starved local walking
+      // away parched is the exact spiral the reserved 5th slot exists to stop
       const pending = customers.filter(k => k.biz === bizKey &&
         (k.state === "waiting" || k.state === "seatedWaiting") && !k.claimed && !k.served);
-      const o = pending.find(k => !k.isCrab) || pending[0];
+      const o = pending.find(k => k.isCrab && k.patience < k.maxPatience * 0.5)
+        || pending.find(k => !k.isCrab) || pending[0];
       if (o) {
         o.claimed = true; c.cust = o; c.stepIdx = -1; c.kstate = "walk";
         // send dine-in guests to a table right away - the server brings it out
@@ -1190,7 +1257,7 @@ function updateKitchen(c, dt) {
       if (c.stepIdx === -1) {
         if (ownerFunds(bizKey) < ingredientCost(c.cust.recipe.raw)) { c.kstate = "waitCash"; return; }
         debitBiz(bizKey, ingredientCost(c.cust.recipe.raw), c.x, FLOOR_Y - 40);
-        consumeIngredient(c.cust.recipe.raw);
+        consumeIngredient(c.cust.recipe.raw, c.cust.recipe);
         c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1;
       }
       else if (c.stepIdx >= c.cust.recipe.steps.length) serve(c);
@@ -1216,13 +1283,24 @@ function updateKitchen(c, dt) {
       popText("SPARKLING", c.x - 6, FLOOR_Y - 30, [140, 220, 255]);
     }
   } else if (c.kstate === "waitCash") {
+    // step into the clear lane while waiting - squatting on the source spot
+    // blocks a selfCook crab heading for the same bin (hold-and-wait deadlock)
+    { const st0 = biz.stations[biz.source][0];
+      setT(c, st0.x + 2, st0.y + 7 <= 147 ? 168 : 147);
+      stepTo(c, c.tx, spd, dt, c.ty); }
     if (ownerFunds(bizKey) >= ingredientCost(c.cust.recipe.raw)) {
       debitBiz(bizKey, ingredientCost(c.cust.recipe.raw), c.x, FLOOR_Y - 40);
-      consumeIngredient(c.cust.recipe.raw);
+      consumeIngredient(c.cust.recipe.raw, c.cust.recipe);
       c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1;
     }
   } else if (c.kstate === "waitSlot") {
     const kind = c.cust.recipe.steps[c.stepIdx][0];
+    // wait in the clear lane, not on the station spot: the crab HOLDING the
+    // slot may be walking to this exact spot (a night pour made this jam
+    // common) - a squatter here deadlocks the kitchen until a guest rages
+    { const st0 = biz.stations[kind][0];
+      setT(c, st0.x + 2, st0.y + 7 <= 147 ? 168 : 147);
+      stepTo(c, c.tx, spd, dt, c.ty); }
     const s = tryAcquire(bizKey, kind);
     if (s >= 0) {
       c.slotKind = kind; c.slot = s;
@@ -1288,6 +1366,14 @@ function payAndBenefit(c, cust) {
     if (cust.biz === "arcade") tradeImport("power", 1);             // a machine hour
   }
   creditAccomplishment(c, cust);
+  if (cust.biz === "juicebar") {
+    if (window._stats) window._stats.drinkServes = (window._stats.drinkServes || 0) + 1;
+    if (!firstPour && c && c.p) {   // the bar's first drink is town news
+      firstPour = true;
+      toast = { text: c.p.name + " POURED THE JUICE BAR'S FIRST " + ITEM_NAMES[cust.recipe.icon] + "!", t: 6 };
+      c.quip = { text: "FRESH SQUEEZED!", t: 2.6 };
+    }
+  }
   if (c && c.p) today.byCrab[c.p.name] = (today.byCrab[c.p.name] || 0) + 1;
   if (cust.isCrab) {
     const price = Math.ceil(cust.recipe.pay * 1.25);   // full retail, always - no broke-crab discounts
@@ -1296,6 +1382,11 @@ function payAndBenefit(c, cust) {
     if (cust.crab.p.npc && bizOwner(cust.biz) === "player" && window._stats)
       window._stats.npcSpendAtPlayer = (window._stats.npcSpendAtPlayer || 0) + price;
     if (cust.need === "food") cust.crab.p.hunger = 0;
+    if (cust.need === "drink") {
+      cust.crab.quip = { text: ["AHH, THE GOOD STUFF", "QUENCHED!", "COLD AND SWEET"][(Math.random() * 3) | 0], t: 2.4 };
+      if (window._stats) window._stats.crabDrinks = (window._stats.crabDrinks || 0) + 1;
+    }
+    if (cust.need === "drink" || DRINKS[cust.recipe.id]) cust.crab.p.thirst = 0;   // any juice quenches, even one bought as lunch
     if (cust.need === "fun") { cust.crab.p.bored = 0; cust.crab.quip = { text: "BEST DAY EVER!", t: 2.4 }; }
     popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
   } else {
@@ -1449,13 +1540,21 @@ function updateCustomers(dt) {
     // tourists pick a staffed business
     const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && !bizDark(b) && allCrabs().some(c => c.duty && c.workBiz === b));
     if (open.length) {
-      const weights = open.map(b => b === "shack" ? 0.5 : b === "arcade" ? 0.22 : 0.1);
-      let r = Math.random() * weights.reduce((a, v) => a + v, 0), pick = open[0];
+      const weights = open.map(b => b === "shack" ? 0.5 : b === "arcade" ? 0.22 : b === "juicebar" ? 0.3 : 0.1);
+      const wsum = weights.reduce((a, v) => a + v, 0);
+      let r = Math.random() * wsum, pick = open[0];
       for (let i = 0; i < open.length; i++) { r -= weights[i]; if (r <= 0) { pick = open[i]; break; } }
       // tourists never take the last slot - your own crew and neighbours eat too
       const tourQueue = customers.filter(k => k.biz === pick && !k.isCrab && k.state !== "leaving").length;
       const allQueue = customers.filter(k => k.biz === pick && k.state !== "leaving").length;
       if (tourQueue < TOURIST_QUEUE_MAX && allQueue < QUEUE_MAX) customers.push(newCustomer(pick));
+      // the juice bar is a NEW demand stream, not a split of the meal line:
+      // beachgoers who'd never wait for a plate still grab a drink. Its weight
+      // ADDS total traffic (interval shrinks so every other biz keeps the
+      // exact flow it had before the bar opened).
+      const jbw = open.includes("juicebar") ? 0.3 : 0;
+      spawnT = spawnEvery() * ((wsum - jbw) / wsum) * (0.7 + Math.random() * 0.6);
+      return;
     }
     spawnT = spawnEvery() * (0.7 + Math.random() * 0.6);
   }
@@ -1479,7 +1578,10 @@ function crabStatus(c) {
     if (c.kstate === "waitSlot") return "WAITING FOR A SPOT";
     return "ON SHIFT";
   }
-  if (c.dayState === "selfCook") return c.cookStep >= 3 ? "COOKING A STAFF MEAL" : "RAIDING THE PANTRY";
+  if (c.dayState === "selfCook") {
+    if (c.cookNeed === "drink") return c.cookStep >= 3 ? "POURING A DRINK" : "RAIDING THE FRUIT BIN";
+    return c.cookStep >= 3 ? "COOKING A STAFF MEAL" : "RAIDING THE PANTRY";
+  }
   if (c.dayState === "toErrand") return "OFF TO " + BIZ[c.errandBiz].name;
   if (c.dayState === "errand") return "IN LINE AT " + BIZ[c.errandBiz].name;
   const toWork = c.dayState === "toWork";
@@ -1499,7 +1601,7 @@ const BUTTONS = [];
 }
 function buttonKey(b) {
   if (b.key === "_biz1") return UPS.arcade.lvl === 0 ? "arcade" : "cadegear";
-  if (b.key === "_biz2") return null;   // vacated by the laundromat; the juice bar lands here next pass
+  if (b.key === "_biz2") return "juicebar";   // the laundromat's old slot: squeeze, don't scrub
   return b.key;
 }
 function tryBuy(key) {
@@ -1509,6 +1611,10 @@ function tryBuy(key) {
   if (key === "arcade") {
     toast = { text: "THE CLAWCADE IS YOURS! CLICK A CRAB, THEN ITS CARD, TO STAFF IT", t: 8 };
     popText("GRAND OPENING!", BIZ.arcade.x0 + 40, 100, [140, 255, 160]);
+  }
+  if (key === "juicebar") {
+    toast = { text: "THE JUICE BAR IS YOURS! REASSIGN A CRAB TO WORK THE JUICERS", t: 8 };
+    popText("GRAND OPENING!", BIZ.juicebar.x0 + 20, 100, [140, 255, 160]);
   }
   if (key === "chef") {
     const p2 = makeCrabPersona(crabs.length + ((Math.random() * 6) | 0));
@@ -1649,7 +1755,9 @@ cv.addEventListener("click", (ev) => {
     return;
   }
   // follow-card job toggle
-  if (followIdx >= 0 && !followNpc && UPS.arcade.lvl > 0 && p.x >= 56 && p.x < 90 && p.y >= 33 && p.y < 46) {
+  if (followIdx >= 0 && !followNpc
+      && Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1
+      && p.x >= 56 && p.x < 90 && p.y >= 33 && p.y < 46) {
     const c = crabs[followIdx];
     // crew work only the player's businesses - never an NPC-owned shop
     const owned = Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player");
@@ -1890,7 +1998,8 @@ function drawTown() {
 
 const STATION_ART = { crate: CRATE, board: BOARD, grill: GRILL, pass: PASS,
   taps: TAPS, stall: null, scrub: SCRUB, towel: COUNTER,
-  booth: TOKEN_BOOTH, claw: null, skee: SKEEBALL, prize: PRIZE_COUNTER };
+  booth: TOKEN_BOOTH, claw: null, skee: SKEEBALL, prize: PRIZE_COUNTER,
+  fruitbin: FRUIT_BIN, juicer: null, bar: JUICE_COUNTER };
 
 function drawBusiness(key) {
   const b = BIZ[key];
@@ -1948,7 +2057,7 @@ function drawBusiness(key) {
   wrect(signX + 6, 104, 3, 12, [90, 60, 40]);          // sign posts down to the shoulder
   wrect(signX + signW - 9, 104, 3, 12, [90, 60, 40]);
   wrect(signX, 92, signW, 12, [140, 90, 50]);
-  wrect(signX + 1, 93, signW - 2, 10, key === "shack" ? [190, 140, 80] : [96, 170, 220]);
+  wrect(signX + 1, 93, signW - 2, 10, key === "shack" ? [190, 140, 80] : key === "juicebar" ? [255, 150, 60] : [96, 170, 220]);
   if (signX + signW - camX > 0 && signX - camX < W)
     textShadow(ctx, b.sign, signX + 7 - camX, 95, [255, 250, 240], [70, 50, 40]);
   if (!shackOpen()) {
@@ -1962,6 +2071,7 @@ function drawStation(key, kind, i) {
   const isBusy = busy[key] && busy[key][kind] && busy[key][kind][i];
   let art = STATION_ART[kind];
   if (kind === "claw") art = CLAW_MACHINE[isBusy ? ((time * 4) | 0) % 2 : 0];
+  if (kind === "juicer") art = JUICER[isBusy ? ((time * 6) | 0) % 2 : 0];
   if (kind === "stall") art = STALL[isBusy ? 1 : 0];
   wblit(art, st.x, st.y - art.h);
   if (kind === "grill" && isBusy) {
@@ -2144,6 +2254,7 @@ function crabMood(c) {
   if (c.p.wallet < 10) return ["BROKE", [190, 80, 80]];
   if (c.p.wallet > 120) return ["FLUSH", [180, 140, 30]];
   if ((c.p.hunger || 0) > 0.7) return ["HUNGRY", [200, 110, 40]];
+  if ((c.p.thirst || 0) > 0.8) return ["PARCHED", [200, 110, 40]];
   if (darkness() > 0.7 && c.dayState !== "home") return ["TIRED", [120, 120, 140]];
   if (darkness() > 0.7 && c.dayState === "home") return ["COZY", [180, 120, 60]];
   if (c.dayState === "working" && c.kstate === "work") return ["BUSY", [40, 110, 190]];
@@ -2209,19 +2320,19 @@ function drawFollowCard() {
   // job + needs
   const jobTag = p.owner ? "OWN" : p.job === "fishing" ? "PIER" : BIZ[p.job].short;   // live job, not the old trade
   smallText(ctx, "JOB:" + jobTag, 6, 36, [70, 90, 130]);
-  if (UPS.arcade.lvl > 0) {
+  if (Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1) {
     rect(ctx, 58, 35, 28, 8, [96, 170, 220]);
     smallText(ctx, "JOB>", 60, 36, [255, 255, 255]);
   }
   const eff = crabEff(c) * (p.sick ? 0.5 : 1);   // illness halves everything - show it
   if (eff < 0.995)
     smallText(ctx, "PACE " + Math.round(eff * 100) + "%", 74, 36, eff < 0.8 ? [190, 80, 80] : [200, 110, 40]);
-  const bars = [["FED", 1 - (p.hunger || 0), 6], ["CLN", 1 - (p.dirt || 0), 37],
-    ["FUN", 1 - (p.bored || 0), 68], ["SPA", 1 - (p.sandy || 0), 99]];
+  const bars = [["FED", 1 - (p.hunger || 0), 6], ["SIP", 1 - (p.thirst || 0), 30],
+    ["CLN", 1 - (p.dirt || 0), 54], ["FUN", 1 - (p.bored || 0), 78], ["SPA", 1 - (p.sandy || 0), 102]];
   for (const [label, frac, bx] of bars) {
     smallText(ctx, label, bx, 44, [110, 110, 130]);
-    rect(ctx, bx + 12, 45, 14, 4, [30, 20, 36]);
-    rect(ctx, bx + 13, 46, Math.round(12 * frac), 2,
+    rect(ctx, bx + 11, 45, 13, 4, [30, 20, 36]);
+    rect(ctx, bx + 12, 46, Math.round(11 * frac), 2,
       frac > 0.5 ? [96, 200, 120] : frac > 0.25 ? [235, 200, 90] : [235, 90, 90]);
   }
 }
@@ -2265,7 +2376,7 @@ function drawPanel() {
     smallText(ctx, "MENU - PRICE / COST", 4, ROW_Y, [230, 215, 195]);
     let my = ROW_Y + MROW + 1;
     for (const key of Object.keys(BIZ)) {
-      if (!bizUnlocked(key)) continue;
+      if (!bizUnlocked(key) || bizOwner(key) !== "player") continue;   // your menu, your books
       for (const r of BIZ[key].recipes) {
         smallText(ctx, ITEM_NAMES[r.icon], 4, my, [190, 175, 160]);
         smallText(ctx, "$" + r.pay + " / $" + INGREDIENT_COST[r.raw], 72, my, [140, 200, 150]);
@@ -2277,7 +2388,7 @@ function drawPanel() {
     smallText(ctx, "WAGES " + crabs.length + "X$" + CRAB_WAGE, 132, by, [190, 175, 160]);
     smallText(ctx, "$" + CRAB_WAGE * crabs.length, 224, by, [235, 160, 130]); by += MROW;
     for (const key of Object.keys(BIZ)) {
-      if (!bizUnlocked(key)) continue;
+      if (!bizUnlocked(key) || bizOwner(key) !== "player") continue;   // only rents YOU pay tonight
       smallText(ctx, BIZ[key].short + " RENT", 132, by, [190, 175, 160]);
       smallText(ctx, "$" + BIZ[key].rent, 224, by, [235, 160, 130]); by += MROW;
     }
@@ -2532,8 +2643,8 @@ function drawDossier() {
       eff < 0.8 ? [190, 80, 80] : [200, 110, 40]);
   }
   ly += 2;
-  const bars = [["FED", 1 - (p.hunger || 0)], ["CLEAN", 1 - (p.dirt || 0)],
-    ["FUN", 1 - (p.bored || 0)], ["UNSANDY", 1 - (p.sandy || 0)]];
+  const bars = [["FED", 1 - (p.hunger || 0)], ["QUENCHED", 1 - (p.thirst || 0)],
+    ["CLEAN", 1 - (p.dirt || 0)], ["FUN", 1 - (p.bored || 0)], ["UNSANDY", 1 - (p.sandy || 0)]];
   for (const [label, frac] of bars) {
     smallText(ctx, label, x + 8, ly, [110, 110, 130]);
     rect(ctx, x + 44, ly, 100, 5, [30, 20, 36]);
@@ -2651,7 +2762,7 @@ function frame(now) {
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
     tmin -= 1440; day++; townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
-    trade.day = { fish: 0, corn: 0, water: 0, power: 0 }; trade.landedDay = 0;
+    trade.day = { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }; trade.landedDay = 0;
     today = newDayLog(); today.repStart = rep;
   }
   if (ffSleep && (gameOver || screen !== "play" || (day >= ffSleepDay && tmin >= 6.5 * 60 && tmin < 12 * 60)))
@@ -2672,6 +2783,7 @@ function frame(now) {
     // 2. house rent from each crab's own wallet; broke crabs move to the shelter
     let evictedNames = [];
     for (const c of allCrabs()) {
+      c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.15 * ((c.p.sandy || 0) > 0.5 ? 1.5 : 1));   // a dry night
       if (!c.p.npc) c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.05);
       if (c.p.homeless) {
         // shelter is free; move into a free house once savings allow
@@ -2757,6 +2869,7 @@ function frame(now) {
         if (k.p.sick) continue;
         let risk = 0;
         if ((k.p.hunger || 0) >= 0.95) risk += 0.10;
+        if ((k.p.thirst || 0) >= 0.95) risk += 0.12;   // dehydration: the scariest neglect
         if ((k.p.dirt || 0) >= 0.95) risk += 0.06;
         if ((k.p.sandy || 0) >= 0.95) risk += 0.03;
         for (const s2 of sickNow) {
@@ -2769,6 +2882,7 @@ function frame(now) {
           if (window._stats) {
             const why = [];
             if ((k.p.hunger || 0) >= 0.9) why.push("hunger");
+            if ((k.p.thirst || 0) >= 0.9) why.push("thirst");
             if ((k.p.dirt || 0) >= 0.9) why.push("dirt");
             if ((k.p.sandy || 0) >= 0.9) why.push("sandy");
             if (why.length === 0) why.push("contagion");

@@ -21,13 +21,14 @@ compounds or collapses → the landlord collects at 20:00 either way.
 
 ### Systems (all in game.js unless noted)
 - **Businesses** (`BIZ` table, data-driven): CRAB SHACK (player), THE
-  CLAWCADE ($650), SUDS SHOWERS (NPC-owned by SUDSY). (SUDS N BUBBLES, the
-  $400 laundromat, was removed 2026-08-18 — see the shipped note below; the
-  juice bar takes its shop slot with T2.) Each: stations, recipes, queue, rent, owner.
+  CLAWCADE ($650), JUICE BAR ($400, player — shipped with T2 in the old
+  laundromat's lot AND shop slot), SUDS SHOWERS (NPC-owned by SUDSY).
+  (SUDS N BUBBLES, the $400 laundromat, was removed 2026-08-18 — see the
+  shipped note below.) Each: stations, recipes, queue, rent, owner.
 - **Owner layer**: `OWNERS` registry + `creditBiz`/`debitBiz`/`ownerFunds`.
   The player's till IS `coins`. NPC revenue never touches player books.
 - **Crabs**: personas (name, trait, commute mode, accessory, shift, wallet,
-  house), needs FED/CLN/FUN/SPA, homes they live inside, the shelter for the
+  house), needs FED/THIRST/CLN/FUN/SPA, homes they live inside, the shelter for the
   homeless, disease + contagion + death with beach memorials.
 - **Facilities pattern**: guests occupy things. Shower stalls — attendant
   hands out a kit, guest showers, stall goes dirty, staff cleans it. Dining —
@@ -74,23 +75,32 @@ compounds or collapses → the landlord collects at 20:00 either way.
   Esc closes. Works for every crab, crew and townsfolk alike.
 
 ### Verified balance (8 seeds, tools/headless.mjs)
-- Baseline (buy nothing): **0/8 survive, median eviction ~11-12** — the
+- Baseline (buy nothing): **0/8 survive, median eviction ~11-13** — the
   8-seed snapshot moves a day either way per build; at 16 seeds the tails run
-  6–20+. Combined tree incl. credit line (2026-08-18): 0/8, evictions 10-19, median 13 (credit's sanctioned +1).
+  6–20+. Fully combined tree (credit LIMIT 90 + T2 thirst/juice bar, wage
+  23, 2026-08-18): 0/8, evictions 10-16, median 13. Credit LIMIT tightened
+  120→90 at the T2 merge — the two runways compounded to median 14.
   Standing pressures: job-board labor competition (a hired-away fisher lowers
   townCatch, pushing the shack onto $7 import fish; SUDSY's flush-hire
   threshold till ≥ 260 spares the earliest days) and the needs-drag rework
-  (hungry/dirty crews work up to ~24% slower).
+  (hungry/dirty crews work up to ~24% slower). T2 adds the thirst cycle:
+  crews sustain retail drinking off the raised wage; wallet-starved NPC
+  fishers ride parched near the +0.12/night sickness line — the intended
+  new pressure.
 - Hire-and-seat strategy (`--buy chef,table`): escape is seed-lucky —
   roughly 0-2 of 6 seeds at day 40 depending on build. The suite's growth
   gate (1 of 4 seeds escapes, or median eviction > 18) is the guard that
   counts.
-- Constants: shack rent 230, wage 22, house rent 10, hires 60×2.0,
+- Constants: shack rent 230, wage 23 (raised from 22 with T2 — crews drink
+  at retail, the wage keeps their wallets liquid, bands 8-32), house rent
+  10, hires 60×2.0,
   showers 5/10, fish pay 13. **Rent is charged from night one** — you open
   with $150 in your pocket and have to trade your way to the first payment.
 - **Queue**: 5 slots, of which tourists may fill 4 — the 5th is reserved for
   locals (crew + neighbours). Staff claim paying guests first and serve locals
-  in the lulls.
+  in the lulls — and a local past HALF patience jumps the line (T2: the juice
+  bar's additive tourist stream never lulls on its own; without the jump,
+  locals starved in its queue and raged out parched).
 - History worth knowing: an earlier build measured 7/8 escape, but that number
   was inflated by a bug — at saturated reputation tourists filled every slot
   and locals never got served (free revenue, no service cost, and a quiet
@@ -103,7 +113,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **39 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **42 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
@@ -112,7 +122,10 @@ vm — never fork game logic into tools/) and perf expectations live there.
   disease infection/cure/mortality, showers turnover, NPC economics,
   save/load (incl. boat berths), no-inflation wallet bounds, needs-drag
   visibility, laundromat-removal migration (one-shot refund) + dirt
-  serviced by showers alone.
+  serviced by showers alone, thirst serviced end-to-end at the bar,
+  parched-spiral sickness attribution (with a watered control arm), and
+  juicebar economics (ledger flows charged-vs-tracked, staff retail,
+  save/load roundtrip of thirst + unlock + firstPour).
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
   [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
   (default cores−1, deterministic either way, ~3x faster on 4 seeds).
@@ -174,10 +187,38 @@ Staged landings (each stage ships alone, suite-green, balance re-verified):
   showers/laundry consume water, arcade consumes electricity. A TRADE ledger
   view (notice board or MENU tab). Not connected to anything yet — the point
   is the tracked flows exist before anything depends on them.
-- **T2 — Thirst**: a THIRST need parallel to FED (we already have juice,
-  `raw: "fruit"`). Crabs and guests drink; juice ingredients come through the
-  import ledger. Needs a full headless matrix re-run — a new need is a new
-  death spiral candidate.
+- ~~T2 — Thirst + juice bar~~ **shipped 2026-08-18** (built to the spec
+  below; measured deltas):
+  - Landed exactly as spec'd: accrual +0.35 shift end / +0.15 nightly /
+    +50% while sandy > 0.5; drink errand at 0.45 between food and clean;
+    landing risk +0.12/night at 0.95; −15% walk at 0.8; NO crabEff term.
+    JUICE $6 / COOLER $9 (first two-input recipe via optional `raw2`),
+    juicer x2 + counter in the old cleaners lot at 752-880 (the job board
+    at x716 keeps its sliver), rent 55, $400 in the vacated shop slot.
+    IMPORTS gains fruit $2; every drink counts fruit, each COOLER a gallon
+    of water — tracking only, spent still === fish × $7 by suite assert.
+  - Fallbacks the spec was silent on, decided by the systems map: with no
+    bar, a drink errand buys the shack's own juice ($10, unchanged); staff
+    of a dark shack/bar pour their own at retail (selfCook generalized to
+    biz+need). Any juice quenches, even one bought as lunch.
+  - **Tourist drinks are ADDITIVE demand** (weight 0.3): beachgoers who'd
+    never queue for a plate grab a drink; the spawn interval shrinks so
+    every other biz keeps its exact pre-bar flow. Pure weight-splitting
+    made the bar a strictly-bad buy (it traded $13-17 plates for $6-9
+    drinks); additive demand is the "new demand stream" reading.
+  - Knobs: **wage 22 → 23** (the sanctioned raise — with wage 22 the drink
+    recycle stretched the baseline to median 14 with a 20 tail; a $1 raise
+    landed it at median 11-13 with wallets bounded 8-32). Shack juice price
+    and all spec numbers untouched.
+  - Measured: baseline 0/8, evictions 8-14, median 11 (16 seeds 8-18,
+    median 13; was 8-16 median 12). Growth `--buy chef,table` 1/6 escapes,
+    eviction days identical pre/post; `chef,table,juicebar` 1/6 (same
+    days — the late-game bar is roughly neutral); `chef,juicebar` 0/6 but
+    the bar-first seeds run to median 22 vs baseline 11 — the bar roughly
+    doubles runway without escaping alone. Suite 38/38.
+  - Also fixed en route: a hold-and-wait kitchen deadlock (waitSlot/waitCash
+    chefs squatted ON the station spot the slot-holder was walking to —
+    night pours made it common; waiters now step into the clear lane).
 - **T2 spec (draft, 2026-08-18, pending Matt's read)** — thirst + juice bar
   land as ONE measured pass, immediately after laundry removal merges:
   - **THIRST need**: parallel to FED, faster cycle (casual, frequent): +0.35
