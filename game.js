@@ -396,7 +396,7 @@ function playTrack(i) {
   music = new Audio(t.src);
   music.volume = 0.55;
   music.addEventListener("ended", () => { music = null; if (musicOn) playTrack(trackIdx + 1); });
-  music.play().then(() => { toast = { text: "NOW PLAYING: " + t.name, t: 4 }; })
+  music.play().then(() => { if (!toast) toast = { text: "NOW PLAYING: " + t.name, t: 4 }; })   // don't stomp a live toast (e.g. the migration refund)
     .catch(() => { music = null; });
 }
 function startMusic() { if (!music && musicOn && !muted) playTrack(trackIdx); }
@@ -490,7 +490,7 @@ function load() {
     let refund = 400;                            // the old CLEANERS rung
     if (s.lv.sudsgear > 0) refund += 150;        // and its SUDS GEAR+ upgrade
     coins += refund;
-    toast = { text: "THE LAUNDROMAT CLOSED - EVERYONE SHOWERS NOW. $" + refund + " REFUNDED", t: 9 };
+    toast = { text: "LAUNDROMAT CLOSED - SHOWERS TOOK OVER. +$" + refund, t: 9 };
     sudsRefunded = true;
   }
   crabs = s.personas.map((p2, i) => {
