@@ -42,7 +42,7 @@
 
   // ---------------------------------------------------------------- layout
   const COLS = 4, ROWS = 4;
-  const BX = 10, BY = 46, CW = 59, CH = 38;          // board origin + cell size
+  const BX = 10, BY = 44, CW = 59, CH = 36;          // board origin + cell size
   const SPAWN = { x: 10, y: 202, w: 150, h: 32 };
   const BACK  = { x: 168, y: 202, w: 78, h: 32 };
 
@@ -56,6 +56,7 @@
   let pops = [];               // celebration bits
   let banner = null, bannerT = 0;
   let fullT = 0;               // "board's full" nudge
+  let everMerged = false;      // until then, show the how-to-play nudge
   let gifted = 0;              // coins sent to the till this session (capped)
   const GIFT = 6, GIFT_CAP = 60;
 
@@ -91,7 +92,7 @@
     chainKey = (CHAINS[c.p.job] || CHAINS.shack).key;
     chain = CHAINS[c.p.job] || CHAINS.shack;
     cells = new Array(COLS * ROWS).fill(-1);
-    sel = -1; goalIdx = 0; goalMade = 0; goalsDone = 0; pops = []; fullT = 0;
+    sel = -1; goalIdx = 0; goalMade = 0; goalsDone = 0; pops = []; fullT = 0; everMerged = false;
     for (let i = 0; i < 5; i++) spawn();          // a few to start with
     banner = "YOU ARE " + c.p.name + "!"; bannerT = 2.4;
     on = true; swallowUp = true;
@@ -122,6 +123,7 @@
     }
     cells[a] = -1;
     cells[b] = tier + 1;
+    everMerged = true;
     burst(cellX(b) + CW / 2, cellY(b) + CH / 2, [255, 230, 120]);
     if (typeof sfx !== "undefined") sfx.coin();
 
@@ -237,13 +239,20 @@
     if (bannerT > 0 && banner) {
       bannerT -= dt;
       const w2 = textWidth(banner) + 12, x = ((W - w2) / 2) | 0;
-      rect(ctx, x, 176, w2, 14, [30, 20, 36]);
-      rect(ctx, x + 1, 177, w2 - 2, 12, [255, 250, 235]);
-      text(ctx, banner, x + 6, 180, [200, 120, 40]);
+      rect(ctx, x, 189, w2, 13, [30, 20, 36]);
+      rect(ctx, x + 1, 190, w2 - 2, 11, [255, 250, 235]);
+      text(ctx, banner, x + 6, 192, [200, 120, 40]);
+    }
+    if (!everMerged && bannerT <= 0) {
+      const tip = "TAP TWO THE SAME!";
+      const w3 = textWidth(tip) + 12, x3 = ((W - w3) / 2) | 0;
+      rect(ctx, x3, 189, w3, 13, [30, 20, 36]);
+      rect(ctx, x3 + 1, 190, w3 - 2, 11, [255, 250, 235]);
+      text(ctx, tip, x3 + 6, 192, ((time * 2) | 0) % 2 ? [40, 110, 60] : [80, 150, 90]);
     }
     if (fullT > 0) {
       fullT -= dt;
-      smallText(ctx, "BOARD IS FULL - MERGE SOME!", 44, 194, [255, 200, 120]);
+      smallText(ctx, "BOARD IS FULL - MERGE SOME!", 66, 192, [255, 200, 120]);
     }
   }
 
