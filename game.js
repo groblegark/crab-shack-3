@@ -1663,6 +1663,7 @@ function frame(now) {
   }
 
   if (!gameOver && !window._nocollide) collide(dt);
+  if (window._headless) { requestAnimationFrame(frame); return; }   // sim-only mode: no rendering
   drawBG();
   drawTown();
   drawBus();
