@@ -141,6 +141,41 @@ scenario("save/load roundtrip preserves state", () => {
   return before === after ? true : `mismatch: ${before} vs ${after}`;
 });
 
+scenario("npc: SUDSY runs her showers, player books untouched", () => {
+  const sim = createSim({ seed: 77 });
+  const coins0 = sim.G("Math.round(coins)");
+  sim.runDays(3);
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  if (!st.npcServes || st.npcServes < 1) return "SUDSY served nobody in 3 days";
+  const till = sim.G("OWNERS.sudsy.till");
+  if (!isFinite(till)) return "SUDSY till is " + till;
+  if (!st.npcEarn || st.npcEarn <= 0) return "no NPC earnings recorded";
+  // her serves must not have entered the player's income history
+  const histNpc = sim.G("earnHist.filter(e => e.npc).length");
+  return histNpc === 0 ? true : "NPC serves leaked into player earnHist";
+});
+
+scenario("npc: crew shower errand (sandy resets, fee to SUDSY)", () => {
+  const sim = createSim({ seed: 88 });
+  sim.runUntil('crabs[0].dayState === "home" && tmin > 14 * 60', {});
+  const till0 = sim.G("OWNERS.sudsy.till");
+  sim.G("crabs[0].p.sandy = 0.9; crabs[0].p.wallet = 60; crabs[0].errandCd = 0;");
+  const ok = sim.runUntil("(crabs[0].p.sandy || 0) === 0", { maxSteps: 40000 });
+  if (!ok) return "sandy never reset (errand incomplete)";
+  const wallet = sim.G("crabs[0].p.wallet");
+  const till1 = sim.G("OWNERS.sudsy.till");
+  if (wallet >= 60) return "wallet did not pay the fee";
+  return till1 > till0 - 35 ? true : "SUDSY till fell unexpectedly: " + till0 + " -> " + till1;
+});
+
+scenario("npc: SUDSY dines at the player shack", () => {
+  const sim = createSim({ seed: 66 });
+  sim.runDays(5);
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  return st.npcSpendAtPlayer >= 1 ? true
+    : "SUDSY never bought food at the shack in 5 days (hunger " + sim.G("npcs[0].p.hunger").toFixed(2) + ", wallet " + sim.G("Math.round(npcs[0].p.wallet)") + ")";
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

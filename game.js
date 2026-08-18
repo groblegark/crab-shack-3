@@ -24,7 +24,7 @@ const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
 // ---------------------------------------------------------------- businesses
 const BIZ = {
   shack: {
-    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 135,
+    name: "CRAB SHACK", short: "SHACK", sign: "CRAB SHACK 3", kind: "palapa", rent: 135, owner: "player",
     x0: 1220, x1: 1560, door: 1247,
     stations: {
       crate: [{ x: 1232, y: 136 }],
@@ -46,7 +46,7 @@ const BIZ = {
     ],
   },
   cleaners: {
-    name: "SUDS N BUBBLES", short: "SUDS", sign: "SUDS N BUBBLES", kind: "shopfront", rent: 60,
+    name: "SUDS N BUBBLES", short: "SUDS", sign: "SUDS N BUBBLES", kind: "shopfront", rent: 60, owner: "player",
     x0: 690, x1: 880, door: 706,
     stations: {
       basket:  [{ x: 700, y: 136 }],
@@ -64,7 +64,7 @@ const BIZ = {
     ],
   },
   arcade: {
-    name: "CLAWCADE", short: "CADE", sign: "THE CLAWCADE", kind: "shopfront", rent: 80,
+    name: "CLAWCADE", short: "CADE", sign: "THE CLAWCADE", kind: "shopfront", rent: 80, owner: "player",
     x0: 1620, x1: 1800, door: 1636,
     stations: {
       booth: [{ x: 1630, y: 136 }],
@@ -83,8 +83,46 @@ const BIZ = {
         steps: [["skee", 2.5, "tickets"], ["claw", 3.0, "gold_plush"]] },
     ],
   },
+  showers: {
+    name: "SUDS SHOWERS", short: "SHWR", sign: "SUDS SHOWERS", kind: "shopfront", rent: 40, owner: "sudsy",
+    x0: 950, x1: 1070, door: 964,
+    stations: {
+      taps:  [{ x: 956, y: 136 }],
+      stall: [{ x: 990, y: 136 }, { x: 1012, y: 136 }],
+      scrub: [{ x: 1000, y: 160 }],
+      towel: [{ x: 1040, y: 160 }],
+    },
+    source: "taps", out: "towel", queueX: 1076,
+    park: 906, rack: 934,
+    recipes: [
+      { id: "rinse", icon: "shine", pay: 6, raw: "soap",
+        steps: [["stall", 2.5, "shine"]] },
+      { id: "soak", icon: "suds", pay: 12, raw: "soap",
+        steps: [["stall", 3.0, "suds"], ["scrub", 2.0, "shine"]] },
+    ],
+  },
 };
-const bizUnlocked = (b) => b === "shack" || (b === "cleaners" ? UPS.cleaners.lvl > 0 : UPS.arcade.lvl > 0);
+
+// ---------------------------------------------------------------- owners
+// The simulation layer: every business has an owner with their own till.
+// The player's till IS `coins`; peer owners (NPCs) keep theirs here.
+const OWNERS = { sudsy: { id: "sudsy", name: "SUDSY", till: 200 } };
+const bizOwner = (b) => BIZ[b].owner || "player";
+function ownerFunds(b) { return bizOwner(b) === "player" ? coins : OWNERS[bizOwner(b)].till; }
+function creditBiz(b, amt, x, y) {
+  if (bizOwner(b) === "player") earn(amt, x, y);
+  else {
+    OWNERS[bizOwner(b)].till += amt;
+    popText("+$" + Math.floor(amt), x, y, [150, 210, 255]);
+    if (window._stats) window._stats.npcEarn = (window._stats.npcEarn || 0) + amt;
+  }
+}
+function debitBiz(b, amt, x, y, label) {
+  if (bizOwner(b) === "player") expense(amt, x, y, label);
+  else OWNERS[bizOwner(b)].till -= amt;
+}
+const bizUnlocked = (b) => b === "shack" || bizOwner(b) !== "player"
+  || (b === "cleaners" ? UPS.cleaners.lvl > 0 : UPS.arcade.lvl > 0);
 
 // ---------------------------------------------------------------- clock
 const TS = 4;                     // game minutes per real second
@@ -103,13 +141,14 @@ function darkness() { // 0 = day, 1 = full night
 }
 
 // ---------------------------------------------------------------- recipes
-const INGREDIENT_COST = { fish_raw: 5, fruit: 3, towel_dirty: 1, uniform_dirty: 1, token: 1 };
+const INGREDIENT_COST = { fish_raw: 5, fruit: 3, towel_dirty: 1, uniform_dirty: 1, token: 1, soap: 1 };
 const ITEM_NAMES = {
   fish_raw: "FISH", fish_cut: "CUT FISH", fruit: "FRUIT",
   taco: "FISH TACO", juice: "JUICE", plate_fish: "GRILL FISH",
   towel_dirty: "TOWELS", towel_wet: "WET TOWELS", towel_clean: "FRESH TOWELS",
   uniform_dirty: "LAUNDRY", uniform_wet: "WET WASH", uniform_clean: "CLEAN PRESS",
   token: "TOKENS", plush: "CLAW PLUSH", tickets: "TICKET RUN", gold_plush: "GOLD PLUSH",
+  soap: "SOAP", suds: "DELUXE SOAK", shine: "QUICK RINSE",
 };
 
 // ---------------------------------------------------------------- upgrades
@@ -144,15 +183,17 @@ let screen = "title", hasSave = false, wiping = false;
 function newGame() { wiping = true; localStorage.removeItem(SAVE_KEY); location.reload(); }
 const CRAB_WAGE = 18, HOUSE_RENT = 8;
 function rentAmount() { return day <= 1 ? 0 : BIZ.shack.rent; }   // shack lease (legacy name)
-function totalRent() {
+function totalRent() {   // the PLAYER's nightly property bill
   if (day <= 1) return 0;
-  return Object.keys(BIZ).filter(bizUnlocked).reduce((s, b) => s + BIZ[b].rent, 0);
+  return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player")
+    .reduce((s, b) => s + BIZ[b].rent, 0);
 }
 function nightlyDue() { return totalRent() + CRAB_WAGE * crabs.length; }
 const busy = {
   shack: { board: [false, false, false], grill: [false, false, false], sink: [false] },
   cleaners: { washer: [false, false], dryer: [false, false] },
   arcade: { claw: [false, false], skee: [false, false] },
+  showers: { stall: [false, false], scrub: [false] },
 };
 const bus = { x: 360, dir: 1, state: "drive", dwellT: 0, riders: [] };
 let earnHist = [];
@@ -176,8 +217,19 @@ const SHELTER2 = scale2(SHELTER);
 const BUS2 = scale2(BUS);
 const BUGGIES2 = BUGGIES.map(scale2);
 
+let npcs = [];
+function allCrabs() { return npcs.length ? crabs.concat(npcs) : crabs; }
+function initNpcs() {
+  const p = { name: "SUDSY", npc: true, owner: "sudsy", trait: "cheery", mode: "walk",
+    acc: "showercap", color: CRAB_COLORS.length - 1, shift: "D", house: 0, homeX: 1148,
+    wallet: 25, job: "showers", hunger: 0, dirt: 0, bored: 0, sandy: 0 };
+  const c = newCrab(p);
+  c.workBiz = "showers"; c.x = p.homeX; c.y = 158;
+  npcs = [c];
+}
 function homeX(c) { return homeSpot(c).x; }
 function homeSpot(c) {
+  if (c.p.homeX) return { x: c.p.homeX, y: 158 };   // owner-operators nook by their stand
   if (c.p.homeless) {
     const cot = [6, 24, 44][Math.max(0, crabs.indexOf(c)) % 3];
     return { x: SHELTER_X + cot, y: 155 };
@@ -200,6 +252,7 @@ function newCrab(persona) {
   if (persona.hunger == null) persona.hunger = 0;
   if (persona.dirt == null) persona.dirt = 0;
   if (persona.bored == null) persona.bored = 0;
+  if (persona.sandy == null) persona.sandy = 0;
   return {
     p: persona,
     x: homeX({ p: persona }), y: 160, tx: 0, ty: 160,
@@ -305,6 +358,7 @@ function save() {
   localStorage.setItem(SAVE_KEY, JSON.stringify({
     coins, lifetime, lv, day, tmin, lastRentDay, gameOver, rate: incomeRate(), t: Date.now(),
     personas: crabs.map(c => c.p),
+    npc: { tills: { sudsy: OWNERS.sudsy.till }, personas: npcs.map(c => c.p) },
   }));
 }
 function load() {
@@ -323,6 +377,10 @@ function load() {
       return newCrab(Object.assign(base, p2));   // missing fields fall back to sane defaults
     });
   } else return false;
+  if (s.npc) {
+    if (s.npc.tills && s.npc.tills.sudsy != null) OWNERS.sudsy.till = s.npc.tills.sudsy;
+    if (s.npc.personas && s.npc.personas[0] && npcs[0]) Object.assign(npcs[0].p, s.npc.personas[0]);
+  }
   const away = (Date.now() - (s.t || Date.now())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
@@ -386,7 +444,7 @@ function stepTo(c, tx, speed, dt, ty) {
 // soft-radius separation + station bodies: nobody stands inside anybody
 function collide(dt) {
   const bodies = [];
-  for (const c of crabs) if (!c.hidden && c.cstate !== "drive" && !c.errandCust) bodies.push(c);
+  for (const c of allCrabs()) if (!c.hidden && c.cstate !== "drive" && !c.errandCust) bodies.push(c);
   for (let i = 0; i < bodies.length; i++)
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i], b = bodies[j];
@@ -537,7 +595,13 @@ function updateSchedule(c, dt) {
     c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25);  // a shift works up an appetite
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and stains the uniform
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
+    c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.25);    // beach work is gritty work
     startCommute(c, false);
+  }
+  // owner-operators top their pocket up from the till
+  if (c.p.npc) {
+    const o = OWNERS[c.p.owner];
+    if (o && c.p.wallet < 15 && o.till >= 30) { o.till -= 30; c.p.wallet += 30; }
   }
   // off-duty errands, while town is open and it's not almost shift time
   if (c.errandCd > 0) c.errandCd -= dt;
@@ -552,10 +616,11 @@ function updateSchedule(c, dt) {
 }
 
 // ---------------------------------------------------------------- errands
+function bizStaffed(b) { return bizUnlocked(b) && allCrabs().some(k => k.duty && !k.pendingOff && k.workBiz === b); }
 function pickErrand(c) {
-  const staffed = (b) => bizUnlocked(b) && crabs.some(k => k.duty && !k.pendingOff && k.workBiz === b);
+  const staffed = bizStaffed;
   // restaurant staff privilege: cook your own meal when the kitchen is unstaffed
-  if ((c.p.hunger || 0) >= 0.5 && !staffed("shack") && c.p.job === "shack") {
+  if ((c.p.hunger || 0) >= 0.5 && !staffed("shack") && c.p.job === "shack" && !c.p.npc) {
     const cost = INGREDIENT_COST.fruit;   // staff meal: cheapest ingredients, at cost
     if (c.p.wallet >= cost + 1) return { selfCook: true };
   }
@@ -575,6 +640,10 @@ function pickErrand(c) {
   if ((c.p.bored || 0) >= 0.6 && staffed("arcade")) {
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
     if (c.p.wallet >= r.pay + 2) return { biz: "arcade", recipe: r, need: "fun" };
+  }
+  if ((c.p.sandy || 0) >= 0.6 && staffed("showers") && !c.p.npc) {
+    const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
+    if (c.p.wallet >= r.pay + 2) return { biz: "showers", recipe: r, need: "spa" };
   }
   return null;
 }
@@ -631,7 +700,7 @@ function updateErrand(c, dt) {
   } else if (c.dayState === "errand") {
     const k = c.errandCust;
     if (!k) { c.dayState = "home"; startCommute(c, false); return; }
-    const open = crabs.some(w => w.duty && !w.pendingOff && w.workBiz === k.biz);
+    const open = allCrabs().some(w => w.duty && !w.pendingOff && w.workBiz === k.biz);
     if (!open && k.state === "waiting" && !k.claimed) {
       k.state = "leaving"; k.happy = false;   // kitchen's dark - go home
       c.quip = { text: "CLOSED?! HMPH", t: 2.2 };
@@ -701,14 +770,13 @@ function updateKitchen(c, dt) {
         return;
       }
     }
-    setT(c, biz.door + 4 + (crabs.indexOf(c) % 3) * 10, 146 + (crabs.indexOf(c) % 2) * 10);
+    setT(c, biz.door + 4 + (Math.max(0, crabs.indexOf(c)) % 3) * 10, 146 + (Math.max(0, crabs.indexOf(c)) % 2) * 10);
     stepTo(c, c.tx, spd, dt, c.ty);
   } else if (c.kstate === "walk") {
     if (routedStep(c, spd, dt)) {
       if (c.stepIdx === -1) {
-        if (coins < INGREDIENT_COST[c.cust.recipe.raw]) { c.kstate = "waitCash"; return; }
-        expense(INGREDIENT_COST[c.cust.recipe.raw], c.x, FLOOR_Y - 40);
-        c.paidIngredient = true;
+        if (ownerFunds(bizKey) < INGREDIENT_COST[c.cust.recipe.raw]) { c.kstate = "waitCash"; return; }
+        debitBiz(bizKey, INGREDIENT_COST[c.cust.recipe.raw], c.x, FLOOR_Y - 40);
         c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1;
       }
       else if (c.stepIdx >= c.cust.recipe.steps.length) serve(c);
@@ -743,9 +811,8 @@ function updateKitchen(c, dt) {
       popText("SQUEAKY CLEAN", c.x - 10, FLOOR_Y - 30, [140, 220, 255]);
     }
   } else if (c.kstate === "waitCash") {
-    if (coins >= INGREDIENT_COST[c.cust.recipe.raw]) {
-      expense(INGREDIENT_COST[c.cust.recipe.raw], c.x, FLOOR_Y - 40);
-      c.paidIngredient = true;
+    if (ownerFunds(bizKey) >= INGREDIENT_COST[c.cust.recipe.raw]) {
+      debitBiz(bizKey, INGREDIENT_COST[c.cust.recipe.raw], c.x, FLOOR_Y - 40);
       c.kstate = "work"; c.workMax = c.workT = 0.6; c.slotKind = null; c.slot = -1;
     }
   } else if (c.kstate === "waitSlot") {
@@ -768,8 +835,7 @@ function updateKitchen(c, dt) {
     c.workT -= dt;
     if (c.workT <= 0) {
       if (c.stepIdx === -1) {
-        c.carrying = c.cust.recipe.raw;   // already paid for at grab start
-        c.paidIngredient = false;
+        c.carrying = c.cust.recipe.raw;   // paid for at grab start
       }
       else { c.carrying = c.cust.recipe.steps[c.stepIdx][2]; release(c); }
       popText(ITEM_NAMES[c.carrying] + "!", c.x - 8, FLOOR_Y - 28, [255, 255, 255]);
@@ -792,15 +858,19 @@ function serve(c) {
     if (cust.isCrab) {
       const price = Math.min(Math.ceil(cust.recipe.pay * 1.25), Math.floor(cust.crab.p.wallet));
       cust.crab.p.wallet = Math.max(0, cust.crab.p.wallet - price);
-      earn(price, cust.x, 126);
+      creditBiz(cust.biz, price, cust.x, 126);
+      if (cust.crab.p.npc && bizOwner(cust.biz) === "player" && window._stats)
+        window._stats.npcSpendAtPlayer = (window._stats.npcSpendAtPlayer || 0) + price;
       if (cust.need === "food") cust.crab.p.hunger = 0;
       if (cust.need === "clean") cust.crab.p.dirt = 0;
       if (cust.need === "fun") { cust.crab.p.bored = 0; cust.crab.quip = { text: "BEST DAY EVER!", t: 2.4 }; }
+      if (cust.need === "spa") { cust.crab.p.sandy = 0; cust.crab.quip = { text: "SQUEAKY CLEAN!", t: 2.4 }; }
       popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
     } else {
-      const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0));
+      const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0))
+        * (1 - ((c.p.sandy || 0) >= 0.66 ? 0.15 : 0));
       const tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult;
-      earn(cust.recipe.pay + tip, cust.x, 126);
+      creditBiz(cust.biz, cust.recipe.pay + tip, cust.x, 126);
       popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
     }
     cust.served = true; cust.happy = true; sfx.ding();
@@ -809,6 +879,8 @@ function serve(c) {
     if (seat) { seat.occupant = cust; cust.state = "toTable"; cust.table = seat; }
     else cust.state = "leaving";
     if (window._stats) window._stats[cust.isCrab ? "crabServes" : "tourServes"]++;
+    if (window._stats && bizOwner(cust.biz) !== "player")
+      window._stats.npcServes = (window._stats.npcServes || 0) + 1;
   }
   c.cust = null; c.carrying = null; c.kstate = "idle"; c.stepIdx = 0;
 }
@@ -840,7 +912,7 @@ function updateCustomers(dt) {
         }
       } else {
         if (k.x > slot) k.x = Math.max(slot, k.x - 45 * dt);
-        k.patience -= dt;
+        k.patience -= dt * (bizStaffed(k.biz) ? 1 : 6);   // nobody home? give up quick
         if (k.patience <= 0) {
           k.state = "leaving"; k.happy = false; k.claimed = false;
           if (window._stats) window._stats[k.isCrab ? "crabRage" : "tourRage"]++;
@@ -857,7 +929,7 @@ function updateCustomers(dt) {
       if (k.dineT <= 0) {
         k.table.dishes = Math.min(3, k.table.dishes + 1);
         k.table.occupant = null;
-        earn(5, k.x, 130);   // table tip on the way out
+        creditBiz(k.biz, 5, k.x, 130);   // table tip on the way out
         popText("TABLE TIP", k.x - 10, 122, [140, 255, 160]);
         k.state = "leaving";
       }
@@ -870,9 +942,9 @@ function updateCustomers(dt) {
   spawnT -= dt;
   if (spawnT <= 0 && shackOpen()) {
     // tourists pick a staffed business
-    const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && crabs.some(c => c.duty && c.workBiz === b));
+    const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && allCrabs().some(c => c.duty && c.workBiz === b));
     if (open.length) {
-      const weights = open.map(b => b === "shack" ? 0.55 : b === "cleaners" ? 0.2 : 0.25);
+      const weights = open.map(b => b === "shack" ? 0.5 : b === "cleaners" ? 0.18 : b === "arcade" ? 0.22 : 0.1);
       let r = Math.random() * weights.reduce((a, v) => a + v, 0), pick = open[0];
       for (let i = 0; i < open.length; i++) { r -= weights[i]; if (r <= 0) { pick = open[i]; break; } }
       const inQueue = customers.filter(k => k.biz === pick && k.state !== "leaving").length;
@@ -891,6 +963,7 @@ function crabStatus(c) {
   if (c.dayState === "working") {
     if (c.kstate === "work" && c.slotKind === "board") return "CHOPPING";
     if (c.kstate === "work" && c.slotKind === "grill") return "GRILLING";
+    if (c.kstate === "work" && c.slotKind === "stall") return "RUNNING A SHOWER";
     if (c.kstate === "work") return "GRABBING FOOD";
     if (c.carrying) return "CARRYING " + ITEM_NAMES[c.carrying];
     if (c.kstate === "waitCash") return "SHORT ON CASH!";
@@ -1168,6 +1241,7 @@ function drawTown() {
 }
 
 const STATION_ART = { crate: CRATE, board: BOARD, grill: GRILL, pass: PASS, sink: SINK,
+  taps: TAPS, stall: null, scrub: SCRUB, towel: COUNTER,
   basket: BASKET, washer: null, dryer: DRYER, counter: COUNTER,
   booth: TOKEN_BOOTH, claw: null, skee: SKEEBALL, prize: PRIZE_COUNTER };
 
@@ -1242,6 +1316,7 @@ function drawStation(key, kind, i) {
   let art = STATION_ART[kind];
   if (kind === "washer") art = WASHER[isBusy ? ((time * 6) | 0) % 2 : 0];
   if (kind === "claw") art = CLAW_MACHINE[isBusy ? ((time * 4) | 0) % 2 : 0];
+  if (kind === "stall") art = STALL[isBusy ? 1 : 0];
   wblit(art, st.x, st.y - art.h);
   if (kind === "grill" && isBusy) wblit(FLAME[((time * 8) | 0) % 2], st.x + 6, st.y - GRILL.h - 4);
 }
@@ -1398,8 +1473,8 @@ function drawFollowCard() {
   if (followIdx < 0 || !crabs[followIdx]) return;
   const c = crabs[followIdx], p = c.p;
   const wcard = 128;
-  rect(ctx, 2, 2, wcard, 44, [30, 20, 36]);
-  rect(ctx, 3, 3, wcard - 2, 42, [255, 250, 235]);
+  rect(ctx, 2, 2, wcard, 52, [30, 20, 36]);
+  rect(ctx, 3, 3, wcard - 2, 50, [255, 250, 235]);
   rect(ctx, 5, 6, 20, 26, [200, 230, 245]);
   blit(ctx, CRAB_ARTS[p.color].a, 7, 14);
   const acc = ACCESSORIES[c.duty ? "toque" : p.acc];
@@ -1421,11 +1496,12 @@ function drawFollowCard() {
     rect(ctx, 60, 35, 9, 8, [96, 170, 220]);
     smallText(ctx, ">", 62, 36, [255, 255, 255]);
   }
-  const bars = [["FED", 1 - (p.hunger || 0), 74], ["CLN", 1 - (p.dirt || 0), 102]];
+  const bars = [["FED", 1 - (p.hunger || 0), 6], ["CLN", 1 - (p.dirt || 0), 37],
+    ["FUN", 1 - (p.bored || 0), 68], ["SPA", 1 - (p.sandy || 0), 99]];
   for (const [label, frac, bx] of bars) {
-    smallText(ctx, label, bx, 36, [110, 110, 130]);
-    rect(ctx, bx + 13, 37, 12, 4, [30, 20, 36]);
-    rect(ctx, bx + 14, 38, Math.round(10 * frac), 2,
+    smallText(ctx, label, bx, 44, [110, 110, 130]);
+    rect(ctx, bx + 12, 45, 14, 4, [30, 20, 36]);
+    rect(ctx, bx + 13, 46, Math.round(12 * frac), 2,
       frac > 0.5 ? [96, 200, 120] : frac > 0.25 ? [235, 200, 90] : [235, 90, 90]);
   }
 }
@@ -1650,6 +1726,7 @@ function frame(now) {
     // 2. house rent from each crab's own wallet; broke crabs move to the shelter
     let evictedNames = [];
     for (const c of crabs) {
+      c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.05);
       if (c.p.homeless) {
         // shelter is free; move back into a free house once savings allow
         const used = new Set(crabs.filter(k => !k.p.homeless).map(k => k.p.house));
@@ -1672,6 +1749,16 @@ function frame(now) {
     if (evictedNames.length) {
       toast = { text: evictedNames.join(", ") + " MOVED TO THE SHELTER", t: 6 };
       sfx.angry();
+    }
+    // 2b. peer owners settle their own books (no NPC eviction cascade yet - TODO)
+    for (const b of Object.keys(BIZ)) {
+      if (bizOwner(b) === "player") continue;
+      const o = OWNERS[bizOwner(b)];
+      if (o && o.till >= BIZ[b].rent && day > 1) o.till -= BIZ[b].rent;
+    }
+    for (const c of npcs) {
+      c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.1);
+      c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.05);
     }
     // 3. property rents across every business you hold: miss and it's over
     const rent = totalRent();
@@ -1720,7 +1807,7 @@ function frame(now) {
   if (!gameOver) {
   updateBus(dt);
   updateCustomers(dt);
-  for (const c of crabs) {
+  for (const c of allCrabs()) {
     c.animT += dt;
     c._stepped = false;
     updateSchedule(c, dt);
@@ -1767,7 +1854,7 @@ function frame(now) {
     } });
   }
   for (const k of customers) paint.push({ base: k.state === "dining" ? (k.table.y + 1) : (k.isCrab ? 165 : FLOOR_Y), f: () => drawCustomer(k) });
-  for (const c of crabs) paint.push({ base: c.cstate === "drive" ? ROAD_Y1 : c.y, f: () => drawCrab(c) });
+  for (const c of allCrabs()) paint.push({ base: c.cstate === "drive" ? ROAD_Y1 : c.y, f: () => drawCrab(c) });
   paint.push({ base: FLOOR_Y, f: drawLandlord });
   paint.sort((a, b) => a.base - b.base);
   for (const e of paint) e.f();
@@ -1784,6 +1871,7 @@ function frame(now) {
 document.addEventListener("visibilitychange", () => { if (document.hidden) save(); else last = performance.now(); });
 addEventListener("beforeunload", save);
 
+initNpcs();
 hasSave = load();
 if (!hasSave) {
   crabs = [newCrab(makeCrabPersona(0)), newCrab(makeCrabPersona(1))];
