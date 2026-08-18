@@ -416,7 +416,7 @@ function allCrabs() { return npcs.length ? crabs.concat(npcs) : crabs; }
 function initNpcs() {
   const p = { name: "SUDSY", npc: true, owner: "sudsy", trait: "cheery", mode: "walk",
     acc: "showercap", color: CRAB_COLORS.length - 1, shift: "D", house: 0, homeless: true,
-    wallet: 25, job: "showers", hunger: 0, dirt: 0, bored: 0, sandy: 0 };
+    wallet: 25, job: "showers", hunger: 0, dirt: 0, bored: 0, tired: 0 };
   const c = newCrab(p);
   c.workBiz = "showers"; c.x = 1148; c.y = 158;
   const fishers = [
@@ -425,7 +425,7 @@ function initNpcs() {
   ].map((f, i) => {
     const fp = { name: f.name, npc: true, fisher: true, trait: f.trait, mode: "walk",
       acc: f.acc, color: f.color, shift: "D", house: 0, homeless: true,
-      wallet: 18, job: "fishing", hunger: 0.3, dirt: 0.2, bored: 0, sandy: 0.3 };
+      wallet: 18, job: "fishing", hunger: 0.3, dirt: 0.2, bored: 0, tired: 0.3 };
     const fc = newCrab(fp);
     fc.fishSpot = FISHING_SPOTS[f.spot];
     fc.x = f.x0; fc.y = 158;
@@ -433,6 +433,15 @@ function initNpcs() {
   });
   npcs = [c].concat(fishers);
 }
+// TIRED (replaces SANDY): accrued by shift work and errand legwork - never by
+// idling at home - and repaired only by SLEEP. The drain is proportional (an
+// exhausted crab crashes hardest) so it self-limits, and bed quality is a
+// real housing-ladder rung: your own bed (house or boat) drains at full rate,
+// a shelter cot at half. Steady state is measured, not felt - see the
+// "tired:" suite scenarios before touching these numbers.
+const TIRED_SHIFT = 0.45, TIRED_ERRAND = 0.03, TIRED_NIGHT = 0.05;
+const TIRED_DRAIN = { bed: 0.5, cot: 0.25 };   // fraction drained per game hour, asleep
+
 function homeX(c) { return homeSpot(c).x; }
 function homeSpot(c) {
   if (c.p.boat != null) return boatSpot(c.p.boat);   // on deck, rain or shine
@@ -448,6 +457,12 @@ function homeSpot(c) {
 // once a commute drops them at the lot, home crabs wander in and settle
 function updateHome(c, dt) {
   const s = homeSpot(c);
+  // SLEEP repairs TIRED: bedded down for the night, exhaustion drains away -
+  // full rate in your own bed (house/boat), half on a shelter cot
+  if (darkness() > 0.7 && (c.p.tired || 0) > 0) {
+    const rate = c.p.homeless ? TIRED_DRAIN.cot : TIRED_DRAIN.bed;
+    c.p.tired = Math.max(0, (c.p.tired || 0) * (1 - rate * dt * TS / 60));
+  }
   setT(c, s.x, s.y);
   stepTo(c, s.x, crabMove(c) * 0.7, dt, s.y);
 }
@@ -471,7 +486,10 @@ function newCrab(persona) {
   if (persona.boat != null && BOAT_BERTHS[persona.boat] == null) persona.boat = null;
   if (!persona.homeless && persona.boat == null && (persona.house == null || HOUSE_XS[persona.house] == null)) persona.homeless = true;
   if (!persona.made) persona.made = {};   // dish id -> lifetime count
-  if (persona.sandy == null) persona.sandy = 0;
+  // TIRED replaced SANDY: old saves seed tired from their sandy value, and the
+  // stale field is dropped so nothing strands in future saves
+  if (persona.tired == null) persona.tired = persona.sandy || 0;
+  delete persona.sandy;
   if (persona.thirst == null) persona.thirst = 0;
   return {
     p: persona,
@@ -651,6 +669,8 @@ function load() {
       const n = npcs.find(k => k.p.name === sp.name);
       if (n) {
         Object.assign(n.p, sp);
+        if (sp.tired == null) n.p.tired = sp.sandy || 0;   // TIRED replaced SANDY (old townsfolk saves seed from it)
+        delete n.p.sandy;
         if (n.p.job !== "fishing" && !BIZ[n.p.job]) { n.p.job = "fishing"; n.p.employer = null; }   // removed-business jobs: back to the pier
         delete n.p.homeX;   // pre-housing-market nook field
         if (n.p.boat != null && BOAT_BERTHS[n.p.boat] == null) n.p.boat = null;
@@ -692,6 +712,8 @@ function maybeQuip(c, dt) {
     let lines = isNight ? ["ZZZ..."] : TRAITS[c.p.trait].quips[quipContext(c)];
     if (c.p.homeless && quipContext(c) === "home" && !isNight)
       lines = ["SAVING FOR A PLACE", "SHELTER SOUP AGAIN", "I'LL BOUNCE BACK"];
+    if ((c.p.tired || 0) >= 0.8 && !isNight)
+      lines = ["DEAD ON MY FEET", "SO... SLEEPY", "NEED MY BED"];
     if ((c.p.thirst || 0) >= 0.8 && !isNight)
       lines = ["PARCHED...", "SO DRY", "JUICE. PLEASE."];
     c.quip = { text: lines[(Math.random() * lines.length) | 0], t: 2.6 };
@@ -946,6 +968,7 @@ function updateSchedule(c, dt) {
       && !(c.restDay === day && c.restUntil > tmin)) {   // ordered home: a real break before the schedule re-dispatches
     startCommute(c, true);
   }
+  if (c.dayState === "working") c.workedToday = true;   // fisher or shopkeep alike: tonight's tired bump is earned, not blanket
   if (c.dayState === "working" && tmin >= sh.end) c.pendingOff = true;
   if (c.dayState === "working" && c.pendingOff && c.kstate === "idle") {
     // last call: stick around while anyone's still waiting in the grace window
@@ -955,10 +978,10 @@ function updateSchedule(c, dt) {
     c.duty = false; c.pendingOff = false;
     if (c.carrying) c.carrying = null;
     c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25);  // a shift works up an appetite
-    c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * ((c.p.sandy || 0) > 0.5 ? 1.5 : 1));  // dry work - worse in the beach heat
+    c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));  // working a whole shift ALREADY tired makes you thirsty (checked pre-bump: same firing rate the sandy coupling had)
+    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT);   // a full shift takes it out of you
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and grubbies up the shell
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
-    c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.15);    // beach work is gritty work
     // grab dinner on the way home instead of trekking back later
     const e = !c.p.sick && pickErrand(c);
     if (e && !e.selfCook) startErrand(c, e);
@@ -1031,11 +1054,11 @@ function pickErrand(c) {
   // dirt is serviced at the showers too (the laundromat is gone): a grubby
   // crab heads for the taps at the same 0.66 threshold that fed the sickness
   // "cared" check - a shower takes dirt down 0.5 (0.7 deluxe), well below it
-  const needsBath = (c.p.sandy || 0) >= 0.6 || (c.p.dirt || 0) >= 0.66
+  const needsBath = (c.p.dirt || 0) >= 0.66
     || (c.p.sick && (c.p.dirt || 0) >= 0.4);   // the sick drag themselves to the taps - staying clean is the cure
   if (needsBath && staffed("showers") && c.workBiz !== "showers") {
     const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
-    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "showers", recipe: r, need: "spa" };
+    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "showers", recipe: r, need: "clean" };
   }
   if (c.p.sick) return null;   // bed rest otherwise: no arcade nights while ill
   if ((c.p.bored || 0) >= 0.6 && staffed("arcade")) {
@@ -1094,6 +1117,7 @@ function updateSelfCook(c, dt) {
 }
 function startErrand(c, e) {
   c.dayState = "toErrand"; c.errandBiz = e.biz; c.errand = e;
+  c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_ERRAND);   // errand legwork tires, a little
   setT(c, BIZ[e.biz].queueX + 4, 166);
 }
 function updateErrand(c, dt) {
@@ -1557,7 +1581,7 @@ function payAndBenefit(c, cust) {
     popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
   } else {
     const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0))
-      * (1 - ((c.p.sandy || 0) >= 0.66 ? 0.15 : 0));
+      * (1 - ((c.p.tired || 0) >= 0.85 ? 0.15 : 0));   // an EXHAUSTED server fumbles the charm (0.85 = the mood line; evenings routinely reach the old 0.66)
     const tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult;
     creditBiz(cust.biz, cust.recipe.pay + tip, cust.x, 126);
     popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
@@ -1650,8 +1674,7 @@ function updateCustomers(dt) {
       if (k.showerT <= 0) {
         const st = k.stall;
         st.occupant = null; st.dirty = true; k.stall = null;
-        if (k.isCrab) {
-          k.crab.p.sandy = 0;
+        if (k.isCrab) {   // dirt-only: TIRED is slept off, not scrubbed off
           k.crab.p.dirt = Math.max(0, (k.crab.p.dirt || 0) - (k.recipe.deep ? 0.7 : 0.5));
           k.crab.quip = { text: "SQUEAKY CLEAN!", t: 2.4 };
         }
@@ -2438,7 +2461,8 @@ function crabMood(c) {
   if (c.p.wallet > 120) return ["FLUSH", [180, 140, 30]];
   if ((c.p.hunger || 0) > 0.7) return ["HUNGRY", [200, 110, 40]];
   if ((c.p.thirst || 0) > 0.8) return ["PARCHED", [200, 110, 40]];
-  if (darkness() > 0.7 && c.dayState !== "home") return ["TIRED", [120, 120, 140]];
+  if ((c.p.tired || 0) > 0.85) return ["EXHAUSTED", [190, 80, 80]];
+  if (darkness() > 0.7 && c.dayState !== "home") return ["UP LATE", [120, 120, 140]];
   if (darkness() > 0.7 && c.dayState === "home") return ["COZY", [180, 120, 60]];
   if (c.dayState === "working" && c.kstate === "work") return ["BUSY", [40, 110, 190]];
   return ["SUNNY", [40, 150, 70]];
@@ -2511,7 +2535,7 @@ function drawFollowCard() {
   if (eff < 0.995)
     smallText(ctx, "PACE " + Math.round(eff * 100) + "%", 74, 36, eff < 0.8 ? [190, 80, 80] : [200, 110, 40]);
   const bars = [["FED", 1 - (p.hunger || 0), 6], ["SIP", 1 - (p.thirst || 0), 30],
-    ["CLN", 1 - (p.dirt || 0), 54], ["FUN", 1 - (p.bored || 0), 78], ["SPA", 1 - (p.sandy || 0), 102]];
+    ["CLN", 1 - (p.dirt || 0), 54], ["FUN", 1 - (p.bored || 0), 78], ["ZZZ", 1 - (p.tired || 0), 102]];
   for (const [label, frac, bx] of bars) {
     smallText(ctx, label, bx, 44, [110, 110, 130]);
     rect(ctx, bx + 11, 45, 13, 4, [30, 20, 36]);
@@ -2827,7 +2851,7 @@ function drawDossier() {
   }
   ly += 2;
   const bars = [["FED", 1 - (p.hunger || 0)], ["QUENCHED", 1 - (p.thirst || 0)],
-    ["CLEAN", 1 - (p.dirt || 0)], ["FUN", 1 - (p.bored || 0)], ["UNSANDY", 1 - (p.sandy || 0)]];
+    ["CLEAN", 1 - (p.dirt || 0)], ["FUN", 1 - (p.bored || 0)], ["RESTED", 1 - (p.tired || 0)]];
   for (const [label, frac] of bars) {
     smallText(ctx, label, x + 8, ly, [110, 110, 130]);
     rect(ctx, x + 44, ly, 100, 5, [30, 20, 36]);
@@ -2966,8 +2990,8 @@ function frame(now) {
     // 2. house rent from each crab's own wallet; broke crabs move to the shelter
     let evictedNames = [];
     for (const c of allCrabs()) {
-      c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.15 * ((c.p.sandy || 0) > 0.5 ? 1.5 : 1));   // a dry night
-      if (!c.p.npc) c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.05);
+      c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.15 * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));   // a dry night - drier after a hard day
+      if (c.workedToday) { c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_NIGHT); c.workedToday = false; }   // the day's work catches up at dusk; idlers owe nothing
       if (c.p.homeless) {
         // shelter is free; move into a free house once savings allow
         const used = new Set(allCrabs().filter(k => !k.p.homeless).map(k => k.p.house));
@@ -3042,7 +3066,6 @@ function frame(now) {
     }
     for (const c of npcs) {
       c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.1);
-      c.p.sandy = Math.min(1, (c.p.sandy || 0) + 0.05);
     }
     // 2.5 epidemiology: neglect breeds illness; illness spreads; rest + care cures
     {
@@ -3054,7 +3077,7 @@ function frame(now) {
         if ((k.p.hunger || 0) >= 0.95) risk += 0.10;
         if ((k.p.thirst || 0) >= 0.95) risk += 0.12;   // dehydration: the scariest neglect
         if ((k.p.dirt || 0) >= 0.95) risk += 0.06;
-        if ((k.p.sandy || 0) >= 0.95) risk += 0.03;
+        if ((k.p.tired || 0) >= 0.95) risk += 0.05;   // run ragged - exhaustion is worse than sand ever was
         for (const s2 of sickNow) {
           const coworkers = s2.workBiz === k.workBiz && k.dayState !== "home" && !s2.p.npc;
           const shelterMates = k.p.homeless && s2.p.homeless;
@@ -3067,7 +3090,7 @@ function frame(now) {
             if ((k.p.hunger || 0) >= 0.9) why.push("hunger");
             if ((k.p.thirst || 0) >= 0.9) why.push("thirst");
             if ((k.p.dirt || 0) >= 0.9) why.push("dirt");
-            if ((k.p.sandy || 0) >= 0.9) why.push("sandy");
+            if ((k.p.tired || 0) >= 0.9) why.push("exhaustion");
             if (why.length === 0) why.push("contagion");
             window._stats.causes = window._stats.causes || {};
             for (const w of why) window._stats.causes[w] = (window._stats.causes[w] || 0) + 1;
