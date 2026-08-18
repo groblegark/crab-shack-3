@@ -378,6 +378,9 @@ const sfx = {
   angry: () => { beep(220, .15, "sawtooth", .03); beep(160, .2, "sawtooth", .03, .12); },
   ding: () => beep(1560, .1, "triangle", .05),
   bus: () => beep(300, .2, "triangle", .04),
+  // ambient color, kept very quiet
+  gull: () => { beep(1760, .12, "triangle", .02); beep(1320, .16, "triangle", .018, .12); },
+  splash: () => { beep(520, .05, "sine", .03); beep(300, .09, "sine", .025, .05); },
 };
 
 // ---------------------------------------------------------------- economy
@@ -867,6 +870,7 @@ function updateFishing(c, dt) {
     townCatch++;
     c.p.wallet += 2;   // the market pays small money for each landed fish
     popText("CATCH!", c.x - 4, c.y - 24, [140, 220, 255]);
+    sfx.splash();
     if (window._stats) window._stats.catches = (window._stats.catches || 0) + 1;
     if (Math.random() < 0.25) c.quip = { text: ["BIG ONE!", "THEY'RE BITING", "SEA PROVIDES"][(Math.random() * 3) | 0], t: 2.2 };
   }
@@ -1633,9 +1637,12 @@ function drawStation(key, kind, i) {
   }
 }
 
+let _swoopT = 99;
 function drawSwoop() {
   // every so often a gull dives at the snack queue
   const T = time % 41;
+  if (T < _swoopT && darkness() <= 0.5) sfx.gull();   // one cry per dive
+  _swoopT = T;
   if (T > 5.5 || darkness() > 0.5) return;
   const t = T / 5.5;
   const wx2 = BIZ.shack.queueX + 180 - t * 220;
