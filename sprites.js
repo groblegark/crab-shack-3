@@ -62,12 +62,28 @@ const _CRAB_LEGS_W = [
   "KRRK...KK.......",
   ".KK.............",
 ];
+// fast asleep: eyestalks drooped, lids shut, legs folded under the shell
+const _CRAB_SLEEP = [
+  "................",
+  "..KK........KK..",
+  ".KRRK......KRRK.",
+  ".KKKK......KKKK.",
+  "..KRRRRRRRRRRK..",
+  ".KRTRRRRRRRRTRK.",
+  "KRRRRKRRRRKRRRRK",
+  "KRRRRRRRRRRRRRRK",
+  ".KRRTRRRRRRTRRK.",
+  ".KRRK.KRRK.KRRK.",
+  "..KK...KK...KK..",
+  "................",
+];
 function crabArt(bodyCol, shadeCol) {
   const p = swap(PAL, { R: bodyCol, T: shadeCol });
   return {
     a: parseArt(_CRAB_TOP.concat(_CRAB_LEGS_A), p),
     b: parseArt(_CRAB_TOP.concat(_CRAB_LEGS_B), p),
     w: parseArt(_CRAB_TOP.concat(_CRAB_LEGS_W), p),
+    s: parseArt(_CRAB_SLEEP, p),
   };
 }
 const CRAB_COLORS = [

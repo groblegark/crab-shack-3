@@ -1646,11 +1646,14 @@ function drawCrab(c) {
   }
   const working = (c.kstate === "work" || c.kstate === "cleaningStall") && c.dayState === "working";
   const moving = c.dayState !== "home" || Math.hypot((c.tx || c.x) - c.x, (c.ty || c.y) - c.y) > 2;
+  const sleeping = !moving && c.dayState === "home" && darkness() > 0.7;
   let art;
-  if (working) art = ((c.animT * 6) | 0) % 2 ? arts.w : arts.a;
+  if (sleeping) art = arts.s;
+  else if (working) art = ((c.animT * 6) | 0) % 2 ? arts.w : arts.a;
   else if (moving) art = ((c.animT * 8) | 0) % 2 ? arts.a : arts.b;
   else art = arts.a;
-  const bob = working ? -(((c.animT * 6) | 0) % 2) : 0;
+  const bob = sleeping ? (Math.sin(time * 1.6 + c.animT) > 0 ? 1 : 0)   // slow breathing
+    : working ? -(((c.animT * 6) | 0) % 2) : 0;
   let y = c.y - 12 + bob;
   if (riding && c.p.mode === "bike") {
     wblit(BIKE, c.x - 2, ROAD_Y1 - 8, c.flip);
@@ -1667,6 +1670,13 @@ function drawCrab(c) {
     wblit(acc.art, c.x + ax, y + acc.dy, c.flip);
   }
   if ((c.p.dirt || 0) >= 0.66) wblit(DIRT, c.x, y, c.flip);
+  if (sleeping) {   // a little Z drifts up from the shell
+    const ph = (time * 0.45 + c.animT * 0.37) % 1;
+    if (ph < 0.75) {
+      const zx = c.x + 13 + ((Math.sin(ph * 9 + c.animT) * 2) | 0) - camX;
+      if (zx > -4 && zx < W) smallText(ctx, "Z", zx, y - 2 - ph * 13, ph < 0.4 ? [200, 210, 235] : [150, 160, 195]);
+    }
+  }
   if (c.p.sick && ((c.animT * 2) | 0) % 2) wblit(SICK_MARK, c.x + 10, y - 8);
   if (c.p.fisher && c.dayState === "working") wblit(ROD[((c.animT * 2) | 0) % 2], c.x + 12, y - 3, c.flip);
   if (c.carrying) wblit(ITEMS[c.carrying], c.x + 4, y - 7);
