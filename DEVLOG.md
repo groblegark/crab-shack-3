@@ -23,8 +23,10 @@ crabs learned to actually get IN the shower, and somebody bought a boat.
   yet. The crabs don't know why the ledger exists. (We know why.)
 - **Fishers can buy a boat and live on it.** $75 buy-in, $2 a night mooring,
   three named berths off the pier — and the fishing is roughly twice as good
-  out there. Expect the first crab to move aboard around day 23. Landlubbers
-  remain puzzled.
+  out there — double hauls land 20% of the time. A fisher grossing ~$13 a
+  day saves up the $75 in about three weeks: in three of four simulated
+  towns, somebody moved aboard organically between day 23 and 25. Nobody
+  told them to. Landlubbers remain puzzled.
 - **Tired crabs work like tired crabs.** Hunger and grime now visibly slow a
   crab down — the dossier will tell you a neglected crew crab is WORKING AT
   82%, and it is not lying. Needy crews measured 23–47% slower. Feed your
@@ -34,19 +36,28 @@ crabs learned to actually get IN the shower, and somebody bought a boat.
 
 ![A fisher casts off the pier](devlog/img/2026-08-18-pier-fisher.png)
 
-### Fixed (little stories division)
+### Fixed: the stall nobody could clean
 
-- Crabs now walk INTO the shower stall, shut the curtain, and bob their
-  happy little heads over the top of it. Bubbles included. Previously they
-  vanished from reality for the duration of the wash, which was efficient
-  but alarming.
-- A crab who passed away mid-errand no longer haunts their shower stall
-  forever. The stall is scrubbed, marked clean, and returned to service.
-  The town grieves. Briefly.
-- A crab poached off the pier by a rival business mid-shower no longer
-  leaves a ghost in the stall either. Career moves are no excuse.
-- The shower's head-over-the-curtain art no longer appears BEFORE the crab
-  gets there. Showers once again require attendance.
+A three-act ghost story, resolved this afternoon.
+
+**Act one.** Crabs learned to walk INTO the shower stall, shut the curtain,
+and bob their happy little heads over the top of it. Bubbles included.
+Previously they vanished from reality for the duration of the wash, which
+was efficient but alarming.
+
+**Act two.** Players began reporting a head bobbing in a stall nobody had
+walked into. This ghost, it turns out, wasn't there at all — the art was
+drawing from the moment a wash was booked, not the moment the crab arrived.
+Showers once again require attendance.
+
+**Act three.** The REAL ghost. A crab who passed away mid-errand — or got
+poached off to a rival business mid-shower, career moves being no excuse —
+left the stall occupied forever. The cleaning staff, respectful to a fault,
+refuse to scrub an occupied stall, so the stall stood haunted for the rest
+of the run: never cleaned, never used again. An exorcism (`abortErrand`)
+now releases the stall, the table, and the order of any crab who leaves
+this mortal coil mid-task. The stall is scrubbed and returned to service.
+The town grieves. Briefly.
 
 ![SUDSY keeps the stalls sparkling](devlog/img/2026-08-18-suds-showers.png)
 
@@ -55,16 +66,27 @@ crabs learned to actually get IN the shower, and somebody bought a boat.
 *Every entry we run the town headless for a couple of weeks and report
 what actually happened. Seeded, reproducible, occasionally tragic.*
 
-This week's town survived all 12 simulated days and closed with $169 in the
-till. SALTY out-fished DRIFT 50 catches to 37 and never once mentioned it,
-which everyone agrees made it worse. The stalls at SUDS SHOWERS turned over
-68 washes and SUDSY scrubbed every single one of them herself. Three crabs
-fell ill — the books blame hunger twice, grime three times, and beach sand
-three times, which tells you what kind of summer it's been. One recovered.
-Twenty-three tourists rage-quit the queue; the reputation chip hit 96
-anyway. Staff drank juice on shift at full retail ($10 a glass, costs the
-kitchen $3) because nobody has told them about employee discounts, and
-nobody is going to.
+This week's town survived all 12 simulated days and closed with $169 in
+the till. SALTY out-fished DRIFT 50 catches to 37 and never once mentioned
+it, which everyone agrees made it worse. DRIFT, for the record, is doing
+fine: in another timeline (seed 31), DRIFT rented a promenade house on day
+TWO, purely off $2-a-catch fishing wages — the "DRIFT MOVED INTO A HOUSE!"
+toast fired while we were pointing the camera at something else entirely.
+
+In a darker timeline (seed 41), both fishers fell sick in the same week and
+SUDSY's HELP WANTED posting aged a full day on the board, unfilled. The
+next morning a drifter named SANDY stepped off the bus, read the board, and
+took the showers job — the first bus-arrival hire in town history. SANDY
+started homeless, with a fallback spot on the pier. This town gives you a
+job and a fishing rod and not much else.
+
+Back in our timeline: SUDS SHOWERS turned over 68 washes and SUDSY scrubbed
+every stall herself. Three crabs fell ill — the books blame hunger twice,
+grime three times, and beach sand three times, which tells you what kind of
+summer it's been. One recovered. Twenty-three tourists rage-quit the queue;
+the reputation chip hit 96 anyway. Staff drank juice on shift at full
+retail ($10 a glass, costs the kitchen $3) because nobody has told them
+about employee discounts, and nobody is going to.
 
 ![The job board stands ready](devlog/img/2026-08-18-notice-board.png)
 
