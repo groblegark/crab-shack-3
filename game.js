@@ -904,7 +904,8 @@ function updateSchedule(c, dt) {
   const sh = SHIFTS[c.p.shift];
   if (c.p.job !== "fishing" && !bizUnlocked(c.p.job)) c.p.job = "shack";
   if (!c.p.npc && c.p.job !== "fishing" && bizOwner(c.p.job) !== "player") c.p.job = "shack";   // crew can't staff NPC shops
-  if (c.dayState === "home" && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !c.p.sick) {
+  if (c.dayState === "home" && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !c.p.sick
+      && !(c.restDay === day && c.restUntil > tmin)) {   // ordered home: a real break before the schedule re-dispatches
     startCommute(c, true);
   }
   if (c.dayState === "working" && tmin >= sh.end) c.pendingOff = true;
@@ -1124,6 +1125,171 @@ function abortChef(c) {
   if (c.cust && !c.cust.served) c.cust.claimed = false;   // let another chef pick the order up
   if (c.cleanStall) { c.cleanStall.cleaning = false; c.cleanStall = null; }
   c.kstate = "idle"; c.cust = null; c.carrying = null; c.stepIdx = 0;
+}
+
+// ---------------------------------------------------------------- player orders (right-click)
+// SELECTION = the crab you're following. Right-click gives orders to CREW
+// crabs only - the townsfolk have their own lives (design choice: NPC agency
+// stays intact; see PLAN). Desktop right-click only this pass: long-press
+// would collide with merge mode's hold gesture, so touch is deferred.
+const ORDER_IDLE = 2.5;   // seconds a directed crab lingers before the schedule reclaims them
+// Break from ANY current activity, releasing every held resource: station
+// slot + claimed order + cleaning stall (abortChef), errand stall/table/
+// queue ghost (abortErrand), then bus/commute and selfCook state. A chef
+// whose claimed customer we ghost recovers on their own (updateKitchen
+// aborts on state "leaving"). Ends parked in dayState "home" so
+// updateSchedule can re-dispatch from a known-safe state.
+function abortActivity(c) {
+  abortChef(c);
+  abortErrand(c);
+  c.cookStep = 0; c.cookRecipe = null;
+  c.duty = false; c.pendingOff = false;
+  c.cstate = ""; c.busFrom = -1; c.busTo = -1;
+  c.hidden = false; c.pauseT = 0;
+  c.y = clampY(c.y);   // yanked off a bus/stall: back into the walk band
+  c.order = null;
+  c.dayState = "home";
+}
+function orderPop(c, ok, verdict) {
+  popText(c.p.name + ": " + verdict, c.x - 12, c.y - 26, ok ? [140, 255, 160] : [255, 150, 130]);
+  if (ok) sfx.ding(); else sfx.angry();
+}
+function orderGoto(c, x, y) {
+  abortActivity(c);
+  c.order = { kind: "goto", x: Math.max(12, Math.min(WORLD_W - 24, x)), y: clampY(y), idleT: -1 };
+  c.dayState = "directed";
+  setT(c, c.order.x, c.order.y);
+  orderPop(c, true, "ON IT!");
+}
+function updateDirected(c, dt) {
+  const o = c.order;
+  if (!o) { c.dayState = "home"; return; }
+  if (o.idleT >= 0) {   // arrived: linger a beat, then the schedule reclaims them
+    o.idleT -= dt;
+    if (o.idleT <= 0) { c.order = null; c.dayState = "home"; c.errandCd = Math.max(c.errandCd, 1); }
+    return;
+  }
+  if (routedStep(c, crabMove(c), dt)) o.idleT = ORDER_IDLE;
+}
+// pickErrand's recipe/pricing/staffing gates, sans the need thresholds - a
+// directed crab runs the errand NOW if the till, wallet and line allow it
+// (the 5-slot queue cap is enforced on arrival, same as any errand)
+function forcedErrand(c, b) {
+  if (b === "shack") {
+    if (!bizStaffed("shack")) {
+      if (c.p.job === "shack" && !c.p.npc) {   // staff privilege: cook your own, at retail
+        const aff = BIZ.shack.recipes.filter(r => c.p.wallet >= r.pay + 2);
+        if (aff.length) { aff.sort((a, b2) => a.pay - b2.pay); return { selfCook: true, recipe: aff[0] }; }
+      }
+      return null;
+    }
+    const aff = BIZ.shack.recipes.filter(r => c.p.wallet >= Math.ceil(r.pay * 1.25) + 2);
+    if (!aff.length) return null;
+    aff.sort((a, b2) => a.pay - b2.pay);
+    return { biz: "shack", recipe: c.p.wallet > 40 ? aff[(Math.random() * aff.length) | 0] : aff[0], need: "food" };
+  }
+  if (!bizStaffed(b)) return null;
+  if (b === "showers") {
+    const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];
+    return c.p.wallet >= Math.ceil(r.pay * 1.25) + 2 ? { biz: b, recipe: r, need: "spa" } : null;
+  }
+  if (b === "arcade") {
+    if (c.p.sick) return null;   // bed rest: no game nights while ill
+    const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];
+    return c.p.wallet >= Math.ceil(r.pay * 1.25) + 2 ? { biz: b, recipe: r, need: "fun" } : null;
+  }
+  return null;
+}
+// What a right-click at world (wx, wy) means for this crew crab. Priority:
+// their workplace (clock in) > their home (knock off) > a business (errand)
+// > open ground (walk there). Every refusal pops - never silent.
+function orderCrab(c, wx, wy) {
+  const sh = SHIFTS[c.p.shift];
+  const jb = c.p.job === "fishing" ? null : BIZ[c.p.job];
+  const atWorkplace = jb ? wx >= jb.x0 && wx <= jb.x1
+    : wx >= PIER_X0 - 8 && wx <= PIER_X1 + 24;
+  if (atWorkplace && !c.p.sick && tmin < sh.end - 30) {
+    if (c.dayState === "working" && c.duty) return orderPop(c, false, "ALREADY ON THE CLOCK");
+    abortActivity(c);
+    startCommute(c, true);
+    return orderPop(c, true, c.p.job === "fishing" ? "GONE FISHING!" : "BACK TO WORK!");
+  }
+  if (atWorkplace && c.p.sick && c.p.job !== "shack")   // sick + own shack falls through: they may still buy food there
+    return orderPop(c, false, "TOO SICK TO WORK");
+  // their home (house lot or shelter) -> knock off and take a real break
+  const atHome = c.p.homeless
+    ? wx >= SHELTER_X - 2 && wx <= SHELTER_X + 70
+    : c.p.boat == null && wx >= HOUSE_XS[c.p.house] - 2 && wx <= HOUSE_XS[c.p.house] + 62;
+  if (atHome) {
+    abortActivity(c);
+    c.restDay = day; c.restUntil = tmin + 120;   // ~2 game-hours before the schedule re-dispatches to work
+    startCommute(c, false);
+    return orderPop(c, true, "HEADING HOME");
+  }
+  // a business -> run that errand now (their own workplace reaches here only
+  // off-shift or sick, which is exactly when dinner beats clocking in)
+  for (const b of Object.keys(BIZ)) {
+    if (!bizUnlocked(b) || wx < BIZ[b].x0 || wx > BIZ[b].x1) continue;
+    if (c.duty || c.dayState === "working") return orderPop(c, false, "ON THE CLOCK");
+    if (bizDark(b)) return orderPop(c, false, "IT'S SHUT");
+    const e = forcedErrand(c, b);
+    if (!e) return orderPop(c, false, "CAN'T RIGHT NOW");
+    abortActivity(c);
+    c.errandCd = 0;
+    if (e.selfCook) startSelfCook(c, e); else startErrand(c, e);
+    return orderPop(c, true, "ON IT!");
+  }
+  // open ground: a natural click-to-nav feel predominates
+  orderGoto(c, wx, wy);
+}
+
+// ---------------------------------------------------------------- auto-unstick
+// The collision field has one rare hard pin: a walker shoved by a stationary
+// anchor is pushed straight back along its own line of travel and grinds in
+// place (documented: a commuter pinned against an idle chef). Crabs are
+// crabs - when one makes no progress it takes a little perpendicular
+// sidestep and tries again. Conservative by design: only crabs that MOVED
+// via stepTo this frame count (deliberate waits - queues, station work, bus
+// stops, trait pauses - never call stepTo), and only with real distance
+// still to cover.
+const STUCK_WINDOW = 1.5;   // seconds of no net progress before a sidestep
+const STUCK_DIST = 2;       // "no progress" = net displacement under this many px
+const STUCK_FAR = 8;        // only when genuinely underway (target further than this)
+const STUCK_RETRIES = 4;    // sidesteps before giving up with a quip
+const DETOUR_T = 1.0;       // seconds each sidestep waypoint lives
+function updateStuck(c, dt) {
+  if (c.detour) {   // sidestep in progress: steer for the waypoint, then resume
+    c.detour.t -= dt;
+    const done = stepTo(c, c.detour.x, crabMove(c) * 1.2, dt, c.detour.y);
+    if (done || c.detour.t <= 0) c.detour = null;
+    c.stuckT = 0; c.stuckRef = null;
+    return;
+  }
+  const walking = c._stepped && !c.hidden && !c.errandCust &&
+    Math.abs((c._mx != null ? c._mx : c.x) - c.x) > STUCK_FAR;
+  if (!walking) { c.stuckT = 0; c.stuckRef = null; c.stuckN = 0; return; }
+  if (!c.stuckRef) { c.stuckRef = { x: c.x, y: c.y }; c.stuckT = 0; return; }
+  c.stuckT += dt;
+  if (Math.hypot(c.x - c.stuckRef.x, c.y - c.stuckRef.y) >= STUCK_DIST) {
+    c.stuckRef = { x: c.x, y: c.y }; c.stuckT = 0; c.stuckN = 0;   // real progress: all clear
+    return;
+  }
+  if (c.stuckT < STUCK_WINDOW) return;
+  c.stuckN = (c.stuckN || 0) + 1;
+  c.stuckT = 0; c.stuckRef = null;
+  if (c.stuckN > STUCK_RETRIES) {
+    c.stuckN = 0;
+    c.quip = { text: ["DANG TRAFFIC", "I GIVE UP", "WHO PARKED THERE?!"][(Math.random() * 3) | 0], t: 2.4 };
+    if (c.order) { c.order = null; c.dayState = "home"; }   // a directed crab abandons the order
+    return;
+  }
+  // perpendicular sidestep: hop to whichever side of the lane has room
+  // (alternating on retries), backing off a touch so the collider lets go
+  const dir = Math.sign((c._mx != null ? c._mx : c.x) - c.x) || 1;
+  let dy = (c.stuckN % 2 ? -1 : 1) * 12;
+  if (clampY(c.y + dy) === c.y) dy = -dy;
+  c.detour = { x: c.x - dir * 6, y: clampY(c.y + dy), t: DETOUR_T };
+  if (window._stats) window._stats.unsticks = (window._stats.unsticks || 0) + 1;
 }
 function updateFishing(c, dt) {
   // stand at the spot, cast, wait, land one - the town's oldest job
@@ -1478,6 +1644,7 @@ function crabStatus(c) {
     if (c.kstate === "waitSlot") return "WAITING FOR A SPOT";
     return "ON SHIFT";
   }
+  if (c.dayState === "directed") return c.order && c.order.idleT >= 0 ? "TAKING A BREATHER" : "AS ORDERED";
   if (c.dayState === "selfCook") return c.cookStep >= 3 ? "COOKING A STAFF MEAL" : "RAIDING THE PANTRY";
   if (c.dayState === "toErrand") return "OFF TO " + BIZ[c.errandBiz].name;
   if (c.dayState === "errand") return "IN LINE AT " + BIZ[c.errandBiz].name;
@@ -1529,6 +1696,7 @@ function tryBuy(key) {
 
 let dragging = false, dragStartX = 0, dragCamX = 0, dragMoved = false;
 cv.addEventListener("mousedown", (ev) => {
+  if (ev.button !== 0) return;   // right button is for orders - it must not pan or drop the follow
   const p = evPos(ev);
   if (p.y < PANEL_Y) { dragging = true; dragStartX = p.x; dragCamX = camX; dragMoved = false; }
 });
@@ -1691,6 +1859,21 @@ cv.addEventListener("click", (ev) => {
       return;
     }
   }
+});
+// right-click: give the followed CREW crab an order (orderCrab resolves the
+// target). The browser menu is suppressed on the canvas so the world owns
+// the gesture. No context menu yet - that's "at some point", not now.
+cv.addEventListener("contextmenu", (ev) => {
+  ev.preventDefault();
+  if (screen !== "play" || gameOver) return;
+  if (dossier || boardView || reportT > 0) return;
+  if (window.MergeMode && MergeMode.active()) return;
+  const p = evPos(ev);
+  if (p.y >= PANEL_Y) return;   // the panel is left-click country
+  if (followCust) { popText(followCust.name.split(" ")[0] + ": JUST VISITING!", followCust.x - 12, 120, [255, 150, 130]); return; }
+  if (followNpc) { orderPop(followNpc, false, "I'VE GOT MY OWN LIFE"); return; }
+  if (followIdx < 0) return;   // nobody selected: nothing to order
+  orderCrab(crabs[followIdx], p.x + camX, p.y);
 });
 addEventListener("keydown", (e) => {
   if (e.key === "m") { toggleMute(); if (!muted) sfx.ding(); }
@@ -2877,7 +3060,9 @@ function frame(now) {
     else if (c.dayState === "selfCook") updateSelfCook(c, dt);
     else if (c.dayState === "working" && c.p.job === "fishing") updateFishing(c, dt);
     else if (c.dayState === "working") updateKitchen(c, dt);
+    else if (c.dayState === "directed") updateDirected(c, dt);
     else if (c.dayState === "home") updateHome(c, dt);
+    updateStuck(c, dt);
     maybeQuip(c, dt);
   }
   if (followCust && !customers.includes(followCust)) followCust = null;   // they went home
@@ -2959,6 +3144,19 @@ function frame(now) {
   for (const e of paint) e.f();
   drawSwoop();
   drawFloaters(dt);
+  {  // directed-crab marker: a bouncing flag where the followed crab was sent
+    const fc = followIdx >= 0 && crabs[followIdx];
+    if (fc && fc.order && fc.dayState === "directed" && fc.order.idleT < 0) {
+      const mx = fc.order.x + 6 - camX;
+      if (mx > -8 && mx < W + 8) {
+        const my = fc.order.y - 16 - Math.abs(Math.sin(time * 5)) * 3;
+        rect(ctx, mx, my, 1, 9, [255, 255, 255]);        // pole
+        rect(ctx, mx + 1, my, 5, 4, [255, 216, 96]);     // pennant
+        px(ctx, mx + 6, my + 1, [255, 216, 96]);
+        px(ctx, mx, fc.order.y - 6, [255, 216, 96]);     // planted spot
+      }
+    }
+  }
   drawNight();
   drawDossier();
   drawJobBoard();
