@@ -19,6 +19,7 @@ const BUS_TERMINUS = [100, 1240];
 const STATION_BOTTOM = 152;
 const QUEUE_DX = 13, QUEUE_MAX = 4;
 const SHELTER_X = 444, MOVE_IN_COST = 25;
+const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
 
 // ---------------------------------------------------------------- businesses
 const BIZ = {
@@ -173,9 +174,22 @@ const SHELTER2 = scale2(SHELTER);
 const BUS2 = scale2(BUS);
 const BUGGIES2 = BUGGIES.map(scale2);
 
-function homeX(c) {
-  if (c.p.homeless) return SHELTER_X + 16 + (Math.max(0, crabs.indexOf(c)) % 3) * 12;
-  return HOUSE_XS[c.p.house] + 28;
+function homeX(c) { return homeSpot(c).x; }
+function homeSpot(c) {
+  if (c.p.homeless) {
+    const cot = [6, 24, 44][Math.max(0, crabs.indexOf(c)) % 3];
+    return { x: SHELTER_X + cot, y: 155 };
+  }
+  const hx = HOUSE_XS[c.p.house];
+  return darkness() > 0.7
+    ? { x: hx + 8, y: 154 }    // asleep on the bed
+    : { x: hx + 34, y: 156 };  // up and about in the front room
+}
+// once a commute drops them at the lot, home crabs wander in and settle
+function updateHome(c, dt) {
+  const s = homeSpot(c);
+  setT(c, s.x, s.y);
+  stepTo(c, s.x, crabMove(c) * 0.7, dt, s.y);
 }
 
 function newCrab(persona) {
@@ -1014,15 +1028,17 @@ function drawTown() {
   wrect(0, ROAD_Y1, WORLD_W, 3, [214, 196, 156]);   // shoulder
   // houses face the promenade (owned ones get the owner's roof color)
   for (const c of crabs)
-    if (!c.p.homeless) wblit(HOUSES2[c.p.color % HOUSES2.length], HOUSE_XS[c.p.house], LOT_BOTTOM - HOUSES2[0].h);
+    if (!c.p.homeless) wblit(HOUSES2[c.p.color % HOUSES2.length], HOUSE_XS[c.p.house], HOME_BOTTOM - HOUSES2[0].h);
   // the crab shelter
-  wblit(SHELTER2, SHELTER_X, LOT_BOTTOM - SHELTER2.h);
-  if (SHELTER_X - camX > -80 && SHELTER_X - camX < W)
-    smallText(ctx, "SHELTER", SHELTER_X + 14 - camX, LOT_BOTTOM - SHELTER2.h - 8, [230, 220, 200]);
+  wblit(SHELTER2, SHELTER_X, HOME_BOTTOM - SHELTER2.h);
+  if (SHELTER_X - camX > -80 && SHELTER_X - camX < W) {
+    smallText(ctx, "SHELTER", SHELTER_X + 22 - camX, HOME_BOTTOM - SHELTER2.h + 3, [30, 20, 36]);
+    smallText(ctx, "SHELTER", SHELTER_X + 21 - camX, HOME_BOTTOM - SHELTER2.h + 2, [240, 235, 220]);
+  }
   // bus stops on the shoulder
   for (const s of BUS_STOPS) wblit(BUS_STOP, s - 3, ROAD_Y1 + 3);
   // scenery fills the beach pockets between lots
-  wblit(PALM, 505, 134); wblit(PALM, 960, 132, true); wblit(PALM, 1035, 136); wblit(PALM, 1560, 134); wblit(PALM, 1900, 130, true); wblit(PALM, 1965, 136);
+  wblit(PALM, 534, 134); wblit(PALM, 960, 132, true); wblit(PALM, 1035, 136); wblit(PALM, 1560, 134); wblit(PALM, 1900, 130, true); wblit(PALM, 1965, 136);
   wblit(UMBRELLA, 1050, 150); wblit(UMBRELLA, 1620, 152); wblit(UMBRELLA, 1830, 151);
   // parked vehicles: buggies pull off on the shoulder, bikes rack on the apron
   for (const c of crabs) {
@@ -1230,8 +1246,8 @@ function drawNight() {
   if (dark > 0.5) {
     for (const c of crabs) {
       if (c.dayState !== "home" || c.hidden) continue;
-      if (c.p.homeless) wrect(SHELTER_X + 22, LOT_BOTTOM - SHELTER2.h + 9, 8, 8, [255, 216, 96]);
-      else wrect(HOUSE_XS[c.p.house] + 8, LOT_BOTTOM - HOUSES2[0].h + 14, 10, 7, [255, 216, 96]);
+      if (c.p.homeless) { wrect(SHELTER_X + 8, 130, 8, 6, [255, 216, 96]); wrect(SHELTER_X + 50, 130, 8, 6, [255, 216, 96]); }
+      else wrect(HOUSE_XS[c.p.house] + 38, 132, 10, 8, [255, 216, 96]);
     }
     if (dark > 0.65) {
       for (let i = 0; i < 6; i++) {
@@ -1589,6 +1605,7 @@ function frame(now) {
     if (c.dayState === "toWork" || c.dayState === "toHome") updateCommute(c, dt);
     else if (c.dayState === "toErrand" || c.dayState === "errand") updateErrand(c, dt);
     else if (c.dayState === "working") updateKitchen(c, dt);
+    else if (c.dayState === "home") updateHome(c, dt);
     maybeQuip(c, dt);
   }
   if (followIdx >= 0 && crabs[followIdx]) {
