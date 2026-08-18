@@ -64,9 +64,13 @@ compounds or collapses → the landlord collects at 20:00 either way.
   Esc closes. Works for every crab, crew and townsfolk alike.
 
 ### Verified balance (8 seeds, tools/headless.mjs)
-- Baseline (buy nothing): **0/8 survive, evicted day 9–14, median 11**
-  (tightened slightly when strict retail + sick mobility landed; same shape).
-- Hire-and-seat strategy (`--buy chef,table`): **2/6 alive at day 40**.
+- Baseline (buy nothing): **0/8 survive, evicted day 9–20, median 11**
+  (median unchanged through the needs-drag rework; at 16 seeds the tails
+  always ran 6–20+, the old 9–14 was an 8-seed snapshot).
+- Hire-and-seat strategy (`--buy chef,table`): escape is seed-lucky —
+  measured 1/6 alive at day 40 pre-rework (the documented 2/6 had already
+  drifted), 0/6 with a day-31 near-miss after. The suite's growth gate
+  (1 of 4 seeds escapes, or median eviction > 18) is the guard that counts.
 - Constants: shack rent 230, wage 22, house rent 10, hires 60×2.0,
   showers 5/10, fish pay 13. **Rent is charged from night one** — you open
   with $150 in your pocket and have to trade your way to the first payment.
@@ -83,13 +87,17 @@ compounds or collapses → the landlord collects at 20:00 either way.
   re-clean, so cheap showers matter); buy *timing* beat buy prices.
 
 ## Tools (the load-bearing part)
-- `node tools/suite.mjs` — **20 scenarios, must stay green before any push.**
+See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
+vm — never fork game logic into tools/) and perf expectations live there.
+- `node tools/suite.mjs` — **21 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, sick-crab mobility,
   disease infection/cure/mortality, showers turnover, NPC economics,
-  save/load, no-inflation wallet bounds.
-- `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]` — CLI.
+  save/load, no-inflation wallet bounds, needs-drag visibility.
+- `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
+  [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
+  (default cores−1, deterministic either way, ~3x faster on 4 seeds).
   Its buyer models a sensible player: hourly purchase checks, reserve = cost +
   tonight's bill + cushion, saves (doesn't skip) for the big unlocks, rehires
   after a death, and only staffs a side business if the shack keeps shift
@@ -109,6 +117,16 @@ compounds or collapses → the landlord collects at 20:00 either way.
   100 / 250 of a dish they get the knack (−5%), get famous (−12%), or master
   it (−20% prep time) for that dish only, announced in a toast and shown on
   their follow card. Rewards watching a specific crab grow into a specialist.
+- **Needs drive performance** (`crabEff` in game.js): a well-kept crab works
+  at 1.0; hunger past 0.3 costs up to −18%, dirt past 0.6 up to −6% (floor
+  0.76). Applies to station prep, stall cleaning, and — gently, with a kicker
+  below eff 0.85 — kitchen hustle speed. Pinned-needy crews serve ~25–45%
+  fewer dishes over 5 days than well-kept ones (suite: "needs bite").
+  Surfaced as a PACE % chip on the follow card and a "WORKING AT N%" dossier
+  row when impaired. Fishing casts are deliberately NOT coupled: the whole
+  town eats the catch, and any measurable drag there re-tilts the calibrated
+  economy (tried at full and half weight; both broke the knife-edge one-crab
+  states). Tune only against the matrices + suite, never by feel.
 
 ## Backlog (rough priority)
 1. **Business settings** — per-business config (staff-meal pricing
