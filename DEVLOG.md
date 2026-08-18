@@ -27,6 +27,10 @@ crabs learned to actually get IN the shower, and somebody bought a boat.
   day saves up the $75 in about three weeks: in three of four simulated
   towns, somebody moved aboard organically between day 23 and 25. Nobody
   told them to. Landlubbers remain puzzled.
+
+  ![SALTY and DRIFT asleep aboard their boats, cabin lamps lit](devlog/img/2026-08-18-night-boats.png)
+  *Day 25, half past midnight. SALTY and DRIFT, asleep on the water they
+  work. The cottage below the pier sleeps empty — they didn't want it.*
 - **Tired crabs work like tired crabs.** Hunger and grime now visibly slow a
   crab down — the dossier will tell you a neglected crew crab is WORKING AT
   82%, and it is not lying. Needy crews measured 23–47% slower. Feed your
