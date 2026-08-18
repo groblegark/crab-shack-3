@@ -18,7 +18,7 @@ const BUS_STOPS = [163, 660, 1180];
 const BUS_TERMINUS = [100, 1240];
 const STATION_BOTTOM = 152;
 const QUEUE_DX = 13, QUEUE_MAX = 4;
-const SHELTER_X = 444, MOVE_IN_COST = 25;
+const SHELTER_X = 444, MOVE_IN_COST = 35;
 const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
 
 // ---------------------------------------------------------------- businesses
@@ -106,6 +106,19 @@ const BIZ = {
 // ---------------------------------------------------------------- owners
 // The simulation layer: every business has an owner with their own till.
 // The player's till IS `coins`; peer owners (NPCs) keep theirs here.
+//
+// MONEY FLOWS (the inflation audit - keep this current):
+//   tourist sales/tips/table tips  -> business owner's till   (outside money IN)
+//   ingredient costs               <- business owner's till   (money DESTROYED)
+//   crew register purchases        crew wallet -> owner till  (recycles wages)
+//   staff meals (retail)           crew wallet -> shack till; till pays ingredients
+//   crew shower fees               crew wallet -> SUDSY till  (leaves player loop)
+//   SUDSY's own meals              SUDSY wallet -> player till
+//   wages (nightly)                player till -> crew wallets
+//   crew house rent (nightly)      crew wallet -> DESTROYED (the town keeps it)
+//   shack/biz rents (nightly)      owner till  -> DESTROYED (Mr. Pincherton)
+// Crew wallets are fed only by wages; every sink above must keep the
+// steady-state wallet bounded (see suite: "no wallet inflation").
 const OWNERS = { sudsy: { id: "sudsy", name: "SUDSY", till: 200 } };
 const bizOwner = (b) => BIZ[b].owner || "player";
 function ownerFunds(b) { return bizOwner(b) === "player" ? coins : OWNERS[bizOwner(b)].till; }
@@ -181,7 +194,7 @@ let camX = 1180, followIdx = -1, tab = "crew";
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let screen = "title", hasSave = false, wiping = false;
 function newGame() { wiping = true; localStorage.removeItem(SAVE_KEY); location.reload(); }
-const CRAB_WAGE = 18, HOUSE_RENT = 8;
+const CRAB_WAGE = 28, HOUSE_RENT = 12;
 function rentAmount() { return day <= 1 ? 0 : BIZ.shack.rent; }   // shack lease (legacy name)
 function totalRent() {   // the PLAYER's nightly property bill
   if (day <= 1) return 0;
@@ -609,7 +622,7 @@ function updateSchedule(c, dt) {
   const townAwake = shackOpen() || (tmin >= 20 * 60 && tmin < 23 * 60) || (tmin >= 5.5 * 60 && tmin < 8 * 60);
   if (c.dayState === "home" && townAwake && c.errandCd <= 0 && errandWindow) {
     const e = pickErrand(c);
-    if (e && e.selfCook) startSelfCook(c);
+    if (e && e.selfCook) startSelfCook(c, e);
     else if (e && !e.selfCook && shackOpen()) startErrand(c, e);
     else c.errandCd = 2;
   }
@@ -619,10 +632,16 @@ function updateSchedule(c, dt) {
 function bizStaffed(b) { return bizUnlocked(b) && allCrabs().some(k => k.duty && !k.pendingOff && k.workBiz === b); }
 function pickErrand(c) {
   const staffed = bizStaffed;
-  // restaurant staff privilege: cook your own meal when the kitchen is unstaffed
+  // restaurant staff privilege: cook your own meal when the kitchen is unstaffed.
+  // Charged at RETAIL, same as the register.
+  // TODO: business settings - staff-meal pricing (retail/at-cost/free) becomes a per-business setting
   if ((c.p.hunger || 0) >= 0.5 && !staffed("shack") && c.p.job === "shack" && !c.p.npc) {
-    const cost = INGREDIENT_COST.fruit;   // staff meal: cheapest ingredients, at cost
-    if (c.p.wallet >= cost + 1) return { selfCook: true };
+    const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= r.pay + 2);
+    if (affordable.length) {
+      affordable.sort((a, b) => a.pay - b.pay);
+      const r = c.p.wallet > 40 ? affordable[(Math.random() * affordable.length) | 0] : affordable[0];
+      return { selfCook: true, recipe: r };
+    }
   }
   if ((c.p.hunger || 0) >= 0.5 && staffed("shack")) {
     const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= r.pay + 2);
@@ -647,17 +666,22 @@ function pickErrand(c) {
   }
   return null;
 }
-function startSelfCook(c) {
-  c.dayState = "selfCook"; c.cookStep = 0;
+function startSelfCook(c, e) {
+  c.dayState = "selfCook"; c.cookStep = 0; c.cookRecipe = e.recipe;
   const s0 = stationSpot("shack", "crate", 0); setT(c, s0.x, s0.y);
 }
 function updateSelfCook(c, dt) {
-  if (c.cookStep === 0) {                      // to the crate
+  if (c.cookStep === 0) {                      // to the crate: ring yourself up first
     if (routedStep(c, crabMove(c), dt)) {
-      const cost = INGREDIENT_COST.fruit;
-      c.p.wallet = Math.max(0, c.p.wallet - cost);
-      coins += cost;                            // covers the pantry: net zero for the house
-      c.carrying = "fruit"; c.cookStep = 1; c.workT = 0.6;
+      const r = c.cookRecipe;
+      c.p.wallet = Math.max(0, c.p.wallet - r.pay);
+      creditBiz("shack", r.pay, c.x, FLOOR_Y - 40);          // retail into the till
+      debitBiz("shack", INGREDIENT_COST[r.raw], c.x, FLOOR_Y - 34);  // till buys the ingredients
+      if (window._stats) {
+        window._stats.staffMealPaid = (window._stats.staffMealPaid || 0) + r.pay;
+        window._stats.staffMealCost = (window._stats.staffMealCost || 0) + INGREDIENT_COST[r.raw];
+      }
+      c.carrying = r.raw; c.cookStep = 1; c.workT = 0.6;
     }
   } else if (c.cookStep === 1) {               // grab
     c.workT -= dt;
@@ -1618,7 +1642,7 @@ function drawIntro() {
     ["RENT: $" + BIZ.shack.rent + ", NIGHTLY AT 20:00", [170, 50, 50]],
     ["YOUR FIRST NIGHT IS FREE", [40, 130, 60]],
     ["CREW WAGES: $" + CRAB_WAGE + " EACH, NIGHTLY", [70, 70, 90]],
-    ["CREW PAY THEIR OWN HOME RENT", [70, 70, 90]],
+    ["CREW PAY THEIR OWN $" + HOUSE_RENT + " HOME RENT", [70, 70, 90]],
     ["THE LAUNDROMAT? $" + UPS.cleaners.base + ", RENT $" + BIZ.cleaners.rent, [70, 70, 90]],
     ["MISS RENT AND I TAKE THE SHACK", [170, 50, 50]],
   ];
