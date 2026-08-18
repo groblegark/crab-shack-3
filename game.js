@@ -278,7 +278,8 @@ const IMPORTS = {
   power: { name: "POWER", unit: "KWH", price: 2 },
 };
 let trade = { total: { fish: 0, corn: 0, water: 0, power: 0 },
-  day: { fish: 0, corn: 0, water: 0, power: 0 }, spent: 0 };
+  day: { fish: 0, corn: 0, water: 0, power: 0 }, spent: 0,
+  landedDay: 0, landed: 0 };   // pier production - NOT an import
 function tradeImport(kind, qty, dollars) {
   trade.total[kind] += qty; trade.day[kind] += qty;
   if (dollars) trade.spent += dollars;
@@ -1133,7 +1134,7 @@ function updateFishing(c, dt) {
     const aboard = c.p.boat != null;
     c.castT = aboard ? 9 + Math.random() * 13 : 14 + Math.random() * 18;
     const haul = aboard && Math.random() < 0.2 ? 2 : 1;
-    townCatch += haul;
+    townCatch += haul; trade.landed += haul; trade.landedDay += haul;
     c.p.wallet += 2 * haul;   // the market pays small money for each landed fish
     popText(haul > 1 ? "DOUBLE HAUL!" : "CATCH!", c.x - 4, c.y - 24, [140, 220, 255]);
     sfx.splash();
@@ -2571,14 +2572,16 @@ function drawJobBoard() {
     smallText(ctx, "$" + j.wage + "/DAY - SEE " + OWNERS[bizOwner(j.biz)].name + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 9;
   }
   {
-    ly += 2; smallText(ctx, "TRADE LEDGER - IMPORTS, TODAY / ALL TIME", x + 6, ly, [58, 42, 38]); ly += 8;
+    ly += 2; smallText(ctx, "TRADE LEDGER, TODAY / ALL TIME", x + 6, ly, [58, 42, 38]); ly += 8;
+    smallText(ctx, "FISH LANDED OFF THE PIER", x + 6, ly, [40, 150, 70]);
+    smallText(ctx, trade.landedDay + " / " + trade.landed, x + 126, ly, [40, 150, 70]); ly += 7;
     for (const kind of Object.keys(IMPORTS)) {
       const im = IMPORTS[kind];
-      smallText(ctx, im.name, x + 6, ly, [90, 90, 105]);
-      smallText(ctx, trade.day[kind] + " / " + trade.total[kind] + " " + im.unit + " AT $" + im.price, x + 40, ly, [110, 110, 130]);
+      smallText(ctx, im.name + (kind === "fish" ? " SHIPPED IN" : ""), x + 6, ly, [90, 90, 105]);
+      smallText(ctx, trade.day[kind] + " / " + trade.total[kind] + " " + im.unit + " AT $" + im.price, x + 126, ly, [110, 110, 130]);
       ly += 7;
     }
-    smallText(ctx, "SPENT ON IMPORTS: $" + Math.round(trade.spent) + " - FISH ONLY SO FAR", x + 6, ly, [140, 110, 40]); ly += 9;
+    smallText(ctx, "SHIPPED-IN FISH ONLY WHEN THE PIER RUNS DRY", x + 6, ly, [140, 110, 40]); ly += 9;
   }
   const staff = npcs.filter(c => c.p.employer);
   if (staff.length) {
@@ -2646,7 +2649,7 @@ function frame(now) {
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
     tmin -= 1440; day++; townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
-    trade.day = { fish: 0, corn: 0, water: 0, power: 0 };
+    trade.day = { fish: 0, corn: 0, water: 0, power: 0 }; trade.landedDay = 0;
     today = newDayLog(); today.repStart = rep;
   }
   if (ffSleep && (gameOver || screen !== "play" || (day >= ffSleepDay && tmin >= 6.5 * 60 && tmin < 12 * 60)))
