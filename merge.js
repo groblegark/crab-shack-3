@@ -15,10 +15,11 @@
   // Touch + phone-sized, decided once at boot. On a desktop this object still
   // exists but every entry point answers "not mine", so behaviour is unchanged.
   const MOBILE = (function () {
-    const touch = (navigator.maxTouchPoints || 0) > 0 ||
-      (window.matchMedia && matchMedia("(pointer: coarse)").matches);
-    const small = Math.min(innerWidth, innerHeight) < 620;
-    return touch && small;
+    // primary input is a finger (phones AND iPads) - or any touch on a small screen.
+    // Touchscreen laptops report a fine primary pointer, so desktops stay unchanged.
+    const coarse = window.matchMedia && matchMedia("(pointer: coarse)").matches;
+    const touch = (navigator.maxTouchPoints || 0) > 0;
+    return coarse || (touch && Math.min(innerWidth, innerHeight) < 620);
   })();
 
   // ---------------------------------------------------------------- content
