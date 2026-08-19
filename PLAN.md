@@ -27,6 +27,17 @@ compounds or collapses → the landlord collects at 20:00 either way.
   shipped note below.) Each: stations, recipes, queue, rent, owner.
 - **Owner layer**: `OWNERS` registry + `creditBiz`/`debitBiz`/`ownerFunds`.
   The player's till IS `coins`. NPC revenue never touches player books.
+  The registry GROWS: `BIZ[k].owner` is a key into it, `null` means nobody
+  owns the lot (closed, on the market), and a crab who buys a business gets a
+  new entry. Owner changes, one owner with several businesses (one till,
+  strikes counted per lease) and an owner with none all fall out of that.
+- **Business failure, FOR SALE and succession** (`SALE_CFG` + the
+  `business failure & succession` block in game.js): a peer owner who misses
+  three settlements in a row CLOSES - shutters and a priced FOR SALE sign in
+  the world, no tourists, no errands, staff and owner-operator laid off to the
+  pier. Any crab with the savings buys it (the player through the shopfront's
+  BUY chip); a new NPC owner runs the same policy tables, because those tables
+  key on the BUSINESS. See the feature entry below for the numbers.
 - **Crabs**: personas (name, trait, commute mode, accessory, shift, wallet,
   house), needs FED/THIRST/CLN/FUN/SPA, homes they live inside, the shelter for the
   homeless, disease + contagion + death with beach memorials.
@@ -186,14 +197,13 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **69 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **88 scenarios, must stay green before any push.**
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
   distributions per housing tier. Paired arms per seed: the care ladder live
   vs collapsed back onto the pre-seam CARED odds *inside the same build*, plus
   a RUNG arm (a housed crab rolled at cot odds) that isolates the housing rung
   on an identical RNG stream. This is where the cared-seam numbers in the
   labor-policy bullet come from.
-- `node tools/suite.mjs` — **73 scenarios, must stay green before any push.**
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
@@ -229,6 +239,11 @@ vm — never fork game logic into tools/) and perf expectations live there.
   a real cooldown, no thrash over a fortnight), SUDSY running the same
   policy with an OUT SICK placard and no panic posting, census derivation +
   every sort and filter, and the labor-settings save/load roundtrip.
+  Plus business failure & succession: the three-strike closure (layoffs, no
+  tourists, no errands, no takings), a saved-up crab buying the shop and
+  trading again under the new owner's policies, the player's shopfront buy
+  path end to end, a 20-day closure soak with nobody able to afford it, and
+  the ownership + FOR SALE market save/load roundtrip.
 
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
   [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
@@ -245,6 +260,120 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- **Business failure, FOR SALE and succession** (Matt's fault report, built
+  2026-08-19, worktree — a directed build during the closing act, not a new
+  front): *"sudsy goes bankrupt every day.. the shop needs to close till some
+  crab can buy it then, rite?"* He was right, and it measured: seed 7 kept
+  alive 12 days, SUDSY's till sat at $0 for **1861 of 4215 sampled ticks**
+  and her shop spent **781 ticks DARK**, bankrupt twice, debt written off each
+  time. A zombie: a permanently half-shuttered shower house and nothing ever
+  changed.
+  - **FAILURE is the credit machinery, not a new rule.** `settleCreditLine`
+    now REPORTS `missedMin` (behaviour-identical for the player: `ok` is
+    unchanged, the player's cliff is still BANKRUPT). At settlement a peer
+    owner's lease that misses the minimum — or can't even draw the night's
+    bill — is a **STRIKE** (`bizStrike[biz]`, per LEASE so an owner with two
+    shops loses only the one that failed). `SALE_CFG.STRIKES = 3` in a row and
+    the shutters go up; a single clean settlement wipes the slate. The debt is
+    no longer forgiven and `NPC_DARK_NIGHTS` is retired to a legacy-save path.
+    Toasts name the countdown ("SUDSY MISSED THE SHWR RENT - 2 NIGHTS TO PUT
+    IT RIGHT").
+  - **CLOSING is real.** `BIZ[k].owner = null`. `bizDark` reads it, so the
+    existing gates do the work with no new special cases: no tourist spawns,
+    no errand dispatch (`bizStaffed`), "IT'S SHUT" on a right-click order, no
+    job-board postings, no hours/labor policy. Staff **and the
+    owner-operator** are laid off by `layOff()` — NPCs to the pier with a
+    fishSpot (`p.fisher = true`, the town's default profession) and a way back
+    via the job board, crew back to the player's kitchen. They still pay their
+    $10 house rent tonight and ride the same shelter ladder as everyone. Named
+    in the toast and in the day report ("SHWR CLOSED - FOR SALE $180",
+    "SUDSY, DRIFT LAID OFF - BACK TO THE PIER").
+  - **THE PRICE IS LEGIBLE**, fixed at listing, every term checkable on the
+    sign: `rent x SALE_CFG.RENT_NIGHTS (3)` (the lease) + `SALE_CFG.FIXTURE
+    ($15) x every station spot, stall and table` (the kit) + `GOODWILL_DAYS
+    (2) x the shop's recent daily takings` (from a rolling 3-day `bizTake`
+    book, not a guess), floored at two nights' rent. SUDS SHOWERS prices at
+    **$180** dead (105 lease + 75 fixtures + $0 goodwill) and **$194-210**
+    when it was still taking money on the way down.
+  - **SUCCESSION.** `runSuccession()` at settlement: book the day's takings,
+    sweep any business whose owner has left the town onto the market (**the
+    death seam**, one loop — an owner who dies leaves a business, not an
+    orphan), then clear the market to the deepest pocket who can pay
+    `price + SALE_CFG.RESERVE ($30, three nights of house rent — nobody buys
+    their way onto a cot)`. Eligible: **any NPC crab** — a fisher, a hired
+    hand, an ex-owner, someone who already owns a shop (they just add a lease
+    to the same till). The player's own crew are under contract with the
+    player and stay out of the pool; the player buys for themselves.
+  - **The money never inflates.** The buyer pays the price out of savings;
+    `FLOAT_FRAC 0.5` of it becomes the shop's OPENING TILL (stock, soap,
+    change in the drawer) and the rest is the lease transfer Mr. Pincherton
+    pockets — destroyed, exactly like rent. The player's till IS `coins`, so
+    their float never leaves their pocket: they must HOLD the full asking
+    price, and their real cost is the transfer (half). Documented asymmetry,
+    not an accident.
+  - **A new owner is data.** `OWNERS[slug(name)]` is minted, `p.owner`/`p.job`
+    /`shift D` set, and they inherit `HOURS_POLICY` + `autoLabor` + `sickPol`
+    **because those tables key on the BUSINESS, not on SUDSY**. The dossier
+    reads "RUNS SUDS SHOWERS" (fixed: an owner who is also a fisher used to
+    read "FISHES OFF THE PIER"). All of it — the registry, who holds which
+    lease, `bought`, `market`, `bizTake`, `bizStrike` — roundtrips save/load,
+    and an old save opens with SUDSY behind her own counter.
+  - **UI**: boards nailed across the shopfront + a **FOR SALE $N** placard and
+    a **BUY IT** chip, painted after the y-sorted pass so they sit in front of
+    the stalls; a BUSINESS FOR SALE block on the TOWN JOB BOARD card (price,
+    why it closed, days on the market, "ANY CRAB WITH THE SAVINGS CAN TAKE IT
+    ON"); and a FOR SALE line on the management screen. The player's buy is a
+    two-tap arm on the chip (`tapSaleChip` — the click listener only decides
+    which chip was hit, so the suite drives exactly what a tap drives).
+  - **Balance**: baseline 30d x 8 **0/8, 10,11,13,13,14,14,15,16 median 14**
+    (before: 11,11,13,13,14,14,15,16, median 14 — one seed moved a day).
+    Growth `--buy chef,table` 40d x 8: **3/8 alive, 7,9,15,20,39,41,41,41**
+    (before 4/8, 7,9,15,22,41,41,41,41) — one marginal seed dies on day 39 of
+    40. Documented, not tuned away, per standing policy.
+  - **Measured knock-on** (6 seeds x 40d, kept-alive chef+table town, before
+    vs after): mean dirt across all crabs **0.808 -> 0.809**, showers served
+    **91 -> 91**, infections **17.67 -> 17.67**, dirt-caused illness
+    **15.83 -> 15.67**, NPC spend at the player's shack **$1022 -> $1110**,
+    guests served **679 -> 703**, lifetime takings **$12946 -> $13412**. The
+    headline finding: **the zombie was already contributing nothing.** A shop
+    whose till sat at $0 for 44% of the run and went dark on a rota barely
+    washed anybody; closing it honestly costs the town's hygiene nothing
+    measurable, and the laid-off owner becomes a FISHER who spends her catch
+    money at the player's counter — the player's takings go slightly UP. (The
+    town's dirt is high either way; a free public water tap is the other
+    agent's answer to that, and this build deliberately does not build a
+    second one.)
+  - **The player can buy it and it pays**: a crew-staffed SUDS SHOWERS takes
+    **$161-184/day** against its $35 rent (seed 77, days 3-5), so the $210
+    asking price (net $105 to the player) pays back in a day.
+  - **Suite 82 -> 88.** New: the three-strike closure + layoff + stops
+    trading; a saved-up crab buying it and the shop trading again under the
+    new owner's policies; the player's shopfront buy path (refusal, arm,
+    sign, rent bill, crew staffing, takings); a 20-day closure soak with
+    wallets clamped under the asking price (no wedge, no frozen crabs, the
+    town keeps trading); and the ownership + market save/load roundtrip in
+    three arms (listed / sold to a crab / bought by the player, plus an old
+    save with none of the keys); plus the death seam — an owner deleted from
+    `npcs` mid-run leaves the shop listed "gone", not orphaned.
+    **Re-pointings (2, receipts in the
+    scenarios):** `credit: balance, flags and NPC lines roundtrip save/load`
+    — its "pre-credit save" fixture must now also delete the `owners`
+    registry, or it isn't the old save it claims to be; `cpu hours: SUDSY's
+    policy converges and never thrashes` — seed 1337's SUDSY now FAILS on day
+    9, and a shop that is out of business cannot demonstrate 30 days of hours
+    policy, so she gets the same solvency prop the player already gets in that
+    scenario.
+  - **Story beat (organic, reproducible)**: `node tools/headless.mjs --days 60
+    --seeds 1 --seedbase 7 --buy chef,table` (seed 10696). **Day 19**: SUDS
+    SHOWERS misses its third lease. SUDSY loses the shop she owned outright —
+    and takes her hired hand **DRIFT** down with her; both back to the rail.
+    The town has no shower house for 25 days. **Day 44**: **SHELLDON**, a
+    fisher who came in off the morning bus, has $210 saved and buys it for
+    $180. The shutters come off and the stalls run again — under a fisher.
+    (Seed 6685 tells the same story with **DRIFT** buying it on day 54, after
+    SUDSY's day-31 failure.) Shots: `forsale-shopfront`, `forsale-jobboard`,
+    `salty-owns-showers`, `salty-dossier-owner`, `player-bought-showers`,
+    `manage-forsale-line` under shots/.
 - **Labor policy suite: sick days + overtime + scheduling + town census**
   (shipped 2026-08-18, worktree — realizes the "Labor policy suite" and
   "Town census" feature requests and the parked **Overtime** backlog entry):
@@ -611,11 +740,22 @@ and sibling nodes) plus business settings, more peer owners, the
 player-avatar crab, staff-bused service and NPC eviction are the CS4 seed
 bed, not a CS3 backlog. The devlog capstone (73f209c) closes the serial.
 
+REOPENED BY DIRECTIVE (2026-08-19): Matt watched his town and filed a fault
+— *"sudsy goes bankrupt every day.. the shop needs to close till some crab
+can buy it then, rite?"* — which is a QUALITY complaint about a zombie, not
+a new front. Business failure / FOR SALE / succession landed against it (see
+the feature entry above), alongside a free public water tap and NPC
+mortality from sibling agents.
+
 ## DEFERRED TO CS4 (decided 2026-08-18, not forgotten)
 Both belong to Matt's "all crabs should be equal" directive, and both were
 deferred deliberately as design questions rather than bugs:
 - **NPC mortality** — NPCs still cannot die (the `!k.p.npc` guard in the
   settlement illness block). Also why a sick NPC can linger indefinitely.
+  **Seam ready (2026-08-19)**: whoever lands mortality does NOT need to touch
+  the owner layer. `runSuccession()` sweeps at every settlement — a business
+  whose owner is no longer in `allCrabs()` goes on the market with reason
+  "gone" instead of being orphaned, and the same buyers turn up for it.
 - **Wage asymmetry** — NPC_WAGE 20 vs CRAB_WAGE 23.
 These are the last places the sim treats some crabs as more real than
 others. Tomorrow is the day for that.
@@ -653,12 +793,17 @@ unit economics.
    original idea: per-business PRICES and staffing rules.
 2. **More peer owners moving in** — the owner layer makes this content, not
    surgery: an OWNERS entry + BIZ entry + an NPC crab. Fish market buying
-   wholesale off the pier is the natural next one.
+   wholesale off the pier is the natural next one. **Half-shipped 2026-08-19**:
+   succession already mints peer owners at runtime (a fisher buys the failed
+   shower house and the registry grows), so this is now only about NEW LOTS.
 3. **Player-avatar crab** — make `owner: "player"` also a walkable crab.
 4. **Fishing expansion** — hire fishers directly; fired/unhired crew return to
    the pier; weather/catch variance; quotas; a boat (see trade horizon T4).
-5. **NPC eviction / move-outs** — NPC owners currently skip rent when short
-   (TODO in the settlement block); no mortality for NPCs either.
+5. ~~**NPC eviction / move-outs**~~ — the rent half **shipped 2026-08-19**:
+   an NPC owner no longer skips rent when short. They draw the line exactly as
+   the player does, and three missed settlements CLOSE the business and put it
+   on the market (see the failure/succession entry). Still open: NPC mortality
+   (a CS4 item — the succession block leaves it a one-loop seam).
 6. Staff-bused table service for a fancier restaurant tier.
 7. Cosmetics — mostly **shipped**: pier plank art (boardwalk over the east
    break, pilings, railing, night lamp, perched gull), closed-eye sleep

@@ -202,6 +202,9 @@ function staffMealCharge(b, r) {   // what a selfCooking staffer rings up
 // failure & succession block below).
 const OWNERS = { sudsy: { id: "sudsy", name: "SUDSY", till: 200, credit: 0, darkT: 0 } };
 const bizOwner = (b) => BIZ[b].owner === null ? null : (BIZ[b].owner || "player");
+// never let a draw path throw on an owner who has left the registry (sold up,
+// or - the death seam - left the town between one frame and the next settlement)
+const ownerName = (id) => id === "player" ? "YOU" : (OWNERS[id] && OWNERS[id].name) || "NOBODY";
 function ownerFunds(b) {
   const o = bizOwner(b);
   return o === "player" ? coins : o && OWNERS[o] ? OWNERS[o].till : 0;   // an unowned shop has no till
@@ -3844,23 +3847,9 @@ function drawBusiness(key) {
       smallText(ctx, "MANAGE", mx + 3 - camX, 107, [255, 255, 255]);
   }
   if (forSale(key)) {
-    // THE SHUTTERS: boards nailed across the shopfront, and the sign that
-    // makes the opportunity legible from the street - price and all.
-    for (let i = 0; i < 3; i++) {
-      wrect(b.x0 + 5, 130 + i * 11, b.x1 - b.x0 - 10, 3, [176, 132, 84]);
-      wrect(b.x0 + 5, 133 + i * 11, b.x1 - b.x0 - 10, 1, [128, 92, 56]);
-    }
-    const price = salePrice(key), lbl = "FOR SALE  $" + fmt(price);
-    const pw = textWidth(lbl) + 12, px = (b.x0 + b.x1) / 2 - pw / 2;
-    wrect(px, 118, pw, 13, [30, 20, 36]);
-    wrect(px + 1, 119, pw - 2, 11, [255, 244, 210]);
-    if (px + pw - camX > 0 && px - camX < W)
-      text(ctx, lbl, px + 6 - camX, 121, [180, 60, 40]);
-    const r = saleChipRect(key), armed = saleArm === key;
-    wrect(r.x, r.y, r.w, r.h, [30, 20, 36]);
-    wrect(r.x + 1, r.y + 1, r.w - 2, r.h - 2, coins >= price ? (armed ? [255, 200, 90] : [96, 200, 120]) : [150, 140, 140]);
-    if (r.x - camX > -r.w && r.x - camX < W)
-      smallText(ctx, armed ? "TAP AGAIN" : "BUY IT", r.x + 4 - camX, r.y + 3, [30, 20, 36]);
+    // the shutters, the placard and the BUY chip are painted LAST (see
+    // drawForSaleSigns) - boards nailed across a shopfront go in front of the
+    // furniture, not behind the stalls
   } else if (!bizOpenNow(key)) {
     wrect(signX + signW / 2 - 23, 118, 46, 11, [30, 20, 36]);
     text(ctx, "CLOSED", signX + signW / 2 - 18 - camX, 120, [255, 120, 120]);
@@ -3872,6 +3861,34 @@ function drawBusiness(key) {
     wrect(signX + signW / 2 - 25, 79, 50, 12, [30, 20, 36]);
     wrect(signX + signW / 2 - 24, 80, 48, 10, [255, 250, 235]);
     text(ctx, lbl, signX + signW / 2 - textWidth(lbl) / 2 - camX, 82, sick ? [120, 150, 90] : [40, 110, 190]);
+  }
+}
+
+// THE SHUTTERS. Painted after the whole y-sorted pass: boards nailed across a
+// closed shopfront belong in FRONT of its stalls and counters, and the
+// placard is the one thing in the scene that has to be readable from the
+// street - price and all, with the BUY chip the player taps.
+function drawForSaleSigns() {
+  for (const key of saleList()) {
+    if (!bizUnlocked(key)) continue;
+    const b = BIZ[key];
+    if (b.x1 - camX < 0 || b.x0 - camX > W) continue;
+    for (let i = 0; i < 3; i++) {
+      wrect(b.x0 + 5, 130 + i * 12, b.x1 - b.x0 - 10, 3, [176, 132, 84]);
+      wrect(b.x0 + 5, 133 + i * 12, b.x1 - b.x0 - 10, 1, [128, 92, 56]);
+    }
+    const price = salePrice(key), lbl = "FOR SALE  $" + fmt(price);
+    const pw = textWidth(lbl) + 12, px2 = Math.round((b.x0 + b.x1) / 2 - pw / 2);
+    wrect(px2, 116, pw, 13, [30, 20, 36]);
+    wrect(px2 + 1, 117, pw - 2, 11, [255, 244, 210]);
+    if (px2 + pw - camX > 0 && px2 - camX < W)
+      text(ctx, lbl, px2 + 6 - camX, 119, [180, 60, 40]);
+    const r = saleChipRect(key), armed = saleArm === key;
+    wrect(r.x, r.y, r.w, r.h, [30, 20, 36]);
+    wrect(r.x + 1, r.y + 1, r.w - 2, r.h - 2,
+      coins >= price ? (armed ? [255, 200, 90] : [96, 200, 120]) : [150, 140, 140]);
+    if (r.x - camX > -r.w && r.x - camX < W)
+      smallText(ctx, armed ? "TAP AGAIN" : "BUY IT", r.x + (armed ? 3 : 8) - camX, r.y + 3, [30, 20, 36]);
   }
 }
 
@@ -4481,8 +4498,11 @@ function drawDossier() {
     if (key) dossierHit[key] = { x: x, y: ly - 1, w: w2, h: 9 };
     ly += 9;
   };
+  // OWNING comes first: a fisher who bought a shop is a shopkeeper now, even
+  // though they keep their sea legs (and their berth)
   const doesTxt = p.npc
-    ? (p.employer ? "WORKS AT " + BIZ[p.job].name + " FOR " + OWNERS[p.employer].name
+    ? (p.owner && BIZ[p.job] ? "RUNS " + BIZ[p.job].name
+      : p.employer && BIZ[p.job] && OWNERS[p.employer] ? "WORKS AT " + BIZ[p.job].name + " FOR " + OWNERS[p.employer].name
       : p.fisher ? (p.boat != null ? "FISHES OFF THE " + BOAT_NAMES[p.boat] : "FISHES OFF THE PIER")
       : "RUNS " + BIZ[p.job].name)
     : "WORKS " + BIZ[p.job].name;   // short verb: leave room for TAP: REASSIGN
@@ -4969,7 +4989,7 @@ function drawCensus(R) {
     smallText(ctx, p.name.slice(0, 9), r.x + 12, ry + 1, [40, 30, 40]);
     const jobTag = p.job === "fishing" ? "PIER" : BIZ[p.job].short;
     const boss = p.owner ? "OWNER" : p.job === "fishing" ? "SELF"
-      : p.employer ? OWNERS[p.employer].name : "YOU";
+      : p.employer ? ownerName(p.employer) : "YOU";
     smallText(ctx, jobTag + "/" + boss, r.x + 52, ry + 1, [70, 90, 130]);
     const wTxt = "$" + fmt(Math.max(0, Math.round(p.wallet)));
     smallText(ctx, wTxt, r.x + 136 - smallTextWidth(wTxt), ry + 1, p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
@@ -5011,7 +5031,7 @@ function drawJobBoard() {
       continue;
     }
     smallText(ctx, "HELP WANTED: " + BIZ[j.biz].name, x + 6, ly, [40, 30, 40]); ly += 7;
-    smallText(ctx, "$" + j.wage + "/DAY - SEE " + OWNERS[bizOwner(j.biz)].name + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 9;
+    smallText(ctx, "$" + j.wage + "/DAY - SEE " + ownerName(bizOwner(j.biz)) + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 9;
   }
   {   // BUSINESSES FOR SALE: the board carries the town's opportunities, not
       // just its vacancies. Price, why it closed, and how long it has stood
@@ -5060,7 +5080,7 @@ function drawJobBoard() {
     ly += 2; smallText(ctx, "WHO WORKS FOR WHOM", x + 6, ly, [58, 42, 38]); ly += 8;
     for (const c of staff.slice(0, 4)) {
       if (ly > y + h2 - 16) break;   // the sparkline ate a row or two - keep inside the card
-      smallText(ctx, c.p.name + " - " + BIZ[c.p.job].name + ", PAID BY " + OWNERS[c.p.employer].name, x + 6, ly, [90, 90, 105]); ly += 7;
+      smallText(ctx, c.p.name + " - " + BIZ[c.p.job].name + ", PAID BY " + ownerName(c.p.employer), x + 6, ly, [90, 90, 105]); ly += 7;
     }
   }
   {   // the board advertises the labor the town WANTS; the census reads the
@@ -5524,6 +5544,7 @@ function frame(now) {
   paint.push({ base: FLOOR_Y, f: drawLandlord });
   paint.sort((a, b) => a.base - b.base);
   for (const e of paint) e.f();
+  drawForSaleSigns();   // boards go over the furniture, and the price has to read from the street
   drawSwoop();
   drawFloaters(dt);
   {  // directed-crab marker: a bouncing flag where the followed crab was sent

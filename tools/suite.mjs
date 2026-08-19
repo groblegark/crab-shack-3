@@ -2277,6 +2277,21 @@ scenario("failure: three missed leases close a peer's shop and lay off its staff
   return true;
 });
 
+scenario("failure: an owner who leaves the town leaves a business, not an orphan", () => {
+  // THE DEATH SEAM, kept minimal on purpose: mortality does not have to know
+  // anything about the owner layer. runSuccession sweeps at every settlement.
+  const sim = createSim({ seed: 81 });
+  sim.runUntil("day >= 2 && tmin > 8 * 60", keep({ maxSteps: 400000 }));
+  sim.G('npcs = npcs.filter(c => c.p.name !== "SUDSY");');   // exactly what a mortality pass does
+  if (sim.G("BIZ.showers.owner") !== "sudsy") return "fixture wrong: the shop was not hers";
+  sim.runUntil("lastRentDay === day", keep({ maxSteps: 400000 }));
+  if (!sim.G('forSale("showers")')) return "an ownerless business was left orphaned";
+  if (sim.G("market.showers.why") !== "gone") return "listed for the wrong reason: " + sim.G("market.showers.why");
+  if (!sim.G('bizDark("showers")')) return "an ownerless shop is somehow still trading";
+  sim.runDays(sim.G("day") + 3, KEEP);
+  return sim.G('!gameOver && forSale("showers")') ? true : "the town did not survive the ownerless stretch";
+});
+
 scenario("sale: a saved-up crab buys the failed shop and it TRADES AGAIN", () => {
   const sim = createSim({ seed: 62 });
   sim.runUntil("day >= 2 && tmin > 8 * 60", keep({ maxSteps: 400000 }));
@@ -2353,6 +2368,10 @@ scenario("sale: the player buys a failed business through the shopfront", () => 
   if (!sim.runUntil('bizStaffed("showers")', keep({ maxSteps: 500000 })))
     return "crew never opened the shop the player bought";
   if (sim.G('crabs[0].p.job') !== "showers") return "the schedule bounced the crew back off a player-owned shop";
+  // ...and it pays into the PLAYER's till, on the player's books
+  sim.runUntil("tmin > 12 * 60 && day > " + sim.G("day"), keep({ maxSteps: 900000 }));
+  if (!sim.runUntil('(today.biz.showers || { take: 0 }).take > 0', keep({ maxSteps: 900000 })))
+    return "the shop the player bought never took a penny";
   return true;
 });
 
