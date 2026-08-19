@@ -52,7 +52,26 @@ compounds or collapses → the landlord collects at 20:00 either way.
   nooks any more: everyone homeless sleeps on shelter cots, pays $10 house
   rent when housed, and moves up at settlement when wallet ≥ move-in ($35) +
   rent. Fishers fund it at $2/catch; SUDSY pays herself a bigger owner draw
-  while homeless. World is 2192 wide.
+  while homeless. World is 2192 wide. **All 9 lots stand permanently**
+  (2026-08-18): drawTown walks the lots and asks `houseOccupant(h)` — an
+  occupied house wears its tenant's roof color, a vacant one renders as
+  HOUSE_EMPTY (weathered grey roof, dark glass, TO LET card, bare interior).
+  Night window glow keys on an occupant at home (crew AND townsfolk; boat
+  dwellers keep the cabin lamp), so empty lots stay dark. Houses never pop
+  into existence — people move into a town that was already there.
+- **Hiring is recruitment** (2026-08-18, the directive): the SHOP hire no
+  longer mints a persona with a free house. `hireCrew()` recruits — a
+  CURRENTLY-VISITING tourist by preference (their customer entity converts
+  into a resident crew crab keeping the tourist name/color/accessory, with
+  abortErrand-grade cleanup: stall freed+dirtied, table freed+plate cleared,
+  mid-claim chefs abortChef'd, entity dropped from the queue, follow/dossier
+  transferred), else a new face answers the ad off the morning bus at the
+  west stop. Either way the hire completes immediately (`hireShift()` picks
+  a shift that can still work today) and starts HOMELESS at the shelter —
+  no free house, they climb the ladder on wages. Names dedupe across
+  CRAB_NAMES + CUSTOMER_NAMES (a converted tourist keeps their name if
+  free); spawnDrifter shares the dedupe. headless `--set chef` calls
+  hireCrew() too — no housed-hire fork in tools/.
 - **Job board / labor market**: a notice board at x716 (clickable — postings +
   town payrolls). Each morning at 7:30 (`runJobBoard`) NPC owners post when
   flush (till ≥ 260, staff < 2) or when their shop went dark; jobless fishers
@@ -134,7 +153,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **49 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **53 scenarios, must stay green before any push.**
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
@@ -151,7 +170,10 @@ vm — never fork game logic into tools/) and perf expectations live there.
   accrual/sleep-repair (bed vs cot rates) and the sandy->tired save
   migration.
   serviced by showers alone, days-off rota (weekly rest + off-day
-  spending, cover-shift/stagger coverage, exact wage-skip bill math).
+  spending, cover-shift/stagger coverage, exact wage-skip bill math),
+  hiring-as-recruitment (tourist conversion with clean entity teardown,
+  bus-arrival fallback working day-of, all-9-lots occupancy derivation
+  with no house conjured on hire).
 
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
   [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
@@ -317,6 +339,19 @@ Staged landings (each stage ships alone, suite-green, balance re-verified):
 Sequencing rule: fixed prices and untracked externalities are *fine* — track
 first, connect later. Don't build the network before the node is beautiful.
 
+- **Hiring-as-recruitment + standing lots** (Matt's directive, built
+  2026-08-18, worktree): "hiring new crabs shouldn't make a house pop into
+  existence; we should recruit them from the tourist pool or something, and
+  the houses just exist empty already." Systems bullets above have the
+  mechanics. Measured: baseline 30d x 8 seeds BIT-IDENTICAL (0/8,
+  evictions 7,8,9,9,10,10,10,14, median 10 — baseline never hires, as
+  expected); growth `--buy chef,table` also bit-identical eviction days
+  (0/8, 7-10, median 10) — homeless hires (no $10 house rent, cot-rate
+  sleep) and the occasional converted-away paying tourist net out to
+  nothing measurable on the eviction curve. No price tuning. Suite 53/53
+  (3 new scenarios; zero existing pins needed re-pointing — the rehire and
+  rota scenarios only pin "hire completes immediately", which holds).
+
 - **Fisher self-sufficiency** (Matt 2026-08-18, shipped): self-employed
   fishers take breaks whenever a need presses (the errand loop re-commutes
   them to the pier after), and a hungry fisher who can't afford town food
@@ -448,11 +483,17 @@ unit economics.
 - **Per-owner everything; all crabs equal** (Matt 2026-08-18): "no public
   utilities, no town payroll — per-owner … all crabs should be equal in the
   simulation, they just start with different stuff." Language pass done
-  (job-board card now reads WHO WORKS FOR WHOM, PAID BY <owner>). Mechanical
-  equality audit still open: NPCs currently CANNOT die (crew can); NPC_WAGE
-  20 vs CRAB_WAGE 22; tourists are a separate entity class rather than crabs
-  with a suitcase. Direction: one simulation contract for every crab,
-  differing only in starting assets/relationships.
+  (job-board card now reads WHO WORKS FOR WHOM, PAID BY <owner>). **Brick
+  laid 2026-08-18 — hiring-as-recruitment**: a hire is no longer minted
+  with a free house; a tourist, a drifter and a new hire all enter the sim
+  the same way (homeless at the shelter, climbing on wages), and a tourist
+  can now BECOME a crab (conversion keeps their name/shell/accessory) —
+  founders differ only in starting stuff (they open housed in lots 0/1,
+  sanctioned). Still unequal after this pass: NPCs CANNOT die (crew can);
+  NPC_WAGE 20 vs CRAB_WAGE 23; tourists while merely visiting remain a
+  separate entity class (no needs/wallet/trait until converted). Direction:
+  one simulation contract for every crab, differing only in starting
+  assets/relationships.
 - ~~Click-to-nav + right-click redirect~~ — **shipped 2026-08-18** (see the
   "Right-click orders" systems bullet). Suite 41/41 (scripted-redirect
   round trip + a deterministic still-vs-mover pin the watchdog must beat —

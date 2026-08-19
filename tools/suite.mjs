@@ -1085,6 +1085,78 @@ scenario("fishers feed themselves: breaks + the beach roast", () => {
   return sim.G("(window._stats.roasts || 0) >= 1") ? true : "hunger fell without a roast counted";
 });
 
+scenario("hiring converts a visiting tourist (identity kept, entity gone, homeless, works today)", () => {
+  const sim = createSim({ seed: 23 });
+  sim.runUntil('customers.some(k => !k.isCrab && k.state === "waiting")', { maxSteps: 200000 });
+  // mirror hireCrew's pick order so we know exactly who should get the toque
+  const probe = JSON.parse(sim.G(`(() => {
+    const el = customers.filter(k => !k.isCrab && k.state !== "leaving" && k.state !== "outStall");
+    const p = el.find(k => k.state === "waiting" || k.state === "arriving") || el[0];
+    return JSON.stringify({ name: p.name, color: p.color, acc: p.acc,
+      tourists: customers.filter(k => !k.isCrab).length,
+      lots: HOUSE_XS.map((x, h) => { const o = houseOccupant(h); return o ? o.p.name : null; }) });
+  })()`));
+  const d0 = sim.G("day");
+  sim.G('coins = 500; tryBuy("chef")');
+  const h = JSON.parse(sim.G("JSON.stringify(crabs[crabs.length - 1].p)"));
+  if (h.name !== probe.name) return `hired ${h.name}, expected the visiting ${probe.name}`;
+  if (h.color !== probe.color || h.acc !== probe.acc)
+    return "tourist identity not preserved: " + JSON.stringify([h.color, h.acc, probe.color, probe.acc]);
+  if (!h.homeless || h.house != null) return "converted hire not homeless: " + JSON.stringify([h.homeless, h.house]);
+  // the customer entity is GONE: queue count down one, no ghost claims, no leaked furniture
+  if (sim.G("customers.filter(k => !k.isCrab).length") !== probe.tourists - 1)
+    return "customer entity still in the queue";
+  if (sim.G("allCrabs().some(c => c.cust && !customers.includes(c.cust))"))
+    return "a chef still claims the converted tourist's order";
+  if (sim.G("[].concat(...Object.values(BIZ).map(b => (b.tables || []).concat(b.stalls || []))).some(t => t.occupant && !customers.includes(t.occupant))"))
+    return "converted tourist leaked a table/stall";
+  // no house popped into existence on the hire
+  const lots2 = JSON.parse(sim.G("JSON.stringify(HOUSE_XS.map((x, h) => { const o = houseOccupant(h); return o ? o.p.name : null; }))"));
+  if (JSON.stringify(lots2) !== JSON.stringify(probe.lots)) return "hiring moved the housing map: " + JSON.stringify(lots2);
+  // and they clock in the same day - the hire completes immediately
+  sim.runUntil(`crabs[${sim.G("crabs.length") - 1}].dayState === "working"`, { maxSteps: 200000,
+    onTick: (G) => { if (G("coins") < 300) G("coins = 500"); } });
+  if (sim.G("day") !== d0) return "converted hire never worked the day they were hired";
+  return true;
+});
+
+scenario("hiring with no tourists books a morning-bus arrival who works day-of", () => {
+  const sim = createSim({ seed: 29 });   // day 1, 7:00: town not open yet, zero tourists
+  if (sim.G("customers.length") !== 0) return "expected an empty town at 7:00";
+  sim.G('coins = 500; tryBuy("chef")');
+  if (sim.G("crabs.length") !== 3) return "hire did not complete immediately";
+  const p = JSON.parse(sim.G("JSON.stringify([crabs[2].p.name, crabs[2].p.homeless, crabs[2].p.house, Math.round(crabs[2].x)])"));
+  if (!p[1] || p[2] != null) return "bus hire not homeless: " + JSON.stringify(p);
+  if (Math.abs(p[3] - sim.G("BUS_STOPS[0]")) > 2) return "hire did not step off at the west bus stop: x=" + p[3];
+  const names = JSON.parse(sim.G("JSON.stringify(allCrabs().map(c => c.p.name))"));
+  if (names.filter(n => n === p[0]).length !== 1) return "name collision across pools: " + p[0];
+  sim.runUntil('crabs[2].dayState === "working"', { maxSteps: 200000,
+    onTick: (G) => { if (G("coins") < 300) G("coins = 500"); } });
+  return sim.G("day") === 1 && sim.G('crabs[2].dayState === "working"')
+    ? true : "bus hire never worked day-of (day " + sim.G("day") + ", state " + sim.G("crabs[2].dayState") + ")";
+});
+
+scenario("all 9 lots stand: empties render vacant, hiring never conjures a house", () => {
+  const sim = createSim({ seed: 31 });
+  // the draw derivation drawTown uses: every lot resolves to a tenant or null
+  const lots = JSON.parse(sim.G("JSON.stringify(HOUSE_XS.map((x, h) => { const o = houseOccupant(h); return o ? o.p.name : null; }))"));
+  if (lots.length !== 9) return "expected 9 lots, got " + lots.length;
+  const occupied = lots.filter(Boolean).length;
+  const housed = sim.G("allCrabs().filter(c => !c.p.homeless && c.p.boat == null).length");
+  if (occupied !== housed) return `draw says ${occupied} occupied, sim says ${housed} housed`;
+  if (occupied !== 2) return "fresh town should house exactly the founders: " + JSON.stringify(lots);
+  // the vacant art is real and distinct (empty lots draw HOUSE_EMPTY2)
+  if (sim.G("HOUSE_EMPTY2.w") !== 60 || sim.G("HOUSE_EMPTY2.h") !== 46) return "HOUSE_EMPTY2 art missing or mis-sized";
+  // hire twice (bus path at 7:00): the housing map must not move a pixel
+  sim.G('coins = 900; tryBuy("chef"); tryBuy("chef")');
+  const lots2 = JSON.parse(sim.G("JSON.stringify(HOUSE_XS.map((x, h) => { const o = houseOccupant(h); return o ? o.p.name : null; }))"));
+  if (JSON.stringify(lots2) !== JSON.stringify(lots)) return "hiring moved the housing map: " + JSON.stringify(lots2);
+  if (!sim.G("crabs.slice(2).every(c => c.p.homeless)")) return "a hire started housed";
+  // night glow derives from an occupant at home, which an empty lot cannot
+  // have - houseOccupant(h) === null IS the dark-window guarantee
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

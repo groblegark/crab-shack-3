@@ -393,6 +393,36 @@ function houseArt(roofCol) {
   ], p);
 }
 
+// a VACANT lot's house: the same hut, standing empty - weathered grey roof,
+// dark unlit glass with a pale TO LET card, no picture on the wall, no bed.
+// All nine lots exist whether or not anyone's home; people move in, houses
+// don't pop into existence (see drawTown's lot loop).
+const HOUSE_EMPTY = parseArt([
+  "......KKKKKKKKKKKKKKKKKK......",
+  "....KKRRRRRRRRRRRRRRRRRRKK....",
+  "..KKRRRRRRRRRRRRRRRRRRRRRRKK..",
+  ".KRRRRRRRRRRRRRRRRRRRRRRRRRRK.",
+  "KRRRRRRRRRRRRRRRRRRRRRRRRRRRRK",
+  "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
+  "KDIIIIIIIIIIIIIIIIIIIIIIIIIIDK",
+  "KDIIIIIIIIIIIIIIIIIIIIIIIIIIDK",
+  "KDIIIIIIIIIIIIIIIIKKKKKKKIIIDK",
+  "KDIIIIIIIIIIIIIIIIKNNNNNKIIIDK",
+  "KDIIIIIIIIIIIIIIIIKNYYYNKIIIDK",
+  "KDIIIIIIIIIIIIIIIIKNYYYNKIIIDK",
+  "KDIIIIIIIIIIIIIIIIKKKKKKKIIIDK",
+  "KDIIIIIIIIIIIIIIIIIIIIIIIIIIDK",
+  "KDIIIIIIIIIIIIIIIIIIIIIIIIIIDK",
+  "KDIIIIIIIIIIIIIIIIIIIIIIIIIIDK",
+  "KDIIIIIIIIIIIIIIIIIIIIIIIIIIDK",
+  "KD..........................DK",
+  "KD..........................DK",
+  "KD..........................DK",
+  "KD..........................DK",
+  "KEEEEEEEEEEEEEEEEEEEEEEEEEEEEK",
+  "KEDEEDEEDEEDEEDEEDEEDEEDEEDEEK",
+], swap(PAL, { R: [150, 144, 156] }));
+
 // live-aboard fishing boat, sheer stripe + pennant color-swapped per owner;
 // aft mast with the gaff sail furled, little forward cabin, bow to the west
 function boatArt(col) {
