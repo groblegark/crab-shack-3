@@ -1060,12 +1060,24 @@ function otPayForecast(c) { return otEligible(c) ? otPremium(c, otMinutes(c)) : 
 //     BESIDE   sharp one, and it is the one Matt asked for: being the
 //     THEM     worst-paid crab in the room stings more than a low number does.
 //
+// ...and under all three, THE TOWN'S STANDARD DAY (WAGE_STD x KEEP), which is
+// the one number a boss cannot argue down. MEASURED, and it is the reason it
+// exists: without it a player who cut EVERY shop to $20 moved the going rate
+// down with them - the player IS most of the town's payroll - and the cut was
+// free. It measured 2 of 16 do-nothing towns surviving 30 days against the
+// pillar's 0, i.e. "cut the wage on day one" would have been the obviously
+// correct opening move and the whole lever a fake. A crab knows what a day's
+// work is worth in this town: it is the number on Mr. Pincherton's lease.
+// Inert by construction - at WAGE_STD the ratio is exactly 1.0.
+//
 // At the shipped defaults all three sit at or below WAGE_STD (the pier tops
 // out at 7 x 5 x 0.6 = 21 against a wage of 23), so nobody is aggrieved in a
 // default town and the whole layer is inert until somebody moves a stepper.
 const WAGE_CFG = {
   FISH_DAY: 5,        // fish landed in a day on the rail (the job board's own figure)
   PIER_TOUGH: 0.6,    // a steady wage is worth this much of a lucky day's fishing
+  KEEP: 1.0,          // the town's standard day, as a share of WAGE_STD: the floor no boss can argue down
+  PEER_TOL: 0.85,     // how much of the best crab's deal the rest expect: a premium under ~1/0.85 goes unremarked
   GRACE: 2,           // nights on a new job before anybody starts counting
   GAIN: 1.0,          // grievance per night, per full unit of shortfall
   CALM: 0.34,         // grievance shed per night when the pay is fair (3 good nights clears a bad week)
@@ -1082,13 +1094,21 @@ function townWage(exceptBiz) {   // the mean rate of the other shops hiring in t
   const rates = Object.keys(BIZ).filter(b => b !== exceptBiz && bizUnlocked(b) && bizOwner(b)).map(bizWage);
   return rates.length ? rates.reduce((s, r) => s + r, 0) / rates.length : WAGE_STD;
 }
-function peerWage(c) {   // the best-paid OTHER crab on the same roster
+// The best-paid OTHER crab on the same roster, discounted by PEER_TOL. The
+// discount is what makes a private deal a usable instrument rather than a
+// mutiny: a star can be carried at a premium of about a sixth before the rest
+// of the room starts counting. Measured - at full weight a single crab on
+// $35 in a $23 shack made EVERY colleague demand $35, and the growth matrix
+// went to a median eviction of day 7. A big premium still costs you.
+function peerWage(c) {
   let best = 0;
   for (const k of allCrabs()) if (k !== c && k.p.job === c.p.job && !k.p.owner) best = Math.max(best, wageRate(k));
-  return best;
+  return best * WAGE_CFG.PEER_TOL;
 }
 // the number a crab thinks it is worth tonight
-function goingRate(c) { return Math.max(pierClaim(), townWage(c.p.job), peerWage(c)); }
+function goingRate(c) {
+  return Math.max(WAGE_STD * WAGE_CFG.KEEP, pierClaim(), townWage(c.p.job), peerWage(c));
+}
 function payRatio(c) { const g = goingRate(c); return g > 0 ? wageRate(c) / g : 1; }
 // wage-earners only: fishers sell fish and owners draw from their own till,
 // so neither has a boss to be aggrieved at.
@@ -1361,7 +1381,10 @@ function runWagePolicy(b) {
   const stale = !!post && day - post.day >= cfg.postDays;          // advertised, nobody came
   const aggrieved = staff.some(k => wageGripe(k) >= WAGE_CFG.WARN);
   const lostRecently = st.lost && day - st.lost <= cfg.lossMemory;
-  const going = Math.max(pierClaim(), townWage(b));
+  // the same market the STAFF read, floor included - an owner who trimmed
+  // below the town's standard day would just be manufacturing her own
+  // grievance, and the policy would fight itself
+  const going = Math.max(WAGE_STD * WAGE_CFG.KEEP, pierClaim(), townWage(b));
   let line = null;
   if ((stale || aggrieved || lostRecently) && rate < WAGE_MAX
       && o.till >= cfg.tillFloor + (rate + 1) * Math.max(1, staff.length)) {

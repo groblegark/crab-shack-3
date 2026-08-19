@@ -24,6 +24,12 @@ const SET = (opt("set", "") || "").split(",").filter(Boolean);
 const STEP = parseFloat(opt("step", "0.05"));   // sim timestep, seconds
 const QUIET = args.includes("--quiet");
 const SEEDS = parseInt(opt("seeds", "1"));
+// THE WAGE LEVER. --wage N sets every PLAYER-owned shop's rate (the setting
+// the SCHEDULE tab exposes); --star N puts one named crab on a private deal
+// at N, which is the "pay your best crab more" strategy the sweep tests
+// against "raise everybody". Both go through the game's own setters.
+const WAGE = opt("wage", null) != null ? parseInt(opt("wage", null)) : null;
+const STAR = opt("star", null) != null ? parseInt(opt("star", null)) : null;
 const JOBS = opt("jobs", null) != null
   ? parseInt(opt("jobs", null))
   : Math.min(SEEDS, Math.max(1, os.cpus().length - 1));
@@ -83,6 +89,11 @@ for (const kv of SET) {
      if (${JSON.stringify(k)} === "chef") while (crabs.length < UPS.chef.lvl) hireCrew();`);   // the game's own recruitment path: hires start homeless
 }
 
+if (WAGE != null)
+  G(`for (const b of Object.keys(BIZ)) if (bizOwner(b) === "player") setBizWage(b, ${WAGE});`);
+if (STAR != null)
+  G(`if (crabs.length) setCrabWage(crabs[0], ${STAR});`);
+
 // ---- run ----------------------------------------------------------------
 G('soundOn = false; musicOn = false; screen = "play"; window._headless = true; window._stats = { tourServes: 0, crabServes: 0, tourRage: 0, crabRage: 0, bused: 0 };');
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);
@@ -90,7 +101,10 @@ const buyScript = BUY.length ? new vm.Script(`
   if (tmin >= 9 * 60 && tmin <= 19 * 60 && Math.abs(tmin - Math.round(tmin / 60) * 60) < ${STEP} * TS / 2) {
     // a sensible player: buy anything on the plan you can afford while keeping
     // tonight's bill covered; unlocks get saved for rather than skipped
-    const playerBill = (extraHire) => CRAB_WAGE * (crabs.length + (extraHire ? 1 : 0)) +
+    // labour is priced per crab now: the reserve totals what THIS crew costs
+    // (private deals included) plus a notional wage for the crab being hired
+    const playerBill = (extraHire) =>
+      crabs.reduce((s, c) => s + Math.round(wageRate(c)), 0) + (extraHire ? bizWage("shack") : 0) +
       totalRent() + 40;   // conservative: keep a real cushion past tonight
     for (const k of ${JSON.stringify(BUY)}) {
       const u = UPS[k];
@@ -137,7 +151,21 @@ while (G("day") <= DAYS && !G("gameOver")) {
   }
 }
 const wall = Date.now() - t0;
-return { dayRows, wall, stats: G("JSON.stringify(window._stats)"),
+// the labour-market picture this run ended on: who ended up where on the
+// housing ladder, and what the wage lever actually did to the town
+const labour = G(`JSON.stringify({
+  rates: Object.keys(BIZ).map(b => b + ":" + bizWage(b)).join(" "),
+  crew: crabs.map(c => c.p.name + "$" + Math.round(wageRate(c))).join(" "),
+  boat: allCrabs().filter(c => c.p.boat != null).length,
+  housed: allCrabs().filter(c => !c.p.homeless && c.p.boat == null).length,
+  cot: allCrabs().filter(c => c.p.homeless).length,
+  crewHoused: crabs.filter(c => !c.p.homeless).length, crewN: crabs.length,
+  purse: Math.round(allCrabs().reduce((s, c) => s + Math.max(0, c.p.wallet), 0)),
+  walkouts: (window._stats.walkouts || []).length,
+  quits: (window._stats.wageQuits || []).length,
+  wageMoves: (window._stats.wageMoves || []).map(m => "d" + m.day + ":" + m.rate).join(","),
+})`);
+return { dayRows, wall, labour, lifetime: G("Math.round(lifetime)"), stats: G("JSON.stringify(window._stats)"),
   over: G("gameOver"), bankrupt: G("bankrupt"), debt: G("Math.round(credit.bal)"), day: G("day"), rent: G("rentAmount()"), rep: G("Math.round(rep)"), wal: G("JSON.stringify(window._wal)"),
   coins: G("Math.round(coins)"), ups: G(`Object.keys(UPS).map(k => k + ":" + UPS[k].lvl).join(" ")`) };
 }
@@ -188,6 +216,7 @@ if (!QUIET && SEEDS === 1) {
 for (const r of results) {
   console.log("   stats:", r.stats);
   console.log("   wallets:", r.wal);
+  console.log("   labour:", r.labour);
   console.log(r.over
     ? `${r.bankrupt ? "BANKRUPT" : "EVICTED"} day ${r.day} (rent $${r.rent}, had $${r.coins}, debt $${r.debt}, rep ${r.rep}) — ${r.ups}`
     : `SURVIVED ${DAYS}d, $${r.coins} rep ${r.rep} — ${r.ups}`);
@@ -196,5 +225,11 @@ if (SEEDS > 1) {
   const evictDays = results.map(r => r.over ? r.day : DAYS + 1).sort((a, b) => a - b);
   const surv = results.filter(r => !r.over).length;
   console.log(`>> survived ${surv}/${SEEDS}; eviction days: ${evictDays.join(",")} (median ${evictDays[SEEDS >> 1]})`);
+  const L = results.map(r => JSON.parse(r.labour));
+  const sum = (f) => L.reduce((s, l) => s + f(l), 0);
+  console.log(`>> lifetime $${results.reduce((s, r) => s + r.lifetime, 0)}`
+    + `; housing boat/house/cot ${sum(l => l.boat)}/${sum(l => l.housed)}/${sum(l => l.cot)}`
+    + `; crew housed ${sum(l => l.crewHoused)}/${sum(l => l.crewN)}`
+    + `; purse $${sum(l => l.purse)}; walkouts ${sum(l => l.walkouts)}; quits ${sum(l => l.quits)}`);
 }
 console.log(`(${results.reduce((s, r) => s + r.wall, 0)}ms total)`);
