@@ -1043,6 +1043,13 @@ const PLAYLIST = [
   { src: "music/regalia-waltz.mp3", name: "REGALIA WALTZ" },
   { src: "music/butter-pow.mp3", name: "BUTTER POW" },
   { src: "music/carnival-of-the-glitch.mp3", name: "CARNIVAL OF THE GLITCH" },
+  { src: "music/pixomatic-moon.mp3", name: "PIXOMATIC MOON" },
+  { src: "music/dense-portal.mp3", name: "DENSE PORTAL" },
+  { src: "music/dance-up.mp3", name: "DANCE UP" },
+  { src: "music/lantern-circuit.mp3", name: "LANTERN CIRCUIT" },
+  { src: "music/marble-rain.mp3", name: "MARBLE RAIN" },
+  { src: "music/rain-circuit-lullaby.mp3", name: "RAIN CIRCUIT LULLABY" },
+  { src: "music/goat-circuit.mp3", name: "GOAT CIRCUIT" },
 ];
 let musicOn = false, music = null, muted = false;   // opt-IN for new players (SFX stays on)
 let musNudges = 0, musNudged = false;               // invite, don't nag: gives up after 3 sessions
