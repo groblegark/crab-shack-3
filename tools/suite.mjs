@@ -2506,7 +2506,13 @@ scenario("routes: both travel lanes are clear of every solid (tripwire)", () => 
   // day somebody parks a table or a counter on one - which is exactly how the
   // town got into the all-day-bouncing state in the first place.
   const sim = createSim({ seed: 11 });
-  sim.G(`coins = 4000; tryBuy("arcade"); tryBuy("juicebar"); tryBuy("table"); tryBuy("table");`);
+  // buy the table rungs to the CAP, not a fixed two: the whole point of this
+  // tripwire is that a table nobody has bought yet cannot be parked on a lane
+  // (the cap went 2 -> 4 with the table-service economy)
+  sim.G(`coins = 4000; tryBuy("arcade"); tryBuy("juicebar");
+         while (UPS.table.lvl < UPS.table.max) tryBuy("table");`);
+  if (sim.G("(bizTables('shack')||[]).length") !== sim.G("TABLE_BASE + UPS.table.max"))
+    return "the fixture did not stand every table the shop can sell";
   const bad = JSON.parse(sim.G(`JSON.stringify(LANES.map(l => [l, laneClear(l, 0, WORLD_W)]).filter(r => r[1] < LANE_PAD))`));
   if (bad.length) return "lane(s) obstructed: " + bad.map(([l, c]) => `y=${l} has ${c}px of daylight`).join(", ");
   // and a walker asked to cross a blocked lane must pick the other one
@@ -3400,7 +3406,21 @@ scenario("tables: more tables really do seat more guests (the cap earns its keep
   const base = arm(0), full = arm(cap);
   if (full <= base * 1.1)
     return `the full cap seated ${full} against ${base} at the starting two tables - the extra tables do nothing`;
-  return true;
+  // ...and EVERY table the shop sells is genuinely reachable and seatable -
+  // a new table parked somewhere guests cannot path to would pass the
+  // throughput gate above on the strength of the ones that already worked
+  const sim = createSim({ seed: 1337 });
+  sim.G(`coins = 6000; tryBuy("chef"); tryBuy("chef");
+         while (UPS.table.lvl < UPS.table.max) tryBuy("table"); coins = 900;
+         window._used = bizTables("shack").map(() => 0);`);
+  sim.runDays(8, { tickEvery: 10, onTick: (G) => {
+    if (G("coins") < 400) G("coins = 900");
+    G(`bizTables("shack").forEach((t, i) => { if (t.occupant) window._used[i]++; })`);
+  } });
+  const used = JSON.parse(sim.G("JSON.stringify(window._used)"));
+  const idle = used.map((n, i) => [i, n]).filter(([, n]) => n === 0);
+  return idle.length === 0 ? true
+    : `table(s) ${idle.map(([i]) => i).join(",")} never seated anybody in 8 days - unreachable (occupancy ticks ${used.join(",")})`;
 });
 
 scenario("tip sharing + the table cap roundtrip save/load", () => {
