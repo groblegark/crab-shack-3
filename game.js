@@ -1595,6 +1595,15 @@ function updateSchedule(c, dt) {
   if (c.p.job !== "fishing" && !bizUnlocked(c.p.job)) c.p.job = "shack";
   if (!c.p.npc && c.p.job !== "fishing" && bizOwner(c.p.job) !== "player") c.p.job = "shack";   // crew can't staff NPC shops
   const off = offToday(c);   // one weekday in seven: no commute, no duty, no pay
+  // a granted sick day takes effect the MOMENT it is granted - a crab already
+  // walking in (or already on the clock, because the boss just relented) turns
+  // around and goes home. Without this the dossier's TAP: REST would only
+  // work at dawn, and the day the illness lands mid-commute would be a
+  // full shift worked while ill.
+  if (onSickDay(c) && (c.dayState === "toWork" || c.dayState === "working")) {
+    if (c.dayState === "working") { c.duty = false; c.pendingOff = false; abortChef(c); }
+    startCommute(c, false);
+  }
   if (c.dayState === "home" && !off && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !onSickDay(c)
       && !(c.restDay === day && c.restUntil > tmin)) {   // ordered home: a real break before the schedule re-dispatches
     startCommute(c, true);

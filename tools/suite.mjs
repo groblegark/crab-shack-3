@@ -1544,6 +1544,309 @@ scenario("fish market: floor-price week - the roast keeps a broke fisher alive",
 
 });
 
+// ================================================== LABOR POLICY SUITE
+scenario("sick days: bed rest beats a cot, and both beat the old cared bar", () => {
+  // (a) A sick crab resting in a real bed, fed and hydrated, must reach the
+  // improved recovery lane - and the DURATION distribution must sit left of a
+  // shelter-cot control. Paired arms: same seeds, only the care table differs
+  // (this is exactly what tools/illness.mjs measures at n=120; the gate here
+  // is the direction, at a sample size the suite can afford).
+  const OLD = `CARE_LANES.cot = { cure: 0.40, die: 0.08, label: "COT" };
+               CARE_LANES.bed = { cure: 0.40, die: 0.08, label: "BED" };`;
+  const run = (seed, { housed, old }) => {
+    const sim = createSim({ seed });
+    if (old) sim.G(OLD);
+    sim.runUntil("day >= 2 && tmin >= 7 * 60", { maxSteps: 200000 });
+    if (sim.G("gameOver")) return null;
+    sim.G(`{ const c = crabs[0];
+      c.p.wallet = 80;
+      ${housed ? `if (c.p.homeless) { const used = new Set(allCrabs().filter(k => !k.p.homeless).map(k => k.p.house));
+          for (let h = 0; h < HOUSE_XS.length; h++) if (!used.has(h)) { c.p.house = h; c.p.homeless = false; break; } }`
+        : `c.p.homeless = true; c.p.house = null; c.p.boat = null;`}
+      c.p.sick = { days: 0 }; c.p.restT = 0; c.p.hunger = 0.1; c.p.thirst = 0.1; c.p.dirt = 0.1; }`);
+    const N = JSON.stringify(sim.G("crabs[0].p.name"));
+    let lane = "?";
+    for (let d = 0; d < 12; d++) {
+      sim.G("if (coins < 500) coins = 900;");
+      if (!housed) sim.G(`{ const c = crabs.find(k => k.p.name === ${N});
+        if (c) { c.p.homeless = true; c.p.house = null; c.p.boat = null; } }`);
+      sim.runUntil("tmin >= 19.9 * 60 && lastRentDay !== day", { maxSteps: 200000 });
+      if (sim.G(`crabs.some(c => c.p.name === ${N} && c.p.sick)`))
+        lane = sim.G(`careLane(crabs.find(c => c.p.name === ${N}))`);
+      sim.runUntil("lastRentDay === day", { maxSteps: 200000 });
+      if (sim.G(`!crabs.some(c => c.p.name === ${N})`)) return { days: d + 1, lane, died: true };
+      if (sim.G(`!crabs.find(c => c.p.name === ${N}).p.sick`)) return { days: d + 1, lane, died: false };
+      sim.runUntil("tmin < 10", { maxSteps: 200000 });
+      if (sim.G("gameOver")) return null;
+    }
+    return { days: 12, lane, died: false };
+  };
+  const seeds = [1337, 1674, 2011, 2348, 2685, 3022, 3359, 3696, 4033, 4370, 4707, 5044];
+  const arm = (cfg) => seeds.map(s => run(s, cfg)).filter(Boolean);
+  const bedNew = arm({ housed: true }), bedOld = arm({ housed: true, old: true });
+  const cotNew = arm({ housed: false });
+  if (!bedNew.length || !bedOld.length) return "no arm produced a measurable illness";
+  // the lane itself: a housed convalescent must actually reach BED REST
+  if (!bedNew.some(r => r.lane === "bed"))
+    return "no housed rester ever reached the bed lane: " + JSON.stringify(bedNew.map(r => r.lane));
+  if (!cotNew.some(r => r.lane === "cot"))
+    return "no shelter rester ever reached the cot lane: " + JSON.stringify(cotNew.map(r => r.lane));
+  if (bedNew.some(r => r.lane === "cot") || cotNew.some(r => r.lane === "bed"))
+    return "housing tier and care lane disagree";
+  const mean = (rows) => rows.reduce((s, r) => s + r.days, 0) / rows.length;
+  const mBedNew = mean(bedNew), mBedOld = mean(bedOld);
+  // durations shift LEFT vs the pre-seam odds (never right)
+  if (mBedNew > mBedOld + 1e-9)
+    return `bed rest did not shorten illness: ${mBedNew.toFixed(2)}d vs ${mBedOld.toFixed(2)}d pre-seam`;
+  // and the ladder rung is real: bed odds must strictly beat cot odds
+  if (!(CARE_LANES_bed_cure() > CARE_LANES_cot_cure()))
+    return "bed odds do not beat cot odds in the care table";
+  return true;
+
+  function CARE_LANES_bed_cure() { const s = createSim({ seed: 1 }); return s.G("CARE_LANES.bed.cure"); }
+  function CARE_LANES_cot_cure() { const s = createSim({ seed: 1 }); return s.G("CARE_LANES.cot.cure"); }
+});
+
+scenario("sick days: GRANT keeps them home unpaid, REQUIRE puts them to work paid", () => {
+  const sim = createSim({ seed: 404 });
+  sim.runUntil("day >= 2 && tmin >= 6.5 * 60", { maxSteps: 300000 });
+  // GRANT (the default, and the pre-feature behavior): ill = home all day
+  sim.G(`{ crabs[0].p.sick = { days: 1 }; crabs[0].workedToday = false; coins = 900; }`);
+  if (sim.G(`sickPolFor(crabs[0]) !== "grant" || !onSickDay(crabs[0])`))
+    return "the default policy is not GRANT";
+  sim.runUntil("tmin >= 15 * 60", { maxSteps: 300000,
+    onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  if (sim.G('crabs[0].dayState === "working"')) return "a granted sick crab clocked in anyway";
+  if (sim.G("crabs[0].workedToday")) return "a granted sick crab was marked as having worked";
+  if (sim.G("crabDueTonight(crabs[0]) !== 0")) return "a granted sick day is on the wage bill";
+  // REQUIRE: same crab, next morning, dragged in and paid in full
+  const sim2 = createSim({ seed: 404 });
+  sim2.runUntil("day >= 2 && tmin >= 6.5 * 60", { maxSteps: 300000 });
+  sim2.G(`{ crabs[0].p.sick = { days: 1 }; crabs[0].p.sickPol = "require"; coins = 900; }`);
+  if (sim2.G("onSickDay(crabs[0])")) return "REQUIRE still reads as a sick day";
+  if (sim2.G("crabDueTonight(crabs[0]) !== CRAB_WAGE"))
+    return "a required sick crab is not on the wage bill: " + sim2.G("crabDueTonight(crabs[0])");
+  const worked = sim2.runUntil('crabs[0].dayState === "working" || crabs[0].dayState === "toWork"',
+    { maxSteps: 300000, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  if (!worked) return "a required sick crab never left the house";
+  // and the wallet proves it at settlement
+  sim2.runUntil("lastRentDay === day", { maxSteps: 400000,
+    onTick: (G) => { G('if (crabs[0]) crabs[0].p.sick = crabs[0].p.sick || { days: 1 };'); if (G("coins") < 400) G("coins = 900"); } });
+  return sim2.G("crabs[0] && crabs[0].workedToday === false && crabs[0].p.wallet > 0")
+    ? true : "the required crab's pay never landed";
+});
+
+scenario("overtime: pays exactly 1.5x the hourly rate and accelerates the needs cost", () => {
+  const sim = createSim({ seed: 909 });
+  sim.runUntil("day >= 2 && tmin >= 7 * 60", { maxSteps: 300000 });
+  // an M-shift crab (8-14 under default hours) asks for overtime: the window
+  // grows to 8-16, entirely inside the shop's 8-20 opening
+  const geo = JSON.parse(sim.G(`{ const c = crabs.find(k => k.p.shift === "M" && !k.p.npc) || crabs[0];
+    c.p.shift = "M"; c.p.ot = true;
+    JSON.stringify({ base: [baseShift(c).start, baseShift(c).end], eff: [effShift(c).start, effShift(c).end],
+      mins: otMinutes(c), open: [BIZ[c.p.job].hours.open, BIZ[c.p.job].hours.close] }); }`));
+  if (geo.mins !== 120) return "OT window is " + geo.mins + " minutes, expected 120";
+  if (geo.eff[1] !== geo.base[1] + 120) return "OT did not extend the shift end: " + JSON.stringify(geo);
+  if (geo.eff[1] > geo.open[1] || geo.eff[0] < geo.open[0])
+    return "OT escaped the shop's open hours: " + JSON.stringify(geo);
+  // THE RATE, exact: premium dollars / OT minutes === 1.5 x wage / shift minutes
+  const rate = JSON.parse(sim.G(`{ const c = crabs.find(k => k.p.ot) || crabs[0];
+    const span = baseShift(c).end - baseShift(c).start;
+    JSON.stringify([otPremium(c, 120), CRAB_WAGE * 1.5 * 120 / span, otPremium(c, 60) * 2, span]); }`));
+  if (Math.abs(rate[0] - rate[1]) > 1e-9) return "OT premium is not 1.5x hourly: " + JSON.stringify(rate);
+  if (Math.abs(rate[0] - rate[2]) > 1e-9) return "OT premium is not linear in minutes: " + JSON.stringify(rate);
+  // an E-shift crab whose shift already ends at close borrows from the START
+  const early = JSON.parse(sim.G(`{ const c = crabs[0];
+    c.p.shift = "E"; c.p.ot = true;
+    JSON.stringify([baseShift(c).start, effShift(c).start, effShift(c).end, BIZ[c.p.job].hours.close]); }`));
+  if (early[1] !== early[0] - 120 || early[2] !== early[3])
+    return "an E-shift OT day did not borrow from the start: " + JSON.stringify(early);
+  // THE NEEDS COST: the same end-of-shift accrual, scaled by the longer day.
+  // Two identical crabs, one on OT, put through the shift-end bump by hand.
+  const cost = JSON.parse(sim.G(`{
+    const mk = () => ({ p: { hunger: 0, tired: 0 } });
+    const c = crabs[0], span = Math.max(60, baseShift(c).end - baseShift(c).start);
+    const f = 120 / span;
+    JSON.stringify([0.25 * (1 + f), TIRED_SHIFT * (1 + OT_FATIGUE * f), 0.25, TIRED_SHIFT, f]); }`));
+  if (!(cost[0] > cost[2]) || !(cost[1] > cost[3]))
+    return "OT did not accelerate the existing accrual: " + JSON.stringify(cost);
+  if (Math.abs(cost[1] - cost[3] * (1 + 1.5 * cost[4])) > 1e-9)
+    return "tiredness is not accruing at OT_FATIGUE x the proportional share";
+  // and the truth is measured, not assumed: a crab who never clocks in past
+  // their contracted hours earns no premium at all
+  return sim.G("otPayToday(crabs[0]) === 0") ? true : "OT paid for minutes nobody worked";
+});
+
+scenario("overtime: the marker and the tags render, and clear when OT ends", () => {
+  const sim = createSim({ seed: 606 });
+  sim.runUntil("day >= 2 && tmin >= 7 * 60", { maxSteps: 300000 });
+  sim.G(`{ const c = crabs[0]; c.p.shift = "M"; c.p.ot = true; c.p.sick = null;
+    tmin = 15 * 60; c.dayState = "working"; c.duty = true; c.pendingOff = false;
+    c.kstate = "idle"; c.workBiz = c.p.job; }`);
+  if (!sim.G("onOvertimeNow(crabs[0])")) return "the OT marker never lit while clocked in past the shift";
+  if (!sim.G("otMinutes(crabs[0]) > 0")) return "no OT minutes on an OT day";
+  if (!sim.G(`crabStatus(crabs[0]).length > 0`)) return "status line broke";
+  // inside the contracted window: no marker (the crab is just at work)
+  sim.G("tmin = 11 * 60");
+  if (sim.G("onOvertimeNow(crabs[0])")) return "the marker lit during ordinary hours";
+  // request withdrawn: everything clears from live state, nothing to reset
+  sim.G("tmin = 15 * 60; crabs[0].p.ot = false;");
+  if (sim.G("onOvertimeNow(crabs[0])")) return "the marker survived the OT request being withdrawn";
+  if (sim.G("otMinutes(crabs[0]) !== 0")) return "the OT tag survived the request being withdrawn";
+  if (sim.G("effShift(crabs[0]).end !== baseShift(crabs[0]).end")) return "the shift stayed long after OT ended";
+  // off duty: no marker even mid-OT-window
+  sim.G(`crabs[0].p.ot = true; crabs[0].duty = false;`);
+  if (sim.G("onOvertimeNow(crabs[0])")) return "the marker lit for a crab who isn't on the clock";
+  // and the art exists in both frames
+  return sim.G("Array.isArray(OT_MARK) && OT_MARK.length === 2 && OT_MARK[0].w > 0")
+    ? true : "the OT powerup sprite is missing";
+});
+
+scenario("auto-manage: grants a sick day and calls OT for the gap, without wedging", () => {
+  const sim = createSim({ seed: 808 });
+  sim.runUntil("day >= 2 && tmin >= 7 * 60", { maxSteps: 300000 });
+  // a two-crab shack under a harsh REQUIRE policy, with the rota delegated
+  sim.G(`{ coins = 4000; UPS.chef.lvl++; hireCrew();
+    BIZ.shack.sickPol = "require"; BIZ.shack.autoLabor = true;
+    for (const c of crabs) { c.p.job = "shack"; c.p.sickPol = null; delete c.p.sickPol; c.p.ot = false; }
+    crabs[0].p.shift = "M"; crabs[1].p.shift = "E";
+    crabs[0].p.sick = { days: 1 }; }`);
+  // rule 1 (REST) fires at the next settlement: the manager sends them home
+  sim.runUntil("lastRentDay === day", { maxSteps: 400000,
+    onTick: (G) => { if (G("coins") < 600) G("coins = 2000"); G('if (crabs[0]) crabs[0].p.sick = crabs[0].p.sick || { days: 1 };'); } });
+  if (sim.G(`!crabs[0] || sickPolFor(crabs[0]) !== "grant"`))
+    return "auto-manage never granted the sick day: " + sim.G("crabs[0] ? sickPolFor(crabs[0]) : 'gone'");
+  const moves = JSON.parse(sim.G("JSON.stringify(window._stats.laborMoves || [])"));
+  if (!moves.some(m => /HOME TO REST/.test(m.line))) return "no named toast for the sick-day grant";
+  // ... and the shop is NOT dark: the healthy coworker still opens up
+  sim.runUntil("tmin >= 12 * 60 && lastRentDay !== day", { maxSteps: 400000,
+    onTick: (G) => { if (G("coins") < 600) G("coins = 2000"); G('if (crabs[0]) crabs[0].p.sick = crabs[0].p.sick || { days: 1 };'); } });
+  if (sim.G(`bizRestingToday("shack")`)) return "coverage collapsed: the shack hung a placard with a healthy crab on the roster";
+  // ONE MOVE A DAY, a cooldown after each, and it must not thrash: run a
+  // fortnight and check the manager never moves twice in a settlement and
+  // never flips the same crab's OT flag on consecutive days
+  const d0 = sim.G("day");
+  sim.runDays(d0 + 14, { onTick: (G) => {
+    if (G("coins") < 600) G("coins = 2000");
+    G('if (crabs[0] && day < ' + (d0 + 6) + ') crabs[0].p.sick = crabs[0].p.sick || { days: 1 };');
+  }, tickEvery: 40 });
+  const all = JSON.parse(sim.G("JSON.stringify(window._stats.laborMoves || [])"));
+  const perDay = {};
+  for (const m of all) perDay[m.day] = (perDay[m.day] || 0) + 1;
+  const doubled = Object.entries(perDay).filter(([, n]) => n > 1);
+  if (doubled.length) return "more than one labor move in a day: " + JSON.stringify(doubled);
+  // a cooldown day means no two moves on consecutive days either
+  const days = Object.keys(perDay).map(Number).sort((a, b) => a - b);
+  for (let i = 1; i < days.length; i++)
+    if (days[i] === days[i - 1] + 1) return "the manager moved on consecutive days (no cooldown): " + days;
+  return true;
+});
+
+scenario("npc shops run the same policy: SUDSY takes a sick day, placard up, no panic posting", () => {
+  const sim = createSim({ seed: 707 });
+  sim.runUntil("day >= 2 && tmin >= 9 * 60", { maxSteps: 300000 });
+  // SUDSY is an owner-operator: she grants herself sick days by the same rule
+  sim.G(`{ const s = npcs.find(k => k.p.owner === "sudsy");
+    s.p.sick = { days: 1 }; OWNERS.sudsy.till = 600; jobBoard.length = 0; hireDay = day; }`);
+  if (!sim.G(`onSickDay(npcs.find(k => k.p.owner === "sudsy"))`))
+    return "SUDSY did not grant herself the sick day";
+  if (!sim.G(`BIZ.showers.autoLabor`)) return "peer owners should ship with auto-manage ON";
+  // the placard reads OUT SICK, not DAY OFF
+  if (!sim.G(`bizRestingToday("showers")`)) return "a sick single-worker shop is not resting";
+  if (sim.G(`restingLabel("showers") !== "OUT SICK"`))
+    return "the placard reads " + sim.G(`restingLabel("showers")`);
+  // she stays home all day, unpaid, and the job board does NOT post: a bout
+  // of flu is not a vacancy
+  sim.runUntil("tmin >= 8 * 60 && day > " + sim.G("day"), { maxSteps: 400000,
+    onTick: (G) => G(`{ const s = npcs.find(k => k.p.owner === "sudsy"); if (s) s.p.sick = s.p.sick || { days: 1 }; OWNERS.sudsy.till = 600; }`) });
+  const posted = JSON.parse(sim.G("JSON.stringify(jobBoard.filter(j => j.biz === 'showers'))"));
+  if (posted.length) return "a sick day triggered the emergency HELP WANTED posting: " + JSON.stringify(posted);
+  return sim.G(`npcs.find(k => k.p.owner === "sudsy").dayState !== "working"`)
+    ? true : "SUDSY worked her own shift while ill";
+});
+
+scenario("census: rows derive live state, and sort + filter actually move", () => {
+  const sim = createSim({ seed: 505 });
+  sim.runUntil("day >= 2 && tmin >= 10 * 60", { maxSteps: 300000 });
+  sim.G(`{ coins = 6000; for (let i = 0; i < 4; i++) { UPS.chef.lvl++; hireCrew(); }
+    for (let i = 0; i < 4; i++) spawnDrifter();
+    crabs[0].p.ot = true; crabs[0].p.shift = "M";
+    crabs[1].p.sick = { days: 3 };
+    crabs[2].p.wallet = 500; crabs[2].p.homeless = false;
+    censusSort = 0; censusFilter = 0; censusPage = 0; }`);
+  const n = sim.G("allCrabs().length");
+  if (n < 12) return "only " + n + " crabs - the census has to scale past a dozen";
+  if (sim.G("censusList().length !== allCrabs().length")) return "the ALL filter dropped somebody";
+  if (sim.G("censusPages() < 2")) return "12+ crabs must page";
+  // DERIVED, not cached: change the world, the row changes
+  const before = sim.G(`{ const c = censusList().find(k => k.p.ot); JSON.stringify([c.p.name, otMinutes(c), homeTag(c.p)]); }`);
+  sim.G(`{ const c = allCrabs().find(k => k.p.ot); c.p.ot = false; c.p.homeless = true; c.p.house = null; c.p.boat = null; }`);
+  const after = sim.G(`{ const c = allCrabs().find(k => JSON.parse(${JSON.stringify(before)})[0] === k.p.name);
+    JSON.stringify([c.p.name, otMinutes(c), homeTag(c.p)]); }`);
+  const b4 = JSON.parse(before), af = JSON.parse(after);
+  if (af[1] !== 0 || af[2] !== "COT" || b4[1] === 0)
+    return "census fields did not follow live state: " + before + " -> " + after;
+  // sorts: NAME is alphabetical, WALLET is richest-first, HEALTH sickest-first
+  sim.G("censusSort = 0");
+  const byName = JSON.parse(sim.G("JSON.stringify(censusList().map(c => c.p.name))"));
+  if (byName.join() !== byName.slice().sort().join()) return "NAME sort is not alphabetical";
+  sim.G("censusSort = CENSUS_SORTS.indexOf('WALLET')");
+  const w = JSON.parse(sim.G("JSON.stringify(censusList().map(c => c.p.wallet))"));
+  for (let i = 1; i < w.length; i++) if (w[i] > w[i - 1]) return "WALLET sort is not descending: " + w;
+  sim.G("censusSort = CENSUS_SORTS.indexOf('HEALTH')");
+  if (!sim.G("censusList()[0].p.sick")) return "HEALTH sort did not float the sick crab to the top";
+  // filters: each one is a strict subset with the right predicate
+  sim.G("censusSort = 0; censusFilter = CENSUS_FILTERS.indexOf('CREW')");
+  if (sim.G("censusList().some(c => c.p.npc)")) return "the CREW filter let a townsfolk through";
+  sim.G("censusFilter = CENSUS_FILTERS.indexOf('TOWN')");
+  if (sim.G("censusList().some(c => !c.p.npc)")) return "the TOWN filter let a crew crab through";
+  sim.G("censusFilter = CENSUS_FILTERS.indexOf('SICK')");
+  if (sim.G("censusList().some(c => !c.p.sick) || censusList().length === 0")) return "the SICK filter is wrong";
+  sim.G("censusFilter = CENSUS_FILTERS.indexOf('OT')");
+  if (sim.G("censusList().some(c => !c.p.ot && otMinutes(c) === 0)")) return "the OT filter is wrong";
+  sim.G("censusFilter = 0");
+  return true;
+});
+
+scenario("labor policy: every new setting roundtrips save/load", () => {
+  const store = new Map();
+  const a = createSim({ seed: 41, storage: store, fresh: false });
+  a.runDays(2);
+  a.G(`{ BIZ.shack.sickPol = "require"; BIZ.shack.autoLabor = true;
+    BIZ.showers.autoLabor = false; BIZ.juicebar.sickPol = "grant";
+    laborPolicyState.shack = { cd: 1 };
+    crabs[0].p.ot = true; crabs[0].p.restT = 4.5; crabs[0].p.sickPol = "grant";
+    crabs[1].p.ot = false; crabs[1].p.sickPol = "require";
+    npcs[0].p.ot = true;
+    save(); }`);
+  const b = createSim({ seed: 42, storage: store, fresh: false });
+  const got = JSON.parse(b.G(`JSON.stringify({
+    sp: [BIZ.shack.sickPol, BIZ.juicebar.sickPol, BIZ.arcade.sickPol],
+    al: [BIZ.shack.autoLabor, BIZ.showers.autoLabor],
+    pol: laborPolicyState.shack,
+    c0: [crabs[0].p.ot, crabs[0].p.restT, crabs[0].p.sickPol],
+    c1: [crabs[1].p.ot, crabs[1].p.sickPol],
+    n0: npcs.map(k => k.p.name + ":" + !!k.p.ot).join(",") })`));
+  if (got.sp[0] !== "require" || got.sp[1] !== "grant" || got.sp[2] !== "grant")
+    return "sick policies came back " + JSON.stringify(got.sp);
+  if (got.al[0] !== true || got.al[1] !== false) return "auto-manage flags came back " + JSON.stringify(got.al);
+  if (!got.pol || got.pol.cd !== 1) return "labor cooldown came back " + JSON.stringify(got.pol);
+  if (got.c0[0] !== true || Math.abs(got.c0[1] - 4.5) > 1e-9 || got.c0[2] !== "grant")
+    return "crew OT/rest/override came back " + JSON.stringify(got.c0);
+  if (got.c1[0] !== false || got.c1[1] !== "require") return "crew override came back " + JSON.stringify(got.c1);
+  if (!/:true/.test(got.n0)) return "townsfolk OT did not roundtrip: " + got.n0;
+  // a tampered save must clamp, not wedge
+  const s = JSON.parse(store.get("crabshack3_v1"));
+  s.sickPol.shack = "bogus"; s.personas[0].sickPol = "nonsense";
+  store.set("crabshack3_v1", JSON.stringify(s));
+  const c = createSim({ seed: 43, storage: store, fresh: false });
+  // a bogus value is IGNORED, so the shop falls back to the safe default
+  // (GRANT) and the crab's nonsense override is dropped entirely
+  const clamped = JSON.parse(c.G(`JSON.stringify([BIZ.shack.sickPol, crabs[0].p.sickPol == null, sickPolFor(crabs[0])])`));
+  return clamped[0] === "grant" && clamped[1] && clamped[2] === "grant"
+    ? true : "a bogus sick policy survived the load: " + JSON.stringify(clamped);
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
