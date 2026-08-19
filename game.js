@@ -561,6 +561,7 @@ function salePrice(b) { return market[b] ? market[b].price : askingPrice(b); }
 // pays their $10 house rent tonight, and climbs (or slips) the same ladder
 // everyone else does.
 function layOff(k) {
+  logLaidOff(k);   // DIARY: read the old job BEFORE it is cleared below
   abortChef(k); abortErrand(k);
   k.duty = false; k.pendingOff = false; k.kstate = "idle"; k.carrying = null;
   k.dayState = "home"; k.cstate = "";
@@ -653,6 +654,8 @@ function buyBusiness(b, buyer) {
       buyer.workBiz = b; buyer.fishSpot = null;
     }
     who = buyer.p.name;
+    crabLog(buyer, "money", "BOUGHT THE " + BIZ[b].name + " FOR $" + price, 0);   // DIARY
+    crabLog(buyer, "life", "THEIR OWN BOSS NOW - RUNS THE " + BIZ[b].short, 0);
   }
   delete market[b];
   bizStrike[b] = 0;
@@ -1402,6 +1405,7 @@ function newCrab(persona) {
   if (persona.ot == null) persona.ot = false;
   if (persona.restT == null) persona.restT = 0;
   if (persona.sickPol != null && !SICK_POLS.includes(persona.sickPol)) delete persona.sickPol;
+  clampLog(persona);   // THE CRAB DIARY: old saves have none, a degenerate one can't grow
   return {
     p: persona,
     x: homeX({ p: persona }), y: 160, tx: 0, ty: 160,
@@ -1846,6 +1850,7 @@ function load(slot) {
       const n = npcs.find(k => k.p.name === sp.name);
       if (n) {
         Object.assign(n.p, sp);
+        clampLog(n.p);   // townsfolk skip newCrab on this path: bound their diary here
         if (sp.tired == null) n.p.tired = sp.sandy || 0;   // TIRED replaced SANDY (old townsfolk saves seed from it)
         delete n.p.sandy;
         if (n.p.job !== "fishing" && !BIZ[n.p.job]) { n.p.job = "fishing"; n.p.employer = null; }   // removed-business jobs: back to the pier
@@ -2208,6 +2213,7 @@ function arriveCommute(c, atWork) {
   if (atWork) {
     c.dayState = "working"; c.duty = true; c.kstate = "idle"; c.workBiz = c.p.job;
     c.workedToday = true;   // wages follow actual work: a mid-day rota reshuffle (job-board hire) can't unpay a worked shift
+    logClockIn(c);   // DIARY
     if (c.p.job === "fishing" && c.fishSpot) { c.x = c.fishSpot.x; c.y = c.fishSpot.y; c.castT = 3 + Math.random() * 6; }
   }
   else { c.dayState = "home"; }
@@ -2288,6 +2294,7 @@ function runJobBoard() {
       hire.duty = false; hire.pendingOff = false; hire.kstate = "idle";
       hire.carrying = null; hire.dayState = "home"; hire.cstate = ""; hire.workBiz = j.biz;
       jobBoard.splice(jobBoard.indexOf(j), 1);
+      crabLog(hire, "life", "TOOK THE " + BIZ[j.biz].short + " JOB - $" + j.wage + " A DAY", 0);   // DIARY
       today.moved.push(hire.p.name + " HIRED AT " + BIZ[j.biz].name);
       toast = { text: hire.p.name + " TOOK THE " + BIZ[j.biz].name + " JOB", t: 5 };
       popText("HIRED!", hire.x - 6, FLOOR_Y - 34, [140, 255, 160]);
@@ -2303,6 +2310,7 @@ function spawnDrifter() {
   c.fishSpot = freeFishSpot();   // a hole on the rail (somebody died, somebody took a job) gets filled first
   c.x = BUS_STOPS[0]; c.y = 158;   // stepped off the morning bus with one bag
   npcs.push(c);
+  crabLog(c, "life", "GOT OFF THE MORNING BUS, NEW IN TOWN", 0);   // DIARY
   today.moved.push(c.p.name + " NEW IN TOWN");
   toast = { text: c.p.name + " GOT OFF THE BUS - NEW IN TOWN", t: 5 };
   return c;
@@ -2349,6 +2357,7 @@ function convertTourist(k) {
   if (followCust === k) { followCust = null; followIdx = crabs.length - 1; followNpc = null; }
   if (dossier === k) dossier = c;
   c.quip = { text: "I LIVE HERE NOW!", t: 3 };
+  crabLog(c, "life", "TRADED A HOLIDAY FOR AN APRON - HIRED", 0);   // DIARY
   return c;
 }
 function hireCrew() {
@@ -2375,6 +2384,7 @@ function hireCrew() {
     c = newCrab(p2);
     c.x = BUS_STOPS[0]; c.y = 158;   // one bag, one toque
     crabs.push(c);
+    crabLog(c, "life", "ANSWERED THE AD AND RODE THE BUS IN", 0);   // DIARY
     today.moved.push(c.p.name + " JOINED THE CREW (OFF THE BUS)");
     toast = { text: c.p.name + " ANSWERED THE AD - JUST OFF THE BUS", t: 6 };
   }
@@ -2395,8 +2405,10 @@ function updateSchedule(c, dt) {
   // full shift worked while ill.
   if (onSickDay(c) && (c.dayState === "toWork" || c.dayState === "working")) {
     if (c.dayState === "working") { c.duty = false; c.pendingOff = false; abortChef(c); }
+    crabLog(c, "life", "TOOK A SICK DAY AND WENT HOME", 1200);   // DIARY
     startCommute(c, false);
   }
+  if (off && tmin >= OFF_WAKE && c.logOff !== day) { c.logOff = day; crabLog(c, "life", "TOOK THEIR DAY OFF", 0); }   // DIARY
   if (c.dayState === "home" && !off && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !onSickDay(c)
       && !(c.restDay === day && c.restUntil > tmin)) {   // ordered home: a real break before the schedule re-dispatches
     startCommute(c, true);
@@ -2433,6 +2445,7 @@ function updateSchedule(c, dt) {
     // `otF` is the overtime minutes on top, weighted at OT_FATIGUE for
     // tiredness because the last two hours are the ones that break you.
     // Under default hours with no cover this is byte-for-byte the old numbers.
+    logShiftEnd(c);   // DIARY
     const load = shiftLoad(c), work = workLoad(c), otF = (c.otMin || 0) / ownStdSpan(c);
     c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25 * (load + otF));  // a shift works up an appetite - a long one, more
     c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * (load + otF) * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));  // working a whole shift ALREADY tired makes you thirsty (checked pre-bump: same firing rate the sandy coupling had)
@@ -2692,6 +2705,8 @@ function updateSelfCook(c, dt) {
       popText(c.cookNeed === "drink" ? "STAFF POUR!" : "STAFF MEAL!", c.x - 8, FLOOR_Y - 30, [140, 255, 160]);
       if (window._stats) window._stats.staffMeals = (window._stats.staffMeals || 0) + 1;
       c.quip = { text: c.cookNeed === "drink" ? "BARKEEP'S PRIVILEGE" : "CHEF'S PRIVILEGE", t: 2.4 };
+      crabLog(c, "need", c.cookNeed === "drink" ? "POURED THEMSELVES A DRINK AT WORK"   // DIARY
+        : "COOKED THEMSELVES A STAFF MEAL", 0);
       c.errandCd = 25; c.dayState = "home";
       startCommute(c, false);
     }
@@ -2721,11 +2736,13 @@ function updateTap(c, dt) {
   if (c.tapT > 0) return;
   if (e.need === "clean") {
     c.p.dirt = Math.max(0, (c.p.dirt || 0) - TAP_RINSE);
+    crabLog(c, "need", "RINSED OFF AT " + WATER_TAPS[e.tap].name, 0);   // DIARY
     popText("RINSED OFF", c.x - 12, FLOOR_Y - 30, [150, 210, 255]);
     c.quip = { text: "COLD! BUT CLEANER", t: 2.4 };
     if (window._stats) window._stats.tapRinses = (window._stats.tapRinses || 0) + 1;
   } else {
     c.p.thirst = Math.max(0, (c.p.thirst || 0) - TAP_QUENCH);
+    crabLog(c, "need", "DRANK AT " + WATER_TAPS[e.tap].name, 0);   // DIARY
     popText("FREE WATER", c.x - 12, FLOOR_Y - 30, [150, 210, 255]);
     c.quip = { text: ["GLUG GLUG", "THAT'LL DO", "STRAIGHT FROM THE TAP"][(Math.random() * 3) | 0], t: 2.4 };
     if (window._stats) window._stats.tapDrinks = (window._stats.tapDrinks || 0) + 1;
@@ -2816,6 +2833,7 @@ function finishErrand(k) {
   if (c.errandCust === k) {
     c.hidden = false;
     c.errandCust = null; c.errandCd = 25;
+    if (!k.served) crabLog(c, "peril", "QUEUED AT THE " + BIZ[k.biz].name + " AND GAVE UP", 0);   // DIARY
     if (!k.served) c.quip = { text: "LINE WAS TOO LONG", t: 2.4 };
     c.dayState = "home";
     afterErrand(c, k.served);   // a served crab may chain on; a rage-quit just leaves
@@ -2967,6 +2985,7 @@ function deathArmsAt(lane) { return lane === "neglect" ? DEATH_DAY : LINGER_DAY;
 // One removal path for crew and townsfolk alike. Releases everything the crab
 // held, files the memorial, and settles what their death does to the town.
 function killCrab(k) {
+  crabLog(k, "peril", "PASSED AWAY ON DAY " + day + " OF THE TOWN", 0);   // DIARY: the last entry anyone writes
   abortChef(k); abortErrand(k);
   memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
   today.died.push(k.p.name);
@@ -3220,6 +3239,7 @@ function updateFishing(c, dt) {
     c.roastT -= dt;
     if (c.roastT <= 0) {
       c.p.hunger = Math.max(0, (c.p.hunger || 0) - 0.65);
+      crabLog(c, "need", "ROASTED A FRESH CATCH ON THE BEACH", 0);   // DIARY
       popText("FRESH CATCH LUNCH", c.x - 12, c.y - 24, [140, 255, 160]);
       c.quip = { text: ["CAN'T BEAT FRESH", "SEA PROVIDES", "STRAIGHT OFF THE LINE"][(Math.random() * 3) | 0], t: 2.4 };
       if (window._stats) window._stats.roasts = (window._stats.roasts || 0) + 1;
@@ -3247,6 +3267,7 @@ function updateFishing(c, dt) {
     if (tier.big && Math.random() < tier.big) haul = 4;   // THE BIG ONE
     townCatch += haul; trade.landed += haul; trade.landedDay += haul;
     creditCatch(c, haul);
+    logCatch(c, haul);   // DIARY: tallied all day, filed as ONE line at dusk (the BIG ONE gets its own)
     // free agents: no wage anywhere - the catch sold at the pier's market
     // price IS the income. A scarce-fish day is a lucrative day.
     c.p.wallet += trade.price * haul;
@@ -3373,6 +3394,7 @@ function updateKitchen(c, dt) {
     c.workT -= dt;
     if (c.workT <= 0) {
       if (c.cleanStall) { c.cleanStall.dirty = false; c.cleanStall.cleaning = false; c.cleanStall = null; }
+      crabLogEvery(c, "stall", 90, "work", "SCRUBBED OUT A SHOWER STALL");   // DIARY
       c.kstate = "idle";
       if (window._stats) window._stats.stallsCleaned = (window._stats.stallsCleaned || 0) + 1;
       popText("SPARKLING", c.x - 6, FLOOR_Y - 30, [140, 220, 255]);
@@ -3462,6 +3484,7 @@ function creditCatch(c, haul) {
   c.p.made.caught = before + haul;
   for (const t of FISH_TIERS) {
     if (before < t.at && c.p.made.caught >= t.at) {
+      crabLog(c, "life", t.label + " FISHING - " + c.p.made.caught + " LANDED", 0);   // DIARY
       toast = { text: c.p.name + " " + t.label + " FISHING! " + c.p.made.caught + " LANDED", t: 6 };
       popText(t.label + " FISHING", c.x - 26, c.y - 32, [255, 230, 120]);
       c.quip = { text: ["I KNOW THIS WATER", "THEY COME TO ME NOW", "READ THE TIDE"][(Math.random() * 3) | 0], t: 2.6 };
@@ -3478,6 +3501,7 @@ function creditAccomplishment(c, cust) {
   for (const [need, , label] of MASTERY) {
     if (n === need) {
       const dish = ITEM_NAMES[cust.recipe.icon];
+      crabLog(c, "life", label + " " + dish + " (X" + n + ")", 0);   // DIARY
       toast = { text: c.p.name + " " + label + " " + dish + "! " + n + " SERVED", t: 6 };
       popText(label + " " + dish, c.x - 24, FLOOR_Y - 36, [255, 230, 120]);
       c.quip = { text: ["I'VE GOT THIS", "MY SPECIALTY", "EASY NOW"][(Math.random() * 3) | 0], t: 2.4 };
@@ -3494,6 +3518,8 @@ function payAndBenefit(c, cust) {
     if (cust.biz === "arcade") tradeImport("power", 1);             // a machine hour
   }
   creditAccomplishment(c, cust);
+  logServe(c, cust);   // DIARY: one line for the whole plate, rate-limited in the rush
+  if (cust.isCrab) logTreat(cust);   // DIARY: ...and the crab on the other side of the counter
   if (cust.biz === "juicebar") {
     if (window._stats) window._stats.drinkServes = (window._stats.drinkServes || 0) + 1;
     if (!firstPour && c && c.p) {   // the bar's first drink is town news
@@ -3625,6 +3651,8 @@ function updateCustomers(dt) {
         st.occupant = null; st.dirty = true; k.stall = null;
         if (k.isCrab) {   // dirt-only: TIRED is slept off, not scrubbed off
           k.crab.p.dirt = Math.max(0, (k.crab.p.dirt || 0) - (k.recipe.deep ? 0.7 : 0.5));
+          crabLog(k.crab, "need", "TOOK A " + (k.recipe.deep ? "LONG SOAK" : "SHOWER")   // DIARY
+            + " AT THE " + BIZ[k.biz].name, 0);
           k.crab.quip = { text: "SQUEAKY CLEAN!", t: 2.4 };
         }
         if (window._stats) window._stats.showersDone = (window._stats.showersDone || 0) + 1;
@@ -3750,6 +3778,176 @@ function crabStatus(c) {
   return (toWork ? "WALKING TO WORK" : "HEADING HOME");
 }
 
+// ---------------------------------------------------------------- THE CRAB DIARY
+// Every crab in town keeps its own diary: what it DID, in the town's voice,
+// oldest first, bounded. One API - crabLog(crab, category, line) - so a new
+// behaviour anywhere in the game is a ONE-LINE hook where that behaviour
+// already lives, and nothing has to be refactored to make a life legible.
+//
+// The rules, in order of importance:
+//   1. AN ENTRY IS SOMETHING YOU'D TELL A FRIEND. "SERVED A FISH TACO TO
+//      MISTY", never "state changed to errand". Past tense, named, specific.
+//      One line for the whole serve - not three for approach/cook/deliver.
+//   2. IT IS BOUNDED, AND IT RIDES THE SAVE FOR FREE. LOG_MAX entries per
+//      crab, oldest dropped; each entry is a 4-element ARRAY
+//      [day, minute, category, line] rather than an object, because save()
+//      writes the personas wholesale and array entries cost ~40% fewer bytes
+//      than the same fields keyed. Old saves simply have no log.
+//   3. IT NEVER RUNS ON A TICK. Every hook sits at an event that already
+//      happens exactly once. Anything repetitive carries a minimum gap in
+//      GAME MINUTES (crabLog's 4th arg, or crabLogEvery for a whole class of
+//      line) so a rush hour reads as a few named plates and a fishing day as
+//      one tally - not forty identical entries.
+//   4. IT IS BEHAVIOUR-NEUTRAL. No RNG, no sim state, nothing read back by
+//      the simulation. The frozen day-2 fingerprint must not move.
+const LOG_MAX = 40;          // ~2-4 days for a busy chef, a fortnight for a quiet fisher
+const LOG_GAP = 45;          // default: the same line again within the hour is the same event
+const LOG_SERVE_GAP = 25;    // ...and a chef in a rush files a named plate about every half hour
+const LOG_TEXT = 39;         // characters that fit the diary column at the 3x5 font
+// the colour a category reads in: work is business, money is coin, home is the
+// housing ladder (the spine of a crab's run), need is self-care, life is the
+// big turns, peril is the trouble, social is reserved for the crabs-chatting
+// work landing alongside this one.
+const LOG_CATS = {
+  work:   [70, 90, 130],
+  money:  [150, 115, 40],
+  home:   [70, 140, 200],
+  need:   [40, 150, 70],
+  life:   [140, 100, 175],
+  peril:  [190, 80, 80],
+  social: [200, 110, 160],
+};
+const SHIFT_WORD = { M: "MORNING", E: "EVENING", D: "OPEN-TO-CLOSE" };
+// the load-side guard: an old save has no log, an imported one might have
+// anything. Keep only well-formed entries, keep only the last LOG_MAX.
+function clampLog(p) {
+  if (!Array.isArray(p.log)) { if (p.log != null) delete p.log; return; }
+  const ok = p.log.filter(e => Array.isArray(e) && e.length >= 4 && typeof e[3] === "string");
+  p.log = ok.slice(-LOG_MAX).map(e => [+e[0] || 1, +e[1] || 0, LOG_CATS[e[2]] ? e[2] : "life", e[3].slice(0, LOG_TEXT)]);
+}
+function crabLog(c, cat, line, gap) {
+  if (!c || !c.p || !line) return;
+  const log = c.p.log || (c.p.log = []);
+  const txt = String(line).slice(0, LOG_TEXT);
+  const now = day * 1440 + tmin, win = gap == null ? LOG_GAP : gap;
+  for (let i = log.length - 1; i >= 0; i--) {          // rate limit: only ever scans the window
+    const e = log[i];
+    if (now - (e[0] * 1440 + e[1]) > win) break;
+    if (e[2] === cat && e[3] === txt) return;
+  }
+  log.push([day, Math.round(tmin), cat, txt]);
+  if (log.length > LOG_MAX) log.splice(0, log.length - LOG_MAX);
+}
+// ...and the same door for a whole CLASS of line that would otherwise spam:
+// a chef's plates all read differently (different guest, different dish), so
+// the text-dedup above can't catch them. The slot stamp is transient state on
+// the entity, never the persona - a reload costs at most one extra entry.
+function crabLogEvery(c, slot, mins, cat, line) {
+  if (!c || !c.p) return;
+  const now = day * 1440 + tmin, seen = c._logAt || (c._logAt = {});
+  if (seen[slot] != null && now - seen[slot] < mins) return;
+  seen[slot] = now;
+  crabLog(c, cat, line, 0);
+}
+// ---- HOUSING IS THE SPINE (owner: "should also keep track of housing status
+// carefully"). Every move names the PLACE, and the diary also keeps a compact
+// trail + a nights tally on the persona, so a crab whose log has rolled over
+// still shows whether their life has been going up or down at a glance.
+// short on purpose: a diary line has 39 characters, and the full address
+// ("HOUSE 3 ON THE PROMENADE") already lives on the profile's HOME row
+function placeName(p) {
+  if (p.boat != null) return "THE " + BOAT_NAMES[p.boat];
+  if (p.homeless) return "THE SHELTER";
+  if (p.house >= 7) return "A BEACH COTTAGE";
+  return "HOUSE " + (p.house + 1);
+}
+function placeTag(p) {   // the trail's short form: SHELTER > HOUSE 3 > COTTAGE
+  if (p.boat != null) return BOAT_NAMES[p.boat];
+  if (p.homeless) return "SHELTER";
+  if (p.house >= 7) return "COTTAGE";
+  return "HOUSE " + (p.house + 1);
+}
+function logHome(c, line) {
+  const p = c.p, tag = placeTag(p), t = p.homeTrail || (p.homeTrail = []);
+  if (t[t.length - 1] !== tag) t.push(tag);
+  if (t.length > 4) t.shift();          // the last four addresses; the tally carries the rest
+  p.homeSince = day;
+  crabLog(c, "home", line, 0);
+}
+function homeTrail(p, n) {
+  const t = p.homeTrail && p.homeTrail.length ? p.homeTrail : [placeTag(p)];
+  return t.slice(-(n || 4)).join(" > ");   // the last few addresses; the tally carries the rest
+}
+// ---- the composite hooks: one call at each event site, all the shaping here
+// ONCE A DAY, not once per return: a fisher who breaks for lunch walks back
+// out to the rail two or three times, and only the first is news.
+function logClockIn(c) {
+  crabLogEvery(c, "clockin", 720, "work", c.p.job === "fishing"
+    ? (c.p.boat != null ? "CAST OFF FROM THE " + BOAT_NAMES[c.p.boat] : "TOOK UP A SPOT ON THE PIER")
+    : "CLOCKED IN AT THE " + BIZ[c.p.job].name);
+}
+function logShiftEnd(c) {
+  crabLog(c, "work", c.p.job === "fishing" ? "CAME OFF THE WATER FOR THE DAY"
+    : coveringToday(c) ? "COVERED A DOUBLE SHIFT AT THE " + BIZ[c.p.job].short
+    : "FINISHED THE " + (SHIFT_WORD[c.p.shift] || "") + " SHIFT", 0);
+  if ((c.otMin || 0) >= 15)
+    crabLog(c, "work", "WORKED " + Math.round(c.otMin / 6) / 10 + "H OF OVERTIME", 0);
+}
+function logServe(c, cust) {
+  if (!c || !c.p || !cust.recipe) return;
+  const who = cust.isCrab ? (cust.crab && cust.crab.p.name) || "A NEIGHBOUR" : cust.name.split(" ")[0];
+  crabLogEvery(c, "serve", LOG_SERVE_GAP, "work",
+    "SERVED A " + (ITEM_NAMES[cust.recipe.icon] || "PLATE") + " TO " + who);
+}
+function logTreat(cust) {   // the crab on the OTHER side of the counter
+  const c = cust.crab;
+  if (!c || !c.p || !cust.recipe) return;
+  if (cust.need === "clean") return;   // the wash is filed when they step OUT of the stall, not when the kit is handed over
+  const what = ITEM_NAMES[cust.recipe.icon] || "SOMETHING", where = BIZ[cust.biz].name;
+  const drank = cust.need === "drink" || DRINKS[cust.recipe.id];   // a juice bought as lunch is still a drink
+  crabLog(c, "need", cust.need === "fun" ? "BLEW OFF STEAM AT THE " + where
+    : (drank ? "DRANK A " : "ATE A ") + what + " AT THE " + where, 0);
+}
+function logCatch(c, haul) {
+  c.caughtToday = (c.caughtToday || 0) + haul;                 // tallied, filed once at dusk
+  if (haul >= 4) crabLog(c, "work", "LANDED THE BIG ONE - $" + trade.price * haul, 0);
+}
+function logLaidOff(k) {   // called from layOff BEFORE the job fields are cleared
+  const b = k.p.owner ? Object.keys(BIZ).find(b2 => bizOwner(b2) === k.p.owner) : null;
+  crabLog(k, "life", b ? "LOST THE " + BIZ[b].name + " - SHUTTERS UP"
+    : k.p.npc ? "WAS LAID OFF - BACK TO THE PIER" : "WAS LAID OFF - BACK TO THE KITCHEN", 0);
+}
+function logFellIll(c) {
+  const p = c.p, why = [];
+  if ((p.hunger || 0) >= 0.9) why.push("STARVED");
+  if ((p.thirst || 0) >= 0.9) why.push("PARCHED");
+  if ((p.dirt || 0) >= 0.9) why.push("FILTHY");
+  if ((p.tired || 0) >= 0.9) why.push("WORN OUT");
+  crabLog(c, "peril", "FELL ILL" + (why.length ? " - " + why.join(", ") : ""), 0);
+}
+// One pass per crab at settlement: the nights tally the housing banner reads,
+// the day's fishing filed as ONE line, and the needs a crab took to bed. This
+// is the "crossed a threshold" entry - once a night, never per tick.
+function logNightly(c) {
+  const p = c.p, tr = p.homeTrail;
+  if (p.homeless) p.nCot = (p.nCot || 0) + 1; else p.nHome = (p.nHome || 0) + 1;
+  // the FIRST night of a cot spell, never the twentieth (an eviction has
+  // already written its own line, which leaves SHELTER on the trail)
+  if (p.homeless && (!tr || !tr.length || tr[tr.length - 1] !== "SHELTER")) logHome(c, "TOOK A COT AT THE SHELTER");
+  if (!p.homeTrail || !p.homeTrail.length) { p.homeTrail = [placeTag(p)]; if (!p.homeSince) p.homeSince = day; }
+  if (c.caughtToday) {
+    crabLog(c, "work", "LANDED " + c.caughtToday + " FISH"
+      + (p.boat != null ? " FROM THE " + BOAT_NAMES[p.boat] : " OFF THE PIER"), 0);
+    c.caughtToday = 0;
+  }
+  // a convalescent day looks like silence from the outside - say what it was
+  if (p.sick) crabLog(c, "peril", "SPENT THE DAY LAID UP - DAY " + ((p.sick.days || 0) + 1), 0);
+  if ((p.hunger || 0) >= 0.9) crabLog(c, "peril", "WENT TO BED HUNGRY", 0);
+  if ((p.thirst || 0) >= 0.9) crabLog(c, "peril", "WENT TO BED PARCHED", 0);
+  if ((p.dirt || 0) >= 0.9) crabLog(c, "peril", "WENT TO BED FILTHY", 0);
+  if ((p.tired || 0) >= 0.9) crabLog(c, "peril", "WENT TO BED DEAD ON THEIR FEET", 0);
+}
+
 // ---------------------------------------------------------------- input
 const BUTTONS = [];
 {
@@ -3861,6 +4059,22 @@ cv.addEventListener("click", (ev) => {
     const owned = Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player");
     const c = dossier;
     const inRow = (r) => r && pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h;
+    // the bottom control bar first - it is live on BOTH pages and for tourists
+    const DR = dossierRects(c.p ? DOSS_H : CUST_H);
+    if (inRow(DR.follow)) {   // camera AND selection, then get out of the way
+      followCrab(c); dossier = null; manage = null; boardView = false; sfx.ding(); return;
+    }
+    if (inRow(DR.close)) { dossier = null; if (manage) sfx.ding(); return; }
+    if (c.p) {
+      for (const t of DOSS_TABS) if (inRow(DR.tab[t])) { dossierTab = t; diaryPage = 0; sfx.ding(); return; }
+      if (dossierTab === "DIARY") {   // paging only; the profile's row controls are that page's
+        const pages = Math.max(1, Math.ceil(((c.p.log || []).length) / DIARY_ROWS));
+        if (inRow(DR.prev)) { diaryPage = (diaryPage + pages - 1) % pages; sfx.ding(); return; }
+        if (inRow(DR.next)) { diaryPage = (diaryPage + 1) % pages; sfx.ding(); return; }
+        dossier = null; if (manage) sfx.ding();
+        return;
+      }
+    }
     if (c.p && !c.p.npc && owned.length > 1 && pt.y >= 47 && pt.y < 57 && pt.x >= 24 && pt.x < 232) {
       c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
       sfx.buy();
@@ -4969,6 +5183,97 @@ const _art2Cache = {};
 function art2(key, art) {   // lazily scaled 2x art for the dossier portrait
   return _art2Cache[key] || (_art2Cache[key] = scale2(art));
 }
+// ---------------------------------------------------------------- the record
+// The dossier is now a two-page record with a bottom control bar - PROFILE
+// (who they are right now) and DIARY (what they have been doing), plus a
+// FOLLOW button that puts the camera on them and gets out of the way.
+// Same idiom as manageRects: ONE geometry table feeds both the draw and the
+// hit-test, so the tap targets can never drift from the pixels. Every offset
+// derives from the card, and the card sits inside rows 0..PANEL_Y, which is
+// the world area in BOTH canvas modes - so 240 and 288 get the same record.
+const DOSS_H = 168, CUST_H = 120;   // the crab record and the shorter tourist card
+const DOSS_TABS = ["PROFILE", "DIARY"];
+let dossierTab = "PROFILE", diaryPage = 0, diaryFor = null;
+const DIARY_ROWS = 12;
+function dossierRects(h2) {
+  const x = 24, y = 6, w2 = 208;
+  const by = y + h2 - 16;
+  const R = { x, y, w: w2, h: h2, tab: {},
+    follow: { x: x + 100, y: by, w: 54, h: 13 },
+    close:  { x: x + 158, y: by, w: 46, h: 13 },
+    prev:   { x: x + 152, y: y + 33, w: 14, h: 11 },
+    next:   { x: x + 190, y: y + 33, w: 14, h: 11 },
+    rows: [] };
+  DOSS_TABS.forEach((t, i) => R.tab[t] = { x: x + 4 + i * 46, y: by, w: 44, h: 13 });
+  for (let i = 0; i < DIARY_ROWS; i++) R.rows.push({ x: x + 4, y: y + 50 + i * 8, w: w2 - 8, h: 8 });
+  return R;
+}
+function isFollowing(c) {
+  return c ? (followCust === c || followNpc === c || (followIdx >= 0 && crabs[followIdx] === c)) : false;
+}
+// SELECTION and CAMERA are deliberately separate in this game (a drag drops the
+// camera and keeps the selection). FOLLOW sets BOTH, so right-click orders go
+// to the crab you just chose to watch - and it works for a tourist too, who is
+// a customer object rather than a crab.
+function followCrab(c) {
+  if (!c) return;
+  sel = c;
+  if (!c.p) { followCust = c; followIdx = -1; followNpc = null; }
+  else if (c.p.npc) { followNpc = c; followIdx = -1; followCust = null; }
+  else { followIdx = crabs.indexOf(c); followNpc = null; followCust = null; }
+}
+function dossierBar(R, c, diary) {
+  const chip = (r, label, hot, dim) => {
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, hot ? [190, 140, 80] : dim ? [222, 212, 196] : [235, 225, 205]);
+    smallText(ctx, label, r.x + ((r.w - smallTextWidth(label)) >> 1), r.y + 4,
+      hot ? [40, 24, 16] : dim ? [140, 130, 130] : [90, 60, 40]);
+  };
+  if (diary) for (const t of DOSS_TABS)
+    chip(R.tab[t], t === "DIARY" ? "DIARY " + ((c.p.log && c.p.log.length) || 0) : t, dossierTab === t, false);
+  const on = isFollowing(c);
+  chip(R.follow, on ? "FOLLOWING" : "FOLLOW", false, on);
+  chip(R.close, "CLOSE", false, false);
+}
+function logStamp(e) {
+  const h = (e[1] / 60) | 0, m = e[1] % 60 | 0;
+  return "D" + e[0] + " " + (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+}
+// THE DIARY PAGE. Housing banner first - where a crab has slept is the spine
+// of its run, and the trail plus the nights tally answer "has this life been
+// going up or down?" without reading a single line - then the timeline,
+// newest first, coloured by category, paged for a thumb.
+function drawDiary(c, R) {
+  const { x, y } = R, w2 = R.w, p = c.p;
+  const log = Array.isArray(p.log) ? p.log : [];
+  smallText(ctx, "HOME", x + 6, y + 35, [110, 100, 110]);
+  smallText(ctx, homeTrail(p, 3).slice(0, 30), x + 28, y + 35, [70, 140, 200]);
+  const nh = p.nHome || 0, nc = p.nCot || 0;
+  smallText(ctx, nh + " NIGHTS HOUSED, " + nc + " ON A COT"
+    + (p.homeSince ? " - HERE SINCE D" + p.homeSince : ""), x + 6, y + 43,
+    nc > nh ? [190, 80, 80] : [110, 100, 110]);
+  const pages = Math.max(1, Math.ceil(log.length / DIARY_ROWS));
+  if (diaryPage >= pages) diaryPage = pages - 1;
+  if (pages > 1) {
+    smallText(ctx, "<", R.prev.x + 5, R.prev.y + 3, [96, 170, 220]);
+    smallText(ctx, ">", R.next.x + 5, R.next.y + 3, [96, 170, 220]);
+    const lbl = (diaryPage + 1) + "/" + pages;
+    smallText(ctx, lbl, R.next.x - 12 - smallTextWidth(lbl) / 2, R.next.y + 3, [150, 140, 160]);
+  }
+  if (!log.length) {
+    smallText(ctx, "NOTHING WORTH WRITING DOWN YET.", x + 6, y + 56, [150, 140, 160]);
+    smallText(ctx, "COME BACK AFTER A DAY'S WORK.", x + 6, y + 64, [150, 140, 160]);
+    return;
+  }
+  for (let i = 0; i < DIARY_ROWS; i++) {
+    const e = log[log.length - 1 - (diaryPage * DIARY_ROWS + i)];
+    if (!e) break;
+    const ry = R.rows[i].y;
+    if (i % 2 === 0) rect(ctx, R.rows[i].x, ry - 1, R.rows[i].w, 8, [246, 241, 228]);
+    smallText(ctx, logStamp(e), x + 6, ry, [140, 132, 148]);
+    smallText(ctx, e[3], x + 48, ry, LOG_CATS[e[2]] || [60, 55, 65]);
+  }
+}
 function drawCustDossier(k) {
   const x = 24, y = 6, w2 = 208, h2 = 120;
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
@@ -5000,13 +5305,15 @@ function drawCustDossier(k) {
   ly += 10;
   smallText(ctx, "WORD OF MOUTH: TOURISTS WHO LEAVE HAPPY", x + 8, ly, [90, 90, 105]); ly += 7;
   smallText(ctx, "TELL THEIR FRIENDS. ANGRY ONES TELL MORE.", x + 8, ly, [90, 90, 105]);
-  smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
+  dossierBar(dossierRects(h2), k, false);   // a tourist has no diary - but you can still follow them
 }
 function drawDossier() {
   if (!dossier) return;
   if (!dossier.p) { drawCustDossier(dossier); return; }
   const c = dossier, p = c.p;
-  const x = 24, y = 6, w2 = 208, h2 = 168;   // sits fully above the panel
+  const R = dossierRects(DOSS_H);
+  const x = R.x, y = R.y, w2 = R.w, h2 = R.h;   // sits fully above the panel, in both canvas modes
+  if (diaryFor !== c) { diaryFor = c; diaryPage = 0; }   // a different crab starts at their latest page
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
   rect(ctx, x, y, w2, 32, [58, 42, 38]);
@@ -5026,8 +5333,9 @@ function drawDossier() {
     }
     if (line) smallText(ctx, "'" + line + "'", x + 48, y + 24, [255, 215, 150]);
   }
-  let ly = y + 42;
   dossierHit = {};   // draw and hit-test share one geometry table (see manageRects)
+  if (dossierTab === "DIARY") { drawDiary(c, R); dossierBar(R, c, true); return; }
+  let ly = y + 42;
   const row = (label, val, col, key) => {
     smallText(ctx, label, x + 8, ly, [120, 110, 125]);
     smallText(ctx, val, x + 56, ly, col || [40, 30, 40]);
@@ -5087,21 +5395,25 @@ function drawDossier() {
       walk < 0.85 ? [190, 80, 80] : [200, 110, 40]);
   }
   ly += 2;
-  const bars = [["FED", 1 - (p.hunger || 0)], ["QUENCHED", 1 - (p.thirst || 0)],
-    ["CLEAN", 1 - (p.dirt || 0)], ["FUN", 1 - (p.bored || 0)], ["RESTED", 1 - (p.tired || 0)]];
-  for (const [label, frac] of bars) {
-    smallText(ctx, label, x + 8, ly, [110, 110, 130]);
-    rect(ctx, x + 44, ly, 100, 5, [30, 20, 36]);
-    rect(ctx, x + 45, ly + 1, Math.round(98 * Math.max(0, frac)), 3,
+  // the five needs on ONE row (the follow card's idiom): the record grew a
+  // control bar along the bottom, and a stack of five labelled bars is the
+  // 32px that has to give - the numbers are identical, the meters are shorter
+  const bars = [["FED", 1 - (p.hunger || 0)], ["SIP", 1 - (p.thirst || 0)],
+    ["CLN", 1 - (p.dirt || 0)], ["FUN", 1 - (p.bored || 0)], ["ZZZ", 1 - (p.tired || 0)]];
+  bars.forEach(([label, frac], i) => {
+    const bx = x + 6 + i * 40;
+    smallText(ctx, label, bx, ly, [110, 110, 130]);
+    rect(ctx, bx + 14, ly, 24, 5, [30, 20, 36]);
+    rect(ctx, bx + 15, ly + 1, Math.round(22 * Math.max(0, Math.min(1, frac))), 3,
       frac > 0.5 ? [96, 200, 120] : frac > 0.25 ? [235, 200, 90] : [235, 90, 90]);
-    ly += 8;
-  }
-  ly += 3;
+  });
+  ly += 11;
+  if (ly > y + h2 - 26) { dossierBar(R, c, true); return; }   // a sick crab's rows fill the card: claims wait
   smallText(ctx, "CLAIMS TO FAME", x + 8, ly, [58, 42, 38]); ly += 8;
   const made = Object.entries(p.made || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
   if (!made.length) smallText(ctx, "NONE YET - GIVE IT TIME", x + 8, ly, [150, 140, 160]), ly += 8;
   for (let i = 0; i < made.length; i++) {
-    if (ly > y + h2 - 12 && i < made.length - 1) {   // keep inside the card
+    if (ly > y + h2 - 26 && i < made.length - 1) {   // keep inside the card, above the control bar
       smallText(ctx, "+" + (made.length - i) + " MORE", x + 8, ly, [150, 140, 160]);
       break;
     }
@@ -5113,7 +5425,7 @@ function drawDossier() {
       tier ? [140, 110, 40] : [90, 90, 105]);
     ly += 8;
   }
-  smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
+  dossierBar(R, c, true);
 }
 
 // ---------------------------------------------------------------- management screen
@@ -5725,6 +6037,7 @@ function frame(now) {
       const due = Math.round(basePayToday(c)) + prem;   // the day, priced by the hours contracted
       if (coins >= due) {
         coins -= due; c.p.wallet += due; wages += due;
+        crabLog(c, "money", "DREW $" + due + " IN WAGES", 0);   // DIARY
         if (prem > 0) {
           popText("OT +$" + prem, c.x - 4, FLOOR_Y - 40, [255, 216, 96]);
           if (window._stats) {
@@ -5732,12 +6045,13 @@ function frame(now) {
             window._stats.otMin = (window._stats.otMin || 0) + Math.round(c.otMin || 0);
           }
         }
-      } else popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]);
+      } else { crabLog(c, "peril", "WENT UNPAID - THE TILL WAS EMPTY", 0); popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]); }   // DIARY
     }
     if (wages > 0) earnHist.push({ t: time, amt: -wages });
     // 2. house rent from each crab's own wallet; broke crabs move to the shelter
     let evictedNames = [];
     for (const c of allCrabs()) {
+      logNightly(c);   // DIARY: the nights tally, the day's catch as one line, and what they took to bed
       c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.15 * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));   // a dry night - drier after a hard day
       if (c.workedToday) { c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_NIGHT); c.workedToday = false; }   // the day's work catches up at dusk; idlers owe nothing
       if (c.p.homeless) {
@@ -5756,6 +6070,7 @@ function frame(now) {
         }
         if (free >= 0 && c.p.wallet >= MOVE_IN_COST + HOUSE_RENT) {
           c.p.wallet -= MOVE_IN_COST; c.p.house = free; c.p.homeless = false;
+          logHome(c, "MOVED INTO " + placeName(c.p) + " - $" + MOVE_IN_COST);   // DIARY
           today.moved.push(c.p.name + " GOT A HOUSE");
           toast = { text: c.p.name + " MOVED INTO A HOUSE!", t: 5 };
           popText("HOME SWEET HOME", HOUSE_XS[free] + 8, 100, [140, 255, 160]);
@@ -5771,6 +6086,7 @@ function frame(now) {
         const berth = freeBerth();
         c.p.wallet -= BOAT_COST;
         c.p.boat = berth; c.p.house = null;
+        logHome(c, "MOVED ABOARD THE " + BOAT_NAMES[berth] + " - $" + BOAT_COST);   // DIARY
         c.fishSpot = boatSpot(berth);
         today.moved.push(c.p.name + " MOVED ABOARD THE " + BOAT_NAMES[berth]);
         toast = { text: c.p.name + " MOVED ABOARD!", t: 6 };
@@ -5778,6 +6094,7 @@ function frame(now) {
         sfx.ding();
       } else if (c.p.wallet >= HOUSE_RENT) {
         c.p.wallet -= HOUSE_RENT;
+        crabLog(c, "money", "PAID $" + HOUSE_RENT + " HOUSE RENT", 600);   // DIARY: once a night, never twice
         // careers move; so do crabs. A housed crab whose job has drifted far
         // from their door takes a much-closer empty lot when they can cover
         // the move (a quit fisher shouldn't keep the promenade forever)
@@ -5794,12 +6111,14 @@ function frame(now) {
           }
           if (near >= 0) {
             c.p.house = near;
+            logHome(c, "MOVED TO " + placeName(c.p) + " - CLOSER TO WORK");   // DIARY
             today.moved.push(c.p.name + " MOVED CLOSER TO WORK");
             popText("CLOSER TO WORK", HOUSE_XS[near] + 8, 100, [140, 255, 160]);
           }
         }
       } else {
         c.p.homeless = true;
+        logHome(c, "COULDN'T MAKE RENT - LOST THE HOUSE");   // DIARY: the night a run turns
         evictedNames.push(c.p.name); today.moved.push(c.p.name + " -> SHELTER");
         popText(c.p.name + " LOST THEIR HOUSE", c.x - 12, FLOOR_Y - 34, [255, 120, 120]);
       }
@@ -5816,8 +6135,9 @@ function frame(now) {
       if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay - same deal as the crew
       if (offToday(c) && !c.workedToday) continue;   // day off: unpaid, but the job is safe
       const npcDue = Math.round(basePayToday(c)) + Math.round(otPayToday(c));   // peer owners buy hours at the same rate, premium included
-      if (o && o.till >= npcDue) { o.till -= npcDue; c.p.wallet += npcDue; }
+      if (o && o.till >= npcDue) { o.till -= npcDue; c.p.wallet += npcDue; crabLog(c, "money", "WAS PAID $" + npcDue + " BY " + o.name, 0); }   // DIARY
       else {
+        crabLog(c, "life", "QUIT - " + (o ? o.name : "THE BOSS") + " COULDN'T PAY", 0);   // DIARY
         c.p.job = "fishing"; c.p.employer = null;
         today.moved.push(c.p.name + " QUIT - BACK TO THE PIER");
         toast = { text: c.p.name + " QUIT: " + (o ? o.name : "THE BOSS") + " COULDN'T PAY", t: 6 };
@@ -5871,6 +6191,7 @@ function frame(now) {
         }
         if (risk > 0 && Math.random() < Math.min(0.5, risk)) {
           k.p.sick = { days: 0 }; today.sick.push(k.p.name);
+          logFellIll(k);   // DIARY
           if (window._stats) {
             const why = [];
             if ((k.p.hunger || 0) >= 0.9) why.push("hunger");
@@ -5896,6 +6217,7 @@ function frame(now) {
         if (Math.random() < care.cure) {
           const dur = k.p.sick.days;
           k.p.sick = null; today.recovered.push(k.p.name);
+          crabLog(k, "need", "GOT BETTER AFTER " + dur + " DAY" + (dur === 1 ? "" : "S") + " ILL", 0);   // DIARY
           popText(k.p.name + " RECOVERED!", k.x - 12, FLOOR_Y - 34, [140, 255, 160]);
           if (window._stats) {
             window._stats.recoveries = (window._stats.recoveries || 0) + 1;
@@ -5914,6 +6236,7 @@ function frame(now) {
           // their own bed - the care ladder is what this warning points at).
           if (k.p.gravDay !== day) {
             k.p.gravDay = day;
+            crabLog(k, "peril", "GRAVELY ILL - DAY " + (k.p.sick.days + 1) + ", NEEDS CARE", 0);   // DIARY
             today.critical.push(k.p.name);
             toast = { text: k.p.name + " IS FADING - THEY NEED REST AND CARE", t: 8 };
             popText("GRAVELY ILL", k.x - 14, FLOOR_Y - 34, [255, 150, 130]);

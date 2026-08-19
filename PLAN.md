@@ -134,7 +134,14 @@ compounds or collapses → the landlord collects at 20:00 either way.
   town-wide in headless runs.
 - **Crab dossier**: clicking the follow card opens a full-screen record —
   job, shift, wallet, housing, health, need bars, claims to fame. Click or
-  Esc closes. Works for every crab, crew and townsfolk alike.
+  Esc closes. Works for every crab, crew and townsfolk alike. **Two pages
+  since 2026-08-19** (PROFILE | DIARY) with a bottom control bar carrying
+  FOLLOW and CLOSE — see THE CRAB DIARY below.
+- **THE CRAB DIARY** (`crabLog` + the DIARY page, 2026-08-19): every crab —
+  crew, townsfolk, owner-operators, fishers, drifters — keeps a bounded ring
+  buffer of what it DID, in the game's voice, on its persona (so it saves).
+  40 entries, oldest dropped, `[day, minute, category, line]`. One call at
+  each event site; nothing runs per tick.
 - **Save slots + SAVED TOWNS screen** (Matt's directive, shipped 2026-08-18):
   five towns, not one. Keys `crabshack3_v1_s1..s5` plus `crabshack3_v1_active`
   (the autosave target, persisted); the legacy single key `crabshack3_v1`
@@ -204,7 +211,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **102 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **107 scenarios, must stay green before any push.**
 
 - `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
@@ -275,6 +282,112 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- **THE CRAB DIARY — a per-crab activity log, and the record that shows it**
+  (Matt's directive, built 2026-08-19, worktree: *"We need a detail view of
+  the character where we can see all of their recent actions, because that is
+  awesome."* Plus two owner additions mid-build: *"should also keep track of
+  housing status carefully"* and *"there should be a button in the detail view
+  to follow that crab too."*)
+  - **ONE API, ONE LINE PER HOOK.** `crabLog(crab, category, line[, gapMins])`
+    appends to `c.p.log`, a ring buffer of `LOG_MAX` **40** entries stored as
+    `[day, minute, category, line]` ARRAYS (~46 bytes an entry; the same fields
+    keyed would cost ~40% more). `crabLogEvery(crab, slot, mins, cat, line)` is
+    the door for a whole CLASS of line that would otherwise spam — a chef's
+    plates all read differently, so text-dedup cannot catch them. Categories
+    (and their colours): **work / money / home / need / life / peril /
+    social** — `social` is deliberately empty and reserved for the
+    boredom-and-chatting build landing beside this one, so those behaviours
+    are literally one line each after the merge.
+  - **THE RULE OF THUMB, enforced by the suite**: an entry is something a
+    player would tell a friend about. "SERVED A FISH TACO TO MISTY", never
+    "state changed to errand". Every hook sits at an event that already
+    happens once; repetitive events carry a minimum gap in GAME MINUTES —
+    serves 25min (a rush hour reads as a few named plates), clock-in 720min
+    (a fisher who breaks for lunch walks back to the rail three times and only
+    the first is news), house rent 600min, stall scrubs 90min. A fishing day
+    is TALLIED and filed as ONE line at dusk ("LANDED 9 FISH OFF THE PIER");
+    only THE BIG ONE gets its own entry.
+  - **What is logged**: clock in / shift end (+ OT hours) / named serves /
+    stall scrubs; wages drawn, unpaid nights, house rent, a business bought;
+    meals, drinks (bought vs the free tap), showers, standpipe rinses, beach
+    roasts, staff meals; going to bed hungry / parched / filthy / dead on
+    their feet (a THRESHOLD at settlement, never a tick); falling ill with the
+    reason, laid-up days, recovery, gravely ill, and death as the last entry;
+    hired off the bus or converted from a tourist, job-board hires, quitting
+    when the till is empty, layoffs (an owner-operator's reads "LOST THE SUDS
+    SHOWERS - SHUTTERS UP"), day off, sick day, mastery and fishing tiers, and
+    giving up on a queue. **Deliberately NOT logged**: taking a station per
+    dish (fires several times per plate — the exact tick-level trace the rule
+    forbids; the shift's clock-in carries the workplace instead) and anything
+    else per-tick.
+  - **HOUSING IS THE SPINE** (the owner's addition). Every move is a first-
+    class `home` entry that NAMES the place and what it cost — "MOVED INTO
+    HOUSE 3 - $35", "MOVED ABOARD THE PEARL - $75", "MOVED TO A BEACH COTTAGE
+    - CLOSER TO WORK", "TOOK A COT AT THE SHELTER" (the first night of a
+    spell, never the twentieth), and the one that turns a run,
+    **"COULDN'T MAKE RENT - LOST THE HOUSE"**. The diary page also carries a
+    compact history that survives the buffer rolling over: a **trail**
+    (`p.homeTrail`, last 4 addresses, "SHELTER > HOUSE 5 > COTTAGE") and a
+    **nights tally** (`p.nHome` / `p.nCot`, red when the cots are winning) with
+    "HERE SINCE D12". You can open a crab and see whether the life is going up
+    or down without reading a line.
+  - **THE VIEW** — the dossier grew a page, not a new screen. A bottom control
+    bar (PROFILE | DIARY n | FOLLOW | CLOSE, 13px chips) on the same
+    ONE-geometry-table idiom as `manageRects`: `dossierRects(h)` feeds both the
+    draw and the hit-test, so tap targets can't drift from pixels. The card
+    lives in rows 0..PANEL_Y, which is the world area in BOTH canvas modes, so
+    240 and 288 get the identical record (shot in both). The DIARY page:
+    housing banner, then the timeline newest-first, 12 rows a page, coloured by
+    category, `<` `>` paging. Reached from the follow card, the crew cards and
+    the census row — the same three doors the dossier always had.
+  - **FOLLOW** (the owner's second addition): selection and camera are
+    deliberately separate in this game, so the button sets BOTH (`followCrab`
+    → `sel` + `followIdx`/`followNpc`/`followCust`) and closes the record —
+    and the management card under it — so you can actually watch them. It
+    reads **FOLLOWING**, dimmed, when the camera is already on that crab, and
+    it works for a tourist too (they are customer objects, not crabs).
+    Verified in the browser: FOLLOW from a census-reached record leaves
+    `sel`/`followNpc` on that crab and `camX` converges to exactly
+    `crab.x - W/2 + 8`.
+  - **The price of the page**: the profile's five stacked need bars became ONE
+    row of five (the follow card's idiom) to pay for the 18px control bar —
+    same numbers, shorter meters — and CLAIMS TO FAME steps aside on the one
+    crab that can't fit it (gravely ill + resting + PACE + WALK all at once).
+  - **Measured — save**: a 9-crab town, day 13, every founder's buffer full:
+    **5,169 B → 18,587 B (+13,418)**. 12,730 of that is diary, 46.1 B an entry.
+    It is bounded by construction (crabs x 40 x ~46B): a maxed 14-crab town is
+    ~26 KB a slot, ~130 KB across all five, against localStorage's ~5 MB. Old
+    saves carry no log and start writing one; `clampLog` filters junk and
+    re-caps on load, on both the crew and the townsfolk paths.
+  - **Measured — perf**: it writes on events, never per tick. 3 seeds x 20
+    days, before vs after, two runs each: **11.23s / 11.59s before, 11.53s /
+    11.47s after** — 26.0-26.8 us/frame in both arms, i.e. inside run-to-run
+    noise. The only per-tick addition anywhere is one `c.logOff !== day`
+    comparison for the day-off line.
+  - **BEHAVIOUR-NEUTRAL, and the tripwire agrees**: no RNG, no sim state read
+    back, nothing but bookkeeping. `hours: defaults are behavior-identical
+    (frozen day-2 fingerprint)` passes **UNTOUCHED - no re-baseline**, and so
+    does every other existing scenario. **Suite 102 -> 107**, five new:
+    `diary: a day in a full town reads as a life, not a trace` (all three kinds
+    of crab, categories present, no duplicate inside its window, no day over 26
+    entries, one catch line a day, every line inside the card's 39 columns),
+    `diary: it roundtrips save/load and stays bounded over many days` (exact
+    log + trail + tally roundtrip, bounded after the reload, and a
+    diary-stripped OLD save that opens clean and starts writing), `diary: the
+    last entry is the death, and the memorial still works`, `diary: the ring
+    buffer never grows past its cap under a soak` (24 days, somebody must
+    actually FILL it or the soak isn't testing anything, entries stay ordered),
+    and `diary: housing is the spine - every move is written down by name`.
+  - **Story beat (organic, seed 11, browser)**: SHELLDON's page, day 17.
+    "D16 09:30 TOOK THEIR DAY OFF / D16 13:54 TOOK A SHOWER AT THE SUDS SHOWERS
+    / **D16 20:00 COULDN'T MAKE RENT - LOST THE HOUSE** / D17 07:09 CLOCKED IN
+    AT THE CRAB SHACK" and then eight named plates through to 16:30 — a crab
+    who lost his house on his day off and worked a full shift the next morning,
+    with the housing banner over it reading "SHELTER > HOUSE 3 > SHELTER, 10
+    NIGHTS HOUSED, 6 ON A COT". Shots: `diary-crew`, `diary-crew-tall`,
+    `diary-sudsy`, `diary-sudsy-tall`, `diary-from-census`,
+    `diary-follow-from-record`, `diary-profile-tabs`, `diary-profile-crowded`
+    under shots/.
 - **Needs fail in their own character: THE TRUDGE and THE WIDE BERTH** (built
   2026-08-19, worktree — realizes `design/needs-failure-patterns.md` for three
   of the five needs, to Matt's pick, verbatim: *"Dirt boredom and tiredness are
