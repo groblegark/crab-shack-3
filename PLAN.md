@@ -325,18 +325,21 @@ first, connect later. Don't build the network before the node is beautiful.
   sickness. Baseline settled at 0/8, evictions 8-12, median 10 (roasts +
   break-time trim fish supply slightly).
 
-## OPEN DESIGN QUESTION — growth escape (2026-08-18, for Matt)
-The founding promise "lose by default, but a growth strategy can escape" is
-currently broken: chef+table towns die day 7-12 of revenue collapse at HIGH
-rep (0/6 at 40d, median 10), across the credit/wage-23/weekends economy.
-Baseline is healthy (0/8, median 11 — knife-edge restored by weekends).
-Probed and ruled out: credit minimum sizing (made proportional anyway) and
-credit limit sizing (now scales with payroll: 90 + 70/crew — both measured
-inert on the failing seeds). The collapse is in growth-town unit economics,
-not financing. Options: a calibration workflow over prices/rep pacing/wage
-(like the original one), or accept escape-as-rare and redefine the promise.
-The suite's growth gate is temporarily a regression FLOOR (median >= 9) with
-the escape assertion parked here.
+## DECIDED — growth escape is RARE for now (Matt, 2026-08-18)
+Matt's call on the open question: **option 2 — escape-as-rare stands as the
+design for the moment.** "We'll choose (2) for the moment, we can calibrate
+again once we've told some new stories." The promise is redefined, not
+repaired: the town loses by default and even bought growth usually fails;
+survival stories are the game until further notice. A fresh calibration
+campaign is DEFERRED, to be run after the next content wave (new stories:
+more peer owners, T3 sourcing, exports). The suite's growth gate stays a
+regression FLOOR (median >= 9) so it can't silently get worse, and the
+parked escape assertion below is the contract for whenever calibration runs.
+Historical context preserved: chef+table towns die day 7-12 of revenue
+collapse at HIGH rep (0/6 at 40d, median 10) across the credit/wage-23/
+weekends economy; financing probed and ruled out (proportional minimum,
+payroll-scaled limit 90 + 70/crew, both inert); the collapse is growth-town
+unit economics.
 
 ## Backlog (rough priority)
 1. **Business settings** — per-business config (staff-meal pricing
