@@ -478,6 +478,29 @@ unit economics.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Labor policy suite: sick days + overtime + scheduling menu** (Matt).
+  Three pieces, one family, built on the management screen:
+  - **Sick days** — a sick crab can take the day off, UNPAID, to care for
+    themselves. Rest at home should genuinely help: this is the moment to
+    close the known "cared" seam (recovery's cared check reads only
+    hunger+dirt — predates thirst/tiredness; a sick day in a real bed,
+    hydrated, should hit the 40% recovery lane, else staying home is
+    theater). Interacts with shift coverage exactly like weekends'
+    single-worker DAY OFF placard.
+  - **Overtime** — already specced this morning (see earlier entry: ~1.5x
+    premium, needs/health cost, dossier control, visible OT powerup marker
+    + follow-card tag). Its prerequisites (stats→performance, T1) landed
+    long ago; it rides in this bundle.
+  - **Scheduling menu + auto-management** — a scheduling screen (likely a
+    management-screen tab): shift assignments, days off, OT requests, sick
+    day approvals. Ships WITH an auto-manage mode built on legible
+    convergent rules (the SUDSY hours pattern) so CPU owners run the same
+    policies the player can — and lazy players can delegate. CPU
+    participation is the point: NPC shops grant sick days and post OT by
+    the same rules the player sees in the menu.
+  All balance-moving (labor supply changes on every axis) → full matrix;
+  sick days probably shift the illness-duration distribution left, which
+  is the intended payoff — measure it for the devlog.
 - **Music off by default, but sell it** (Matt): ship with music muted for
   new players (SFX stays on), and actively encourage flipping it on — e.g.
   a small pulse/glow on the MUS toggle early on, or a one-time toast at a
