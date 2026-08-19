@@ -478,6 +478,16 @@ unit economics.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Town census — all-crab character menu** (Matt: "need an all-crab
+  character menu to review basic stats of whole pop"). A population
+  screen: every crab in town — crew, townsfolk, NPC owners — one row
+  each with the basics at a glance: name/portrait, job + employer, shift
+  & day off, wallet, housing (house/boat/cot), health (sick day N /
+  well), need bars in miniature, PACE, OT/day-off status. Sort/filter by
+  job, housing, sickness, wallet. Tap a row → that crab's dossier (and
+  selects them, per the selection decouple). Natural home: a POP/TOWN tab
+  next to CREW/SHOP/MENU, or reachable from the job board. Pairs with the
+  scheduling menu — census for reviewing, scheduling for acting.
 - **Decouple selection from camera follow** (Matt: "we can't order crabs
   around cause when you drag it deselects them; need to be able to select
   a crab without it focusing basically; should focus till click away, then
