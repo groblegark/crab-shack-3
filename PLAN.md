@@ -153,7 +153,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **59 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **65 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
@@ -595,6 +595,69 @@ unit economics.
     floating input costs; interaction with the escape-as-rare baseline.
     Full matrix. First real price mechanism in the game — the doorway to T5
     exports (exports need prices to mean anything).
+- ~~Fish price discovery~~ — **shipped (worktree, 2026-08-18)**, built to the
+  directive (price mechanism replaces the labor restriction; fisher wages
+  ABOLISHED outright per the follow-up — "they're always paid based on catch
+  as free agents"). The game's first real price mechanism:
+  - **Clearing rule** (`settleFishMarket`, once a day at midnight): 3-day
+    windows of landings (`trade.landH`) vs fish eaten (`trade.useH` — local +
+    shipped-in + beach roasts; an import IS unmet local demand). Demand
+    outrunning landings by >1/day steps the price +$1; landings piling up
+    >2/day past demand steps it −$1. Band $2 (floor) to $7 (FISH_IMPORT —
+    at the ceiling the world market supplies and imports still charge a flat
+    $7, so local can never exceed world). Starts at the classic $4.
+    FISH_LOCAL is gone; `ingredientCost` charges `trade.price` while the
+    pier has fish.
+  - **Money flow**: the market-stall abstraction buys every landed fish at
+    `trade.price` (fisher wallet credit at the splash — no wage, no floor,
+    no housing stipend) and sells to any fish-consuming kitchen at the same
+    price via ingredientCost. Its fee is absorbing spoilage (fish paid for
+    that rot at the 4-crate midnight clamp) and the fishers' own roasts;
+    injection is bounded by price x (landed − eaten), self-damping because a
+    glut is exactly when the price is at the floor. Consumers pay $13-16
+    retail > $7 max fisher take per fish: no infinite loop.
+  - **Full fisher freedom** restored: the pressing-needs gate is deleted; a
+    fisher breaks for ANY need. The price pulls them back: (1) fun breaks
+    are skipped at price >= $6 (one comparison; hunger/thirst always walk)
+    with the "THE WATER'S MONEY TODAY" quip, once a day; (2) a WORKING
+    fisher's lunch is the roast — eating a $2-7 fish on the spot beats a
+    $15 town lunch plus hours of walking at any price, and it's the safety
+    valve that makes zero-wage glut weeks survivable (never the town's last
+    2 fish, unchanged); (3) `afterErrand()` sends a mid-shift fisher
+    straight back to the rail — the old errand→home→pier odyssey (~3000px)
+    was the measured cause of the original supply collapse.
+  - **Labor answers price both ways**: a job-board posting only tempts a
+    fisher while the wage beats ~5 fish at market (ties go to the steady
+    paycheck, so the flush-SUDSY hire still works at launch prices); a
+    price pinned at the ceiling a full day posts HELP WANTED: THE PIER,
+    and a day unfilled pulls a drifter off the bus (fishSpotFor() grows
+    the rail past 3 spots, 14px per wrap).
+  - **UI**: notice-board trade card gains PIER FISH PRICE + a 30-clearing
+    sparkline (green in-band, orange at ceiling); catches pop "CATCH! +$N".
+    Price/series/windows/ceilDays roundtrip save/load; old saves open $4.
+  - **Stability measured** (8 solvent seeds x 30d): band held 2-7 on every
+    seed, $1 max daily step by construction, mean price 4.4-5.7; full
+    floor-to-ceiling traverses after day 5: 0-2 per seed in 3.6 weeks
+    (bound asked: <= ~2/WEEK). The hog cycle exists but swells over
+    ~10-14 days, damped by the 3-day window + $1 steps + drifter entry.
+  - **Balance measured**: baseline 30d x 8: 0/8, evictions 8,8,8,9,9,10,
+    10,11, median 9 (was median 10 — one inside the ±2 band); growth
+    chef,table: 0/8, 7,8,8,9,10,10,10,15, median 10 (unchanged, and a new
+    day-15 tail). Growth towns DO get squeezed by design (scarcity pins
+    their price at $7; the suite growth floor recalibrated 6,7,9,13 →
+    7,7,8,9 on its own seeds). Fisher income 1.7-5.4x the old $2/catch
+    (avg $4.2-5.7/fish); both founding fishers house themselves at day-2
+    settlement now (was day 5-8 or never); SUDSY's take dips ~10% (fishers
+    hold the pier more). Suite 59/59 — re-pointing: boat scenario pins
+    thirst, tired scenario pins SALTY to a cot, growth floor above; 6 new
+    fish-market scenarios (ceiling+imports, glut+pay, opportunity cost,
+    15-day band, save/load, roast-carried glut week).
+  - **Devlog beat (organic)**: seed 6685, arcade-town (coins 3000, arcade +
+    2 chefs day 1), day 9 ~9:56 — SALTY, bored 0.8, wallet $16, price $7,
+    skips the arcade for the rail: THE WATER'S MONEY TODAY. Shots:
+    fish-price-trade-card, fish-price-ceiling-posting, waters-money-today,
+    catch-at-market-price under shots/.
+
 - ~~Tiredness replaces sandiness~~ — **built (worktree branch, 2026-08-18),
   after the T2 merge as sequenced**: `p.sandy` renamed `p.tired` with save
   migration (old sandy seeds tired, crew + townsfolk paths, nothing strands).
