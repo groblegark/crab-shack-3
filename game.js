@@ -1114,10 +1114,12 @@ function payRatio(c) { const g = goingRate(c); return g > 0 ? wageRate(c) / g : 
 // so neither has a boss to be aggrieved at.
 function onPayroll(c) { return !c.p.owner && c.p.job !== "fishing" && !!BIZ[c.p.job] && !!bizOwner(c.p.job); }
 function wageGripe(c) { return onPayroll(c) ? (c.p.gripe || 0) : 0; }
-function wageMoodLabel(c) {
+function wageMoodLabel(c, short) {
   const g = wageGripe(c);
-  return g >= WAGE_CFG.LEAVE ? "WALKING OUT" : g >= WAGE_CFG.WARN ? "ASKING AROUND"
-    : g >= WAGE_CFG.GRUMBLE ? "UNDERPAID" : payRatio(c) > 1.08 ? "WELL PAID" : "";
+  return g >= WAGE_CFG.LEAVE ? (short ? "WALKING!" : "WALKING OUT")
+    : g >= WAGE_CFG.WARN ? (short ? "ASKING" : "ASKING AROUND")
+    : g >= WAGE_CFG.GRUMBLE ? (short ? "GRUMBLES" : "UNDERPAID")
+    : payRatio(c) > 1.08 ? (short ? "HAPPY" : "WELL PAID") : "";
 }
 // A CREW CRAB DOES NOT RESIGN, IT WALKS OUT FOR THE DAY. The player's crew are
 // under contract - the same reasoning that keeps them out of the pool of crabs
@@ -5693,7 +5695,7 @@ function drawManage() {
       const c = staff[i], cell = R.cells[i], ry = R.rows[i].y;
       if (i % 2 === 0) rect(ctx, R.rows[i].x, ry - 1, R.rows[i].w, 11, [244, 238, 224]);
       const gripe = wageGripe(c);
-      smallText(ctx, c.p.name.slice(0, 8), cell.name.x + 1, ry + 2,
+      smallText(ctx, c.p.name.slice(0, 7), cell.name.x + 1, ry + 2,
         gripe >= WAGE_CFG.WARN ? [190, 80, 80] : [40, 30, 40]);
       const otM = otMinutes(c), cov = coveringToday(c);
       smallText(ctx, (cov ? "CVR " : c.p.shift + " ") + (otM ? effShift(c).label : baseShift(c).label),
@@ -5704,16 +5706,16 @@ function drawManage() {
         cell.ot.x, ry + 2, c.p.ot ? (otM ? [200, 110, 40] : [170, 150, 130]) : [150, 140, 160]);
       const sp = sickPolFor(c);
       smallText(ctx, c.p.sick ? (onSickDay(c) ? "SICK:REST" : "SICK:WORK")
-        : gripe >= WAGE_CFG.GRUMBLE ? wageMoodLabel(c)
+        : gripe >= WAGE_CFG.GRUMBLE ? wageMoodLabel(c, true)
         : sp === "require" ? "MUST WORK" : c.p.sickPol ? "SICK DAY OK" : "SHOP RULE",
         cell.sick.x, ry + 2, c.p.sick ? [190, 80, 80]
         : gripe >= WAGE_CFG.WARN ? [190, 80, 80] : gripe >= WAGE_CFG.GRUMBLE ? [200, 110, 40]
         : sp === "require" ? [200, 110, 40] : [110, 100, 110]);
       // the per-crab rate: highlighted the moment it stops being the shop's
       const rate = Math.round(wageRate(c)), own = !onShopRate(c);
-      smallText(ctx, "-", cell.wdn.x + 2, ry + 2, [120, 90, 60]);
-      smallText(ctx, "$" + rate, cell.wdn.x + 8, ry + 2, own ? [190, 110, 30] : [90, 80, 90]);
-      smallText(ctx, "+", cell.wup.x + 16, ry + 2, [120, 90, 60]);
+      smallText(ctx, "-", cell.wdn.x + 3, ry + 2, [150, 110, 70]);
+      smallText(ctx, "$" + rate, cell.wdn.x + 11, ry + 2, own ? [190, 110, 30] : [90, 80, 90]);
+      smallText(ctx, "+", cell.wup.x + 14, ry + 2, [150, 110, 70]);
     }
     if (staff.length > R.rows.length)
       smallText(ctx, "+" + (staff.length - R.rows.length) + " MORE - SEE THE TOWN TAB", x + 8, y + h2 - 26, [150, 140, 160]);

@@ -106,6 +106,13 @@ compounds or collapses → the landlord collects at 20:00 either way.
   auto-manage rule table that peer owners run by default and the player can
   delegate to. Surfaced on the management screen's SCHEDULE tab, the TOWN
   census, and the dossier's SHIFT/HEALTH rows.
+- **The wage** (`WAGE_STD` / `BIZ[b].wage` / `p.wage` / `WAGE_CFG` /
+  `WAGE_POLICY` in game.js, 2026-08-19): pay is DATA, per business and per
+  crab, set on the SCHEDULE tab beside the roster. Underpaid crabs grumble,
+  warn, then quit (NPC) or walk out (crew); well-paid crabs cannot be poached
+  and climb the housing ladder faster; peer owners run a convergent wage policy
+  of their own. `NPC_WAGE` is retired — see the feature entry for the model,
+  the sweep and the verdict on whether the lever is real.
 - **Sick crabs can move**: bed rest no longer bars essential errands — the
   sick still buy food and drag themselves to the showers (half
   speed), which feeds the `cared` check that improves cure and death odds.
@@ -182,7 +189,8 @@ compounds or collapses → the landlord collects at 20:00 either way.
   roughly 0-2 of 6 seeds at day 40 depending on build. The suite's growth
   gate (1 of 4 seeds escapes, or median eviction > 18) is the guard that
   counts.
-- Constants: shack rent 230, wage 23 (raised from 22 with T2 — crews drink
+- Constants: shack rent 230, wage 23 (**now the DEFAULT rate, not a constant —
+  see "THE WAGE IS A SETTING"**; raised from 22 with T2 — crews drink
   at retail, the wage keeps their wallets liquid, bands 8-32), house rent
   10, hires 60×2.0,
   showers 5/10, fish pay 13. **Rent is charged from night one** — you open
@@ -204,7 +212,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **102 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **109 scenarios, must stay green before any push.**
 
 - `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
@@ -275,6 +283,187 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- **THE WAGE IS A SETTING** (built 2026-08-19, worktree — Matt: *"I think
+  giving bosses the ability to adjust wages is the next step here.. if we don't
+  have it already.. need a menu setting"*, plus the amendment *"Should be able
+  to pay workers different amounts though, even though it's a pain"*). Wages
+  were two frozen constants; they are now three layers, most specific winning:
+
+  | layer | what it is | default |
+  |---|---|---|
+  | `WAGE_STD` | the town's standard day | **23** (the old CRAB_WAGE) |
+  | `BIZ[b].wage` | what THIS shop advertises and pays | WAGE_STD |
+  | `p.wage` | what THIS crab negotiated | the shop's rate |
+
+  `wageRate()` reads them in that order and **every pay path in the game
+  already ran through it** — `basePayToday`, `contractPay`, `hourlyRate`,
+  `otPremium` — so the settlement, the BILL chip, the MENU column and the
+  bankruptcy forecaster total per-crab rates without one of them learning a
+  new rule. Bounds `WAGE_MIN 8` / `WAGE_MAX 60`, $1 steps, `clampWage` on
+  every setter and on load.
+  - **`NPC_WAGE` IS RETIRED** and PLAN's deferred wage asymmetry with it. A
+    business pays what it pays, whoever works there. The 20 survives in
+    exactly one place — **SUDS SHOWERS' OPENING rate**, a fact about her shop
+    rather than about the crabs in it — and that is deliberate: it is inert
+    against the shipped curves, it gives the new lever something to bite on
+    in a default town, and *her own wage policy corrects it in public*.
+    (Measured: forcing every shop to 23 instead moves nothing systematic —
+    a 6-town propped matrix reads 18/21/17/27/21 infections at showers-wage
+    20/21/22/23/24, i.e. **non-monotone stream chaos**, so this is a design
+    choice with a receipt, not a balance dodge.)
+  - **A PRIVATE DEAL IS A DEAL WITH A BOSS** (`p.wageOwner`). It travels with
+    the crab across every shop that owner runs — reassign crew from the shack
+    to the juice bar and the deal comes too — and **lapses, announced in the
+    day report, the moment somebody else signs the cheque**. The alternative
+    would let a $50 crew crab wander onto SUDSY's payroll with a deal she
+    never made.
+  - **THE MENU SETTING** lives on the management screen's SCHEDULE tab, beside
+    the roster it belongs to. A shop-rate stepper with big 16x15 targets, an
+    **ALL $N** chip that tears up every private deal in one tap (the bulk
+    action that makes per-crab bearable), **TONIGHT $N** — the exact payroll,
+    live, as you step — and **TOWN $N / PIER $N**, what the rest of the market
+    is paying. Every roster row gains a `- $23 +` stepper, the number
+    highlighted orange when it is a private deal, and the name goes red when
+    that crab is one warning from the door. Both canvas modes (the card is
+    H-independent geometry); every control driven through the real click path.
+  - **CONSEQUENCES — a crab measures its pay against three offers it could
+    actually take**, and under all three sits **the town's standard day**:
+    - **THE WATER** — `FISH_DAY (5)` fish at today's floating market price,
+      discounted by `PIER_TOUGH 0.6` because a paycheck is steady and the
+      water is not. This is the same figure the job board already used.
+    - **NEXT DOOR** — the *mean* rate of the other shops hiring in town (mean,
+      not max, so one rich shop cannot drag everyone's demands up).
+    - **THE CRAB AT THE NEXT STATION** — the best-paid other staffer at their
+      own shop, at `PEER_TOL 0.85`. The sharp one, and the one Matt asked for.
+    - **`WAGE_STD x KEEP (1.0)`, the floor no boss can argue down.** MEASURED
+      FAULT and the reason it exists: without it, cutting every shop to $20
+      moved the going rate down too — *the player IS most of the town's
+      payroll* — so the cut was free and **2 of 16 do-nothing towns survived
+      30 days** against a pillar of 0. "Cut the wage on day one" would have
+      been the obviously correct opening move and the whole lever a fake
+      stepper. Inert by construction: the ratio at WAGE_STD is exactly 1.0.
+    - Grievance (`p.gripe`) accrues nightly at `GAIN 1.0 x shortfall` after a
+      `GRACE` of 2 nights on a new job, and is shed at `CALM 0.34` — much
+      faster when the fix is generous (`MAKEUP 3`), so a player who puts it
+      right sees the crab back on the clock the next morning rather than
+      sulking through a week they already paid for. Capped at 1.3.
+    - **WARNINGS FIRST, ALWAYS**: a grumbling quip + a dossier line at 0.35, a
+      **named toast** at 0.70 ("SCUTTLE IS ASKING AROUND - $17 ISN'T ENOUGH"),
+      a `SORE ABOUT PAY` mood, a red name on the roster. Only then feet.
+    - **NPC staff QUIT** at 1.0 — poached by a better-paying vacancy if one
+      exists (`poachTarget`), else back to the pier down the existing quit
+      path. **CREW DO NOT RESIGN**: they are under contract with the player,
+      the same reasoning that keeps them out of the pool of crabs who can buy
+      a failed business. They **WALK OUT** — refusing tomorrow's shift, unpaid
+      — decided at settlement so there is a whole evening to fix it, and
+      repeated nightly until it is fixed. Routed through `offToday`, so the
+      wage skip, the BILL dip, the placard and errands-all-day all come free,
+      while `coveringToday` (which reads the ROTA) correctly refuses to hand
+      the shop a free cover double for it. **Never an unrecoverable state.**
+    - **A crab paid above the going rate cannot be poached, by construction** —
+      grievance is the only thing that turns a head, and the best-paid crab in
+      the room has none.
+    - **HIGH pay buys labour**: postings advertise the shop's own rate (and the
+      card now prints what a day on the pier pays beside it); the player's SHOP
+      hire answers the same comparison (`recruitBites`, inert at defaults
+      because the pier's best claim is 7 x 5 x 0.6 = $21 under WAGE_STD 23).
+  - **CPU OWNERS RUN THE SAME LEVER** (`WAGE_POLICY` + `runWagePolicy`, the
+    `HOURS_POLICY` pattern): RAISE +$1 on an unfillable post, an aggrieved
+    staffer, or a loss to pay in the last 3 days; TRIM -$1 when fully staffed,
+    nobody aggrieved, and paying over `trimOver 1.12` of the market. One move
+    a day, a cooldown day, a named toast. **Deliberately SHOP-LEVEL** — a peer
+    owner sets one rate and never negotiates per crab; the player having the
+    finer instrument is a fair asymmetry, the same shape as right-click orders.
+    Converges because the regimes are disjoint with a dead band between them
+    and every raise weakens its own trigger (suite-proved over 30 days: no two
+    moves in a day, never two days running, nothing moving in the last week).
+  - **THE SWEEP, and the verdict.** `--wage N` and `--star N` were added to
+    `tools/headless.mjs` (both through the game's own setters).
+
+    | growth, `--buy chef,table` 40d x 8 | alive | evictions | median | lifetime | crew housed | walkouts |
+    |---|---|---|---|---|---|---|
+    | **$17** (-25%) | 0/8 | 10-17 | 14 | $35,757 | **0/29** | 154 |
+    | **$20** | 0/8 | 14-20 | 18 | $47,958 | 1/35 | 216 |
+    | **$23** (default) | **6/8** | 11,14,41x6 | **41** | **$133,121** | **38/40** | 0 |
+    | **$26** | 1/8 | 9-41 | 11 | $46,495 | 20/20 | 0 |
+    | **$29** (+25%) | 0/8 | 9-14 | 10 | $27,631 | 16/16 | 0 |
+    | **$35** (+50%) | 0/8 | 7-10 | 8 | $22,312 | 16/16 | 0 |
+
+    Replicated on a second seed block (`--seedbase 8`): $23 3/8 median 13
+    ($83k), $26 1/8 median 12 ($49k), $20 0/8 median 19 ($47k) — same
+    direction both times, so the effect is not knife-edge chaos.
+
+    | baseline, 30d x 16 | survive | median | lifetime | crew housed | walkouts |
+    |---|---|---|---|---|---|
+    | **$17** | 0/16 | 8 | $32,273 | **0/32** | 96 |
+    | **$20** | 0/16 | 12 | $53,724 | **0/32** | 84 |
+    | **$23** (default) | **0/16** | **14** | $71,500 | 18/32 | 0 |
+    | **$26** | 0/16 | 12 | $68,992 | **32/32** | 0 |
+    | **$29** | 0/16 | 10 | $57,159 | **32/32** | 0 |
+
+    **THE HOUSING LADDER IS THE CLEANEST SIGNAL IN THE GAME**: crew housed at
+    day 30 runs **0/32 → 0/32 → 18/32 → 32/32 → 32/32** across $17→$29. The
+    wage reaches the wallet and the wallet is the ladder, exactly as specced.
+    - **IS THERE AN OBVIOUSLY CORRECT WAGE? Yes, and it is the default — but
+      the lever is still real, because it is a REAL TRADE-OFF and not a free
+      saving in either direction.** Down: you buy runway and lose the town
+      (at $20 the growth median eviction *lengthens* to 18-19 days while
+      escape goes to 0/8, lifetime halves, and the crew never leave the cots).
+      Up: you house everybody, nobody ever walks, and the rent eats you. The
+      honest statement for Matt is that **$23 is the balanced point of an
+      economy that was tuned around $23**, so the interesting play is not
+      "what number is best" but "what do I do when the market moves" — the
+      fish price at the ceiling, a peer owner bidding, a shop bought off the
+      market with its staff on somebody else's rate. That is where the lever
+      earns its keep, and it is why the pier comparison floats.
+    - **DOES PAYING ONE CRAB MORE EVER BEAT RAISING EVERYONE? No.** At equal
+      payroll cost (+$6/night on two crew, 16 seeds x 30d): uniform $26 reads
+      median 12, **$68,992** lifetime, **32/32** crew housed; one star on $29
+      reads median 12, **$62,907**, **23/32** housed. Same survival, 10% less
+      money, worse housing. Said plainly: **per-crab is an instrument for
+      SITUATIONS, not a strategy** — keeping one attendant when you have just
+      bought a shop whose whole roster is on somebody else's $20, or holding a
+      crab a peer owner is bidding for — and the bulk **ALL $N** action is
+      there because most days you want one number.
+      (En route this was measured much worse: at full peer weight one crab on
+      $35 made **every** colleague demand $35 and growth collapsed to a median
+      eviction of day **7**. `PEER_TOL 0.85` is what makes a premium of about
+      a sixth pass unremarked.)
+  - **DEFAULTS ARE INERT, three receipts.** (1) The frozen day-2 fingerprint
+    passes **untouched** — no re-baseline. (2) `--days 30 --seeds 16` reads
+    **0/16, 11,12,13,13,13,13,13,14,14,14,14,14,14,14,14,20, median 14** and
+    `--buy chef,table --days 40 --seeds 8` reads **6/8, 11,14,41,41,41,41,41,41**
+    — both **byte-identical to the lists already in this file**. (3) With the
+    relations layer off (`window._noWageRelations`/`_noWagePolicy`) the propped
+    6-town matrix reproduces the pre-pass build exactly (6 deaths, 18
+    infections), i.e. the grievance machinery contributes literally nothing
+    until somebody moves a stepper.
+  - **Suite 102 → 109, ZERO re-pointing.** New: defaults are behaviour-identical
+    (nobody grumbles, nobody moves); the setting changes tonight's payroll
+    exactly and the settlement/BILL/MENU/forecaster/OT all agree across sick
+    days, days off and mixed rates; underpaying loses you staff with the
+    warnings in order and the walkout reversible; an underpaid NPC quits and a
+    better payer poaches them (plus the can't-poach-a-well-paid-crab arm);
+    overpaying wins a hire the standard rate could not, weighed against the
+    fish price, on both the job board and the player's own SHOP hire; the CPU
+    policy converges and never thrashes; and every rate, deal, grievance and
+    scheduled walkout roundtrips save/load including a change of boss, APPLY
+    TO ALL, and a degenerate save clamping into the band.
+  - **Story beat (organic, reproducible)**: `node tools/headless.mjs --buy
+    chef,table --days 40 --seeds 1 --seedbase 5` (seed 8022). SUDS SHOWERS
+    opens at **$20** in a **$23** town. SUDSY hires **SALTY** off the rail; he
+    grumbles, then starts asking around. **Day 12** she raises to $21 — and it
+    is too late: **day 15 SALTY quits over the pay and goes back to the pier.**
+    She raises again on day 14, 16 and 18, to **$24**, and there she stops for
+    the remaining 22 days. The town's last wage asymmetry was not legislated
+    away; **SUDSY fixed it herself, in public, after it cost her a hand.**
+    Shots: `wage-schedule-tab`, `wage-schedule-portrait`,
+    `sudsy-raises-the-wage`, `jobboard-wage-posting`, `wage-dossier-pay-row`
+    under shots/.
+  - **Left for the diary agent**: every wage moment is a single obvious call
+    site marked `// DIARY HOOK:` — the player moving a rate, a deal lapsing,
+    the first grumble, the warning, a walkout, a quit, a poach, and a peer
+    owner's move.
 - **Needs fail in their own character: THE TRUDGE and THE WIDE BERTH** (built
   2026-08-19, worktree — realizes `design/needs-failure-patterns.md` for three
   of the five needs, to Matt's pick, verbatim: *"Dirt boredom and tiredness are
@@ -1103,8 +1292,11 @@ others. Tomorrow is the day for that.
 - ~~**NPC mortality**~~ — **REOPENED BY MATT AND SHIPPED 2026-08-19** ("we do
   need to make death an option in such cases"). See the public-taps entry
   below: the `!k.p.npc` guard is gone and every crab is mortal.
-- **Wage asymmetry** — NPC_WAGE 20 vs CRAB_WAGE 23. Still the last place the
-  sim treats some crabs as more real than others.
+- ~~**Wage asymmetry**~~ — **SHIPPED 2026-08-19** with the wage setting below.
+  NPC_WAGE is retired; wages are per-business data and a business pays what it
+  pays whoever works there. The 20 survives only as SUDS SHOWERS' OPENING rate
+  — a fact about her shop, not about the crabs in it — and her own wage policy
+  walks it up to the town's $23 within a fortnight of her first hire.
 
 ## PUBLIC TAPS + UNIVERSAL MORTALITY (shipped 2026-08-19, worktree)
 Matt, from play, two sentences that turned out to be one job: **"some crabs
@@ -1354,7 +1546,10 @@ unit economics.
 ## Backlog (rough priority)
 1. ~~**Business settings**~~ — **shipped 2026-08-18** as shop hours + the
    management screen (see the systems bullet). Remaining loosenings from the
-   original idea: per-business PRICES and staffing rules.
+   original idea: per-business PRICES and staffing rules. **Per-business (and
+   per-crab) WAGES shipped 2026-08-19** — see "THE WAGE IS A SETTING"; prices
+   are the last one standing, and the wage's `goingRate` layer is the pattern
+   a price lever would follow (a setting is only real if somebody responds).
 2. **More peer owners moving in** — the owner layer makes this content, not
    surgery: an OWNERS entry + BIZ entry + an NPC crab. Fish market buying
    wholesale off the pier is the natural next one. **Half-shipped 2026-08-19**:
