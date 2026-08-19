@@ -2226,6 +2226,220 @@ scenario("fishing experience: tiers accrue, save, and pay out on the water", () 
   return back >= 1 ? true : "the catch counter did not survive a save: " + back;
 });
 
+// ================================================================ public taps
+// A full town: the bar and the arcade open, five crew across three trades, and
+// the founding townsfolk. Everyone in it must be able to drink.
+function tapTown(sim) {
+  sim.G(`coins = 6000; tryBuy("juicebar"); tryBuy("arcade"); tryBuy("table");
+    while (crabs.length < 5) hireCrew();
+    crabs[2].p.job = "juicebar"; crabs[3].p.job = "arcade"; crabs[4].p.job = "juicebar";
+    crabs[2].p.shift = "M"; crabs[4].p.shift = "E"; coins = 6000;`);
+}
+
+scenario("taps: nobody in a full town is left parched for a week (crew AND townsfolk)", () => {
+  // THE ANTI-TRAP GATE. The measured fault: SUDSY sat at thirst 1.00 for days
+  // because she could only drink at a STAFFED counter and her own shift covered
+  // every hour the counters were staffed; the fishers held the rail for the
+  // same reason; and as townsfolk neither could pour their own. Pre-tap this
+  // town ran a 6.3-DAY unbroken stretch in the parched band, and SCUTTLE never
+  // drank at all in twelve days.
+  //
+  // The gate is written on the honest quantity. The tap deliberately sits
+  // ABOVE the drink errand's own 0.45 threshold (TAP_AT) so the juice bar keeps
+  // first refusal on every thirst - so "time above 0.45" measures SHOPPING, not
+  // the trap. What must never happen again is a crab PINNED in the parched band
+  // (>= 0.8: the -15% walk penalty, and the approach to the 0.95 sickness
+  // line), or a crab who gets thirsty and never gets a drink.
+  const worst = { dry: 0, dryWho: "", gap: 0, gapWho: "", crit: 0, critWho: "" };
+  for (const seed of [5, 9, 17]) {
+    const sim = createSim({ seed });
+    tapTown(sim);
+    const S = {}, prev = {};
+    let lastT = -1;
+    sim.runDays(10, { tickEvery: 8, onTick: (G) => {
+      G(`if (coins < 800) coins = 800;`);
+      const t = G(`day * 10000 + tmin`);
+      if (t === lastT) return;
+      lastT = t;
+      for (const r of JSON.parse(G(`JSON.stringify(allCrabs().map(c => ({ n: c.p.name, th: c.p.thirst || 0, npc: !!c.p.npc })))`))) {
+        const s = S[r.n] = S[r.n] || { n: 0, run: 0, maxRun: 0, gap: 0, maxGap: 0, crit: 0, thirsty: false, npc: r.npc };
+        s.n++;
+        if (r.th >= 0.95) s.crit++;
+        if (r.th >= 0.8) { s.run++; s.maxRun = Math.max(s.maxRun, s.run); } else s.run = 0;
+        if (r.th >= 0.45) s.thirsty = true;   // did this crab ever WANT a drink?
+        // a real quench: any drink, bought or from a spout, drops the meter hard
+        if (prev[r.n] != null && r.th < prev[r.n] - 0.2) s.gap = 0; else s.gap++;
+        if (s.thirsty) s.maxGap = Math.max(s.maxGap, s.gap);
+        prev[r.n] = r.th;
+      }
+    } });
+    for (const n of Object.keys(S)) {
+      const s = S[n], perDay = s.n / 10, who = `${n}${s.npc ? " (town)" : " (crew)"}@${seed}`;
+      if (s.maxRun / perDay > worst.dry) { worst.dry = s.maxRun / perDay; worst.dryWho = who; }
+      if (s.maxGap / perDay > worst.gap) { worst.gap = s.maxGap / perDay; worst.gapWho = who; }
+      if (s.crit / s.n > worst.crit) { worst.crit = s.crit / s.n; worst.critWho = who; }
+    }
+  }
+  // measured on this build: worst parched streak ~0.9d, worst dry spell ~3.2d,
+  // worst crab ~7% of its life at the sickness line. The gates sit well clear.
+  if (worst.dry >= 3) return `a crab spent ${worst.dry.toFixed(1)} days straight in the parched band: ${worst.dryWho}`;
+  if (worst.gap >= 7) return `a thirsty crab went ${worst.gap.toFixed(1)} days without a drink: ${worst.gapWho}`;
+  if (worst.crit >= 0.25) return `${worst.critWho} spent ${(100 * worst.crit).toFixed(0)}% of its life on the dehydration sickness line`;
+  return true;
+});
+
+scenario("taps: free and always reachable, and the juice bar still sells", () => {
+  const sim = createSim({ seed: 11 });
+  tapTown(sim);
+  // FREE: a crab who could easily afford a juice pays nothing at the spout,
+  // and plain water only takes the EDGE off - a juice zeroes the meter
+  sim.G(`{ const c = crabs[0]; c.p.wallet = 30; c.p.thirst = 1;
+    abortActivity(c); startTapStop(c, { tap: 0, need: "drink" }); }`);
+  if (!sim.runUntil(`crabs[0].p.thirst < 1`, { maxSteps: 200000 }))
+    return "a crab sent to the tap never got a drink";
+  if (sim.G("crabs[0].p.wallet") !== 30) return "the tap charged for a drink of water";
+  if (sim.G("crabs[0].p.thirst") <= 0) return "plain water fully quenched - it must be worse than a bought drink";
+  if (!(sim.G("crabs[0].p.thirst") <= 1 - 0.5)) return "the tap barely quenched anything";
+  // ALWAYS REACHABLE: with every counter in town unstaffed and every wallet
+  // empty, a properly thirsty crab of EVERY kind is still offered a tap
+  sim.G(`{ for (const c of allCrabs()) { c.p.thirst = 0.75; c.p.wallet = 0; c.p.dirt = 0;
+    c.duty = false; c.pendingOff = true; c.p.hunger = 0; c.p.bored = 0; } }`);
+  const cover = JSON.parse(sim.G(`JSON.stringify(allCrabs().map(c => { const e = pickErrand(c); return [c.p.name, !!c.p.npc, !!(e && e.tap != null && e.need === "drink")]; }))`));
+  const stranded = cover.filter(r => !r[2]).map(r => r[0] + (r[1] ? " (town)" : " (crew)"));
+  if (stranded.length) return "no water offered to: " + stranded.join(", ");
+  if (!cover.some(r => r[1]) || !cover.some(r => !r[1])) return "the fixture covered only one kind of crab";
+  // THE REVENUE FLOOR: over a fortnight the bar must still be a real business.
+  // Measured 6 seeds x 14d, before -> after: $14347 -> $15386 (+7.2%) - it goes
+  // UP, because a hydrated town walks faster and shops more. The floor sits
+  // well under that, so a future tap tweak that guts the bar fails loudly.
+  const b = createSim({ seed: 13 });
+  tapTown(b);
+  b.G(`window._take = {}; var _cb0 = creditBiz;
+    creditBiz = function (k, amt, x, y) { window._take[k] = (window._take[k] || 0) + amt; return _cb0(k, amt, x, y); };`);
+  b.runDays(14, { tickEvery: 20, onTick: (G) => { G(`if (coins < 800) coins = 800;`); } });
+  const take = JSON.parse(b.G(`JSON.stringify(window._take || {})`));
+  const taps = b.G(`(window._stats && window._stats.tapDrinks) || 0`);
+  if (!(taps > 0)) return "nobody used a tap all fortnight - the fixture is not exercising them";
+  if (!(take.juicebar > 1400)) return `juice bar takings collapsed to $${Math.round(take.juicebar || 0)} over 14 days`;
+  return true;
+});
+
+scenario("mortality: sustained neglect kills a crew crab AND a townsfolk crab", () => {
+  // The `!k.p.npc` guard is gone: every crab is mortal. What must hold is that
+  // it takes SUSTAINED NEGLECT, that the town is warned by name first, and that
+  // the crab leaves a memorial and a line in the day's report.
+  for (const who of ["crew", "town"]) {
+    const sim = createSim({ seed: 4242 });
+    sim.runUntil("day >= 2 && tmin >= 9 * 60", { maxSteps: 300000 });
+    const name = sim.G(who === "crew" ? "crabs[0].p.name" : `npcs.find(c => c.p.name === "SALTY").p.name`);
+    // total neglect, HELD: starving, parched, filthy, and made to work through it
+    const grind = (G) => G(`{ coins = 3000; const k = allCrabs().find(c => c.p.name === ${JSON.stringify(name)});
+      if (k) { k.p.sick = k.p.sick || { days: 1 }; k.p.hunger = 1; k.p.thirst = 1; k.p.dirt = 1; k.p.sickPol = "require"; } }`);
+    grind(sim.G);
+    let warned = false;
+    const gone = sim.runUntil(`!allCrabs().some(c => c.p.name === ${JSON.stringify(name)})`, {
+      maxSteps: 900000,
+      onTick: (G) => {
+        grind(G);
+        if (G(`JSON.stringify(today.critical)`).includes(name)) warned = true;
+        if (G(`report ? JSON.stringify(report.critical || []) : "[]"`).includes(name)) warned = true;
+      },
+    });
+    if (!gone) return `${who}: total neglect never killed ${name}`;
+    if (!warned) return `${who}: ${name} died with no FADING warning - the town never saw it coming`;
+    if (!sim.G(`memorials.some(m => m.name === ${JSON.stringify(name)})`))
+      return `${who}: no memorial on the dune for ${name}`;
+    const line = sim.G(`JSON.stringify((report && report.died && report.died.length ? report.died : today.died))`);
+    if (!line.includes(name)) return `${who}: the day report never named ${name}: ${line}`;
+    const rec = JSON.parse(sim.G(`JSON.stringify((window._stats.illness || []).filter(r => r.name === ${JSON.stringify(name)} && r.out === "died"))`));
+    if (!rec.length) return `${who}: no illness record for the death`;
+    if (rec[0].lane !== "neglect") return `${who}: died on the ${rec[0].lane} lane - a neglect death should read as neglect`;
+    if (rec[0].npc !== (who === "town")) return `${who}: the record filed the death under the wrong kind of crab`;
+    if (rec[0].days < sim.G("DEATH_DAY")) return `${who}: died after only ${rec[0].days} days ill (roll arms at ${sim.G("DEATH_DAY")})`;
+  }
+  return true;
+});
+
+scenario("mortality: a cared-for crab is not taken on day three (the ladder still pays)", () => {
+  // The care ladder has to keep meaning something now that EVERYONE can die.
+  // A crab who is fed, watered, clean and resting in their own bed sits on the
+  // BED lane: the roll does not even arm until LINGER_DAY, and the cure odds
+  // are the improved ones. Same illness, same day, two different fates.
+  const setup = `{ const k = crabs[0];
+    k.p.homeless = false; k.p.house = 3; k.p.boat = null;
+    k.p.hunger = 0; k.p.thirst = 0; k.p.dirt = 0; k.p.restT = REST_HOURS + 1;
+    k.p.sickPol = "grant"; k.p.sick = { days: 3 }; }`;
+  const sim = createSim({ seed: 77 });
+  sim.runUntil("day >= 2 && tmin >= 12 * 60", { maxSteps: 300000 });
+  sim.G(setup);
+  if (sim.G(`careLane(crabs[0])`) !== "bed") return "the fixture never reached BED REST: " + sim.G(`careLane(crabs[0])`);
+  if (sim.G(`gravelyIll(crabs[0])`)) return "a crab resting in their own bed was flagged GRAVELY ILL on day 3";
+  if (!(sim.G(`deathArmsAt("bed")`) > sim.G(`deathArmsAt("neglect")`)))
+    return "a cared-for crab's death roll arms no later than a neglected one's";
+  const lanes = JSON.parse(sim.G(`JSON.stringify(CARE_LANES)`));
+  if (!(lanes.bed.cure > lanes.cot.cure && lanes.cot.cure > lanes.cared.cure && lanes.cared.cure > lanes.neglect.cure))
+    return "the care ladder's cure odds are no longer graded: " + JSON.stringify(lanes);
+  // 24 nights of exactly that day-3 bed rest: the roll must never fire, and the
+  // crab must actually get better on the good odds
+  let deaths = 0, cures = 0;
+  for (let i = 0; i < 24; i++) {
+    const s2 = createSim({ seed: 500 + i });
+    s2.runUntil("day >= 2 && tmin >= 12 * 60", { maxSteps: 300000 });
+    s2.G(setup);
+    s2.runUntil("lastRentDay === day", { maxSteps: 400000, onTick: (G) => {
+      G(`{ coins = 3000; const k = crabs[0];
+        if (k && k.p.sick) { k.p.hunger = 0; k.p.thirst = 0; k.p.dirt = 0; k.p.restT = REST_HOURS + 1; } }`);
+    } });
+    if (!s2.G("crabs[0]")) deaths++;
+    else if (!s2.G("crabs[0].p.sick")) cures++;
+  }
+  if (deaths) return `${deaths}/24 cared-for crabs were taken on the third day of illness`;
+  if (cures < 6) return `only ${cures}/24 cared-for crabs recovered - the improved lane stopped paying`;
+  return true;
+});
+
+scenario("mortality: a dead townsfolk crab leaves the town in a sane state", () => {
+  const store = new Map();
+  const sim = createSim({ seed: 4242, storage: store, fresh: false });
+  sim.runUntil("day >= 2 && tmin >= 9 * 60", { maxSteps: 300000 });
+  // give SUDSY a member of staff first, so the dead-owner path has a job to lose
+  sim.G(`{ const f = npcs.find(c => c.p.name === "DRIFT");
+    f.p.job = "showers"; f.p.employer = "sudsy"; f.workBiz = "showers"; f.fishSpot = null;
+    OWNERS.sudsy.till = 400; }`);
+  const grind = (G) => G(`{ const k = npcs.find(c => c.p.name === "SUDSY");
+    if (k) { k.p.sick = k.p.sick || { days: 1 }; k.p.hunger = 1; k.p.thirst = 1; k.p.dirt = 1; k.p.sickPol = "require"; } }`);
+  grind(sim.G);
+  if (!sim.runUntil(`!npcs.some(c => c.p.name === "SUDSY")`, { maxSteps: 900000, onTick: grind }))
+    return "SUDSY never died";
+  // the shop has no owner: shut, not silently trading, and off the job board
+  if (!sim.G(`bizDark("showers")`)) return "a shop whose owner died is still open for business";
+  if (!sim.G(`OWNERS.sudsy.gone`)) return "the owner registry never recorded the death";
+  if (sim.G(`jobBoard.some(j => j.biz === "showers")`)) return "a dead owner's shop is still advertising for staff";
+  // her staff are not drawing wages from a till nobody keeps
+  const drift = sim.G(`JSON.stringify(npcs.filter(c => c.p.name === "DRIFT").map(c => [c.p.job, c.p.employer, !!c.fishSpot]))`);
+  if (drift !== '[["fishing",null,true]]') return "her staff did not go back to the pier: " + drift;
+  // no orphaned pier spot: no two fishers standing in the same place
+  const spots = JSON.parse(sim.G(`JSON.stringify(allCrabs().filter(c => c.fishSpot && c.p.boat == null).map(c => c.fishSpot.x + "," + c.fishSpot.y))`));
+  if (new Set(spots).size !== spots.length) return "two fishers were handed the same place on the rail: " + spots;
+  // the sim keeps running - no crash, no wedge
+  const d0 = sim.G("day");
+  sim.runDays(d0 + 4, { tickEvery: 20, onTick: (G) => { if (G("coins") < 400) G("coins = 1200"); } });
+  if (sim.G("day") <= d0) return "the town stopped advancing after a death";
+  // save/load: the dead stay dead, the memorial and the shuttered shop persist.
+  // (initNpcs() stands the founders up BEFORE load() runs, so without the prune
+  // SUDSY walks back out of the sea on every reload.)
+  sim.G("save()");
+  const back = createSim({ seed: 99, storage: store, fresh: false });
+  if (!back.G("hasSave")) return "the town after a death did not save";
+  if (back.G(`allCrabs().some(c => c.p.name === "SUDSY")`)) return "SUDSY walked back out of the sea on reload";
+  if (!back.G(`memorials.some(m => m.name === "SUDSY")`)) return "the memorial did not survive the reload";
+  if (!back.G(`bizDark("showers")`)) return "the ownerless shop reopened itself on reload";
+  const spots2 = JSON.parse(back.G(`JSON.stringify(allCrabs().filter(c => c.fishSpot && c.p.boat == null).map(c => c.fishSpot.x + "," + c.fishSpot.y))`));
+  if (new Set(spots2).size !== spots2.length) return "reload double-booked a place on the rail: " + spots2;
+  back.runDays(back.G("day") + 2, { tickEvery: 20, onTick: (G) => { if (G("coins") < 400) G("coins = 1200"); } });
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
