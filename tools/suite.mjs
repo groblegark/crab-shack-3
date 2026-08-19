@@ -3183,6 +3183,198 @@ scenario("dirt: a filthy crab in a crowded shack wedges nobody (warps + unsticks
   return true;
 });
 
+// ---------------------------------------------------------------- THE CRAB DIARY
+// A per-crab activity log - bounded, saved, and behaviour-neutral. The gates
+// below are the four the brief named plus the housing one the owner added:
+// a sane deduplicated day for all three kinds of crab, a save/load roundtrip
+// that stays bounded over many days, a dead crab's last entry, the ring
+// buffer's cap under a soak, and every housing move written down by NAME.
+// (The tripwire that the diary does not move the sim is the existing frozen
+// day-2 fingerprint, which passes UNTOUCHED - no re-baseline.)
+
+// a full town: arcade + juice bar + a third crab, kept solvent so a whole
+// day's worth of ordinary life actually happens
+function diaryTown(seed, days, store) {
+  const sim = createSim(store ? { seed, storage: store, fresh: false } : { seed });
+  sim.G(`coins = 4000; tryBuy("arcade"); tryBuy("juicebar"); tryBuy("chef"); tryBuy("table");`);
+  sim.runDays(days, { tickEvery: 40, onTick: (G) => { if (G("coins") < 500) G("coins = 2000"); } });
+  return sim;
+}
+const diaryDump = (sim) => JSON.parse(sim.G(`JSON.stringify(allCrabs().map(c => ({
+  name: c.p.name, npc: !!c.p.npc, job: c.p.job, fisher: !!c.p.fisher,
+  log: c.p.log || [], nHome: c.p.nHome || 0, nCot: c.p.nCot || 0, trail: c.p.homeTrail || []
+})))`));
+
+scenario("diary: a day in a full town reads as a life, not a trace", () => {
+  const sim = diaryTown(11, 6);
+  const cap = sim.G("LOG_MAX");
+  const rows = diaryDump(sim);
+  const crew = rows.find(r => !r.npc && r.job !== "fishing");
+  const fisher = rows.find(r => r.fisher && r.job === "fishing" && r.log.length > 4);
+  const town = rows.find(r => r.npc && !r.fisher) || rows.find(r => r.npc && r.job !== "fishing");
+  if (!crew || !fisher || !town) return `the town did not have all three kinds of crab: ${rows.map(r => r.name + "/" + r.job)}`;
+  const cats = (r) => new Set(r.log.map(e => e[2]));
+  // 1) every kind of crab keeps a log, and it spans more than one colour
+  for (const r of [crew, fisher, town]) {
+    if (r.log.length < 8) return `${r.name} only logged ${r.log.length} entries in six days`;
+    if (cats(r).size < 3) return `${r.name}'s diary is all one category: ${[...cats(r)]}`;
+    if (r.log.length > cap) return `${r.name} blew the ring buffer: ${r.log.length} > ${cap}`;
+  }
+  // 2) the categories that MEAN something are there
+  if (!cats(crew).has("work") || !cats(crew).has("money"))
+    return `a working crew crab logged no work or no wages: ${[...cats(crew)]}`;
+  if (!crew.log.some(e => /^SERVED A /.test(e[3]))) return "a shack crew crab never served a named dish to a named guest";
+  if (!crew.log.some(e => /^CLOCKED IN AT /.test(e[3]))) return "a crew crab never clocked in";
+  if (!fisher.log.some(e => /^LANDED \d+ FISH/.test(e[3]))) return "a fisher's day never landed a tallied catch";
+  // 3) NO TICK SPAM. Two shapes of it: the same line twice inside its window,
+  //    and a day so noisy it could only be a trace.
+  for (const r of rows) {
+    for (let i = 0; i < r.log.length; i++) {
+      const e = r.log[i];
+      for (let j = i - 1; j >= 0; j--) {
+        const f = r.log[j];
+        if ((e[0] * 1440 + e[1]) - (f[0] * 1440 + f[1]) > 45) break;
+        if (f[2] === e[2] && f[3] === e[3]) return `${r.name} filed the same line twice inside the hour: "${e[3]}" at D${f[0]}/${f[1]} and D${e[0]}/${e[1]}`;
+      }
+    }
+    const perDay = {};
+    for (const e of r.log) perDay[e[0]] = (perDay[e[0]] || 0) + 1;
+    const worst = Math.max(0, ...Object.values(perDay));
+    if (worst > 26) return `${r.name} logged ${worst} entries in one day - that is a trace, not a diary`;
+  }
+  // 4) a fishing day is ONE tally line, not forty splashes
+  const landLines = fisher.log.filter(e => /^LANDED \d+ FISH/.test(e[3]));
+  const landDays = new Set(landLines.map(e => e[0]));
+  if (landLines.length !== landDays.size) return `the fisher filed ${landLines.length} catch lines over ${landDays.size} days`;
+  // 5) the voice: past tense, upper case, inside the card's column
+  for (const r of rows) for (const e of r.log) {
+    if (e[3].length > 39) return `${r.name} logged an over-long line (${e[3].length}): "${e[3]}"`;
+    if (e[3] !== e[3].toUpperCase()) return `${r.name} logged lower case: "${e[3]}"`;
+  }
+  return true;
+});
+
+scenario("diary: it roundtrips save/load and stays bounded over many days", () => {
+  const store = new Map();
+  const sim = diaryTown(4242, 5, store);
+  sim.G("save()");
+  const before = diaryDump(sim).map(r => [r.name, JSON.stringify(r.log), r.nHome, r.nCot, r.trail.join(">")]);
+  if (!before.some(r => JSON.parse(r[1]).length > 5)) return "nothing was logged before the save";
+  const back = createSim({ seed: 4242, storage: store, fresh: false });
+  if (!back.G("hasSave")) return "the town did not save";
+  const after = diaryDump(back).map(r => [r.name, JSON.stringify(r.log), r.nHome, r.nCot, r.trail.join(">")]);
+  for (const [name, log, nh, nc, trail] of before) {
+    const got = after.find(r => r[0] === name);
+    if (!got) return `${name} did not come back from the save at all`;
+    if (got[1] !== log) return `${name}'s diary did not roundtrip:\n        want ${log.slice(0, 160)}\n        got  ${got[1].slice(0, 160)}`;
+    if (got[2] !== nh || got[3] !== nc || got[4] !== trail)
+      return `${name}'s housing history did not roundtrip: ${nh}/${nc}/${trail} -> ${got[2]}/${got[3]}/${got[4]}`;
+  }
+  // ...and it keeps its bound as the town runs on from the reload
+  back.G("coins = 4000");
+  back.runDays(back.G("day") + 10, { tickEvery: 40, onTick: (G) => { if (G("coins") < 500) G("coins = 2000"); } });
+  const cap = back.G("LOG_MAX");
+  for (const r of diaryDump(back)) if (r.log.length > cap) return `${r.name} grew past the cap after a reload: ${r.log.length}`;
+  // an OLD save (no diary anywhere) opens clean and starts writing one
+  const old = new Map();
+  const env = JSON.parse(store.get("crabshack3_v1_s1"));
+  for (const p of env.personas.concat(env.npc.personas)) { delete p.log; delete p.homeTrail; delete p.nHome; delete p.nCot; delete p.homeSince; }
+  old.set("crabshack3_v1_s1", JSON.stringify(env));
+  old.set("crabshack3_v1_active", "1");
+  const pre = createSim({ seed: 4242, storage: old, fresh: false });
+  if (!pre.G("hasSave")) return "a pre-diary save no longer loads";
+  if (pre.G(`allCrabs().some(c => (c.p.log || []).length)`)) return "a pre-diary save came back with entries out of nowhere";
+  pre.G("coins = 3000");
+  pre.runDays(pre.G("day") + 2, { tickEvery: 40, onTick: (G) => { if (G("coins") < 500) G("coins = 2000"); } });
+  if (!pre.G(`allCrabs().some(c => (c.p.log || []).length > 3)`)) return "a migrated town never started writing its diary";
+  return true;
+});
+
+scenario("diary: the last entry is the death, and the memorial still works", () => {
+  const store = new Map();
+  const sim = createSim({ seed: 4242, storage: store, fresh: false });
+  sim.runUntil("day >= 2 && tmin >= 9 * 60", { maxSteps: 300000 });
+  // hold a reference so the record survives the crab being taken out of town
+  sim.G(`window._watch = npcs.find(c => c.p.name === "SUDSY")`);
+  const grind = (G) => G(`{ const k = npcs.find(c => c.p.name === "SUDSY");
+    if (k) { k.p.sick = k.p.sick || { days: 1 }; k.p.hunger = 1; k.p.thirst = 1; k.p.dirt = 1; k.p.sickPol = "require"; } }`);
+  grind(sim.G);
+  if (!sim.runUntil(`!npcs.some(c => c.p.name === "SUDSY")`, { maxSteps: 900000, onTick: grind }))
+    return "SUDSY never died";
+  const log = JSON.parse(sim.G(`JSON.stringify(window._watch.p.log || [])`));
+  if (!log.length) return "the dead crab kept no diary at all";
+  const last = log[log.length - 1];
+  if (!/^PASSED AWAY/.test(last[3])) return `the final entry is not the death: "${last[3]}"`;
+  if (last[2] !== "peril") return `the death was filed under ${last[2]}`;
+  // ...and the days that led to it are on the record (the fixture pins the
+  // illness by hand, so it is the convalescence lines that must show)
+  if (!log.some(e => /LAID UP|GRAVELY ILL|FELL ILL/.test(e[3])))
+    return "the illness that killed her was never written down: " + JSON.stringify(log.slice(-4));
+  // the memorial path is untouched, and the record does not follow her into it
+  if (!sim.G(`memorials.some(m => m.name === "SUDSY")`)) return "no memorial for the dead";
+  if (sim.G(`memorials.some(m => m.log)`)) return "the memorial row is carrying diaries around";
+  sim.G("save()");
+  const back = createSim({ seed: 99, storage: store, fresh: false });
+  if (back.G(`allCrabs().some(c => c.p.name === "SUDSY")`)) return "the dead came back on reload";
+  if (!back.G(`memorials.some(m => m.name === "SUDSY")`)) return "the memorial did not survive the reload";
+  return true;
+});
+
+scenario("diary: the ring buffer never grows past its cap under a soak", () => {
+  const sim = diaryTown(7, 24);
+  const cap = sim.G("LOG_MAX");
+  const rows = diaryDump(sim);
+  let bytes = 0, busiest = 0, name = "";
+  for (const r of rows) {
+    if (r.log.length > cap) return `${r.name} holds ${r.log.length} entries against a cap of ${cap}`;
+    const b = JSON.stringify(r.log).length;
+    bytes += b;
+    if (r.log.length > busiest) { busiest = r.log.length; name = r.name; }
+  }
+  if (busiest < cap) return `nobody in a 24-day town ever filled the buffer (busiest ${name} at ${busiest}) - the soak is not testing the cap`;
+  // the whole town's diaries, hard-bounded: crabs x cap x line length
+  const bound = rows.length * cap * 60;
+  if (bytes > bound) return `the town's diaries total ${bytes}B, past the ${bound}B bound`;
+  // ...and the oldest entries are the ones that went
+  for (const r of rows) for (let i = 1; i < r.log.length; i++)
+    if (r.log[i][0] * 1440 + r.log[i][1] < r.log[i - 1][0] * 1440 + r.log[i - 1][1])
+      return `${r.name}'s diary is out of order at entry ${i}`;
+  return true;
+});
+
+scenario("diary: housing is the spine - every move is written down by name", () => {
+  const sim = createSim({ seed: 3 });
+  // a crab with the money moves in; the same crab, broke, loses it again
+  sim.G(`{ const k = npcs.find(c => c.p.fisher); k.p.homeless = true; k.p.house = null; k.p.wallet = 200; window._sub = k.p.name; }`);
+  const nm = sim.G("window._sub");
+  const at = (re) => JSON.parse(sim.G(`JSON.stringify((allCrabs().find(c => c.p.name === "${nm}").p.log || []))`))
+    .filter(e => re.test(e[3]));
+  if (!sim.runUntil(`!allCrabs().find(c => c.p.name === "${nm}").p.homeless`, { maxSteps: 400000 }))
+    return "the crab never moved in";
+  const moved = at(/^MOVED INTO /);
+  if (!moved.length) return "moving into a house was not written down";
+  if (moved[0][2] !== "home") return `a housing move was filed under ${moved[0][2]}`;
+  if (!/HOUSE \d|COTTAGE|SHELTER/.test(moved[0][3])) return `the move does not name the place: "${moved[0][3]}"`;
+  if (!/\$/.test(moved[0][3])) return `the move does not say what it cost: "${moved[0][3]}"`;
+  const trail0 = sim.G(`JSON.stringify(allCrabs().find(c => c.p.name === "${nm}").p.homeTrail)`);
+  if (!/SHELTER/.test(trail0)) return `the trail lost where they came from: ${trail0}`;
+  // now take the money away: the night the run turns has to be legible
+  const broke = (G) => G(`{ const k = allCrabs().find(c => c.p.name === "${nm}"); if (k) k.p.wallet = 0; }`);
+  broke(sim.G);
+  if (!sim.runUntil(`allCrabs().find(c => c.p.name === "${nm}").p.homeless`, { maxSteps: 900000, onTick: broke }))
+    return "the crab never lost the house";
+  if (!at(/COULDN'T MAKE RENT/).length) return "losing the house to rent was not written down";
+  const st = JSON.parse(sim.G(`JSON.stringify((({p}) => ({ t: p.homeTrail, h: p.nHome || 0, c: p.nCot || 0, s: p.homeSince }))(allCrabs().find(c => c.p.name === "${nm}")))`));
+  if (!st.t || st.t.length < 2 || st.t[st.t.length - 1] !== "SHELTER")
+    return `the trail does not end back at the shelter: ${JSON.stringify(st.t)}`;
+  if (st.t.length > 4) return `the trail is unbounded: ${JSON.stringify(st.t)}`;
+  if (!(st.h > 0 && st.c > 0)) return `the nights tally never counted both kinds of night: ${st.h} housed / ${st.c} cot`;
+  if (!st.s) return "the trail never recorded when this address started";
+  if (at(/^TOOK A COT AT THE SHELTER/).length > 2)
+    return "the shelter line is being filed every night instead of at the start of a spell";
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
