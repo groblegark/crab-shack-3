@@ -109,6 +109,31 @@ compounds or collapses → the landlord collects at 20:00 either way.
 - **Crab dossier**: clicking the follow card opens a full-screen record —
   job, shift, wallet, housing, health, need bars, claims to fame. Click or
   Esc closes. Works for every crab, crew and townsfolk alike.
+- **Save slots + SAVED TOWNS screen** (Matt's directive, shipped 2026-08-18):
+  five towns, not one. Keys `crabshack3_v1_s1..s5` plus `crabshack3_v1_active`
+  (the autosave target, persisted); the legacy single key `crabshack3_v1`
+  migrates into slot 1 byte-for-byte on first boot, then retires. A slot holds
+  the SAME envelope save() always wrote — **opaque** to the save layer, so new
+  fields from any system ride along — plus two sidecars this layer owns:
+  `_ver` (import guard) and `_meta` (day, weekday, coins, rep, pop, a crew
+  roster snapshot with name/color/accessory/job/housing tier/sick/OT, and a
+  real timestamp). `_meta` is fully derivable from the envelope (`slotMeta`),
+  so migrated and imported saves get a preview card for free and `slotCard()`
+  falls back to deriving it. UI: a SAVED TOWNS button on the title and a SAVE
+  chip in the panel tab row (which REPLACED the old panel NEW chip — new games
+  are now per-slot, with a confirm, where they belong) open an overlay with its
+  own rect table, sized off H so both canvas modes work: five slot rows, then
+  the selected town's crew as 2x portraits with name/job/housing/health, then
+  LOAD / NEW HERE / DELETE / EXPORT and a global IMPORT FILE. DELETE and
+  NEW-HERE-onto-a-town are two-tap confirms (3.5s arm). EXPORT writes the slot
+  JSON via an `a[download]` + Blob URL named `crabshack3-slotN-dayD-stamp.json`;
+  IMPORT reads a `.json` through a hidden `<input type="file" id="importSave">`
+  in index.html, validates shape + version BEFORE anything is written
+  (`saveProblem` — not-JSON, wrong app, no crew, unnamed crew, bad day/coins,
+  newer `_ver`; the reason prints on the card), stages it, and only writes on
+  confirm. An imported old-build save runs the same load() migrations a stored
+  one does. Deleting the slot you're playing reboots into it rather than
+  leaving a zombie autosave.
 
 ### Verified balance (8 seeds, tools/headless.mjs)
 - Baseline (buy nothing): **0/8 survive, median eviction ~11-13** — the
@@ -153,14 +178,16 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **65 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **69 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
   job-board hire/payroll/quit, stall-wedge soak, T1 trade-ledger flows,
   line-of-credit draw/bankruptcy/predictor-lead/roundtrip,
   disease infection/cure/mortality, showers turnover, NPC economics,
-  save/load (incl. boat berths), no-inflation wallet bounds, needs-drag
+  save/load (incl. boat berths), save SLOTS (legacy-key migration into
+  slot 1, two independent towns across a switch, import refusal + staged
+  commit + old-build import re-migration, the preview card), no-inflation wallet bounds, needs-drag
   visibility, laundromat-removal migration (one-shot refund) + dirt
   serviced by showers alone, thirst serviced end-to-end at the bar,
   parched-spiral sickness attribution (with a watered control arm),

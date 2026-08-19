@@ -947,10 +947,22 @@ function readSlotEnv(i) {   // parsed + validated, or null - never a half-read
   try { s = JSON.parse(localStorage.getItem(slotKey(i))); } catch (e) {}
   return s && !saveProblem(s) ? s : null;
 }
-function slotCard(i) {      // what the SAVED TOWNS screen draws for one row
-  const s = readSlotEnv(i);
-  if (!s) return null;
-  return s._meta && Array.isArray(s._meta.crew) ? s._meta : slotMeta(s);
+// What the SAVED TOWNS screen draws for one row. The screen asks for all five
+// every frame, so the parse is memoized against the raw string - a stale card
+// is impossible (the string changes the moment the slot does) and a redraw
+// costs five map lookups instead of five JSON.parse.
+const _cardCache = {};
+function slotCard(i) {
+  let raw = null;
+  try { raw = localStorage.getItem(slotKey(i)); } catch (e) {}
+  const hit = _cardCache[i];
+  if (hit && hit.raw === raw) return hit.card;
+  let s = null;
+  try { s = JSON.parse(raw); } catch (e) {}
+  if (s && saveProblem(s)) s = null;
+  const card = s ? (s._meta && Array.isArray(s._meta.crew) ? s._meta : slotMeta(s)) : null;
+  _cardCache[i] = { raw, card };
+  return card;
 }
 function writeSlotEnv(i, env) { localStorage.setItem(slotKey(i), JSON.stringify(env)); }
 function clearSlot(i) { localStorage.removeItem(slotKey(i)); }
@@ -3716,7 +3728,7 @@ function drawManage() {
 function saveRects() {
   const w2 = 240, x = 8, y = 4;
   const h2 = Math.min(H - 8, TALL ? 272 : 232);
-  const rowH = TALL ? 18 : 15, rowY = y + 17;
+  const rowH = TALL ? 18 : 14, rowY = y + 17;
   const bh = TALL ? 16 : 14, bw = 55, bx = x + 4;
   const b1 = y + h2 - (bh * 2 + 8), b2 = y + h2 - (bh + 4);
   const rows = [];
@@ -3816,7 +3828,8 @@ function drawSaveScreen() {
     smallText(ctx, "THE CREW OF SLOT " + saveSel, x + 6, dy, [58, 42, 38]);
     smallText(ctx, "DAY " + card.day + " " + card.weekday + " - " + card.crew.length + " CREW, " + card.pop + " IN TOWN",
       x + 92, dy, [110, 100, 110]);
-    const top = dy + 9, shown = Math.min(card.crew.length, 6);
+    // +13, not +9: hats and flowers overhang the portrait box upward
+    const top = dy + 13, shown = Math.min(card.crew.length, 6);
     for (let i = 0; i < shown; i++) {
       const c = card.crew[i], bx = x + 6 + i * 38;
       rect(ctx, bx, top, 36, 30, [30, 20, 36]);
