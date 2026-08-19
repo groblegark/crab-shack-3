@@ -1066,10 +1066,16 @@ scenario("tired: a workday accrues it; sleep drains it, bed beating cot", () => 
   const sim = createSim({ seed: 21 });
   // day 1 dawn: nobody has worked, nobody is tired
   if (sim.G("crabs.some(c => (c.p.tired || 0) > 0)")) return "crew started tired";
-  // by 19:30 the M-shift crab has clocked off with the +0.45 shift bump
-  sim.runUntil("tmin >= 19.5 * 60", { maxSteps: 400000 });
-  if (!sim.G("crabs.some(c => (c.p.tired || 0) >= 0.44)"))
-    return "no crab tired after a full workday: " + sim.G("JSON.stringify(crabs.map(c => +(c.p.tired || 0).toFixed(2)))");
+  // the M-shift crab clocks off at 14:00 with the +0.45 shift bump.
+  // RE-POINTED (shift-fairness pass): the check used to read the roster at
+  // 19:30, which now measures the AFTERNOON NAP instead of the bump - a crab
+  // home and off the clock recovers in daylight, so by 19:30 the morning crab
+  // is down around 0.15. Receipt: the bump itself is unchanged (0.45 at load
+  // 1.0); we now read it where it happens, just after the shift ends.
+  let peakTired = 0;
+  sim.runUntil("tmin >= 19.5 * 60", { maxSteps: 400000, tickEvery: 20,
+    onTick: (G) => { const t = G("Math.max(0, ...crabs.map(c => c.p.tired || 0))"); if (t > peakTired) peakTired = t; } });
+  if (peakTired < 0.43) return "no crab tired after a full workday: peak " + peakTired.toFixed(3);
   // 21:30, post-settlement: pin a housed crew crab and homeless SALTY at the
   // same exhaustion, park their errands, and let the night do the rest
   sim.runUntil("lastRentDay === day && tmin >= 21.5 * 60", { maxSteps: 400000 });
@@ -1086,15 +1092,20 @@ scenario("tired: a workday accrues it; sleep drains it, bed beating cot", () => 
   if (bed > 0.1) return "housed crab woke tired: " + bed.toFixed(3);   // measured 0.037 at bed rate 0.5/h
   if (cot < 0.2) return "shelter cot drained like a real bed: " + cot.toFixed(3);
   if (cot - bed < 0.08) return "bed vs cot barely differs: " + bed.toFixed(3) + " vs " + cot.toFixed(3);
-  // and daylight accrues NOTHING passively (no idle-at-home accrual, no
-  // commute accrual, no daytime drain - sleep-only repair, work-only accrual):
-  // pin the whole crew at 0.3 after first light, park errands, and 20 game
-  // minutes later every value is untouched no matter where each crab stands
+  // and daylight still accrues NOTHING passively - idling never makes a crab
+  // tireder. RE-POINTED (shift-fairness pass): rest is no longer gated on the
+  // sun, so a crab who is home and off the clock now NAPS in daylight. The
+  // receipt for the re-point is the fault it fixes: rest used to be available
+  // only while darkness() > 0.7, so the morning shift's long free afternoon
+  // repaired nothing and the evening shift banked the whole night - measured
+  // mean tiredness M 0.153 vs E 0.087 over 6 seeds x 10 days, and the penalty
+  // followed the SHIFT, not the crab (swap them and it swaps). The assertion
+  // is now the honest one: tiredness only ever goes DOWN off the clock.
   sim.runUntil("tmin >= 6.05 * 60", { maxSteps: 40000 });
   sim.G("for (const c of crabs) { c.p.tired = 0.3; c.errandCd = 999; }");
   sim.runUntil("tmin >= 6.4 * 60", { maxSteps: 40000 });
-  const moved = JSON.parse(sim.G("JSON.stringify(crabs.filter(c => Math.abs(c.p.tired - 0.3) > 1e-9).map(c => [c.p.name, c.p.tired, c.dayState]))"));
-  return moved.length === 0 ? true : "tired moved without work or sleep: " + JSON.stringify(moved);
+  const moved = JSON.parse(sim.G("JSON.stringify(crabs.filter(c => c.p.tired > 0.3 + 1e-9).map(c => [c.p.name, c.p.tired, c.dayState]))"));
+  return moved.length === 0 ? true : "tired ROSE without work: " + JSON.stringify(moved);
 });
 
 scenario("tired: save migration seeds it from old sandy, strands nothing", () => {
