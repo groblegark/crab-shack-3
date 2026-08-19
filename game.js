@@ -588,6 +588,10 @@ let crabs = [], customers = [], floaters = [];
 let spawnT = 3, toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x, 3=6x
 const FF_SPEED = [1, 2, 3, 6];
 let camX = 1180, followIdx = -1, followNpc = null, followCust = null, tab = "crew";
+// SELECTION is not the camera. Click a crab to select (and focus) them; pan
+// away and the camera lets go but the selection - and its card, and the right-
+// click orders that read it - stay with the crab you picked.
+let sel = null;
 let ffSleep = false, ffSleepDay = 0, ffChain = 0;   // the little sun: skip to morning
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
@@ -2318,7 +2322,7 @@ cv.addEventListener("mousedown", (ev) => {
 addEventListener("mousemove", (ev) => {
   if (!dragging) return;
   const p = evPos(ev);
-  if (Math.abs(p.x - dragStartX) > 4) { dragMoved = true; followIdx = -1; followNpc = null; followCust = null; }
+  if (Math.abs(p.x - dragStartX) > 4) { dragMoved = true; followIdx = -1; followNpc = null; followCust = null; }   // camera only: sel survives the pan
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 });
 addEventListener("mouseup", () => { dragging = false; setTimeout(() => { dragMoved = false; }, 50); });
@@ -2333,7 +2337,7 @@ cv.addEventListener("touchmove", (ev) => {
   if (!dragging) return;
   ev.preventDefault();
   const p = evPos(ev.touches[0]);
-  if (Math.abs(p.x - dragStartX) > 6) { dragMoved = true; followIdx = -1; followNpc = null; followCust = null; }
+  if (Math.abs(p.x - dragStartX) > 6) { dragMoved = true; followIdx = -1; followNpc = null; followCust = null; }   // camera only: sel survives the pan
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 }, { passive: false });
 cv.addEventListener("touchcancel", () => {
@@ -2446,7 +2450,8 @@ cv.addEventListener("click", (ev) => {
       for (let i = 0; i < crabs.length; i++) {
         const bx = 4 + i * CARD_STEP;
         if (p.x >= bx && p.x < bx + CARD && p.y >= ROW_Y && p.y < ROW_Y + CARD) {
-          followIdx = followIdx === i ? -1 : i; followNpc = null; followCust = null; return;
+          followIdx = followIdx === i ? -1 : i; followNpc = null; followCust = null;
+          sel = followIdx >= 0 ? crabs[i] : null; return;
         }
       }
     }
@@ -2466,8 +2471,12 @@ cv.addEventListener("click", (ev) => {
   }
   // a click on the follow card itself opens the crab's full record
   {
-    const fc2 = followNpc || followCust || (followIdx >= 0 && crabs[followIdx]);
-    if (fc2 && p.x >= 2 && p.x < 130 && p.y >= 2 && p.y < 54) { dossier = fc2; sfx.ding(); return; }
+    if (sel && p.x >= 5 && p.x < 26 && p.y >= 6 && p.y < 33) {   // portrait: bring the camera back
+      if (sel.p) { if (sel.p.npc) { followNpc = sel; followIdx = -1; } else { followIdx = crabs.indexOf(sel); followNpc = null; } followCust = null; }
+      else { followCust = sel; followIdx = -1; followNpc = null; }
+      sfx.ding(); return;
+    }
+    if (sel && p.x >= 2 && p.x < 130 && p.y >= 2 && p.y < 54) { dossier = sel; sfx.ding(); return; }
   }
   // the little sun: fast-forward to morning
   if (p.x >= W - 26 && p.x < W - 1 && p.y >= 13 && p.y < 28) {
@@ -2491,6 +2500,7 @@ cv.addEventListener("click", (ev) => {
   // world: click any crab - crew or townsfolk - to follow them
   for (const c of allCrabs()) {
     if (!c.hidden && Math.abs(wx - (c.x + 8)) < 12 && Math.abs(p.y - (c.y - 6)) < 14) {
+      sel = c;
       if (c.p.npc) { followNpc = c; followIdx = -1; }
       else { followIdx = crabs.indexOf(c); followNpc = null; }
       followCust = null;
@@ -2502,7 +2512,7 @@ cv.addEventListener("click", (ev) => {
     if (k.isCrab || k.state === "showering") continue;
     const ky = FLOOR_Y - 4 - 26 * (k.climb || 0);
     if (Math.abs(wx - (k.x + 8)) < 12 && Math.abs(p.y - ky) < 14) {
-      followCust = k; followIdx = -1; followNpc = null;
+      sel = k; followCust = k; followIdx = -1; followNpc = null;
       return;
     }
   }
@@ -2517,10 +2527,10 @@ cv.addEventListener("contextmenu", (ev) => {
   if (window.MergeMode && MergeMode.active()) return;
   const p = evPos(ev);
   if (p.y >= PANEL_Y) return;   // the panel is left-click country
-  if (followCust) { popText(followCust.name.split(" ")[0] + ": JUST VISITING!", followCust.x - 12, 120, [255, 150, 130]); return; }
-  if (followNpc) { orderPop(followNpc, false, "I'VE GOT MY OWN LIFE"); return; }
-  if (followIdx < 0) return;   // nobody selected: nothing to order
-  orderCrab(crabs[followIdx], p.x + camX, p.y);
+  if (!sel) return;   // nobody selected: nothing to order
+  if (!sel.p) { popText(sel.name.split(" ")[0] + ": JUST VISITING!", sel.x - 12, 120, [255, 150, 130]); return; }
+  if (sel.p.npc) { orderPop(sel, false, "I'VE GOT MY OWN LIFE"); return; }
+  orderCrab(sel, p.x + camX, p.y);
 });
 addEventListener("keydown", (e) => {
   if (e.key === "m") { toggleMute(); if (!muted) sfx.ding(); }
@@ -2529,7 +2539,7 @@ addEventListener("keydown", (e) => {
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; followCust = null; }
-  if (e.key === "Escape") { if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } followIdx = -1; followNpc = null; followCust = null; }
+  if (e.key === "Escape") { if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } sel = null; followIdx = -1; followNpc = null; followCust = null; }
 });
 
 // ---------------------------------------------------------------- drawing
@@ -3040,9 +3050,9 @@ function drawCustCard(k) {
 }
 function drawFollowCard() {
   if (dossier || manage) return;   // a full-screen card is open - don't double up
-  if (followCust) { drawCustCard(followCust); return; }
-  const c = followNpc || (followIdx >= 0 && crabs[followIdx]);
-  if (!c) return;
+  if (sel && !sel.p) { drawCustCard(sel); return; }
+  const c = sel;
+  if (!c || !c.p) return;
   const p = c.p;
   const wcard = 128;
   rect(ctx, 2, 2, wcard, 52, [30, 20, 36]);
@@ -3183,8 +3193,8 @@ function drawPanel() {
   } else {
     for (let i = 0; i < crabs.length; i++) {
       const c = crabs[i], bx = 4 + i * CARD_STEP;
-      const sel = followIdx === i;
-      rect(ctx, bx, ROW_Y, CARD, CARD, sel ? [255, 230, 120] : [30, 20, 20]);
+      const picked = sel === c;
+      rect(ctx, bx, ROW_Y, CARD, CARD, picked ? [255, 230, 120] : [30, 20, 20]);
       rect(ctx, bx + 1, ROW_Y + 1, CARD - 2, CARD - 2, [200, 230, 245]);
       const hat = c.duty ? "toque" : c.p.acc, acc = ACCESSORIES[hat];
       if (TALL) {   // room for the full 2x portrait
@@ -3898,6 +3908,8 @@ function frame(now) {
   }
   if (followCust && !customers.includes(followCust)) followCust = null;   // they went home
   if (dossier && !dossier.p && !customers.includes(dossier)) dossier = null;
+  // a selected tourist who leaves town (or a crab who dies) drops the selection
+  if (sel && (sel.p ? !allCrabs().includes(sel) : !customers.includes(sel))) sel = null;
   const followed = followNpc || followCust || (followIdx >= 0 && crabs[followIdx]);
   if (followed) {
     const t = clampCam(followed.x - W / 2 + 8);
@@ -3969,6 +3981,16 @@ function frame(now) {
     } });
   }
   for (const k of customers) paint.push({ base: (k.state === "dining" || k.state === "seatedWaiting") && k.table ? (k.table.y + 1) : (k.isCrab ? 165 : FLOOR_Y), f: () => drawCustomer(k) });
+  if (sel && !sel.hidden) paint.push({ base: sel.y - 0.1, f: () => {
+    // a soft ring under whoever you've picked: it stays put while you pan
+    const bx = sel.x + 8 - camX, by = (sel.p ? sel.y : FLOOR_Y - 4 - 26 * (sel.climb || 0)) + 2;
+    const blink = 0.55 + 0.45 * Math.sin(time * 4);
+    const col = [Math.round(120 + 135 * blink), Math.round(200 + 30 * blink), 120];
+    for (let i = -6; i <= 6; i++) {
+      const t2 = i / 6, dy = Math.round(2 * (1 - t2 * t2));
+      px(ctx, bx + i, by - dy, col); px(ctx, bx + i, by + dy, col);
+    }
+  } });
   for (const c of allCrabs()) paint.push({ base: c.cstate === "drive" && (c.dayState === "toWork" || c.dayState === "toHome") ? ROAD_Y1 : c.y, f: () => drawCrab(c) });
   paint.push({ base: FLOOR_Y, f: drawLandlord });
   paint.sort((a, b) => a.base - b.base);
