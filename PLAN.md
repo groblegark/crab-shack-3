@@ -444,10 +444,15 @@ unit economics.
   - Pier fish price FLOATS with scarcity (townCatch vs recent demand),
     bounded above by the $7 import price — the world price is the natural
     ceiling, which is the trade-horizon stub doing real economic work.
-  - Fishers are paid PER CATCH AT MARKET PRICE (replacing/absorbing the flat
-    $13 subsistence; keep the $2/catch housing-fund flow). Output = income:
-    a scarce-fish day is a lucrative day, so free crabs return to the pier
-    because it pays, not because they're forced.
+  - Fisher WAGES ARE ABOLISHED (Matt: "it's not a real thing. I've never
+    heard of it before; they're always paid based on catch as free agents").
+    The flat $13/day subsistence goes away entirely — a fisher's income is
+    the catch sold at market price, full stop (keep the $2/catch
+    housing-fund flow). Output = income: a scarce-fish day is a lucrative
+    day and a lazy week is a hungry one, so free crabs return to the pier
+    because it pays, not because they're forced. NOTE the safety valve
+    already exists: a broke, hungry fisher roasts one of the catch — the
+    driftwood fire is what makes zero-wage survivable at the bottom.
   - RESTORE full fisher freedom (breaks for fun too — self-employed means
     self-employed; "I'VE GOT MY OWN LIFE" applies to fishers most of all).
   - Job board already provides labor-supply response: fishing postings when
