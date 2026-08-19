@@ -478,6 +478,13 @@ unit economics.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Music off by default, but sell it** (Matt): ship with music muted for
+  new players (SFX stays on), and actively encourage flipping it on — e.g.
+  a small pulse/glow on the MUS toggle early on, or a one-time toast at a
+  calm moment ("THE BAND IS WARMED UP - MUS TO LISTEN"), plus the NOW
+  PLAYING banner already selling track titles. Existing saves keep their
+  current choice; the encouragement shows only while music is off and
+  gives up after a few sessions rather than nagging.
 - **Stop the table-bumping** (Matt: "crabs keep running into tables...
   too much. It's cute if it's just for like 10 minutes but all day? that's
   terrible"). Root cause is structural: routedStep travels exactly two
