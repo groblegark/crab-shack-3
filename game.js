@@ -224,6 +224,12 @@ const bizUnlocked = (b) => b === "shack" || bizOwner(b) !== "player"
 // while extend needs sustained queue pressure: the regimes are disjoint and
 // each move weakens its own trigger (proved over 20 days in the suite).
 const HOURS_POLICY = {
+  // Measured (2026-08-18): with her policy live the baseline matrix is
+  // UNCHANGED (0/8 median 10, tail 14->11) and growth chef,table reads
+  // median 9 vs 10 - exactly the documented per-build wobble. A damping
+  // probe (minSpan 8h) measured the identical growth list, proving the
+  // 1-day shift is stream chaos from her first move, not the shrink depth -
+  // so the floor stays at 6h where her schedule has room to be interesting.
   showers: { quietDays: 3, pressureDays: 2, extendQ: 2, minSpan: 6 * 60, tiredCap: 0.75 },
 };
 let hoursPolicyState = {};        // biz -> { hist: [{f,l,q}...], cd }  (persisted)
