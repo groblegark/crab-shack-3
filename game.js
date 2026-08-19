@@ -157,6 +157,12 @@ const MEAL_POL_LABEL = { retail: "RETAIL", atcost: "AT COST", free: "FREE" };
 for (const k in BIZ) {   // one migration point: defaults = today's behavior
   BIZ[k].hours = { open: 8 * 60, close: 20 * 60 };
   BIZ[k].mealPol = "retail";
+  // labor policy (see the LABOR POLICY block below). GRANT is what the game
+  // already did - a sick crab stayed home unpaid - so the default is inert.
+  BIZ[k].sickPol = "grant";
+  // auto-manage: OFF for the player (you're the manager), ON for peer owners
+  // (SUDSY has always run herself; the same rule table now does it out loud).
+  BIZ[k].autoLabor = !!BIZ[k].owner && BIZ[k].owner !== "player";
 }
 function setBizHours(b, open, close) {
   const h = BIZ[b].hours;
@@ -471,10 +477,218 @@ function bizShiftWindow(b, kind) {
   return w;
 }
 function baseShift(c) { return c.p.job === "fishing" ? SHIFTS[c.p.shift] : bizShiftWindow(c.p.job, c.p.shift); }
-function effShift(c) { return coveringToday(c) ? bizShiftWindow(c.p.job, "cover") : baseShift(c); }
-function bizRestingToday(b) {   // every worker on the roster is off today
+// the shift they're CONTRACTED to work today: their own, or the cover double.
+// effShift (below) adds overtime on top - it's "the hours they actually work".
+function dutyShift(c) { return coveringToday(c) ? bizShiftWindow(c.p.job, "cover") : baseShift(c); }
+
+// ================================================================ LABOR POLICY
+// Sick days, overtime, and the rules a manager - player or CPU - applies to
+// both. Everything is DERIVED from persona state plus per-business policy: no
+// parallel scheduler, and only three new persona fields (sickPol, ot, restT).
+//
+// ---- SICK DAYS -------------------------------------------------------------
+// A sick crab stays home, UNPAID, and cares for themselves. That was already
+// the behavior; what's new is that it is a POLICY, so it can be taken away:
+//   GRANT   (default = the old behavior) the crab rests and earns nothing
+//   REQUIRE the crab drags themselves in at half speed, earns the full wage,
+//           and coughs on the coworkers. (The contagion term in the settlement
+//           epidemiology has always keyed on standing at work beside a sick
+//           colleague - until sick days were a policy, no crab could ever be
+//           there to trigger it.)
+// Per-business default plus a per-crab override (dossier row / SCHEDULE tab).
+// Self-employed fishers and owner-operators always grant: no boss, no policy.
+const SICK_POLS = ["grant", "require"];
+const SICK_POL_LABEL = { grant: "GRANT SICK DAYS", require: "REQUIRE WORK" };
+function sickPolFor(c) {
+  if (c.p.sickPol && SICK_POLS.includes(c.p.sickPol)) return c.p.sickPol;
+  if (c.p.owner || c.p.job === "fishing" || !BIZ[c.p.job]) return "grant";
+  return BIZ[c.p.job].sickPol || "grant";
+}
+// THE predicate: the commute gate, both wage loops, the BILL forecast, the
+// coverage math and the placard all read it.
+function onSickDay(c) { return !!c.p.sick && sickPolFor(c) === "grant"; }
+
+// ---- THE CARED SEAM (closed 2026-08-18) ------------------------------------
+// Recovery's care check read only hunger and dirt - it predated thirst and
+// tiredness, so a crab who spent the whole day in bed got nothing for it and
+// "take a sick day" was theater. Convalescence is now a graded ladder, keyed
+// to the same housing quality the sleep ladder uses (own bed 0.5/h, cot 0.25/h):
+//
+//   lane       cure  die   what it takes
+//   NEGLECT    0.12  0.25  fails fed-and-clean                    (unchanged)
+//   CARED      0.40  0.08  hunger < 0.5 AND dirt < 0.66           (unchanged:
+//                          the old bar still pays exactly what it always did)
+//   COT REST   0.48  0.06  CARED + thirst < 0.5 + a day's rest on a cot
+//   BED REST   0.55  0.04  CARED + thirst < 0.5 + a day's rest in their OWN
+//                          bed (house or boat)
+// Nobody's odds got worse - rest is a NEW, better lane, reachable only by
+// actually staying home on a granted sick day. That is what makes it real.
+const REST_HOURS = 9;   // daylight game-hours at home, ill and excused, to count as a day's rest
+const CARE_LANES = {
+  neglect: { cure: 0.12, die: 0.25, label: "NEGLECTED" },
+  cared:   { cure: 0.40, die: 0.08, label: "CARED FOR" },
+  cot:     { cure: 0.48, die: 0.06, label: "RESTING ON A COT" },
+  bed:     { cure: 0.55, die: 0.04, label: "RESTING IN THEIR OWN BED" },
+};
+function careLane(k) {
+  if ((k.p.hunger || 0) >= 0.5 || (k.p.dirt || 0) >= 0.66) return "neglect";
+  if ((k.p.restT || 0) < REST_HOURS || (k.p.thirst || 0) >= 0.5 || !onSickDay(k)) return "cared";
+  return k.p.homeless ? "cot" : "bed";
+}
+
+// ---- OVERTIME --------------------------------------------------------------
+// A standing per-crab request (p.ot) that lengthens TODAY'S shift by up to
+// OT_SPAN minutes, paid at OT_RATE x the crab's normal hourly rate on top of
+// the flat daily wage, at a proportional needs cost.
+//
+// SHOP-HOURS COUPLING (the choice, documented): overtime lives strictly INSIDE
+// the shop's open hours. Hours gate tourist admission, errand dispatch and the
+// CLOSED sign, so an hour past close is an hour with the doors shut - premium
+// pay for nothing. The extension takes whatever room is left at the END of the
+// shift first, then borrows from the START: an E-shift crab whose shift already
+// ends at close comes in EARLY instead, which is exactly the shape that plugs a
+// missing morning. Want more OT room? Extend the shop's hours - one tab away.
+// A crab already covering a full-open double has no room at all, by
+// construction - you cannot work overtime on a day you work open to close.
+const OT_SPAN = 120;      // up to two extra hours
+const OT_RATE = 1.5;      // premium multiplier on the hourly rate
+const OT_FATIGUE = 1.5;   // tiredness accrues at 1.5x the proportional share (the health cost)
+function otEligible(c) {
+  return !!c.p.ot && !c.p.sick && !offToday(c)
+    && c.p.job !== "fishing" && !!BIZ[c.p.job] && !c.p.owner;   // wage-earners only: fishers sell fish, owners draw from the till
+}
+function otWindow(c) {
+  if (!otEligible(c)) return null;
+  const sh = dutyShift(c), h = BIZ[c.p.job].hours;
+  const after = Math.min(OT_SPAN, Math.max(0, h.close - sh.end));
+  const before = Math.min(OT_SPAN - after, Math.max(0, sh.start - h.open));
+  if (after + before <= 0) return null;
+  return { start: sh.start - before, end: sh.end + after, mins: after + before };
+}
+function otMinutes(c) { const w = otWindow(c); return w ? w.mins : 0; }
+// the hours they actually work today = contracted shift + overtime
+function effShift(c) {
+  const w = otWindow(c);
+  if (!w) return dutyShift(c);
+  return { start: w.start, end: w.end, label: fmtHr(w.start) + "-" + fmtHr(w.end), ot: w.mins };
+}
+// on the clock, right now, in overtime? (the powerup marker + the OT tags read
+// this, so they clear the instant OT ends - nothing to reset)
+function onOvertimeNow(c) {
+  if (!c.duty || c.dayState !== "working") return false;
+  const w = otWindow(c);
+  if (!w) return false;
+  const sh = dutyShift(c);
+  return tmin < sh.start || tmin >= sh.end;
+}
+function wageRate(c) { return c.p.npc ? NPC_WAGE : CRAB_WAGE; }
+// OT minutes at OT_RATE x the normal hourly rate. The hourly rate comes from
+// the crab's OWN contracted shift (baseShift), never the cover double - a
+// cover day is a separate, pre-existing generosity and must not dilute the
+// premium. Exact by construction: the suite pins the RATIO, not a magic number.
+function otPremium(c, mins) {
+  const b = baseShift(c);
+  return wageRate(c) * OT_RATE * mins / Math.max(60, b.end - b.start);
+}
+function otPayToday(c) { return otPremium(c, c.otMin || 0); }        // truthful: minutes actually worked
+// tonight's forecast: scheduled while they're still on OT, else what they worked
+function otPayForecast(c) { return otEligible(c) ? otPremium(c, otMinutes(c)) : otPayToday(c); }
+
+function bizRestingToday(b) {   // nobody on the roster works today (rest day or sick day)
   const staff = allCrabs().filter(k => k.p.job === b);
-  return staff.length > 0 && staff.every(k => offToday(k));
+  return staff.length > 0 && staff.every(k => offToday(k) || onSickDay(k));
+}
+function restingLabel(b) {   // what the placard says - illness reads differently from a rota day
+  const staff = allCrabs().filter(k => k.p.job === b);
+  return staff.some(k => onSickDay(k)) && staff.every(k => onSickDay(k) || offToday(k))
+    && staff.some(k => !offToday(k)) ? "OUT SICK" : "DAY OFF";
+}
+
+// ---- AUTO-MANAGE -----------------------------------------------------------
+// Built on the exact pattern SUDSY's hours policy uses: a small state machine
+// read once per settlement, AT MOST ONE MOVE PER DAY, a cooldown day after a
+// move, and a named toast for every move so the player can watch the manager
+// think. Peer owners run it by default; the player can delegate with the
+// AUTO-MANAGE toggle on the SCHEDULE tab (default OFF - you're the manager).
+//
+//   rule        move                       fires when
+//   REST        sickPol -> grant           a staffer is ill under a REQUIRE
+//                                          policy: send them home
+//   OT OFF      p.ot = false               a crab on OT is over the tiredness
+//                                          budget, sick, or no longer needed
+//   OT ON       p.ot = true                tomorrow leaves a shift uncovered
+//                                          AND a rested candidate exists
+//
+// CONVERGENCE. OT ON needs (gap tomorrow AND tired < OT_ON_TIRED); OT OFF needs
+// (tired >= OT_OFF_TIRED) OR (no gap). The tiredness triggers are a HYSTERESIS
+// BAND (0.55 / 0.75), never a knife edge, and overtime itself pushes tiredness
+// UP at OT_FATIGUE - so every ON move weakens its own trigger. On the coverage
+// axis the two regimes are disjoint by construction. With one move a day, a
+// cooldown after each, and a roster-sized cap on how many crabs can be on OT,
+// the machine settles into a duty cycle instead of thrashing (suite-proved
+// over 21 days).
+const LABOR_CFG = { OT_ON_TIRED: 0.55, OT_OFF_TIRED: 0.75, OT_ON_HUNGER: 0.5 };
+let laborPolicyState = {};   // biz -> { cd } (persisted)
+// does tomorrow leave a shift with nobody on it? Days off already promote a
+// coworker to a full-open double (revenue-neutral, free), so the honest gap is
+// SICKNESS - an excused crab's window simply goes dark. That is the hole
+// overtime is for, and it is why the OT extension borrows from the START when
+// there is no room at the end: an E crab coming in early plugs a lost morning.
+function coverGapTomorrow(b) {
+  const roster = allCrabs().filter(k => k.p.job === b && !k.p.owner);
+  if (roster.length < 2) return null;   // a one-crab shop honestly closes - that's the placard, not an OT problem
+  const wd = weekdayIdx(day + 1);
+  const out = roster.filter(k => dayOffIdx(k) === wd || onSickDay(k));
+  const on = roster.filter(k => !out.includes(k));
+  if (!on.length || !out.length) return null;
+  const hole = out.find(o => !on.some(w => w.p.shift === o.p.shift || w.p.shift === "D"));
+  return hole || null;
+}
+function runLaborPolicy(b) {
+  if (!BIZ[b] || !BIZ[b].autoLabor || window._noLaborPolicy) return;
+  if (b === "fishing") return;
+  const st = laborPolicyState[b] = laborPolicyState[b] || { cd: 0 };
+  if (st.cd > 0) { st.cd--; return; }
+  const roster = allCrabs().filter(k => k.p.job === b);
+  const who = bizOwner(b) === "player" ? "THE ROTA" : OWNERS[bizOwner(b)].name;
+  const move = (line) => {
+    st.cd = 1;
+    toast = { text: line, t: 6 };
+    today.moved.push(line);
+    if (window._stats) (window._stats.laborMoves = window._stats.laborMoves || [])
+      .push({ day, biz: b, line });
+  };
+  // 1. REST: nobody works a shift ill if the manager can help it
+  const forced = roster.find(k => k.p.sick && sickPolFor(k) === "require");
+  if (forced) {
+    forced.p.sickPol = "grant";
+    return move(who + " SENDS " + forced.p.name + " HOME TO REST");
+  }
+  // 2. OT OFF: over budget, ill, or the gap has closed
+  const gap = coverGapTomorrow(b);
+  const stop = roster.find(k => k.p.ot &&
+    ((k.p.tired || 0) >= LABOR_CFG.OT_OFF_TIRED || k.p.sick || !gap));
+  if (stop) {
+    stop.p.ot = false;
+    const why = (stop.p.tired || 0) >= LABOR_CFG.OT_OFF_TIRED || stop.p.sick
+      ? " OFF OVERTIME - THEY'RE SPENT" : " OFF OVERTIME - COVERED AGAIN";
+    return move(who + " TAKES " + stop.p.name + why);
+  }
+  // 3. OT ON: a real gap tomorrow and a crab healthy enough to fill it
+  if (gap) {
+    const cand = roster.filter(k => !k.p.ot && k !== gap && otEligibleTomorrow(k)
+      && (k.p.tired || 0) < LABOR_CFG.OT_ON_TIRED && (k.p.hunger || 0) < LABOR_CFG.OT_ON_HUNGER)
+      .sort((a, c2) => (a.p.tired || 0) - (c2.p.tired || 0))[0];
+    if (cand) {
+      cand.p.ot = true;
+      return move(who + " ASKS " + cand.p.name + " TO WORK OVERTIME");
+    }
+  }
+}
+// the eligibility test without today's transient state (tomorrow's roster)
+function otEligibleTomorrow(c) {
+  return !c.p.sick && c.p.job !== "fishing" && !!BIZ[c.p.job] && !c.p.owner
+    && dayOffIdx(c) !== weekdayIdx(day + 1);
 }
 function darkness() { // 0 = day, 1 = full night
   const t = tmin;
@@ -607,11 +821,16 @@ function totalRent() {   // the PLAYER's nightly property bill, due from night o
   return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player")
     .reduce((s, b) => s + BIZ[b].rent, 0);
 }
-// tonight's actual wage bill: sick crabs and crabs on their day off skip pay
-// (exactly the settlement loop's rule, so the BILL chip and MENU math match)
-function wagesOwedTonight() {
-  return crabs.reduce((s, c) => s + (c.p.sick || (offToday(c) && !c.workedToday) ? 0 : CRAB_WAGE), 0);
+// tonight's actual wage bill: crabs on a granted sick day and crabs on their
+// day off skip pay, and anyone on overtime adds their premium (exactly the
+// settlement loop's rule, so the BILL chip and MENU math match). A crab
+// REQUIRED to work while sick is on the bill like anyone else.
+function crabDueTonight(c) {
+  if (onSickDay(c) && !c.workedToday) return 0;
+  if (offToday(c) && !c.workedToday) return 0;
+  return wageRate(c) + Math.round(otPayForecast(c));
 }
+function wagesOwedTonight() { return crabs.reduce((s, c) => s + crabDueTonight(c), 0); }
 function nightlyDue() { return totalRent() + wagesOwedTonight(); }
 const busy = {
   shack: { board: [false, false, false], grill: [false, false, false] },
@@ -710,6 +929,11 @@ function updateHome(c, dt) {
     return;
   }
   c._offWt = null;
+  // convalescence: DAYLIGHT hours spent at home while ill are what the care
+  // ladder reads (night sleep is everyone's, so it would prove nothing). A
+  // crab who commuted in and worked banks a couple of hours either side of
+  // their shift and never reaches REST_HOURS; a crab who stayed home does.
+  if (c.p.sick && darkness() < 0.7) c.p.restT = (c.p.restT || 0) + dt * TS / 60;
   const s = homeSpot(c);
   // SLEEP repairs TIRED: bedded down for the night, exhaustion drains away -
   // full rate in your own bed (house/boat), half on a shelter cot
@@ -745,6 +969,11 @@ function newCrab(persona) {
   if (persona.tired == null) persona.tired = persona.sandy || 0;
   delete persona.sandy;
   if (persona.thirst == null) persona.thirst = 0;
+  // labor policy state: no overtime standing, no per-crab sick override, no
+  // convalescence banked. Old saves land here and behave exactly as before.
+  if (persona.ot == null) persona.ot = false;
+  if (persona.restT == null) persona.restT = 0;
+  if (persona.sickPol != null && !SICK_POLS.includes(persona.sickPol)) delete persona.sickPol;
   return {
     p: persona,
     x: homeX({ p: persona }), y: 160, tx: 0, ty: 160,
@@ -879,6 +1108,12 @@ function save() {
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
     mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
     hoursPol: hoursPolicyState,
+    // labor policy: per-biz sick-day setting + auto-manage delegation, and the
+    // auto-manager's cooldown ledger (per-crab ot/sickPol/restT ride along
+    // inside the personas above)
+    sickPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].sickPol; return m; })(),
+    autoLabor: (() => { const m = {}; for (const k in BIZ) m[k] = !!BIZ[k].autoLabor; return m; })(),
+    laborPol: laborPolicyState,
   }));
 }
 let sudsRefunded = false;   // laundromat-removal migration: refund paid out (persisted)
@@ -970,6 +1205,14 @@ function load() {
   if (s.hoursPol) for (const b in s.hoursPol)
     if (BIZ[b] && s.hoursPol[b] && Array.isArray(s.hoursPol[b].hist))
       hoursPolicyState[b] = { hist: s.hoursPol[b].hist.slice(-4), cd: s.hoursPol[b].cd || 0 };
+  // labor policy. Old saves have none: the defaults above ARE the old
+  // behavior (grant sick days, auto-manage off for the player / on for peers).
+  if (s.sickPol) for (const b in s.sickPol)
+    if (BIZ[b] && SICK_POLS.includes(s.sickPol[b])) BIZ[b].sickPol = s.sickPol[b];
+  if (s.autoLabor) for (const b in s.autoLabor)
+    if (BIZ[b]) BIZ[b].autoLabor = !!s.autoLabor[b];
+  if (s.laborPol) for (const b in s.laborPol)
+    if (BIZ[b] && s.laborPol[b]) laborPolicyState[b] = { cd: s.laborPol[b].cd || 0 };
   const away = (Date.now() - (s.t || Date.now())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
@@ -1207,10 +1450,11 @@ function runJobBoard() {
     if (bizOwner(b) === "player") continue;
     const o = OWNERS[bizOwner(b)];
     if (!o || (o.darkT || 0) > 0 || jobBoard.some(j => j.biz === b)) continue;
-    // day-off staff still count here: a rest day is not a dark shop, so a
-    // weekly closure never triggers the emergency HELP WANTED posting
-    // (that gate is for broke/sick darkness only)
-    const staff = allCrabs().filter(k => k.p.job === b && !k.p.sick).length;
+    // day-off AND sick-day staff still count here: neither a rest day nor a
+    // bout of flu is a vacancy, so a weekly closure or a granted sick day
+    // never triggers the emergency HELP WANTED posting (that gate is for a
+    // shop that has genuinely lost its people)
+    const staff = allCrabs().filter(k => k.p.job === b).length;
     if ((o.till >= 260 && staff < 2) || (staff === 0 && o.till >= NPC_WAGE * 2))
       jobBoard.push({ biz: b, wage: NPC_WAGE, day });
   }
@@ -1351,11 +1595,18 @@ function updateSchedule(c, dt) {
   if (c.p.job !== "fishing" && !bizUnlocked(c.p.job)) c.p.job = "shack";
   if (!c.p.npc && c.p.job !== "fishing" && bizOwner(c.p.job) !== "player") c.p.job = "shack";   // crew can't staff NPC shops
   const off = offToday(c);   // one weekday in seven: no commute, no duty, no pay
-  if (c.dayState === "home" && !off && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !c.p.sick
+  if (c.dayState === "home" && !off && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !onSickDay(c)
       && !(c.restDay === day && c.restUntil > tmin)) {   // ordered home: a real break before the schedule re-dispatches
     startCommute(c, true);
   }
-  if (c.dayState === "working") c.workedToday = true;   // fisher or shopkeep alike: tonight's tired bump is earned, not blanket
+  if (c.dayState === "working") {
+    c.workedToday = true;   // fisher or shopkeep alike: tonight's tired bump is earned, not blanket
+    // overtime is measured, not assumed: minutes clocked in OUTSIDE the
+    // contracted window are the ones that earn the premium, so a crab who
+    // knocks off early is paid for what they actually did
+    const ds = dutyShift(c);
+    if (otEligible(c) && (tmin < ds.start || tmin >= ds.end)) c.otMin = (c.otMin || 0) + dt * TS;
+  }
   if (c.dayState === "working" && tmin >= sh.end) c.pendingOff = true;
   if (c.dayState === "working" && c.pendingOff && c.kstate === "idle") {
     // last call: stick around while anyone's still waiting in the grace window
@@ -1364,9 +1615,14 @@ function updateSchedule(c, dt) {
     if (lingering) return;
     c.duty = false; c.pendingOff = false;
     if (c.carrying) c.carrying = null;
-    c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25);  // a shift works up an appetite
+    // OVERTIME'S HEALTH COST: no parallel system - the existing end-of-shift
+    // accrual just scales with the extra hours. Hunger rises in proportion to
+    // the longer day; tiredness rises at OT_FATIGUE x that share, because the
+    // last two hours are the ones that break you.
+    const otF = (c.otMin || 0) / Math.max(60, baseShift(c).end - baseShift(c).start);
+    c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25 * (1 + otF));  // a shift works up an appetite
     c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));  // working a whole shift ALREADY tired makes you thirsty (checked pre-bump: same firing rate the sandy coupling had)
-    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT);   // a full shift takes it out of you
+    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT * (1 + OT_FATIGUE * otF));   // a full shift takes it out of you - overtime more so
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and grubbies up the shell
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
     // grab dinner on the way home instead of trekking back later (gated on
@@ -2239,7 +2495,8 @@ function updateCustomers(dt) {
 
 // ---------------------------------------------------------------- status text
 function crabStatus(c) {
-  if (c.p.sick) return "SICK - DAY " + ((c.p.sick.days || 0) + 1) + " - NEEDS FOOD + REST";
+  if (c.p.sick) return "SICK - DAY " + ((c.p.sick.days || 0) + 1)
+    + (onSickDay(c) ? " - RESTING UP" : " - WORKING THROUGH IT");
   if (offToday(c)) {   // sick beats off; off beats everything but the commute home
     if (c.dayState === "toErrand") return "DAY OFF - OFF TO " + BIZ[c.errandBiz].short;
     if (c.dayState === "errand") return "DAY OFF - AT " + BIZ[c.errandBiz].name;
@@ -2800,11 +3057,13 @@ function drawBusiness(key) {
     wrect(signX + signW / 2 - 23, 118, 46, 11, [30, 20, 36]);
     text(ctx, "CLOSED", signX + signW / 2 - 18 - camX, 120, [255, 120, 120]);
   } else if (bizRestingToday(key)) {
-    // the whole roster is off today: an honest smalltown closed-sign day,
-    // hung over the roofline where the stalls can't hide it
+    // the whole roster is out today: an honest smalltown closed-sign day, hung
+    // over the roofline where the stalls can't hide it. A sick day reads
+    // differently from a rota day, but hangs the same placard.
+    const lbl = restingLabel(key), sick = lbl === "OUT SICK";
     wrect(signX + signW / 2 - 25, 79, 50, 12, [30, 20, 36]);
     wrect(signX + signW / 2 - 24, 80, 48, 10, [255, 250, 235]);
-    text(ctx, "DAY OFF", signX + signW / 2 - 21 - camX, 82, [40, 110, 190]);
+    text(ctx, lbl, signX + signW / 2 - textWidth(lbl) / 2 - camX, 82, sick ? [120, 150, 90] : [40, 110, 190]);
   }
 }
 
@@ -3627,7 +3886,7 @@ function frame(now) {
     tmin -= 1440; day++;
     settleFishMarket();   // the day's landings vs the day's appetite set tomorrow's pier price
     townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
-    for (const c of allCrabs()) c.workedToday = false;   // a new day's ledger
+    for (const c of allCrabs()) { c.workedToday = false; c.otMin = 0; }   // a new day's ledger
     trade.day = { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }; trade.landedDay = 0;
     today = newDayLog(); today.repStart = rep;
   }
@@ -3641,10 +3900,20 @@ function frame(now) {
     // 1. wages: pay every crab you can afford
     let wages = 0;
     for (const c of crabs) {
-      if (c.p.sick) continue;                        // no work, no pay
+      if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay (a REQUIRED crab who worked is paid in full)
       if (offToday(c) && !c.workedToday) continue;   // day off: same rule - the bill dips, the wallet doesn't
-      if (coins >= CRAB_WAGE) { coins -= CRAB_WAGE; c.p.wallet += CRAB_WAGE; wages += CRAB_WAGE; }
-      else popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]);
+      const prem = Math.round(otPayToday(c));        // overtime premium on top of the flat day
+      const due = CRAB_WAGE + prem;
+      if (coins >= due) {
+        coins -= due; c.p.wallet += due; wages += due;
+        if (prem > 0) {
+          popText("OT +$" + prem, c.x - 4, FLOOR_Y - 40, [255, 216, 96]);
+          if (window._stats) {
+            window._stats.otPay = (window._stats.otPay || 0) + prem;
+            window._stats.otMin = (window._stats.otMin || 0) + Math.round(c.otMin || 0);
+          }
+        }
+      } else popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]);
     }
     if (wages > 0) earnHist.push({ t: time, amt: -wages });
     // 2. house rent from each crab's own wallet; broke crabs move to the shelter
@@ -3725,9 +3994,10 @@ function frame(now) {
       const emp = c.p.employer;
       if (!emp) continue;
       const o = OWNERS[emp];
-      if (c.p.sick) continue;                        // no work, no pay - same deal as the crew
+      if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay - same deal as the crew
       if (offToday(c) && !c.workedToday) continue;   // day off: unpaid, but the job is safe
-      if (o && o.till >= NPC_WAGE) { o.till -= NPC_WAGE; c.p.wallet += NPC_WAGE; }
+      const npcDue = NPC_WAGE + Math.round(otPayToday(c));   // peer owners pay the same overtime premium
+      if (o && o.till >= npcDue) { o.till -= npcDue; c.p.wallet += npcDue; }
       else {
         c.p.job = "fishing"; c.p.employer = null;
         today.moved.push(c.p.name + " QUIT - BACK TO THE PIER");
@@ -3793,13 +4063,24 @@ function frame(now) {
       for (const k of everyone) {
         if (!k.p.sick) continue;
         k.p.sick.days++;
-        const cared = (k.p.hunger || 0) < 0.5 && (k.p.dirt || 0) < 0.66;
-        if (Math.random() < (cared ? 0.4 : 0.12)) {
+        // THE CARED SEAM: a graded ladder, not a coin flip (see CARE_LANES).
+        // A crab who spent the day resting at home, fed and hydrated, does
+        // measurably better - and their own bed beats a shelter cot.
+        const lane = careLane(k), care = CARE_LANES[lane];
+        const tier = k.p.homeless ? "cot" : k.p.boat != null ? "boat" : "house";
+        if (Math.random() < care.cure) {
+          const dur = k.p.sick.days;
           k.p.sick = null; today.recovered.push(k.p.name);
           popText(k.p.name + " RECOVERED!", k.x - 12, FLOOR_Y - 34, [140, 255, 160]);
-          if (window._stats) window._stats.recoveries = (window._stats.recoveries || 0) + 1;
+          if (window._stats) {
+            window._stats.recoveries = (window._stats.recoveries || 0) + 1;
+            (window._stats.illness = window._stats.illness || [])
+              .push({ name: k.p.name, days: dur, lane, tier, out: "well" });
+          }
         } else if (!k.p.npc && k.p.sick.days >= 3 &&
-            Math.random() < Math.min(0.75, (cared ? 0.08 : 0.25) + 0.12 * Math.max(0, k.p.sick.days - 4))) {
+            Math.random() < Math.min(0.75, care.die + 0.12 * Math.max(0, k.p.sick.days - 4))) {
+          if (window._stats) (window._stats.illness = window._stats.illness || [])
+            .push({ name: k.p.name, days: k.p.sick.days, lane, tier, out: "died" });
           // the tide takes them
           abortChef(k); abortErrand(k);
           memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
@@ -3814,7 +4095,11 @@ function frame(now) {
           sfx.angry();
         }
       }
+      for (const k of allCrabs()) k.p.restT = 0;   // convalescence is banked one day at a time
     }
+    // the day's labor policy: peer owners (and delegating players) make at
+    // most one move each, on the same convergent-rules pattern as SUDSY's hours
+    for (const b of Object.keys(BIZ)) if (bizUnlocked(b)) runLaborPolicy(b);
     // 3. property rents + loan service (THE credit hook): a shortfall draws
     // on the line of credit instead of instant eviction; interest compounds
     // and the minimum payment auto-collects inside settleCreditLine.
