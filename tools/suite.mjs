@@ -1164,6 +1164,153 @@ scenario("all 9 lots stand: empties render vacant, hiring never conjures a house
   return true;
 });
 
+scenario("fish market: scarcity walks the price to the ceiling; the world supplies there", () => {
+  const sim = createSim({ seed: 55 });
+  // lay the fleet up: nothing lands, the town eats imports, price must climb
+  sim.runDays(6, { tickEvery: 30, onTick: (G) => {
+    if (G("coins") < 300) G("coins = 600");
+    G("for (const c of npcs) if (c.p.fisher) c.p.sick = c.p.sick || { days: 0 };");
+  } });
+  const t = JSON.parse(sim.G("JSON.stringify(trade)"));
+  if (t.price !== 7) return "price after 5+ dry days: $" + t.price + " (series " + t.series + ")";
+  for (let i = 0; i < t.series.length; i++) {
+    if (t.series[i] < 2 || t.series[i] > 7) return "price left the band: " + t.series;
+    if (i && Math.abs(t.series[i] - t.series[i - 1]) > 1) return "price jumped a step: " + t.series;
+  }
+  if (!(t.total.fish > 0)) return "no imports flowed with a dry pier";
+  if (t.spent !== t.total.fish * 7) return "imports not charged at the flat $7 world price: $" + t.spent + " for " + t.total.fish;
+  return t.ceilDays >= 1 ? true : "ceilDays not counting at the ceiling";
+});
+
+scenario("fish market: a glut sags the price to the floor and pay falls with it", () => {
+  const sim = createSim({ seed: 7 });
+  // deterministic clearing math: heavy landings vs a light appetite,
+  // one $1 step per clearing, floor-clamped
+  sim.G("trade.price = 5; trade.landH = []; trade.useH = []; trade.series = []");
+  for (let i = 0; i < 3; i++) sim.G("trade.landedDay = 20; trade.useDay = 6; settleFishMarket()");
+  const s = JSON.parse(sim.G("JSON.stringify(trade.series)"));
+  if (JSON.stringify(s) !== "[4,3,2]") return "glut clearings walked " + JSON.stringify(s) + ", expected [4,3,2]";
+  sim.G("trade.landedDay = 20; trade.useDay = 6; settleFishMarket()");
+  if (sim.G("trade.price") !== 2) return "price fell through the $2 floor";
+  // and a floor-price catch pays exactly $2 into the fisher's claw
+  sim.G("window._stats.fishPay = 0; window._stats.catches = 0");
+  const ok = sim.runUntil("(window._stats.catches || 0) >= 3", { maxSteps: 900000, onTick: (G) =>
+    G("trade.price = 2; if (coins < 300) coins = 600;") });
+  if (!ok) return "no catches landed to price-check";
+  const pay = sim.G("window._stats.fishPay"), n = sim.G("window._stats.catches");
+  return pay === 2 * n ? true : "caught " + n + " at $2, paid $" + pay;
+});
+
+scenario("fish market: at the ceiling a fisher skips the arcade; at the floor he goes", () => {
+  const sim = createSim({ seed: 13 });
+  sim.G('coins = 3000; tryBuy("arcade"); tryBuy("chef"); crabs[2].p.job = "arcade";');
+  const pin = `{ const c = npcs.find(k => k.p.name === window._f);
+    if (c) { c.p.hunger = 0.2; c.p.thirst = 0.2; c.p.dirt = 0.2; c.p.tired = 0.2;
+      c.p.sick = null; c.p.wallet = 60; c.p.bored = 0.9;
+      if (c.errandCd > 0.5) c.errandCd = 0.5; } }`;
+  const found = sim.runUntil('tmin > 10 * 60 && tmin < 15 * 60 && bizStaffed("arcade") && npcs.some(c => c.p.job === "fishing" && c.dayState === "working" && !c.p.employer)', {
+    maxSteps: 900000, onTick: (G) => { if (G("coins") < 400) G("coins = 800"); } });
+  if (!found) return "never staged a working fisher beside a staffed arcade";
+  sim.G('window._f = npcs.find(c => c.p.job === "fishing" && c.dayState === "working" && !c.p.employer).p.name');
+  // state A: bored stiff at a $7 price - he stays on the rail and says the line
+  const t0 = sim.G("tmin");
+  sim.G("window._left = false");
+  sim.runUntil(`tmin > ${t0} + 90`, { maxSteps: 40000, tickEvery: 2, onTick: (G) => {
+    G(pin + ' trade.price = 7; if (coins < 400) coins = 800;');
+    G('if (npcs.find(k => k.p.name === window._f).dayState !== "working") window._left = true;');
+  } });
+  if (sim.G("window._left")) return "fisher left the pier at ceiling price";
+  if (!sim.G("npcs.find(k => k.p.name === window._f).priceQuipDay")) return "no THE WATER'S MONEY TODAY moment";
+  // state B: the same itch at a $2 price - the arcade wins
+  sim.G("window._went = false");
+  const went = sim.runUntil("window._went === true", { maxSteps: 120000, tickEvery: 2, onTick: (G) => {
+    G(pin + ' trade.price = 2; if (coins < 400) coins = 800;');
+    G(`{ const c = npcs.find(k => k.p.name === window._f);
+      if ((c.dayState === "toErrand" || c.dayState === "errand") && c.errand && c.errand.need === "fun") window._went = true; }`);
+  } });
+  return went ? true : "fisher never took the arcade break at floor price (state " +
+    sim.G('npcs.find(k => k.p.name === window._f).dayState') + ")";
+});
+
+scenario("fish market: 15 days settle into a band, never a daily sawtooth", () => {
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(15, { tickEvery: 40, onTick: (G) => { if (G("coins") < 300) G("coins = 600"); } });
+  const s = JSON.parse(sim.G("JSON.stringify(trade.series)"));
+  if (s.length < 14) return "series too short: " + JSON.stringify(s);
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] < 2 || s[i] > 7) return "price left the band: " + JSON.stringify(s);
+    if (i && Math.abs(s[i] - s[i - 1]) > 1) return "sawtooth step: " + JSON.stringify(s);
+  }
+  // full floor-to-ceiling traverses: one $1 step a day across a $5 range
+  // makes a traverse take 5+ days by construction; 15 days allow at most 3
+  let crossings = 0, seen = null;
+  for (const p of s) {
+    if (p <= 2) { if (seen === 7) crossings++; seen = 2; }
+    if (p >= 7) { if (seen === 2) crossings++; seen = 7; }
+  }
+  return crossings <= 3 ? true : crossings + " full-range crossings in 15 days: " + JSON.stringify(s);
+});
+
+scenario("fish market: price + series roundtrip save/load", () => {
+  const store = new Map();
+  const a = createSim({ seed: 9, storage: store, fresh: false });
+  a.G("trade.price = 6; trade.series = [4,5,5,6]; trade.useH = [9,8]; trade.landH = [5,6]; trade.ceilDays = 0; trade.useDay = 3; save()");
+  const b = createSim({ seed: 10, storage: store, fresh: false });
+  if (b.G("trade.price") !== 6) return "price did not roundtrip: $" + b.G("trade.price");
+  if (b.G("JSON.stringify(trade.series)") !== "[4,5,5,6]") return "series did not roundtrip";
+  if (b.G("JSON.stringify(trade.useH)") !== "[9,8]" || b.G("JSON.stringify(trade.landH)") !== "[5,6]")
+    return "demand windows did not roundtrip";
+  if (b.G("trade.useDay") !== 3) return "day-use counter did not roundtrip";
+  // an old save (pre-market trade keys) opens at the classic $4, blank chart
+  const raw = JSON.parse(store.get("crabshack3_v1"));
+  delete raw.trade.price; delete raw.trade.series; delete raw.trade.useH;
+  delete raw.trade.landH; delete raw.trade.useDay; delete raw.trade.ceilDays;
+  store.set("crabshack3_v1", JSON.stringify(raw));
+  const c = createSim({ seed: 11, storage: store, fresh: false });
+  return c.G("trade.price") === 4 && c.G("trade.series.length") === 0
+    ? true : "old save defaults wrong: $" + c.G("trade.price");
+});
+
+scenario("fish market: floor-price week - the roast keeps a broke fisher alive", () => {
+  // owner directive: no wage means a glut week produces genuinely poor
+  // fishers; the driftwood roast is the load-bearing safety valve. Pin the
+  // market at the $2 floor for a whole week: SALTY's real income (catch x $2)
+  // can't reliably buy the $18 town meal, so the roast must carry his
+  // nutrition - a hunger-attributed sickness on him IS the failure.
+  const sim = createSim({ seed: 5 });
+  sim.G("window._sSick = null; window._wMax = 0");
+  sim.runDays(7, { tickEvery: 8, onTick: (G) => {
+    // freeze the labor market (days-off scenario pattern): at a $2 price a
+    // $20 posting rationally poaches SALTY off the pier, and a poached
+    // employee is not the glut-priced FISHER this scenario constructs
+    G(`trade.price = 2; if (coins < 300) coins = 600;
+      OWNERS.sudsy.till = Math.min(OWNERS.sudsy.till, 200);
+      if (npcs[0]) npcs[0].p.sick = null;
+      { const f = npcs.find(c => c.p.name === "SALTY");
+        if (f) {
+          if (townCatch < 5) townCatch = 5;
+          window._wMax = Math.max(window._wMax, f.p.wallet);
+          if (f.p.sick && !window._sSick) window._sSick = [day, +(f.p.hunger || 0).toFixed(2)];
+        } }`);
+  } });
+  const sSick = JSON.parse(sim.G("JSON.stringify(window._sSick)"));
+  if (sSick && sSick[1] >= 0.9) return "SALTY fell starvation-sick on day " + sSick[0] + " (hunger " + sSick[1] + ")";
+  if (sim.G("Math.round(window._wMax)") >= 60) return "a floor-price week made SALTY rich ($" + sim.G("Math.round(window._wMax)") + ") - glut pay isn't real";
+  if (!((sim.G("window._stats.roasts") || 0) >= 3)) return "only " + sim.G("window._stats.roasts || 0") + " roasts in a glut week";
+  // and the guard held: with only the town's last two fish, no roast fires
+  const staged = sim.runUntil('npcs.find(c => c.p.name === "SALTY").dayState === "working" && tmin > 9 * 60 && tmin < 17 * 60', {
+    maxSteps: 900000, onTick: (G) => G('{ const f = npcs.find(c => c.p.name === "SALTY"); if (f) f.p.sick = null; if (coins < 300) coins = 600; }') });
+  if (!staged) return "SALTY never got back to the rail for the guard check";
+  sim.G("window._rs = window._stats.roastStarts || 0");
+  const t1 = sim.G("tmin");
+  sim.runUntil(`tmin > ${t1} + 60`, { maxSteps: 20000, tickEvery: 2, onTick: (G) =>
+    G(`{ const f = npcs.find(c => c.p.name === "SALTY"); f.p.hunger = 0.9; f.p.wallet = 3; f.p.sick = null;
+      townCatch = 2; if (coins < 300) coins = 600;
+      for (const k of npcs) if (k.p.fisher) k.castT = 999; }`) });   // no fresh landings: the crate holds exactly the last two
+  return (sim.G("window._stats.roastStarts || 0") === sim.G("window._rs"))
+    ? true : "a roast ate one of the town's last two fish";
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
