@@ -139,6 +139,21 @@ compounds or collapses → the landlord collects at 20:00 either way.
   speed), which feeds the `cared` check that improves cure and death odds.
   Arcade nights stay off-limits. This closed the calibration-flagged spiral
   where the sick couldn't re-clean.
+- **The far shore + the evening mist** (`drawHorizon`/`drawMist`/
+  `drawHorizonTraffic`, 2026-08-19): another coast across the water — two
+  quantised ridges, a lighthouse on the point, a town whose windows come on
+  after dark — on a 0.04 parallax above the sea band, plus a per-day mist
+  (`mistPeak(day)`, an integer hash, no RNG, nothing saved) that rolls in
+  through the late afternoon and takes it away most evenings. **Nothing in the
+  game ever says the town is on an island**; the horizon says it. Imports the
+  trade ledger counts arrive on a freighter out there; the ferry crosses it on
+  Thursdays without calling. PURE DRAW - suite-proved byte-identical.
+- **THE FERRY, the win condition** (`FERRY_PRICE` **20000**, the office at
+  x1806 and the fingerpost at x1148, 2026-08-19): buy the boat and you WIN -
+  a third ending beside EVICTED and BANKRUPT (`won` is a flavour of
+  `gameOver`), snapshotted into `winRec` and saved. Price measured, not felt:
+  a strong `--buy chef,table` town crosses it around day 105-130 and no
+  documented run comes within 5x. See the feature entry.
 - **UI**: title → lease-signing intro (Mr. Pincherton) → play. CREW / SHOP /
   MENU tabs, a three-tab management card (HOURS / SCHEDULE / TOWN census),
   BILL chip (itemized nightly bill), follow-cam on ANY crab
@@ -197,6 +212,24 @@ compounds or collapses → the landlord collects at 20:00 either way.
   leaving a zombie autosave.
 
 ### Verified balance (8 seeds, tools/headless.mjs)
+- **THE LONG GAME (2026-08-19, measured for the ferry's price).** The curves
+  below are all short-horizon; the win condition needed the other end of them.
+  A surviving `--buy chef,table` town banks roughly **$230 a night** once the
+  crew is deep and the room is full, near-linearly from about day 40:
+  **$5,090 (d41), $11,068 (d71), $20,660 (d111), $31,473 (d160)** on seed
+  1337. Over 150 days x 6 seeds it reads **3/6 alive on $22,991 / $23,797 /
+  $28,971**. Buying the SIDE BUSINESSES makes a town measurably POORER over
+  that horizon — `--buy chef,table,grill,board,juicebar,arcade,cadegear` over
+  120 days x 8 reads 4/8 alive on **$3,696-$6,769**, because the arcade and
+  juice bar add nightly rent and pull crew off the shack. Grill+/board+ are
+  free of that (one-off cost, no rent) and read the same as chef,table alone.
+  **FERRY_PRICE 20000 is set against that curve**: ~day 105-130 for a strong
+  town, 5.5x above the best till any documented short run ever reaches.
+- **The 16-seed baseline at HEAD is 0/16, median 10** (evictions
+  9,9,9,9,9,10,10,10,10,11,11,12,12,12,12,13, lifetime $49,354), measured
+  2026-08-19 on a pristine control tree. The 13-14 quoted in the older entries
+  below is stale. Growth `--buy chef,table --days 40 --seeds 8` is **4/8**
+  (9,10,12,13,41,41,41,41, lifetime $97,299).
 - **CURRENT (2026-08-19, after the table-service economy):** baseline
   `--days 30 --seeds 16` **0/16, median 13** (10-19); growth
   `--buy chef,table --days 40 --seeds 8` **3/8 alive**
@@ -263,6 +296,8 @@ vm — never fork game logic into tools/) and perf expectations live there.
 
 - `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - (count above is the live one; the two older figures in this file are historic.)
+- `node tools/suite.mjs` — **122 scenarios** after the ferry/horizon pass
+  (116 + 6). THIS is the live count.
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
@@ -807,6 +842,183 @@ vm — never fork game logic into tools/) and perf expectations live there.
   $74, TABLES BUSED 13) under shots/.
 
 >>>>>>> worktree-agent-a27942d1aa747a62f
+- **THE FAR SHORE, THE MIST, AND THE FERRY** (the owner's world, built
+  2026-08-19, worktree — verbatim: *"for the record, we are on the island of
+  Crabalina, and the shore should be visible but often obscured by mist in the
+  evening; but we never make this explicit; and the goal of the game is to buy
+  the ferry to the mainland, at which point you win, but it's way expensive
+  (say ferry, forget about cruise ships)"*.)
+
+  **1. THE ISLAND IS NEVER STATED, AND IT IS NEVER GOING TO BE.** There is no
+  line of dialogue, no tooltip and no intro card anywhere in the build that
+  says "island", or that the town is surrounded by water, or anything of the
+  kind. What there is instead is a **far shore you can see from the beach** —
+  two quantised ridges (`hzBack` behind `hzRidge`, both 2px-stepped sine
+  profiles), a **lighthouse on the point** whose lamp turns on its own
+  four-second beat, a **town across the water** whose thirteen blocks light
+  their windows after dark, and a **string of harbour lights** along the rest
+  of that coast at night. It sits above the sea band and below the sky, on a
+  **0.04 parallax**, so a full pan of the town shifts it 77px: near enough to
+  be a place, far enough to be somewhere else. The player is never told the
+  geography. They work it out because they can see the other side, and because
+  the only thing in the world that costs $20,000 is a boat.
+  - The name **CRABALINA** appears in exactly the four places a real town
+    writes its own name and nowhere else: the **fingerpost** on the promenade
+    outside the shack, the **ferry's own name** on the office board, her
+    **hull** when she comes in, and the **SAVED TOWNS header** ("CRABALINA -
+    SLOT 3 IS YOURS"). Never a sentence, never an explanation.
+
+  **2. THE MIST MODEL.** `mistPeak(day)` is an **integer hash of the day**
+  (xorshift/imul, then `0.18 + 1.25 * u^0.85` clamped) — no RNG, no saved
+  field, no per-town seed, so the weather is a fact about the calendar and is
+  the same on every machine. Measured over 200 days: **mean 0.76, 25% of
+  evenings clear (< 0.5), 37% a total whiteout**. Biased thick on purpose: the
+  brief is "often obscured", and a clear night only means something if it is
+  uncommon. `mistNow()` is that peak under a day-shape envelope — **zero from
+  09:30 to 16:30** (so the shore is a fact you can go and check at midday),
+  rolling in 16:30→20:00, holding all night, burning off 06:30→09:30. The
+  small hours read **yesterday's** peak, or the mist would change thickness at
+  midnight when `day` ticks over.
+  - The render is 60 one-pixel rows of `rgba` whose alpha ramps in from y26,
+    **holds at full through the band the far shore stands in (y42-66), and
+    eases back off toward the beach** — measured by eye and then fixed: the
+    first cut whited out the near water too and read as a broken renderer
+    rather than as weather. Five banks of it drift through at their own
+    speeds, which is what makes it weather instead of a filter. The colour
+    lerps with `darkness()`, so dusk mist is not daylight mist.
+
+  **3. THE HORIZON EARNS ITS KEEP.** Two honest wires, both pure reads:
+  - **Imports arrive by sea.** On any day the T1 trade ledger actually shipped
+    something in (`trade.day.fish|corn|water|power|fruit > 0`) a small
+    freighter works the far channel from 06:00 to 19:30. What the town
+    consumes comes from the place on the horizon, and you can watch it come.
+  - **She works the far side on Thursdays.** `FERRY_DAY = 3`: on Thursdays THE
+    CRABALINA crosses the horizon west to east, low and white with a red
+    funnel and a wake — **and she does not call here**. That is the whole
+    pitch for the purchase, made without a word of text.
+
+  **4. THE FERRY IS THE WIN CONDITION, AND THE PRICE IS MEASURED.**
+  **`FERRY_PRICE = 20000`.** The runs behind it, all `tools/headless.mjs`:
+
+  | strategy | days | seeds | survivors' till |
+  |---|---|---|---|
+  | do-nothing baseline | 30 | 16 | 0 survive; a few hundred dollars |
+  | `--buy chef,table` (the documented growth run) | 40 | 8 | 4/8 alive, best **$3,637** |
+  | `--buy chef,table,grill,board,juicebar,arcade,cadegear` | 120 | 8 | 4/8 alive, **$3,696-$6,769** |
+  | **`--buy chef,table`** | **150** | **6** | **3/6 alive, $22,991 / $23,797 / $28,971** |
+
+  The middle row is the surprise, and it is why the price is what it is: **the
+  side businesses are a net drag on the till** — they add nightly rent and
+  pull crew off the shack — so the town that gets rich is the one that goes
+  deep on crew and tables and stays out of the property market. Seed 1337 on
+  that strategy banks about **$230 a night** once the crew is deep and the
+  room is full, and its curve is close to linear from day 40: **$5,090 at day
+  41, $11,068 at day 71, $20,660 at day 111, $31,473 at day 160.** So $20,000
+  is **~day 105-130 for a strong town** — and the headless buyer is a
+  *sensible* player, not a good one; a human working wages, hours, the tip
+  slider and a bought-off-the-market showers gets there sooner.
+  - **Absurd on sight, which is the point.** You open with $150 against a $276
+    first-night bill, and the biggest thing in the shop is the $650 arcade.
+    The fare is **133x your starting purse and 31x the arcade**, painted on a
+    fingerpost you walk past every single morning.
+  - **It cannot fire in the documented curves, and that is asserted rather
+    than assumed**: the best till any documented run ever reaches is $3,637,
+    i.e. **5.5x under the fare**, and the new suite gate measures the PEAK
+    till of both a do-nothing arm and a propped growth arm and fails if either
+    comes within 8x / 3x of it.
+  - **Where you buy her**: a **ferry office** kiosk at the foot of the pier
+    (x1806) with MAINLAND FERRY on the fascia, THE CRABALINA under it, the
+    fare in the 5x7 font, and a **two-tap BUY HER chip** on the exact
+    `tapSaleChip` idiom (one geometry function feeds draw and hit-test, the
+    arm lapses after four seconds, every refusal says why). And the
+    **fingerpost outside the shack** — "CRABALINA" over "FERRY $20,000" with
+    an arrow east — is the discoverability: it carries the price from day one,
+    and **its board turns green the morning the town can cover it**, so a
+    player who never once panned east still finds out.
+
+  **5. THE ENDING, AND WHAT BECOMES OF THE CRABS.** `won` is a third flavour
+  of `gameOver` beside `bankrupt`, so every stop-the-world guard in the file
+  applies for free. It does **not** slam a card over a frozen town: `winFerry`
+  swings the camera to the pier, `drawMooredFerry` puts a proper white hull
+  alongside with CRABALINA on her bow, and for **2.2 seconds** all you get is
+  "THE CRABALINA IS IN" on a plaque. Only then does the card fade up, and a
+  click during the beat is swallowed rather than skipping the ending.
+  - **The answer to "what about the crabs" is that there is no leaving.** You
+    are not buying a ticket out; you are buying the boat, and the crossing
+    runs both ways. Verbatim, the whole card:
+
+    > **THE FERRY**
+    > YOU PAID FOR HER IN FISH SUPPERS. $20,000,
+    > ONE PLATE AT A TIME.
+    >
+    > SHE COMES ROUND THE POINT ON THE MORNING TIDE,
+    > LOW AND WHITE, AND THE WHOLE TOWN IS ON THE PIER
+    > BEFORE THE ROPE IS THROWN. *SALTY* TAKES IT.
+    > THEY HAD BEEN WAITING YEARS TO DO THAT.
+    >
+    > YOU DID NOT BUY A WAY OUT. YOU BOUGHT THE
+    > CROSSING, AND A CROSSING RUNS BOTH WAYS. THE
+    > SHACK OPENS AT SEVEN TOMORROW. THE MIST WILL
+    > COME IN TONIGHT LIKE IT ALWAYS DOES, AND FOR
+    > ONCE IT WILL HIDE SOMEWHERE THE TOWN CAN GO.
+    >
+    > ABOARD  PINCHY, CLAWDIA, NIPPY, ROE +2
+    > DAY 118 - $71,204 TAKEN - 11 CRABS, 8 HOUSED
+    >
+    > CRABALINA IS ON THE MAP
+
+    The italicised name is a **real crab from that town**, picked at the
+    moment of purchase — a fisher first, because they have waited longest —
+    and the roster, the population and the housing count are the town's own
+    numbers. `winRec` snapshots all of it the instant she is bought and
+    **rides in the save envelope**, so a reloaded win reads identically
+    however the personas churn afterwards. The SAVED TOWNS row for that slot
+    reads **SAILED D118** in green instead of a date.
+
+  **BEHAVIOUR-NEUTRAL, three receipts.** (1) The **frozen day-2 fingerprint
+  passes untouched** — no re-baseline, on both seeds. (2) The curves are
+  unmoved, against a CONTROL RUN of the same matrices on a pristine HEAD
+  `game.js` in a scratch tree — **byte-identical, both of them**: baseline
+  `--days 30 --seeds 16` reads **0/16, 9,9,9,9,9,10,10,10,10,11,11,12,12,12,
+  12,13, median 10, lifetime $49,354** before and after; growth `--buy
+  chef,table --days 40 --seeds 8` reads **4/8, 9,10,12,13,41,41,41,41,
+  lifetime $97,299** before and after. (NOTE FOR WHOEVER READS THIS NEXT: the
+  16-seed baseline median at HEAD is **10**, not the 13-14 the older entries
+  in this file quote — that figure is stale, and the control run above is the
+  receipt. Nothing in this pass moved it.) Nobody in either matrix can afford
+  a boat, which the new gate measures rather than assumes.
+  (3) The whole draw stack — `drawBG`, `drawTown`, `drawNight`, the far shore,
+  the mist, the office and the sign — is driven **thousands of times inside a
+  running headless sim** and the day-2 fingerprint comes out byte-identical to
+  a run that never drew a pixel, with the layer live AND with `_noHorizon` /
+  `_noMist` set; burning 5,000 calls through `mistPeak`/`hzRidge`/`hzBack`
+  does not shift the RNG stream either.
+
+  **Suite 116 -> 122**, six new, zero re-pointings: `ferry: she costs exactly
+  her price, and buying her is the win` (a dollar short buys nothing, one tap
+  only arms, the fare is taken to the cent, the run ends non-bankrupt with a
+  record, and she cannot be bought twice or into an overdraft), `ferry: the
+  arming tap times out, and an old save never won`, `ferry: the win saves, and
+  a reloaded town shows the same ending` (exact `winRec` roundtrip, the beat
+  not replayed, the SAVED TOWNS card knowing, plus an old save opening as an
+  ordinary town), `ferry: nobody wins by accident` (peak-till measurement on a
+  do-nothing arm and a propped growth arm), `horizon + mist are pure draw`,
+  and `mist: clear at noon, thick most evenings, and a clear night is news`.
+
+  Shots: `horizon-clear-midday`, `horizon-mist-dusk` (the same camera at 19:15
+  on a thick evening - the shore simply gone), `horizon-clear-night` (the
+  windows and the harbour lights over there), `ferry-office`,
+  `ferry-fingerpost`, `ferry-arrives`, `ferry-ending` and `ferry-ending-tall`
+  (288 mode: the card is H-independent, so both canvases get the identical
+  ending) under shots/.
+
+  **Left for later, deliberately:** the mist is a sea-and-horizon layer only —
+  it never rolls up the beach and over the town, which would be a bigger
+  visual change than a draw-layer pass should make and would fight the
+  readability of the shop floor. The ferry has no *service* once bought (she
+  arrives and the run ends). And nothing mechanical keys off the weather: a
+  clear evening is worth exactly the pleasure of seeing across, which is the
+  point of it.
 - **Needs fail in their own character: THE TRUDGE and THE WIDE BERTH** (built
   2026-08-19, worktree — realizes `design/needs-failure-patterns.md` for three
   of the five needs, to Matt's pick, verbatim: *"Dirt boredom and tiredness are

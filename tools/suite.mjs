@@ -3934,6 +3934,164 @@ scenario("tip sharing + the table cap roundtrip save/load", () => {
   return clamped === 1 ? true : `a corrupt tip share read back as ${clamped}`;
 });
 
+// ---- THE FERRY: the win condition, and the far shore it crosses to ---------
+
+scenario("ferry: she costs exactly her price, and buying her is the win", () => {
+  const sim = createSim({ seed: 1337 });
+  if (sim.G("won")) return "a fresh town starts already won";
+  const price = sim.G("FERRY_PRICE");
+  if (price < 5000) return `FERRY_PRICE is ${price} - that is not a boat`;
+  // ONE DOLLAR SHORT IS SHORT. Two taps at price-1 must not arm, must not buy,
+  // and must not move the till.
+  sim.G(`coins = FERRY_PRICE - 1; ferryArm = 0;`);
+  const a1 = sim.G("tapFerryChip()"), a2 = sim.G("tapFerryChip()");
+  if (a1 || a2) return "the ferry sold a dollar under the asking price";
+  if (sim.G("won")) return "a dollar short still won the game";
+  if (sim.G("Math.round(coins)") !== price - 1) return `the till moved on a refused sale (${sim.G("Math.round(coins)")})`;
+  // AT the price: the first tap only arms, the second buys.
+  sim.G(`coins = FERRY_PRICE; ferryArm = 0;`);
+  const b1 = sim.G("tapFerryChip()");
+  if (b1 || sim.G("won")) return "the ferry sold on a single tap - $20k is not a misclick";
+  if (sim.G("Math.round(coins)") !== price) return "the arming tap took money";
+  const b2 = sim.G("tapFerryChip()");
+  if (!b2 || !sim.G("won")) return "paying the full fare twice over did not buy the boat";
+  const st = JSON.parse(sim.G(`JSON.stringify({ coins: Math.round(coins), over: gameOver,
+    bank: bankrupt, rec: winRec, beat: winT < WIN_BEAT })`));
+  if (st.coins !== 0) return `the fare was not taken exactly (${st.coins} left)`;
+  if (!st.over) return "the run did not end on the win";
+  if (st.bank) return "the win reads as BANKRUPT";
+  if (!st.beat) return "the ending card jumped the arrival beat";
+  if (!st.rec || !st.rec.day || !Array.isArray(st.rec.crew) || !st.rec.crew.length || !st.rec.hand)
+    return "the ending has no record of the town that earned it: " + JSON.stringify(st.rec);
+  if (st.rec.pop < st.rec.crew.length) return "the ending counts fewer crabs than crew";
+  // and she cannot be bought twice, or bought into an overdraft
+  sim.G("coins = 50");
+  if (sim.G("winFerry()") || sim.G("coins") !== 50) return "the ferry sold a second time";
+  return true;
+});
+
+scenario("ferry: the arming tap times out, and an old save never won", () => {
+  const sim = createSim({ seed: 21 });
+  sim.G("coins = FERRY_PRICE; ferryArm = 0;");
+  if (sim.G("tapFerryChip()")) return "the first tap bought her";
+  // let the confirm lapse (ferryArm counts down in frame), then top the till
+  // back up: the next tap must ARM again rather than complete the old one
+  sim.runUntil("ferryArm <= 0", { maxSteps: 4000 });
+  sim.G("coins = FERRY_PRICE;");
+  if (sim.G("tapFerryChip()") || sim.G("won")) return "a stale confirm still bought the boat";
+  if (sim.G("ferryArm") <= 0) return "the lapsed confirm did not re-arm";
+  if (!sim.G("tapFerryChip()") || !sim.G("won")) return "the re-armed confirm did not complete";
+  return true;
+});
+
+scenario("ferry: the win saves, and a reloaded town shows the same ending", () => {
+  const store = new Map();
+  const sim = createSim({ seed: 4242, storage: store, fresh: false });
+  sim.runDays(1);
+  sim.G("coins = FERRY_PRICE; ferryArm = 0; tapFerryChip(); tapFerryChip();");
+  if (!sim.G("won")) return "the setup did not win";
+  const before = sim.G("JSON.stringify(winRec)");
+  sim.G("save()");
+  const back = createSim({ seed: 4242, storage: store, fresh: false });
+  const after = JSON.parse(back.G(`JSON.stringify({ won, over: gameOver, bank: bankrupt,
+    rec: winRec, past: winT >= WIN_BEAT, meta: slotCard(activeSlot) })`));
+  if (!after.won || !after.over) return "a saved win reloaded as a town still trading";
+  if (after.bank) return "a saved win reloaded as a bankruptcy";
+  if (JSON.stringify(after.rec) !== before)
+    return `the ending changed across the reload:\n        was ${before}\n        now ${JSON.stringify(after.rec)}`;
+  if (!after.past) return "a reloaded win replays the arrival beat instead of showing the card";
+  if (!after.meta || !after.meta.won) return "the SAVED TOWNS card does not know this town sailed";
+  // an OLD save has no `won` field at all and must open as an ordinary town
+  const old = new Map();
+  old.set(SLOT1, JSON.stringify({ _ver: 1, coins: 300, day: 4, lv: { chef: 2 },
+    personas: [{ name: "PINCHY", job: "shack" }, { name: "CLAWDIA", job: "shack" }] }));
+  old.set(ACTIVE, "1");
+  const legacy = createSim({ seed: 7, storage: old, fresh: false });
+  if (legacy.G("won") || legacy.G("gameOver")) return "an old save opened as a finished game";
+  return true;
+});
+
+scenario("ferry: nobody wins by accident - the fare is out of a playing town's reach", () => {
+  // (b) of the brief, measured rather than asserted. A do-nothing town and a
+  // propped GROWTH town both run their documented length; the gate is what
+  // the till ever PEAKED at, not just what it ended on.
+  let peakBase = 0, peakGrowth = 0;
+  for (const seed of [1337, 4242, 909]) {
+    const sim = createSim({ seed });
+    sim.runDays(20, { tickEvery: 40, onTick: (G) => { peakBase = Math.max(peakBase, G("coins")); } });
+    if (sim.G("won")) return `a do-nothing town on seed ${seed} bought a ferry`;
+  }
+  for (const seed of [1337, 4242]) {
+    const sim = createSim({ seed });
+    // the documented growth strategy, through the game's own paths
+    sim.G(`UPS.chef.lvl = 6; while (crabs.length < 6) hireCrew(); UPS.table.lvl = 4;`);
+    sim.runDays(25, { tickEvery: 40, onTick: (G) => { peakGrowth = Math.max(peakGrowth, G("coins")); } });
+    if (sim.G("won")) return `a growth town on seed ${seed} bought a ferry inside 25 days`;
+  }
+  const price = createSim({ seed: 1 }).G("FERRY_PRICE");
+  if (peakBase * 8 > price) return `a do-nothing town peaked at $${Math.round(peakBase)} against a $${price} fare - too close`;
+  if (peakGrowth * 3 > price) return `a growth town peaked at $${Math.round(peakGrowth)} against a $${price} fare - too close`;
+  return true;
+});
+
+scenario("horizon + mist are pure draw: the sim does not know they exist", () => {
+  // (c) of the brief. The headless sim skips RENDERING, so "with them off" is
+  // not enough on its own - this drives the whole draw stack, mist and far
+  // shore and ferry office included, thousands of times INSIDE a running sim
+  // and demands the day-2 fingerprint come out byte-identical to a run that
+  // never drew a pixel. If any of it consumed a random number or wrote a byte
+  // of sim state, these three strings would part company.
+  const FP = `JSON.stringify({ day, tmin: Math.round(tmin), coins: Math.round(coins*1000)/1000,
+    rep: Math.round(rep*10000)/10000, catch: townCatch, serves: window._stats.tourServes,
+    till: Math.round(OWNERS.sudsy.till*1000)/1000,
+    wallets: allCrabs().map(c => [c.p.name, Math.round(c.p.wallet*100)/100]),
+    pos: allCrabs().map(c => [Math.round(c.x*10)/10, Math.round(c.y*10)/10]) })`;
+  const DRAW = `drawBG(); drawTown(); drawNight();`;
+  const arm = (setup, draw) => {
+    const sim = createSim({ seed: 1337 });
+    if (setup) sim.G(setup);
+    sim.runDays(2, { tickEvery: 8, onTick: draw ? (G) => G(DRAW) : null });
+    return sim.G(FP);
+  };
+  const quiet = arm(null, false);                                  // no rendering at all
+  const on = arm(null, true);                                      // the layer live
+  const off = arm("window._noHorizon = 1; window._noMist = 1;", true);   // the layer switched off
+  if (on !== quiet) return `drawing the far shore moved the sim:\n        quiet ${quiet}\n        drawn ${on}`;
+  if (off !== quiet) return `drawing with the layer OFF moved the sim:\n        quiet ${quiet}\n        off   ${off}`;
+  // and the weather functions themselves take no random numbers: burning
+  // thousands of calls through them must not shift the stream either
+  const churned = arm(`for (let i = 1; i < 5000; i++) { mistPeak(i); hzRidge(i); hzBack(i); }`, false);
+  if (churned !== quiet) return "mistPeak/hzRidge consumed randomness";
+  return true;
+});
+
+scenario("mist: clear at noon, thick most evenings, and a clear night is news", () => {
+  const sim = createSim({ seed: 3 });
+  // midday is always clear - the far shore is a fact you can check
+  for (const t of [10 * 60, 12 * 60, 14 * 60, 16 * 60]) {
+    const m = sim.G(`tmin = ${t}; mistNow()`);
+    if (m !== 0) return `mist ${m} at ${t / 60}:00 - the shore should be visible at midday`;
+  }
+  // it rolls IN through the evening and is still there before dawn
+  const dusk = sim.G("tmin = 18 * 60; mistNow()"), late = sim.G("tmin = 21 * 60; mistNow()");
+  const dawn = sim.G("tmin = 5 * 60; mistNow()"), morn = sim.G("tmin = 9 * 60; mistNow()");
+  if (!(dusk > 0 && late > dusk)) return `mist does not roll in (18:00 ${dusk}, 21:00 ${late})`;
+  if (!(dawn > 0 && morn < dawn)) return `mist does not burn off (05:00 ${dawn}, 09:00 ${morn})`;
+  // and it varies day to day, thick more often than not, with real clear nights
+  const peaks = JSON.parse(sim.G(`JSON.stringify((() => { const a = [];
+    for (let d = 1; d <= 200; d++) a.push(mistPeak(d)); return a; })())`));
+  const clear = peaks.filter(p => p < 0.5).length, thick = peaks.filter(p => p > 0.9).length;
+  const mean = peaks.reduce((s, p) => s + p, 0) / peaks.length;
+  if (clear < 20 || clear > 70) return `${clear}/200 clear evenings - a clear night should be uncommon, not rare or routine`;
+  if (thick < 60) return `only ${thick}/200 evenings genuinely thick - the shore should usually go`;
+  if (!near(mean, 0.6, 0.9)) return `mean mist ${mean.toFixed(2)} outside 0.60-0.90`;
+  // the small hours belong to LAST night's weather, not a fresh roll at midnight
+  const before = sim.G("day = 11; tmin = 23 * 60; mistNow()");
+  const after = sim.G("day = 12; tmin = 1 * 60; mistNow()");
+  if (Math.abs(before - after) > 1e-9) return `the mist changed thickness at midnight (${before} -> ${after})`;
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
