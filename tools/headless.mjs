@@ -23,6 +23,11 @@ const BUY = (opt("buy", "") || "").split(",").filter(Boolean);
 const SET = (opt("set", "") || "").split(",").filter(Boolean);
 const STEP = parseFloat(opt("step", "0.05"));   // sim timestep, seconds
 const QUIET = args.includes("--quiet");
+// `--failoff wander,chat,walkout,nod,rough` switches individual needs-failure
+// behaviours off, so the balance matrix can attribute its own movement to one
+// of them at a time (game.js reads window._failOff through one helper and
+// never sets it). This is how the attribution table in PLAN was built.
+const FAILOFF = (opt("failoff", "") || "").split(",").filter(Boolean);
 const SEEDS = parseInt(opt("seeds", "1"));
 const JOBS = opt("jobs", null) != null
   ? parseInt(opt("jobs", null))
@@ -85,6 +90,7 @@ for (const kv of SET) {
 
 // ---- run ----------------------------------------------------------------
 G('soundOn = false; musicOn = false; screen = "play"; window._headless = true; window._stats = { tourServes: 0, crabServes: 0, tourRage: 0, crabRage: 0, bused: 0 };');
+if (FAILOFF.length) G(`window._failOff = ${JSON.stringify(Object.fromEntries(FAILOFF.map(k => [k, 1])))};`);
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);
 const buyScript = BUY.length ? new vm.Script(`
   if (tmin >= 9 * 60 && tmin <= 19 * 60 && Math.abs(tmin - Math.round(tmin / 60) * 60) < ${STEP} * TS / 2) {

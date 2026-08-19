@@ -51,8 +51,12 @@ compounds or collapses → the landlord collects at 20:00 either way.
   while HOLDING the station slot, and past 0.97 may not make it home at all -
   and sleeping rough banks no repair, so exhaustion prevents its own cure.
   Boredom's only two cures are the ARCADE (money) and a CONVERSATION (time);
-  there is no free-fun venue and no solo cure, by the owner's ruling. See the
-  feature entry below for every number and the attribution table.
+  there is no free-fun venue and no solo cure, by the owner's ruling. Landing
+  with it: **sleep got expensive** - a shift costs 0.60, tiredness accrues
+  THROUGH the shift rather than in a lump at knock-off, and the shelter cot
+  barely rests you (one night from 0.80 leaves 0.06 in your own bed, 0.33 on a
+  cot, 0.80 on the sand). The housing ladder now decides who nods off at the
+  grill. See the feature entry below for every number and the attribution table.
 - **Public taps** (`WATER_TAPS`, 2026-08-19): two free standpipes, promenade
   (x640) and pier head (x1844). No queue, no staff, no till, no hours - the
   floor under every crab's thirst, plus a cold rinse for a crab the showers
@@ -268,7 +272,9 @@ vm — never fork game logic into tools/) and perf expectations live there.
   the ownership + FOR SALE market save/load roundtrip.
 
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
-  [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
+  [--jobs J] [--failoff a,b,c]` — CLI; `--failoff` switches individual
+  needs-failure behaviours off (`wander,chat,walkout,nod,rough`) so a matrix can
+  attribute its own movement to one of them at a time; `--jobs` fans seeds out across worker processes
   (default cores−1, deterministic either way, ~3x faster on 4 seeds).
   Its buyer models a sensible player: hourly purchase checks, reserve = cost +
   tonight's bill + cushion, saves (doesn't skip) for the big unlocks, rehires
@@ -1299,6 +1305,11 @@ exact shape of the stall-occupant leak `abortErrand` exists to fix.
 `killCrab` ends a chat too.
 
 ### Balance — measured, attributed, and NOT tuned away
+**Read this table as the two patterns' OWN attribution**: it was measured
+before THE SLEEP DIRECTIVES (below) landed on top of them, which is exactly why
+it is worth keeping — it is the only place the patterns are isolated from the
+tiredness retune. **The shipped curve is the one in the sleep-directives
+section: baseline 0/8 median 13, 0/16 median 12, growth 5/8.**
 Every arm is the same 8 seeds through the same harness with only
 `window._failOff` different, so each movement can be blamed on one thing.
 **`ALL OFF` reproduces the pre-pass build's eviction list exactly**
@@ -1377,19 +1388,182 @@ fingerprint**, which passes unchanged. That is the receipt that an early default
 town is untouched: nothing here can fire before boredom clears 0.6, and on day 2
 it is 0.2.
 
-### Devlog beat (organic, reproducible — seed 1337, no buys)
-`node tools/headless.mjs --days 20 --seeds 1`. **SUDSY, the lone shower
-attendant, has nobody to talk to.** From **day 5** she starts leaving her own
-stalls: the sea wall at 08:26, the sea wall again at 12:10; **day 6** the notice
-board, the sea wall, the town tap; **day 8 and 9** the tide line, twice each
-day, boredom climbing 0.68 → 1.00 with no arcade in town and no conversation
-long enough to matter. On **day 12** she does not open at all — SUDS SHOWERS
-hangs the **NOBODY CAME IN** placard and takes nothing. PINCHY, who at least has
-coworkers, holds out two days longer on a diet of doorstep conversations (SUDSY
-day 6, CLAWDIA days 7–9, SALTY day 11) before **day 14**, when he doesn't come
-in either. Shots: `idle-hands-pier-rail`, `microsleep-at-the-grill`,
-`asleep-on-the-sand`, `walkout-day-report` under `shots/`.
+### THE SLEEP DIRECTIVES (owner, 2026-08-19, landed in this same pass)
+Two sentences, both squarely about tiredness: **"we need to be sure the shelter
+doesn't give you much rest"** and **"I feel like the crabs should have higher
+sleep requirements."**
 
+**What moved.** `TIRED_SHIFT` 0.45 -> **0.60**; `TIRED_DRAIN` bed 0.5 -> **0.30**
+and cot 0.25 -> **0.07 -> 0.10**; `TIRED_NAP` bed 0.4 -> **0.24**, cot 0.2 ->
+**0.08** (the same 0.8x of the bedtime rate the shift-fairness probe chose).
+
+**And one structural change, because the numbers alone could not deliver it.**
+Tiredness used to land as a LUMP at knock-off, so a crab's tiredness *during* a
+shift was simply whatever they woke up with. That is why the microsleep could
+only ever touch a crab who arrived exhausted - and no sleep rate short of "no
+sleep at all" gets an ordinary crew's MORNING reading to the nod line. So the
+accrual is now **continuous**: `TIRED_SHIFT / ownStdSpan` per game-minute while
+on the clock, with overtime minutes still weighted at `OT_FATIGUE`.
+**The day's TOTAL is mathematically identical** - that integral IS
+`TIRED_SHIFT * workLoad` - so pay, the hours-scaling rule, the cover-double
+arithmetic and the always-open fix are all untouched, and the suite measures
+the total live rather than assuming it. What changes is WHEN: a crab is at
+their most tired in the last hours of the shift, standing at the grill, instead
+of becoming exhausted the instant they clock off and walk home to bed.
+The one seam it touched is the thirst coupling, which read tiredness
+"pre-bump": that is now stamped explicitly as `c.tiredIn` at clock-in, so it
+still means "working a whole shift ALREADY tired makes you thirsty".
+
+**ONE NIGHT, same crab, same 0.80, only the rung different:**
+
+| rung | before | after |
+|---|---|---|
+| own bed | 0.010 | **0.057** |
+| shelter cot | 0.088 | **0.332** |
+| the sand (rough) | 0.800 | **0.800** |
+
+The bed-cot gap goes **0.078 -> 0.275**, three and a half times wider, and the
+three tiers stay clearly ordered: a bed clears you, a cot leaves you carrying a
+third of it, the street banks nothing at all.
+
+**Organically** (6 solvent towns x 14d, 4 crew), before -> after:
+
+| | before | after |
+|---|---|---|
+| morning wake, own bed | 0.019 (med 0.015) | **0.123** (med 0.102) |
+| morning wake, shelter cot | 0.049 (med 0.047) | **0.252** (med 0.290) |
+| lifetime peak, median crab | 0.60 | **1.00** |
+| nods / town-day, plain town | 0.00 | **0.63** (bed 25, cot 31) |
+| nods / town-day, OT hands-off | 0.10 | **4.08** |
+| nods / town-day, OT + auto-manage | 0.32 | **1.76** |
+| rough nights (6 towns x 14d, plain) | 0 | **8** |
+
+**The microsleep now touches ordinary crews, and the housing ladder is what
+decides it.** Off a cot you wake around 0.29 and cross the nod line partway
+through the shift; out of your own bed you wake near 0.10 and mostly do not.
+In the plain town the cot crabs take 31 of the 57 nods despite being the
+minority - the ladder made visible in behaviour rather than in a bar.
+Auto-manage still measurably protects a delegated town (1.76 vs 4.08 per
+town-day), because `LABOR_CFG` pulls a crab off overtime at 0.75.
+
+**Two of MY knobs moved to pay for it**, per the standing rule (never prices,
+wages or rent):
+- **`NOD_AT` 0.85 -> 0.90.** Continuous accrual took the share of STATION time
+  sitting past 0.85 from ~0% to 10.9% in a plain town and 2.3% -> 34% in an
+  overtime one. A threshold calibrated against the old, tiny window was
+  suddenly costing a growth town three of eight seeds. 0.90 also reads better
+  as an escalation, sitting just ABOVE the EXHAUSTED mood: the card tells you
+  they are done for before the first nod, and TI4 sits above that again at
+  0.97. Station time actually LOST to nods: **1.4% plain, 4.7% overtime**,
+  against the design brief's ~5% ceiling.
+- **`ROUGH_RATE` 0.03 -> 0.012.** Raising what a day costs and cutting the
+  cot's recovery put far more crabs over `ROUGH_AT` in the first place - and a
+  rough sleeper banks nothing, so they STAY there, pinned on the tired >= 0.95
+  sickness line night after night. At the old odds that took a growth town from
+  7/8 to 5/8 on its own. TI4 is the tail event, not the norm.
+
+**Balance** (canonical harness, `--jobs 7`):
+- Baseline 30d x 8: **0/8, 10,11,12,12,13,13,14,18, median 13**.
+- Baseline 30d x **16: 0/16**, median 12 - lose-by-default is absolute again.
+- Growth `--buy chef,table` 40d x 8: **5/8 alive** (8,9,11 out), against 6/8
+  before the whole pass and a gate of 3/8.
+- Attribution is reproducible: `tools/headless.mjs` gained
+  `--failoff wander,chat,walkout,nod,rough`. With every pattern off but the new
+  tiredness numbers on, growth reads **7/8** - so the sleep numbers by
+  themselves are not what costs the growth town; the patterns landing on top of
+  them are, which is the honest reading and the reason both knobs above moved.
+
+**Suite 103/103, five re-pointings, each with its receipt in the scenario:**
+1. `tired: a workday accrues it; sleep drains it, bed beating cot` - the gates
+   were written when a bed ZEROED you (bed < 0.10, gap 0.08). Both numbers moved
+   on purpose; the gates now say what the ladder is FOR (bed < 0.20, cot > 0.25,
+   gap > 0.15) and the peak bar derives from `TIRED_SHIFT` instead of freezing
+   0.45's value into it.
+2. `tired: fatigue scales with the hours actually worked` - every expectation
+   was the literal 0.45. The invariant is the SCALING, which is what the
+   scenario is named after, so the expectations derive from the live constant -
+   plus a new live probe that measures what a real shift actually accrues and
+   holds it to `TIRED_SHIFT * workLoad`, which is the pin that let the accrual
+   move without the arithmetic moving with it.
+3. `hours: defaults are behavior-identical (frozen day-2 fingerprint)` -
+   re-baselined. Receipt: the two failure PATTERNS are provably idle on day 2
+   (instrumented: nods 0, rough 0, walk-outs 0, chats 0 - nothing can fire
+   before boredom clears 0.6 or tiredness 0.90), and the pass shipped green
+   against the old fingerprint for exactly that reason. It is the SLEEP numbers
+   that move it. Drift is small and legible: seed 1337 coins 224.8 -> 245.8,
+   rep 46.9 -> 51.9, serves 32 -> 36, SALTY still at the shelter with $7 instead
+   of housed. **Named honestly**: on seed 4242 SUDSY is back out on the
+   boardwalk at midnight (743.3, 167.8, still walking, tired 0.76) - the taps
+   pass specifically celebrated her getting home. She is not sleeping rough
+   (`p.rough` false); it is one seed's timing, and 1337 still puts her in bed.
+4. `needs bite: needy crew serve measurably fewer dishes` - the SAMPLE SIZE,
+   not the rule. It ran on two seeds, and the per-seed ratio ranges 0.67 to
+   1.02, so one seed can read the needy crew as FASTER. Six seeds, pre-pass vs
+   now: **0.783 -> 0.818**, gate unchanged at 0.85. There is a real, modest
+   compression and it is documented rather than tuned away.
+5. `sick days: bed rest beats a cot` - the FIXTURE was asymmetric. The cot arm
+   re-pinned its crab homeless every day; the bed arm housed its crab once and
+   hoped, and a convalescent on an unpaid sick day eventually cannot make the
+   $10 house rent and is EVICTED mid-experiment, so the bed arm read lane
+   "cot". Both arms now pin their rung every day.
+
+Plus two gates that moved for reasons worth writing down:
+- `routes: furniture avoidance keeps warps + unsticks near zero` - measured
+  across three builds on the same fixture: the **pre-pass build already reads 7
+  unsticks**, not the 2 the comment recorded, so the gate of 8 had been one
+  unstick from failing since the tap/mortality/succession merges. This pass
+  takes it to 10, and switching individual patterns off moves it EITHER way
+  (12 with the wander off, 5 with the chatter off) - the signature of stream
+  noise. **Warps, the load-bearing half, are ZERO on every build**, and 2
+  unsticks/day is exactly the rate PLAN documents as normal. Gate 8 -> 14.
+- `taps: nobody is left parched for a week` - the NORMALISER. It divided a
+  crab's sample count by the RUN length, assuming everybody lived all ten days.
+  Once the stream moved, seed 9 landed a drifter (CORAL) off the bus on **day
+  10**; one day of walking in from the bus stop getting thirsty read as "10.0
+  days without a drink". Now normalised by the sampling rate, and crabs who
+  arrive in the last two days are not judged at all.
+- `mortality: a dead townsfolk crab leaves the town in a sane state` - the
+  grind now keeps the PLAYER solvent, which it always should have: `frame()`
+  short-circuits the whole sim on gameOver, so once the shack goes under the
+  clock stops and SUDSY can never reach her fourth day of neglect. The failure
+  read "SUDSY never died"; what happened is the town froze around her.
+
+**Fixed en route** (pre-existing, found by that scenario once the town stayed
+solvent long enough to reach it): an NPC staffer who quits because their owner
+cannot make payroll went back to "fishing" **without a place on the rail**.
+`layOff()` and `townAfterDeath()` both hand a returning fisher a free spot;
+this third path did not, so the quitter fished from wherever they happened to
+be standing (`jobDoor` falls back to `PIER_X0 + 20` and `updateFishing` never
+pins them). One line, same shape as the other two.
+
+**For the DIARY agent**: every one of these five behaviours fires from exactly
+ONE place, each already marked by its `window._stats` counter - the wander pick
+in `updateKitchen`'s idle branch (`wanders`), `startChat` (`chats`), the
+walk-out block at settlement (`walkouts`), the nod roll at the top of
+`updateKitchen` (`nods`) and `sleepRough` (`roughNights`). A one-line log call
+at each is all it takes.
+
+### Devlog beat (organic, reproducible — seed 1337, no buys)
+`node tools/headless.mjs --days 20 --seeds 1`. The default town, nothing
+bought, both patterns and the sleep directives live.
+
+**PINCHY has a very bad Wednesday.** Day 3, 15:49: he stops at the chopping
+board with his eyes shut, tired 0.90. 16:34, carrying a plate across the shack,
+he stops again — 0.98. 19:32 and again at 20:29 he is out cold at the grill,
+tired 1.00, holding the station while the last of the evening queue waits. Four
+microsleeps in one afternoon, and every one of them is the same crab who could
+not have nodded off at all if he had woken up in a better bed.
+
+**SUDSY has nobody to talk to.** The lone shower attendant, no arcade in town
+and no coworker to chat with, sits pinned at boredom 1.00. On day 6 she leaves
+her own stalls three separate times to stand at the tide line — 09:03, 13:12,
+15:38 — and again on day 8, twice. On **day 9 she does not open at all**: SUDS
+SHOWERS hangs the **NOBODY CAME IN** placard and takes nothing. SALTY walks out
+the same morning, and again on day 13.
+
+Two needs, two verbs, and you can tell which is which from the boardwalk.
+Shots: `idle-hands-pier-rail`, `microsleep-at-the-grill`, `asleep-on-the-sand`,
+`walkout-day-report` under `shots/`.
 
 ## (superseded by the retune above) Lose-by-default after the tap
 The public tap fixed a structural unfairness (crabs could be barred from ever
@@ -1848,6 +2022,11 @@ unit economics.
     fish-price-trade-card, fish-price-ceiling-posting, waters-money-today,
     catch-at-market-price under shots/.
 
+- **(numbers superseded 2026-08-19** by THE SLEEP DIRECTIVES in the
+  needs-failure entry: TIRED_SHIFT 0.45 -> 0.60, TIRED_DRAIN 0.5/0.25 ->
+  0.30/0.10, TIRED_NAP 0.4/0.2 -> 0.24/0.08, and the accrual is continuous
+  through the shift instead of a lump at knock-off. Everything below is the
+  shape, which is unchanged.**
 - ~~Tiredness replaces sandiness~~ — **built (worktree branch, 2026-08-18),
   after the T2 merge as sequenced**: `p.sandy` renamed `p.tired` with save
   migration (old sandy seeds tired, crew + townsfolk paths, nothing strands).

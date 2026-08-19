@@ -1306,8 +1306,24 @@ function initNpcs() {
 // real housing-ladder rung: your own bed (house or boat) drains at full rate,
 // a shelter cot at half. Steady state is measured, not felt - see the
 // "tired:" suite scenarios before touching these numbers.
-const TIRED_SHIFT = 0.45, TIRED_ERRAND = 0.03, TIRED_NIGHT = 0.05;
-const TIRED_DRAIN = { bed: 0.5, cot: 0.25 };   // fraction drained per game hour, asleep
+// WHAT A DAY TAKES OUT OF YOU, and how little of it you get back on a cot.
+// Both moved on the owner's directive (2026-08-19): "we need to be sure the
+// shelter doesn't give you much rest" and "I feel like the crabs should have
+// higher sleep requirements."
+//   TIRED_SHIFT 0.45 -> 0.60: a standard six-hour shift now costs 0.60, so a
+//     crab who sleeps badly is still carrying it into the next day.
+//   TIRED_DRAIN cot 0.25 -> 0.10: a shelter cot was HALF a bed, which is not
+//     what a cot is. The drain is proportional, so what matters is what is
+//     LEFT in the morning. Same crab, same 0.80, one night, only the rung
+//     different: own bed 0.010 -> 0.057, shelter cot 0.088 -> 0.332, the sand
+//     0.800 either way. The bed-cot gap goes 0.078 -> 0.275, three and a half
+//     times wider - the housing ladder made visible rather than a rounding
+//     difference. Organically (6 towns x 14d) a crab wakes at 0.10 out of
+//     their own bed and 0.29 off a cot.
+// THREE TIERS, clearly ordered: own bed > shelter cot > the sand, where the
+// sand banks NOTHING at all (see sleepRough).
+const TIRED_SHIFT = 0.60, TIRED_ERRAND = 0.03, TIRED_NIGHT = 0.05;
+const TIRED_DRAIN = { bed: 0.30, cot: 0.10 };   // fraction drained per game hour, asleep
 // ...and while merely HOME, settled and off the clock in daylight: a nap, not
 // a night. Same housing rung, a fraction of the rate - chosen by measurement
 // (the M/E shift-fairness probe), not by feel. Too fast and tiredness stops
@@ -1318,7 +1334,8 @@ const TIRED_DRAIN = { bed: 0.5, cot: 0.25 };   // fraction drained per game hour
 // would make an afternoon on the porch a night's sleep). 0.40 is the slowest
 // rate that clears the 0.03 tolerance, and the town's illness rate is
 // untouched by it (10.40% -> 9.39%), so tiredness keeps its teeth.
-const TIRED_NAP = { bed: 0.4, cot: 0.2 };
+const TIRED_NAP = { bed: 0.24, cot: 0.08 };   // the same 0.8x of the bedtime rate
+                                             // the shift-fairness probe chose, on the new numbers
 
 // ===========================================================================
 // NEEDS THAT FAIL IN THEIR OWN CHARACTER - boredom "drifts", tiredness "stalls"
@@ -1518,17 +1535,22 @@ function runChatter(dt) {
 }
 
 // ---- THE MICROSLEEP -------------------------------------------------------
-const NOD_AT = 0.85;          // the nod line. Baseline crews peak ~0.5 and fishers
-                              // 0.78, so this is a GROWTH-TOWN pressure by
-                              // construction - and auto-manage already pulls a crab
-                              // off overtime at 0.75, BELOW the line, so a delegated
-                              // town should almost never see one. That is the
-                              // feature: the hands-off town pays for being hands-off.
-// per second of timed work past NOD_AT. MEASURED (6 seeds x 15d, 4 crew all on
-// overtime, auto-manage OFF): 0.02 gave 0.16 nods/crew-day and 0.7% of station
-// time lost, which is a pattern nobody would ever see; 0.05 gives ~0.4/crew-day
-// and ~2%, against the design brief's ~5% ceiling. The rate is not what makes
-// nods rare - being past 0.85 while actually mid-task is.
+// The nod line, raised 0.85 -> 0.90 when tiredness started accruing THROUGH
+// the shift instead of landing as a lump at knock-off. That change took the
+// share of station time sitting past 0.85 from ~0% to 10.9% in a plain town
+// and 2.3% -> 34% in an overtime one, so a threshold calibrated against the
+// old, tiny window was suddenly costing a growth town three of eight seeds.
+// 0.90 also reads better as an escalation, because it sits just ABOVE the
+// EXHAUSTED mood: the card tells you they are done for before the first nod,
+// and TI4 (not making it home at all) sits above that again at 0.97.
+// Auto-manage still pulls a crab off overtime at tired 0.75 - well below the
+// line - so a delegated town measurably nods less: 1.76 vs 4.08 per town-day.
+const NOD_AT = 0.90;
+// per second of timed work past NOD_AT. MEASURED against the design brief's
+// ~5% ceiling on station time lost: a plain 4-crew town loses 1.4% of its
+// station time to nods and an all-overtime one 4.7%, at 0.63 and 4.08 nods per
+// town-day. The rate has never been what makes nods rare - being past the nod
+// line while actually mid-task is, and the housing rung is what decides that.
 const NOD_RATE = 0.05;
 const NOD_MIN = 2, NOD_SPAN = 3;   // 2-5 seconds, hard-capped: a stall, never a jam
 // the states where a nod actually COSTS something - mid-task, mid-carry, or
@@ -1546,7 +1568,13 @@ const ROUGH_PX = 250;         // ...if there's still this much of it left
 // exit but the weekly rota day. As a per-second roll, a crab three-quarters of
 // the way home usually makes it and the same crab leaving the pier usually
 // does not - which is the difference between a spiral and a wall.
-const ROUGH_RATE = 0.03;
+// ...and RETUNED 0.03 -> 0.012 when the sleep directives landed. Raising what
+// a day costs and cutting the cot's recovery put far more crabs over ROUGH_AT
+// in the first place, and a crab who sleeps rough banks nothing, so they stay
+// there - pinned on the tired >= 0.95 sickness line night after night. At 0.03
+// that took a growth town from 7/8 to 5/8 on its own. TI4 is the tail event,
+// not the norm.
+const ROUGH_RATE = 0.012;
 // Bed down where they stand. dayState "home" with p.rough set: updateHome
 // skips BOTH repair branches, so the night banks nothing at all (bed 0.4-0.5
 // an hour, cot 0.2-0.25, street 0). Exhaustion prevents its own cure, which is
@@ -2369,6 +2397,7 @@ function updateCommute(c, dt) {
 function arriveCommute(c, atWork) {
   if (atWork) {
     c.dayState = "working"; c.duty = true; c.kstate = "idle"; c.workBiz = c.p.job;
+    c.tiredIn = c.p.tired || 0;   // how tired they turned UP: the thirst coupling reads this, not the shift's own accrual
     c.workedToday = true;   // wages follow actual work: a mid-day rota reshuffle (job-board hire) can't unpay a worked shift
     if (c.p.job === "fishing" && c.fishSpot) { c.x = c.fishSpot.x; c.y = c.fishSpot.y; c.castT = 3 + Math.random() * 6; }
   }
@@ -2572,7 +2601,26 @@ function updateSchedule(c, dt) {
     // contracted window are the ones that earn the premium, so a crab who
     // knocks off early is paid for what they actually did
     const ds = dutyShift(c);
-    if (otEligible(c) && (tmin < ds.start || tmin >= ds.end)) c.otMin = (c.otMin || 0) + dt * TS;
+    const onOT = otEligible(c) && (tmin < ds.start || tmin >= ds.end);
+    if (onOT) c.otMin = (c.otMin || 0) + dt * TS;
+    // TIREDNESS ACCRUES WHILE YOU WORK, not in a lump at knock-off. The TOTAL
+    // is mathematically identical - TIRED_SHIFT / ownStdSpan per game-minute,
+    // integrated across the shift, IS TIRED_SHIFT * workLoad, and the overtime
+    // minutes still ride at OT_FATIGUE - so pay, the hours-scaling rule and
+    // the cover-double arithmetic are all untouched. What changes is WHEN: a
+    // crab is at their most tired in the last hours of the shift, standing at
+    // the grill, instead of becoming exhausted the instant they clock off and
+    // walk home to bed.
+    //
+    // This is the load-bearing half of "higher sleep requirements". Under the
+    // old step model, tiredness DURING a shift was simply whatever you woke
+    // up with - so the microsleep could only ever touch a crab who arrived
+    // exhausted, and no sleep rate short of "no sleep at all" gets an ordinary
+    // crew's MORNING reading to 0.85. Now the housing ladder decides it: off a
+    // cot you wake around 0.5 and cross the nod line halfway through every
+    // shift; out of your own bed you wake near 0.05 and never do.
+    c.p.tired = Math.min(1, (c.p.tired || 0)
+      + TIRED_SHIFT / ownStdSpan(c) * (onOT ? OT_FATIGUE : 1) * dt * TS);
   }
   if (c.dayState === "working" && tmin >= sh.end) c.pendingOff = true;
   if (c.dayState === "working" && c.pendingOff && c.kstate === "idle") {
@@ -2598,10 +2646,16 @@ function updateSchedule(c, dt) {
     // `otF` is the overtime minutes on top, weighted at OT_FATIGUE for
     // tiredness because the last two hours are the ones that break you.
     // Under default hours with no cover this is byte-for-byte the old numbers.
-    const load = shiftLoad(c), work = workLoad(c), otF = (c.otMin || 0) / ownStdSpan(c);
+    const load = shiftLoad(c), otF = (c.otMin || 0) / ownStdSpan(c);
     c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25 * (load + otF));  // a shift works up an appetite - a long one, more
-    c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * (load + otF) * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));  // working a whole shift ALREADY tired makes you thirsty (checked pre-bump: same firing rate the sandy coupling had)
-    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT * (work + OT_FATIGUE * otF));   // a long day, a cover double or overtime all take it out of you
+    // ...and thirst still reads how tired they were CLOCKING IN, never how
+    // tired the shift left them. That is exactly what the old "checked
+    // pre-bump" comment meant; now that tiredness accrues THROUGH the day it
+    // has to be said with a field - c.tiredIn, stamped at arriveCommute. Same
+    // rule, same firing rate, stated where it cannot drift.
+    c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * (load + otF) * ((c.tiredIn || 0) > 0.5 ? 1.5 : 1));  // working a whole shift ALREADY tired makes you thirsty
+    // (the day's tiredness accrued through the shift itself - see the working
+    //  branch of updateSchedule. The total is still TIRED_SHIFT * workLoad.)
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and grubbies up the shell
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
     // grab dinner on the way home instead of trekking back later (gated on
@@ -6072,7 +6126,15 @@ function frame(now) {
       const npcDue = Math.round(basePayToday(c)) + Math.round(otPayToday(c));   // peer owners buy hours at the same rate, premium included
       if (o && o.till >= npcDue) { o.till -= npcDue; c.p.wallet += npcDue; }
       else {
+        // ...and they need somewhere to stand when they get there. layOff()
+        // and townAfterDeath() both hand a returning fisher a free rail spot;
+        // this third path back to the pier - an owner who cannot make payroll
+        // - did not, so the quitter fished from wherever they happened to be
+        // (jobDoor falls back to PIER_X0 + 20 and updateFishing never pins
+        // them). Pre-existing, found by a mortality scenario that only got
+        // far enough to notice once the town stayed solvent longer.
         c.p.job = "fishing"; c.p.employer = null;
+        if (!c.fishSpot) c.fishSpot = freeFishSpot();
         today.moved.push(c.p.name + " QUIT - BACK TO THE PIER");
         toast = { text: c.p.name + " QUIT: " + (o ? o.name : "THE BOSS") + " COULDN'T PAY", t: 6 };
       }
