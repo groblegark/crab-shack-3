@@ -1581,6 +1581,31 @@ let camX = 1180, followIdx = -1, followNpc = null, followCust = null, tab = "cre
 let sel = null;
 let ffSleep = false, ffSleepDay = 0, ffChain = 0;   // the little sun: skip to morning
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
+// ---------------------------------------------------------------- the ferry
+// THE ONE THING IN THIS GAME YOU CANNOT AFFORD. The ticket office has stood at
+// the pier head as long as the town has; the boat it sells passage on lies up
+// across the water and the fare on its board has never once been paid. Buying
+// her ENDS the run - a third ending beside EVICTED and BANKRUPT, and the only
+// one that is a win. gameOver is "the run is over"; bankrupt and won are its
+// two flavours, so every existing stop-the-world guard applies for free.
+//
+// THE PRICE IS MEASURED, not felt (see PLAN). A do-nothing town is gone by day
+// 13 with a few hundred dollars; the documented growth run (--buy chef,table,
+// 40 days) ends its best seed on $3,637. A town that survives AND then trades
+// well banks about $230 a night once the crew is deep and the room is full,
+// and crosses $20,000 somewhere around day 105-130. So: absurd on day one,
+// out of reach for anybody merely surviving, and a hundred good days away for
+// a town that has genuinely mastered the economy.
+const FERRY_PRICE = 20000;
+const FERRY_X = 1806;        // the office, on the sand between the arcade lot and the pier
+const FERRY_SIGN_X = 1148;   // the fingerpost on the promenade, where the player already looks
+const FERRY_DAY = 3;         // she works the far shore on THURSDAYS (weekdayIdx)
+let won = false, winT = 0, ferryArm = 0;
+// snapshotted the moment she is bought, so the ending reads the same after a
+// reload as it did the night it happened (personas churn; an ending must not)
+let winRec = null;
+function commas(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function ferryFare() { return commas(FERRY_PRICE); }
 let memorials = [];   // { x, name } - the town remembers
 let today = newDayLog();
 let report = null, reportT = 0, dossier = null, boardView = false, dossierHit = {};
@@ -2383,7 +2408,7 @@ function slotMeta(s) {
     .filter(p => p && p.boat != null).length;
   const housed = (Array.isArray(s.personas) ? s.personas : [])
     .filter(p => p && !p.homeless).length;
-  return { ver: SAVE_VER, day: d, weekday: WEEKDAYS[weekdayIdx(d)],
+  return { ver: SAVE_VER, day: d, weekday: WEEKDAYS[weekdayIdx(d)], won: !!s.won,
     coins: Math.round(s.coins || 0), rep: Math.round(s.rep != null ? s.rep : 30),
     pop: crew.length + npcN, crew, t: s.t || 0,
     debt: Math.round((s.credit && s.credit.bal) || 0),
@@ -2442,6 +2467,7 @@ function save() {
   const env = {
     coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, t: nowMs(),   // (no `rate`: nothing accrues offline)
     bankrupt, credit: { bal: Math.round(credit.bal), warned: credit.warned },
+    won, winRec,   // the ferry ending, snapshotted: a reloaded win reads identically
     dayLog: (window.dayLog || []).slice(-6),   // keeps the forecaster warm across reloads
     personas: crabs.map(c => c.p),
     npc: { tills: { sudsy: OWNERS.sudsy.till },
@@ -2490,6 +2516,20 @@ function load(slot) {
   lastRentDay = s.lastRentDay || 0;
   if (s.gameOver) { gameOver = true; screen = "play"; }
   bankrupt = !!s.bankrupt;
+  // the ferry ending. An old save has neither field and is simply a town that
+  // never bought her; a save that DID gets its card back, past the beat, with
+  // the numbers it ended on (a corrupt/absent record falls back to live state).
+  won = !!s.won;
+  winRec = null;
+  if (won && s.winRec && typeof s.winRec === "object") {
+    const R = s.winRec;
+    winRec = { day: Math.max(1, Math.round(+R.day || 1)),
+      lifetime: Math.max(0, Math.round(+R.lifetime || 0)),
+      crew: Array.isArray(R.crew) ? R.crew.filter(n => typeof n === "string").slice(0, 8) : [],
+      pop: Math.max(0, Math.round(+R.pop || 0)), housed: Math.max(0, Math.round(+R.housed || 0)),
+      hand: String(R.hand || "SOMEBODY").slice(0, 14) };
+  }
+  if (won) { gameOver = true; screen = "play"; winT = WIN_BEAT + 2; camX = clampCam(PIER_X0 - 96); }
   if (s.credit) { credit.bal = s.credit.bal || 0; credit.warned = !!s.credit.warned; }   // old saves: zero balance
   if (Array.isArray(s.dayLog)) window.dayLog = s.dayLog;
   memorials = Array.isArray(s.memorials) ? s.memorials : [];
@@ -5051,6 +5091,55 @@ function tryBuy(key) {
   sfx.buy(); save();
 }
 
+// THE FERRY'S BUY PATH, whole - the same shape as tapSaleChip, for the same
+// reason: the world click handler decides only WHICH chip was hit, so the
+// suite drives exactly the code a tap drives and nothing forks into tools/.
+// Two taps, because $20,000 is emphatically not a misclick.
+function tapFerryChip() {
+  if (won) return false;
+  if (coins < FERRY_PRICE) {
+    toast = { text: "THE FARE IS $" + ferryFare() + " - YOU HAVE $" + fmt(Math.round(coins)), t: 5 };
+    ferryArm = 0;
+    if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+    return false;
+  }
+  if (ferryArm <= 0) {
+    ferryArm = 4;
+    toast = { text: "TAP AGAIN TO BUY THE CRABALINA FOR $" + ferryFare(), t: 4 };
+    if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+    return false;
+  }
+  return winFerry();
+}
+// The win. It does NOT stop the world mid-frame and put a card over it: the
+// camera swings to the pier, she comes alongside, and the ending only lands
+// once winT has run (drawEnding). Everything about it is snapshotted here so
+// a reloaded save shows the identical ending.
+function winFerry() {
+  if (won || coins < FERRY_PRICE) return false;
+  coins -= FERRY_PRICE;
+  ferryArm = 0; won = true; winT = 0;
+  const town = allCrabs().filter(k => !k.hidden);
+  winRec = {
+    day, lifetime: Math.round(lifetime),
+    crew: crabs.map(c => c.p.name).slice(0, 8),
+    pop: town.length,
+    housed: town.filter(k => !k.p.homeless).length,
+    // whoever takes the rope is a real crab from this town, picked at the
+    // moment it happens - a fisher first, because they have waited longest
+    hand: (town.find(k => k.p.job === "fishing") || town[0] || { p: { name: "SOMEBODY" } }).p.name,
+  };
+  gameOver = true; toast = null; report = null; reportT = 0;
+  camX = clampCam(PIER_X0 - 96);
+  followIdx = -1; followNpc = null; followCust = null;
+  manage = null; dossier = null; boardView = false; saveView = false;
+  popText("THE CRABALINA IS IN", PIER_X0 - 20, 70, [255, 240, 170]);
+  if (music) { music.pause(); music = null; }
+  sfx.ding(); sfx.coin();
+  save();
+  return true;
+}
+
 // THE TIP SLIDER is a real slider: tap anywhere on the track to set it, or
 // hold and drag the thumb. One write path (setTipShare) does the clamping and
 // the 5% snap, so the number drawn is always the number being paid.
@@ -5148,7 +5237,9 @@ cv.addEventListener("click", (ev) => {
     if (p.x >= W / 2 - 56 && p.x < W / 2 + 56 && p.y >= 152 && p.y < 170) { screen = "play"; sfx.ding(); }
     return;
   }
-  if (gameOver) { newGame(); return; }
+  // the ending swallows the click that starts the next town - but not until it
+  // has actually finished arriving, or an eager tap eats the whole ending
+  if (gameOver) { if (!won || winT >= WIN_BEAT + 0.9) newGame(); return; }
   if (dossier) {
     // the DOES row doubles as the reassignment control for crew crabs; the
     // SHIFT and HEALTH rows are the labor-policy controls (OT / sick day)
@@ -5345,6 +5436,16 @@ cv.addEventListener("click", (ev) => {
   if (wx >= JOB_BOARD_X - 2 && wx < JOB_BOARD_X + 28 && p.y >= HOME_BOTTOM - 40 && p.y < HOME_BOTTOM + 4) {
     boardView = true; sfx.ding(); return;
   }
+  // the ferry office: the whole kiosk is the target, the chip is the label
+  if (!won && wx >= FERRY_X - 6 && wx <= FERRY_X + FERRY_W + 6 && p.y >= 112 && p.y < 162) {
+    tapFerryChip(); return;
+  }
+  // and the fingerpost points at it, in both senses
+  if (wx >= FERRY_SIGN_X - 4 && wx <= FERRY_SIGN_X + 72 && p.y >= 116 && p.y < 146) {
+    toast = { text: won ? "THE CRABALINA SAILS FROM THE PIER"
+      : "THE FERRY OFFICE IS DOWN AT THE PIER - $" + ferryFare(), t: 5 };
+    sfx.ding(); return;
+  }
   // a shuttered shop's BUY chip: the player takes a failed business on through
   // the same shopfront the MANAGE chip lives on. Two taps - $200-odd is not a
   // misclick - and every refusal says why.
@@ -5436,6 +5537,164 @@ function wrect(wx, y, w, h, color) {
   rect(ctx, wx - camX, y, w, h, color);
 }
 
+// ------------------------------------------------------------- the far shore
+// Nothing in this game ever says where the town IS. It is said by what you can
+// see from it: across the water there is another coast - hills behind hills, a
+// light on the point, a scatter of blocks that comes on after dark - and most
+// evenings the mist comes in off the sea and takes it away again. On a clear
+// night you can pick out the windows over there. That is the whole statement,
+// and it is made entirely in pixels.
+//
+// EVERY LINE OF THIS IS DRAW-ONLY. It reads day/tmin/time/camX/trade and writes
+// nothing back, and it never touches Math.random - every wobble is a sine or an
+// integer hash of the day - so the sim is byte-identical with the layer on or
+// off. window._noHorizon / window._noMist switch it off; the suite proves the
+// fingerprint doesn't move.
+const HZ_Y = SKY_H;          // the waterline the far coast stands on
+const HZ_PAR = 0.04;         // parallax: far enough that a whole town's pan barely shifts it
+const HZ_LIGHT_X = 84;       // the light on the point
+const HZ_TOWN_X = 168;       // and the town along the shore from it
+function hzRidge(x) {        // the near headland, quantised to 2px for the chunky look
+  const h = 9.5 + Math.sin(x * 0.0140 + 0.7) * 5.5
+                + Math.sin(x * 0.0345 + 2.3) * 2.5
+                + Math.sin(x * 0.0910 + 4.1) * 1.2;
+  return HZ_Y - 2 * Math.max(1, Math.round(h / 2));
+}
+function hzBack(x) {         // the blue ridge standing behind it
+  const h = 15 + Math.sin(x * 0.0079 + 3.4) * 5 + Math.sin(x * 0.0231 + 1.1) * 2.6;
+  return HZ_Y - 2 * Math.max(2, Math.round(h / 2));
+}
+// one run-length pass per ridge: the profile is quantised, so a whole coast
+// costs a few dozen fills instead of 256
+function hzBand(fn, hx, body, top) {
+  let x0 = 0, y0 = fn(hx);
+  for (let sx = 1; sx <= W; sx++) {
+    const y = sx < W ? fn(sx + hx) : -999;
+    if (y === y0) continue;
+    rect(ctx, x0, y0, sx - x0, HZ_Y - y0, body);
+    rect(ctx, x0, y0, sx - x0, 1, top);
+    x0 = sx; y0 = y;
+  }
+}
+function drawHorizon() {
+  if (window._noHorizon) return;
+  const hx = camX * HZ_PAR, night = darkness() > 0.55;
+  hzBand(hzBack, hx, night ? [46, 54, 90] : [156, 180, 210], night ? [58, 66, 106] : [182, 202, 226]);
+  hzBand(hzRidge, hx, night ? [24, 30, 56] : [92, 124, 164], night ? [34, 42, 72] : [116, 148, 184]);
+  // the town across the water: blocks by day, windows after dark
+  for (let i = 0; i < 13; i++) {
+    const bx = Math.round(HZ_TOWN_X + i * 5 - hx);
+    if (bx < -4 || bx > W) continue;
+    const bh = 3 + ((i * 7 + 3) % 4) + (i === 4 || i === 9 ? 3 : 0);
+    rect(ctx, bx, HZ_Y - bh, 4, bh, night ? [22, 26, 52] : [128, 152, 186]);
+    if (night && (i * 3 + 1 + ((time * 0.2) | 0)) % 4)
+      px(ctx, bx + 1, HZ_Y - bh + 1, [255, 214, 128]);
+  }
+  // harbour lights strung along the rest of the shore, only after dark
+  if (night) for (let i = 0; i < 26; i++) {
+    const lx = Math.round(((i * 47 + 11) % 300) - 22 - hx);
+    if (lx < 0 || lx >= W) continue;
+    if ((i * 5 + ((time * 0.15) | 0)) % 7 === 0) continue;   // one or two are out
+    px(ctx, lx, HZ_Y - 1 - (i % 2), [255, 206, 120]);
+  }
+  // THE LIGHT ON THE POINT. It turns whether or not anybody in this town is
+  // watching, which is rather the idea.
+  const lx = Math.round(HZ_LIGHT_X - hx);
+  if (lx > -4 && lx < W + 4) {
+    const base = hzRidge(HZ_LIGHT_X);
+    rect(ctx, lx, base - 9, 3, 9, night ? [126, 130, 156] : [240, 244, 250]);
+    rect(ctx, lx, base - 5, 3, 2, night ? [112, 62, 72] : [212, 84, 84]);
+    const lit = ((time * 0.85) % 4) < 1.2;
+    rect(ctx, lx, base - 11, 3, 2, lit ? [255, 242, 172] : night ? [78, 82, 108] : [150, 160, 180]);
+    if (lit) {
+      px(ctx, lx - 1, base - 10, [255, 232, 144]);
+      px(ctx, lx + 3, base - 10, [255, 232, 144]);
+      if (night) { px(ctx, lx - 2, base - 10, [190, 168, 96]); px(ctx, lx + 4, base - 10, [190, 168, 96]); }
+    }
+  }
+}
+// SOMEWHERE ELSE IS A PLACE, NOT A BACKDROP. The tourists arrive from somewhere
+// and so does everything the trade ledger counts as an IMPORT - so on a day the
+// town actually shipped something in, a little freighter works the far channel,
+// and on Thursdays THE CRABALINA herself crosses, out there, on somebody else's
+// business. Drawn after the sea (a boat floats ON the water) and before the
+// mist (a boat out there goes when the shore goes).
+function drawHorizonTraffic() {
+  if (window._noHorizon) return;
+  const night = darkness() > 0.55;
+  const imported = trade.day.fish + trade.day.corn + trade.day.water + trade.day.power + trade.day.fruit;
+  if (imported > 0 && tmin > 6 * 60 && tmin < 19.5 * 60) {
+    const p = (tmin - 6 * 60) / (13.5 * 60);
+    const bx = Math.round(-14 + p * (W + 28)), by = HZ_Y + 1;
+    const hull = night ? [30, 40, 66] : [70, 92, 120];
+    rect(ctx, bx, by, 12, 2, hull);
+    rect(ctx, bx + 2, by - 2, 3, 2, hull);
+    rect(ctx, bx + 8, by - 3, 2, 3, night ? [40, 30, 40] : [90, 70, 70]);
+    px(ctx, bx + 8, by - 4, night ? [60, 62, 80] : [200, 205, 214]);   // a smudge of smoke
+    if (night) px(ctx, bx + 3, by - 2, [255, 206, 120]);
+  }
+  if (weekdayIdx(day) === FERRY_DAY && tmin > 8 * 60 && tmin < 18 * 60 && !won) {
+    // she runs the far side, west to east, and she does not call here
+    const p = (tmin - 8 * 60) / (10 * 60);
+    const bx = Math.round(-22 + p * (W + 44)), by = HZ_Y + 2;
+    const hull = night ? [56, 62, 92] : [214, 224, 236];
+    rect(ctx, bx, by, 20, 3, hull);
+    rect(ctx, bx + 3, by - 3, 12, 3, night ? [46, 52, 80] : [236, 242, 248]);
+    rect(ctx, bx + 13, by - 6, 3, 3, night ? [70, 40, 44] : [206, 96, 84]);   // the funnel
+    for (let i = 1; i < 5; i++) px(ctx, bx - i * 4, by + 2, [200, 226, 240]);  // wake
+  }
+}
+// THE MIST. Some evenings you can see across; most evenings you cannot. How
+// thick it comes is an integer hash of the DAY - no RNG, nothing stored, no
+// save field - so the weather is a fact about the calendar, the same on every
+// machine, and a clear night is a small event rather than a coin flip.
+function mistPeak(d) {
+  let h = Math.imul(d | 0, 2654435761) >>> 0;
+  h ^= h >>> 15; h = Math.imul(h, 2246822519) >>> 0; h ^= h >>> 13;
+  // biased THICK on purpose: about a third of evenings the shore is simply
+  // gone, about a quarter are clear enough to count the windows, and the rest
+  // sit in between - so "I can see across tonight" is news
+  return Math.min(1, 0.18 + 1.25 * Math.pow((h >>> 8) / 16777216, 0.85));
+}
+// how much of it is out there right now: it comes in off the sea through the
+// late afternoon, sits all night, and burns off through the morning. The small
+// hours belong to YESTERDAY's mist, or it would change thickness at midnight.
+function mistNow() {
+  const t = tmin;
+  if (t < 6.5 * 60) return mistPeak(day - 1);
+  if (t < 9.5 * 60) return mistPeak(day - 1) * (1 - (t - 6.5 * 60) / (3 * 60));
+  if (t < 16.5 * 60) return 0;
+  if (t < 20 * 60) return mistPeak(day) * ((t - 16.5 * 60) / (3.5 * 60));
+  return mistPeak(day);
+}
+function drawMist() {
+  if (window._noMist) return;
+  const m = mistNow();
+  if (m <= 0.02) return;
+  const d = darkness();
+  const c = Math.round(230 - 78 * d) + "," + Math.round(238 - 74 * d) + "," + Math.round(246 - 54 * d);
+  // THE PROFILE MATTERS. Thickest through the band the far shore stands in and
+  // easing off again toward the beach - mist that whited out the near water too
+  // would just read as a broken renderer.
+  for (let y = 26; y < SHORE_Y; y++) {
+    const v = y < 42 ? (y - 26) / 16 : y < 66 ? 1 : 1 - 0.6 * (y - 66) / (SHORE_Y - 66);
+    const a = Math.min(1, m * (0.10 + 0.95 * v) * (0.86 + 0.14 * Math.sin(y * 0.55 - time * 0.5)));
+    if (a <= 0.01) continue;
+    ctx.fillStyle = `rgba(${c},${a.toFixed(3)})`;
+    ctx.fillRect(0, y, W, 1);
+  }
+  // banks of it rolling through, at their own speeds - the motion is what
+  // makes it weather instead of a filter
+  for (let i = 0; i < 5; i++) {
+    const wy = 40 + i * 8 + ((Math.sin(time * 0.17 + i * 2.3) * 2) | 0);
+    if (wy >= SHORE_Y) continue;
+    const ww = 70 + i * 26;
+    const wx = ((time * (5 + i * 3) + i * 130) % (W + ww * 2)) - ww;
+    ctx.fillStyle = `rgba(${c},${(0.30 * m).toFixed(3)})`;
+    ctx.fillRect(wx | 0, wy, ww, 2 + (i % 2));
+  }
+}
+
 function drawBG() {
   for (let i = 0; i < 4; i++) rect(ctx, 0, i * 15, W, 15, SKY[i]);
   const dark = darkness();
@@ -5447,6 +5706,9 @@ function drawBG() {
     blit(ctx, MOON, 20, 8);
     for (const s of STARS) px(ctx, s[0], s[1], [220, 230, 255]);
   }
+  // the far shore, standing on the horizon (drawn over the stars, under the
+  // weather - the hills are nearer than the sky and further than everything)
+  drawHorizon();
   // clouds (parallax)
   blit(ctx, CLOUD, ((time * 4 - camX * 0.4) % 320 + 320) % 320 - 30, 12);
   blit(ctx, CLOUD, ((time * 2.5 - camX * 0.3 + 160) % 320 + 320) % 320 - 30, 30);
@@ -5468,6 +5730,8 @@ function drawBG() {
   }
   const f = (Math.sin(time * 0.9) * 3) | 0;
   rect(ctx, 0, SHORE_Y - 3 + Math.max(0, f), W, 2, [230, 250, 255]);
+  drawHorizonTraffic();   // boats float ON the water, so: after it
+  drawMist();             // and the weather takes the water and the shore together
   // sand (world)
   rect(ctx, 0, SHORE_Y, W, PANEL_Y - SHORE_Y, [246, 222, 170]);
   for (let i = 0; i < 90; i++) {
@@ -5548,6 +5812,88 @@ function drawBoats() {
   }
 }
 
+// ------------------------------------------------------- the ferry, in world
+// The office is a kiosk at the foot of the pier with the fare painted on the
+// front, and the fingerpost outside the shack repeats it every single day.
+// Neither of them explains anything: they are what a real town writes down.
+const FERRY_W = 60;
+function ferryChipRect() { return { x: FERRY_X + 7, y: 147, w: 46, h: 11 }; }
+function drawFerryOffice() {
+  const x = FERRY_X;
+  if (x + FERRY_W - camX < -8 || x - camX > W + 8) return;
+  const afford = coins >= FERRY_PRICE;
+  wrect(x - 4, 114, FERRY_W + 8, 6, [64, 104, 148]);          // roof
+  wrect(x - 4, 114, FERRY_W + 8, 1, [120, 172, 214]);
+  wrect(x - 4, 120, FERRY_W + 8, 1, [36, 64, 104]);
+  wrect(x, 121, FERRY_W, 39, [244, 238, 224]);                // kiosk front
+  wrect(x, 121, 1, 39, [176, 164, 140]);
+  wrect(x + FERRY_W - 1, 121, 1, 39, [176, 164, 140]);
+  wrect(x, 121, FERRY_W, 8, [40, 72, 112]);                   // fascia
+  wrect(x, 158, FERRY_W, 2, [200, 190, 168]);
+  const sx = x - camX;
+  if (sx > -FERRY_W && sx < W) {
+    smallText(ctx, "MAINLAND FERRY", sx + 2, 123, [235, 245, 255]);
+    smallText(ctx, "THE CRABALINA", sx + 4, 132, [120, 100, 80]);
+    const fare = won ? "PAID" : "$" + ferryFare();
+    text(ctx, fare, sx + (FERRY_W - textWidth(fare)) / 2, 138,
+      won || afford ? [40, 130, 70] : [180, 60, 40], 6);
+  }
+  const r = ferryChipRect(), armed = ferryArm > 0;
+  wrect(r.x, r.y, r.w, r.h, [30, 20, 36]);
+  wrect(r.x + 1, r.y + 1, r.w - 2, r.h - 2,
+    won ? [150, 140, 140] : afford ? (armed ? [255, 200, 90] : [96, 200, 120]) : [150, 140, 140]);
+  if (r.x - camX > -r.w && r.x - camX < W) {
+    const lbl = won ? "SHE'S OURS" : armed ? "TAP AGAIN" : "BUY HER";
+    smallText(ctx, lbl, r.x + ((r.w - smallTextWidth(lbl)) >> 1) - camX, r.y + 3, [30, 20, 36]);
+  }
+}
+// The fingerpost on the promenade: the town's name on the top arm, and on the
+// bottom arm the direction and the fare. It is the dream, in the corner of the
+// player's eye, from the first morning.
+function drawFerrySign() {
+  const x = FERRY_SIGN_X;
+  if (x + 70 - camX < 0 || x - camX > W) return;
+  wrect(x + 22, 120, 4, 36, [150, 104, 62]);
+  wrect(x + 22, 120, 1, 36, [190, 142, 92]);
+  wrect(x + 18, 154, 12, 2, [176, 150, 108]);
+  wrect(x, 118, 48, 11, [30, 20, 36]);
+  wrect(x + 1, 119, 46, 9, [246, 240, 222]);
+  // THE ONE STATE THIS SIGN HAS: the day the town can actually cover the fare,
+  // the bottom arm goes green. A player who never once panned east still finds
+  // out, from the sign outside their own shack, on the morning it becomes true.
+  const afford = coins >= FERRY_PRICE && !won;
+  wrect(x, 132, 66, 11, [30, 20, 36]);
+  wrect(x + 1, 133, 64, 9, afford ? [222, 250, 226] : [246, 240, 222]);
+  for (let i = 0; i < 5; i++) wrect(x + 66 + i, 132 + i, 1, 11 - i * 2, [30, 20, 36]);   // the arm's point
+  const sx = x - camX;
+  if (sx > -70 && sx < W) {
+    smallText(ctx, "CRABALINA", sx + 6, 121, [70, 60, 70]);
+    smallText(ctx, won ? "FERRY - SAILING" : "FERRY $" + ferryFare(), sx + 4, 135,
+      afford ? [30, 120, 60] : [40, 72, 112]);
+  }
+}
+// SHE CAME IN. Drawn only on the winning frame and after - a proper hull along
+// the seaward side of the pier, with the town's name on her bow.
+function drawMooredFerry() {
+  const x = PIER_X0 - 30, y = 56;
+  if (x + 120 - camX < 0 || x - camX > W) return;
+  wrect(x, y + 10, 116, 10, [248, 250, 252]);                 // hull
+  wrect(x, y + 20, 116, 4, [40, 60, 96]);
+  wrect(x - 4, y + 12, 5, 8, [248, 250, 252]);                // bow flare
+  wrect(x + 116, y + 12, 4, 8, [248, 250, 252]);
+  wrect(x + 14, y, 78, 10, [236, 242, 250]);                  // superstructure
+  wrect(x + 14, y, 78, 1, [200, 212, 230]);
+  for (let i = 0; i < 9; i++) wrect(x + 18 + i * 8, y + 3, 5, 4, [96, 170, 220]);   // windows
+  wrect(x + 78, y - 8, 8, 9, [206, 96, 84]);                  // funnel
+  wrect(x + 78, y - 8, 8, 2, [40, 40, 52]);
+  wrect(x + 44, y + 24, 3, 6, [70, 90, 120]);                 // gangway down to the deck
+  wrect(x + 40, y + 29, 12, 2, [140, 90, 50]);
+  const sx = x - camX;
+  if (sx > -120 && sx < W) smallText(ctx, "CRABALINA", sx + 20, y + 13, [40, 72, 112]);
+  for (let i = 0; i < 6; i++)   // she is still making a little way against the tide
+    wrect(x - 6 - i * 7, y + 22 + (i % 2), 5, 1, [200, 226, 240]);
+}
+
 function drawTown() {
   // coast road runs the full length of town, behind everything
   wrect(0, ROAD_Y0, WORLD_W, ROAD_Y1 - ROAD_Y0, [120, 116, 130]);
@@ -5613,7 +5959,11 @@ function drawTown() {
   for (const s of BUS_STOPS) wblit(BUS_STOP, s - 3, ROAD_Y1 + 3);
   // scenery fills the beach pockets between lots
   wblit(PALM, 534, 134); wblit(PALM, 960, 132, true); wblit(PALM, 1035, 136); wblit(PALM, 1560, 134); wblit(PALM, 1900, 130, true); wblit(PALM, 1965, 136);
-  wblit(UMBRELLA, 1050, 150); wblit(UMBRELLA, 1620, 152); wblit(UMBRELLA, 1830, 151);
+  wblit(UMBRELLA, 1050, 150); wblit(UMBRELLA, 1620, 152); wblit(UMBRELLA, 1782, 151);   // moved 1830 -> 1782: the ferry office stands there now
+  // the crossing you cannot afford, and the sign that says so every morning
+  drawFerrySign();
+  drawFerryOffice();
+  if (won) drawMooredFerry();
   // parked vehicles: buggies pull off on the shoulder, bikes rack on the apron
   for (const c of crabs) {
     if (c.dayState !== "working") continue;
@@ -6286,7 +6636,66 @@ function drawTitle() {
   smallText(ctx, "MUSIC: PIXEL WAVE WALTZ - MATT CLANKER", 14, PANEL_Y + 8, [170, 150, 135]);
   smallText(ctx, "BUILT ON THE SNESCAT TOY PPU", 44, PANEL_Y + 20, [140, 120, 105]);
 }
+// THE THIRD ENDING. EVICTED and BANKRUPT are the landlord and the bank; this
+// one is the boat. It does not slam a card over a frozen town: for the first
+// couple of seconds you just watch her come alongside the pier (winFerry swung
+// the camera there), and only then does the card come up, fading in, so the
+// last thing the run does is show you the thing you paid for.
+const WIN_BEAT = 2.2;
+function drawEnding() {
+  const R = winRec || { day, lifetime: Math.round(lifetime), crew: [], pop: 0, housed: 0, hand: "SOMEBODY" };
+  if (winT < WIN_BEAT) {
+    const t2 = Math.max(0, winT - 1.0) / (WIN_BEAT - 1.0);
+    ctx.fillStyle = `rgba(16,12,30,${(0.55 * t2).toFixed(3)})`;
+    ctx.fillRect(0, 0, W, H);
+    const hd = "THE CRABALINA IS IN";
+    const hw = textWidth(hd) + 12;
+    rect(ctx, (W - hw) / 2, 158, hw, 13, [30, 20, 36]);
+    text(ctx, hd, (W - textWidth(hd)) / 2, 161, [255, 240, 170]);
+    return;
+  }
+  const fade = Math.min(1, (winT - WIN_BEAT) / 0.9);
+  ctx.fillStyle = `rgba(16,12,30,${(0.55 + 0.25 * fade).toFixed(3)})`;
+  ctx.fillRect(0, 0, W, H);
+  const x = 10, y = 10, w2 = 236, h2 = 162;
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 3, [96, 170, 220]);
+  const ttl = "THE FERRY";
+  textShadow(ctx, ttl, (W - textWidth(ttl)) / 2, y + 8, [40, 110, 190], [190, 215, 235]);
+  const crew = R.crew.slice(0, 4).join(", ") + (R.crew.length > 4 ? " +" + (R.crew.length - 4) : "");
+  const body = [
+    ["YOU PAID FOR HER IN FISH SUPPERS. $" + ferryFare() + ",", 0],
+    ["ONE PLATE AT A TIME.", 0],
+    ["", 0],
+    ["SHE COMES ROUND THE POINT ON THE MORNING TIDE,", 1],
+    ["LOW AND WHITE, AND THE WHOLE TOWN IS ON THE PIER", 1],
+    ["BEFORE THE ROPE IS THROWN. " + R.hand + " TAKES IT.", 1],
+    ["THEY HAD BEEN WAITING YEARS TO DO THAT.", 1],
+    ["", 0],
+    ["YOU DID NOT BUY A WAY OUT. YOU BOUGHT THE", 0],
+    ["CROSSING, AND A CROSSING RUNS BOTH WAYS. THE", 0],
+    ["SHACK OPENS AT SEVEN TOMORROW. THE MIST WILL", 0],
+    ["COME IN TONIGHT LIKE IT ALWAYS DOES, AND FOR", 0],
+    ["ONCE IT WILL HIDE SOMEWHERE THE TOWN CAN GO.", 0],
+  ];
+  let ly = y + 22;
+  for (const [line, tone] of body) {
+    if (line) smallText(ctx, line, x + 6, ly, tone ? [90, 80, 95] : [58, 48, 58]);
+    ly += line ? 8 : 4;
+  }
+  rect(ctx, x + 4, ly + 1, w2 - 8, 1, [222, 212, 196]);
+  ly += 6;
+  smallText(ctx, "ABOARD  " + crew, x + 6, ly, [40, 110, 190]); ly += 8;
+  smallText(ctx, "DAY " + R.day + " - $" + commas(R.lifetime) + " TAKEN - "
+    + R.pop + " CRABS, " + R.housed + " HOUSED", x + 6, ly, [140, 110, 40]); ly += 10;
+  const tag = "CRABALINA IS ON THE MAP";
+  smallText(ctx, tag, x + ((w2 - smallTextWidth(tag)) >> 1), ly, [40, 130, 70]);
+  if (((time * 2) | 0) % 2)
+    smallText(ctx, "CLICK TO START OVER", x + ((w2 - smallTextWidth("CLICK TO START OVER")) >> 1), y + h2 - 9, [120, 110, 120]);
+}
 function drawGameOver() {
+  if (won) return drawEnding();
   ctx.fillStyle = "rgba(16,12,30,0.72)";
   ctx.fillRect(0, 0, W, H);
   const cx2 = W / 2;
@@ -6869,7 +7278,8 @@ function drawSaveScreen() {
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
   rect(ctx, x, y, w2, 14, [58, 42, 38]);
   text(ctx, "SAVED TOWNS", x + 6, y + 4, [255, 240, 210]);
-  smallText(ctx, "SLOT " + activeSlot + " IS THE TOWN YOU'RE PLAYING", x + 84, y + 5, [200, 180, 160]);
+  // the town's name, written where a town writes its name: on the shelf of them
+  smallText(ctx, "CRABALINA - SLOT " + activeSlot + " IS YOURS", x + 84, y + 5, [200, 180, 160]);
   rect(ctx, R.close.x, R.close.y, R.close.w, R.close.h, [150, 60, 60]);
   smallText(ctx, "X", R.close.x + 5, R.close.y + 4, [255, 230, 230]);
   // ---- the five slots
@@ -6881,7 +7291,8 @@ function drawSaveScreen() {
     const ty = r.y + ((r.h - 5) >> 1);
     smallText(ctx, String(n), r.x + 6, ty, [140, 120, 100]);
     if (!m) { smallText(ctx, "EMPTY", r.x + 16, ty, [150, 140, 160]); continue; }
-    smallText(ctx, "DAY " + m.day + " " + m.weekday, r.x + 16, ty, [40, 30, 40]);
+    if (m.won) smallText(ctx, "SAILED D" + m.day, r.x + 16, ty, [40, 130, 70]);
+    else smallText(ctx, "DAY " + m.day + " " + m.weekday, r.x + 16, ty, [40, 30, 40]);
     smallText(ctx, "$" + fmt(m.coins), r.x + 78, ty, [140, 110, 40]);
     smallText(ctx, "REP " + m.rep, r.x + 120, ty, [70, 90, 130]);
     smallText(ctx, "POP " + m.pop, r.x + 156, ty, [90, 90, 105]);
@@ -7278,6 +7689,8 @@ function frame(now) {
   last = now; time += dt;
   if (saveConfirmT > 0) { saveConfirmT -= dt; if (saveConfirmT <= 0) saveConfirm = null; }
   if (saleArmT > 0) { saleArmT -= dt; if (saleArmT <= 0) saleArm = null; }
+  if (ferryArm > 0) ferryArm -= dt;
+  if (won) winT += dt;   // the beat before the ending card: she comes alongside first
   if (saveMsg && saveMsg.t > 0) { saveMsg.t -= dt; if (saveMsg.t <= 0) saveMsg = null; }
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
