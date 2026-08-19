@@ -924,6 +924,10 @@ function startCommute(c, toWork) {
 
 function updateCommute(c, dt) {
   const toWork = c.dayState === "toWork";
+  // a commute that straddles midnight into a day off turns around - long walk
+  // commutes (a fisher's is ~3 game-hours) can legally start before the day
+  // flips and must not deliver anyone to work on their Sunday
+  if (toWork && offToday(c) && !coveringToday(c)) { startCommute(c, false); return; }
   const dest = toWork ? jobDoor(c) : homeX(c);
   const m = c.p.mode, tr = TRAITS[c.p.trait];
   const wspd = crabMove(c), vspd = MODES[m].speed * tr.move;
@@ -1082,8 +1086,12 @@ function updateSchedule(c, dt) {
   // The errand machinery handles the trip; the home branch re-commutes them to
   // the pier afterward (shift window permitting), so it's a real lunch break.
   if (c.p.job === "fishing" && c.dayState === "working" && !c.p.employer && c.errandCd <= 0) {
-    const e = pickErrand(c);
-    if (e && !e.selfCook) {
+    // pressing needs only: lunch and real thirst pull a fisher off the pier;
+    // fun and a grubby shell wait for the evening (unbounded breaks collapsed
+    // the town's fish supply - measured, not guessed)
+    const pressing = (c.p.hunger || 0) >= 0.5 || (c.p.thirst || 0) >= 0.6;
+    const e = pressing && pickErrand(c);
+    if (e && !e.selfCook && (e.need === "food" || e.need === "drink")) {
       c.duty = false; c.errandCd = 6;
       c.dayState = "home";
       startErrand(c, e);
