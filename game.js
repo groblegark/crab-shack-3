@@ -3493,9 +3493,18 @@ function drawPanel() {
     smallText(ctx, "LOCALS PAY +25%", 4, my + 1, [170, 150, 135]);   // under the last menu row
     smallText(ctx, "TONIGHT AT 20:00", 132, ROW_Y, [230, 215, 195]);
     let by = ROW_Y + MROW + 1;
-    const owedN = crabs.filter(c => !c.p.sick && !(offToday(c) && !c.workedToday)).length;
+    // one predicate, three surfaces: this list, the BILL chip and the
+    // settlement loop all read crabDueTonight, so the column always adds up
+    const owed = crabs.filter(c => crabDueTonight(c) > 0);
+    const owedN = owed.length;
     smallText(ctx, "WAGES " + owedN + "X$" + CRAB_WAGE + (owedN < crabs.length ? " (" + (crabs.length - owedN) + " OUT)" : ""), 132, by, [190, 175, 160]);
     smallText(ctx, "$" + CRAB_WAGE * owedN, 224, by, [235, 160, 130]); by += MROW;
+    const otBill = owed.reduce((s, c) => s + Math.round(otPayForecast(c)), 0);
+    if (otBill > 0) {
+      const otN = owed.filter(c => otPayForecast(c) > 0).length;
+      smallText(ctx, "OVERTIME " + otN + "X AT " + OT_RATE + "X", 132, by, [190, 175, 160]);
+      smallText(ctx, "$" + otBill, 224, by, [235, 160, 130]); by += MROW;
+    }
     for (const key of Object.keys(BIZ)) {
       if (!bizUnlocked(key) || bizOwner(key) !== "player") continue;   // only rents YOU pay tonight
       smallText(ctx, BIZ[key].short + " RENT", 132, by, [190, 175, 160]);
@@ -4336,12 +4345,12 @@ function frame(now) {
           if (window._stats) {
             window._stats.recoveries = (window._stats.recoveries || 0) + 1;
             (window._stats.illness = window._stats.illness || [])
-              .push({ name: k.p.name, days: dur, lane, tier, out: "well" });
+              .push({ day, name: k.p.name, days: dur, lane, tier, out: "well" });
           }
         } else if (!k.p.npc && k.p.sick.days >= 3 &&
             Math.random() < Math.min(0.75, care.die + 0.12 * Math.max(0, k.p.sick.days - 4))) {
           if (window._stats) (window._stats.illness = window._stats.illness || [])
-            .push({ name: k.p.name, days: k.p.sick.days, lane, tier, out: "died" });
+            .push({ day, name: k.p.name, days: k.p.sick.days, lane, tier, out: "died" });
           // the tide takes them
           abortChef(k); abortErrand(k);
           memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
