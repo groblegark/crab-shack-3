@@ -5562,9 +5562,36 @@ function drawCensus(R) {
   smallText(ctx, "FED SIP CLN FUN ZZZ", x + 52, y + h2 - 11, [150, 140, 160]);
 }
 
+// The ledger used to spell every row out - "WATER  186 / 1864 GAL AT $1" - and
+// the tails ran off the card. Commodities get 7px icons instead (fish and fruit
+// reuse the item art; corn, water and power are drawn here) and the numbers sit
+// in fixed right-aligned columns that cannot overflow whatever the town imports.
+function drawCommodity(kind, x, y) {
+  if (kind === "fish") { blit(ctx, ITEMS.fish_raw, x - 1, y); return; }
+  if (kind === "fruit") { blit(ctx, ITEMS.fruit, x, y); return; }
+  if (kind === "corn") {
+    rect(ctx, x + 2, y, 3, 6, [255, 216, 96]);
+    px(ctx, x + 1, y + 1, [90, 200, 110]); px(ctx, x + 5, y + 2, [90, 200, 110]);
+    px(ctx, x + 3, y + 1, [230, 180, 60]); px(ctx, x + 3, y + 4, [230, 180, 60]);
+    return;
+  }
+  if (kind === "water") {                       // a droplet
+    px(ctx, x + 3, y, [96, 200, 255]);
+    rect(ctx, x + 2, y + 1, 3, 2, [96, 200, 255]);
+    rect(ctx, x + 1, y + 3, 5, 3, [96, 200, 255]);
+    px(ctx, x + 2, y + 4, [200, 240, 255]);
+    return;
+  }
+  if (kind === "power") {                       // a bolt
+    rect(ctx, x + 3, y, 2, 3, [255, 230, 120]);
+    rect(ctx, x + 2, y + 2, 2, 2, [255, 230, 120]);
+    rect(ctx, x + 3, y + 3, 2, 3, [255, 216, 96]);
+    px(ctx, x + 1, y + 3, [255, 230, 120]);
+  }
+}
 function drawJobBoard() {
   if (!boardView) return;
-  const x = 40, y = 22, w2 = 176, h2 = 158;
+  const x = 30, y = 22, w2 = 196, h2 = 158;
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
   rect(ctx, x, y, w2, 14, [190, 140, 80]);
@@ -5599,12 +5626,18 @@ function drawJobBoard() {
   }
   {
     ly += 2; smallText(ctx, "TRADE LEDGER, TODAY / ALL TIME", x + 6, ly, [58, 42, 38]); ly += 8;
-    smallText(ctx, "FISH LANDED OFF THE PIER", x + 6, ly, [40, 150, 70]);
-    smallText(ctx, trade.landedDay + " / " + trade.landed, x + 126, ly, [40, 150, 70]); ly += 7;
+    smallText(ctx, "LANDED OFF THE PIER", x + 6, ly, [40, 150, 70]);
+    {
+      const v = trade.landedDay + " / " + trade.landed;
+      smallText(ctx, v, x + 140 - smallTextWidth(v), ly, [40, 150, 70]);
+    } ly += 7;
     // the pier price + its history: a tiny sparkline, floor $2 to ceiling $7
     smallText(ctx, "PIER FISH PRICE", x + 6, ly, [140, 110, 40]);
-    smallText(ctx, "$" + trade.price + (trade.price >= FISH_IMPORT ? " AT CEILING" : ""), x + 126, ly,
-      trade.price >= FISH_IMPORT ? [200, 110, 40] : [140, 110, 40]); ly += 7;
+    {
+      const v = "$" + trade.price + (trade.price >= FISH_IMPORT ? " AT CEILING" : "");
+      smallText(ctx, v, x + 140 - smallTextWidth(v), ly,
+        trade.price >= FISH_IMPORT ? [200, 110, 40] : [140, 110, 40]);
+    } ly += 7;
     {
       const s = trade.series.slice(-30), sh = 8, sx = x + 6;
       rect(ctx, sx - 1, ly - 1, 30 * 3 + 2, sh + 2, [235, 225, 205]);
@@ -5614,13 +5647,24 @@ function drawJobBoard() {
       }
       ly += sh + 3;
     }
+    // column heads, so the bare numbers still say what they are
+    const cDay = x + 96, cTot = x + 140, cPr = x + 186;
+    smallText(ctx, "SHIPPED IN", x + 16, ly, [90, 90, 105]);
+    smallText(ctx, "TODAY", cDay - smallTextWidth("TODAY"), ly, [150, 140, 160]);
+    smallText(ctx, "ALL", cTot - smallTextWidth("ALL"), ly, [150, 140, 160]);
+    smallText(ctx, "EACH", cPr - smallTextWidth("EACH"), ly, [150, 140, 160]);
+    ly += 7;
     for (const kind of Object.keys(IMPORTS)) {
       const im = IMPORTS[kind];
-      smallText(ctx, im.name + (kind === "fish" ? " SHIPPED IN" : ""), x + 6, ly, [90, 90, 105]);
-      smallText(ctx, trade.day[kind] + " / " + trade.total[kind] + " " + im.unit + " AT $" + im.price, x + 126, ly, [110, 110, 130]);
-      ly += 7;
+      drawCommodity(kind, x + 6, ly - 1);
+      smallText(ctx, im.name, x + 16, ly, [90, 90, 105]);
+      const d = String(trade.day[kind]), t = String(trade.total[kind]), p = "$" + im.price;
+      smallText(ctx, d, cDay - smallTextWidth(d), ly, [110, 110, 130]);
+      smallText(ctx, t, cTot - smallTextWidth(t), ly, [110, 110, 130]);
+      smallText(ctx, p, cPr - smallTextWidth(p), ly, [140, 110, 40]);
+      ly += 8;
     }
-    smallText(ctx, "SHIPPED-IN FISH ONLY WHEN THE PIER RUNS DRY", x + 6, ly, [140, 110, 40]); ly += 9;
+    smallText(ctx, "FISH ONLY SHIPS WHEN THE PIER IS DRY", x + 6, ly, [140, 110, 40]); ly += 9;
   }
   const staff = npcs.filter(c => c.p.employer);
   if (staff.length) {
