@@ -29,7 +29,11 @@ const BUS_TERMINUS = [100, 1240];
 const STATION_BOTTOM = 152;
 const QUEUE_DX = 13, QUEUE_MAX = 5, TOURIST_QUEUE_MAX = 4;   // tourists keep 4; the 5th slot is reserved for locals
 const SHELTER_X = 444, MOVE_IN_COST = 35;
-const JOB_BOARD_X = 716, NPC_WAGE = 20;   // the town labor market
+const JOB_BOARD_X = 716;   // the town labor market
+// NPC_WAGE (a flat 20 for anybody an NPC employed, against the crew's 23 for
+// the same work) is RETIRED. Wages are per-business data now, and a business
+// pays what it pays whoever works there - see WAGE_STD / bizWage below. This
+// closes the last "some crabs are more real than others" gap PLAN records.
 const PIER_X0 = 1870, PIER_X1 = 2040, PIER_Y = 96;   // planks over the east break
 const FISHING_SPOTS = [{ x: 1900, y: PIER_Y }, { x: 1956, y: PIER_Y }, { x: 2012, y: PIER_Y }];
 // the rail holds more than three: late arrivals shoulder in beside the
@@ -171,6 +175,12 @@ const BIZ = {
   },
   showers: {
     name: "SUDS SHOWERS", short: "SHWR", sign: "SUDS SHOWERS", kind: "shopfront", rent: 35, owner: "sudsy",
+    // SUDSY OPENS BELOW THE MARKET, at the old flat NPC_WAGE. That is the ONLY
+    // place the retired 20 survives, and it is now a fact about her SHOP, not
+    // about the crabs in it - anybody who works there gets $20, crew included,
+    // and any crab she hires can grumble, get poached, or watch her wage policy
+    // walk her up to the town rate. See WAGE_STD.
+    wage: 20,
     x0: 940, x1: 1120, door: 954,
     stations: {
       taps:  [{ x: 946, y: 136 }],
@@ -202,11 +212,62 @@ const BIZ = {
 // on the MANAGEMENT screen (tap a shop's sign); NPC owners tune their own
 // via HOURS_POLICY below.
 const HOURS_MIN = 6 * 60, HOURS_MAX = 24 * 60, HOURS_SPAN_MIN = 4 * 60;
+// ---------------------------------------------------------------- the wage
+// THE WAGE IS A SETTING. Every business carries its own rate - the DAY RATE
+// for a standard day of that shift, exactly the currency hourlyRate already
+// quotes labour in - and every crab can be paid ABOVE or BELOW it on a private
+// deal (Matt: "should be able to pay workers different amounts though, even
+// though it's a pain"). Three layers, most specific wins:
+//
+//   WAGE_STD        the town's standard day        23 (the old CRAB_WAGE)
+//   BIZ[b].wage     what THIS shop advertises      defaults to WAGE_STD
+//   p.wage          what THIS crab negotiated      defaults to the shop rate
+//
+// Defaults are inert by construction: every business opens on WAGE_STD and
+// nobody carries a private deal, so a fresh or migrated save pays exactly what
+// the flat CRAB_WAGE constant paid. The one deliberate change is that NPC
+// staff now earn the same 23 as crew - see NPC_WAGE's headstone above.
+//
+// A PRIVATE DEAL IS A DEAL WITH A BOSS, not a badge the crab wears forever.
+// It is stamped with the OWNER who granted it (p.wageOwner) and it travels
+// with the crab across every shop that owner runs - reassign a crew crab from
+// the shack to the juice bar and their deal comes with them. Work for somebody
+// else (quit, poached, laid off, or your shop was sold out from under you) and
+// it LAPSES back to the new shop's rate, announced in the day report so it is
+// never silent. The alternative - a private rate that survives a change of
+// employer - would let a $50 crew crab wander onto SUDSY's payroll and bankrupt
+// her with a deal she never made.
+const WAGE_STD = 23;
+const WAGE_MIN = 8, WAGE_MAX = 60;   // the stepper's band: below the pier's worst day, above its best
+const clampWage = (n) => Math.max(WAGE_MIN, Math.min(WAGE_MAX, Math.round(+n || 0)));
+function bizWage(b) { return BIZ[b] && BIZ[b].wage != null ? BIZ[b].wage : WAGE_STD; }
+function setBizWage(b, n) { if (BIZ[b]) BIZ[b].wage = clampWage(n); }
+// the deal, if it is still THIS boss's deal (see the note above)
+function privateWage(c) {
+  return c.p.wage != null && c.p.wageOwner === bizOwner(c.p.job) ? clampWage(c.p.wage) : null;
+}
+function onShopRate(c) { return privateWage(c) == null; }
+function setCrabWage(c, n) {
+  const shop = bizWage(c.p.job), v = clampWage(n);
+  if (v === shop) { delete c.p.wage; delete c.p.wageOwner; return shop; }   // back on the shop rate: no deal to keep
+  c.p.wage = v; c.p.wageOwner = bizOwner(c.p.job);
+  return v;
+}
+// APPLY TO ALL: the bulk action that makes per-crab bearable. Every staffer of
+// this shop goes back onto the shop rate, private deals torn up.
+function applyShopWage(b) {
+  let n = 0;
+  for (const k of allCrabs()) if (k.p.job === b && k.p.wage != null) { delete k.p.wage; delete k.p.wageOwner; n++; }
+  return n;
+}
 const MEAL_POLS = ["retail", "atcost", "free"];   // staff-meal pricing, per biz
 const MEAL_POL_LABEL = { retail: "RETAIL", atcost: "AT COST", free: "FREE" };
 for (const k in BIZ) {   // one migration point: defaults = today's behavior
   BIZ[k].hours = { open: 8 * 60, close: 20 * 60 };
   BIZ[k].mealPol = "retail";
+  // a business pays what it pays, whoever works there. WAGE_STD unless the
+  // table names an opening rate (SUDS SHOWERS does - see its entry).
+  BIZ[k].wage = BIZ[k].wage != null ? clampWage(BIZ[k].wage) : WAGE_STD;
   // labor policy (see the LABOR POLICY block below). GRANT is what the game
   // already did - a sick crab stayed home unpaid - so the default is inert.
   BIZ[k].sickPol = "grant";
@@ -755,7 +816,10 @@ function dayOffIdx(c) {
   const v = _offMap[c.p.name + "|" + c.p.job];
   return v != null ? v : 0;
 }
-function offToday(c) { return dayOffIdx(c) === weekdayIdx(day); }
+// "not working today" - the rota's weekday off, or a WALKOUT over pay (see
+// walkoutToday). One predicate, so both reasons skip the commute, the duty and
+// the wage together and nothing downstream needs a second rule.
+function offToday(c) { return dayOffIdx(c) === weekdayIdx(day) || walkoutToday(c); }
 function coveringToday(c) {
   refreshDaysOff();
   return c.p.shift !== "D" && !offToday(c) && !!_needCover[c.p.job];
@@ -920,7 +984,15 @@ function onOvertimeNow(c) {
   const sh = dutyShift(c);
   return tmin < sh.start || tmin >= sh.end;
 }
-function wageRate(c) { return c.p.npc ? NPC_WAGE : CRAB_WAGE; }
+// what THIS crab is paid for a standard day: their private deal, else their
+// shop's rate. One function, and every pay path in the game already runs
+// through it - basePayToday, contractPay, hourlyRate and otPremium all read
+// it, so the settlement, the BILL chip, the MENU column and the bankruptcy
+// forecaster total per-crab rates without any of them learning a new rule.
+function wageRate(c) {
+  const deal = privateWage(c);
+  return deal != null ? deal : bizWage(c.p.job);
+}
 // ---- THE HOURLY RATE (one clock for all labor) -----------------------------
 // CRAB_WAGE / NPC_WAGE are DAY RATES FOR A STANDARD DAY OF THAT SHIFT - the
 // span the shift has under the town's default 8:00-20:00 hours (SHIFT_SPAN: a
@@ -972,12 +1044,79 @@ function otPayToday(c) { return otPremium(c, c.otMin || 0); }        // truthful
 // tonight's forecast: scheduled while they're still on OT, else what they worked
 function otPayForecast(c) { return otEligible(c) ? otPremium(c, otMinutes(c)) : otPayToday(c); }
 
+// ---- WHAT THE REST OF TOWN PAYS -------------------------------------------
+// A wage is only a lever if a crab can tell whether it is a good one, so every
+// employed crab measures theirs against three offers it could actually take:
+//
+//   THE WATER  a day's casting is about five fish at today's market price -
+//              the same rule the job board already uses to decide whether a
+//              fisher signs. It FLOATS ($2-7 a fish), so the outside option is
+//              a real, moving number rather than a constant. Discounted by
+//              PIER_TOUGH because a paycheck is a paycheck: a crab in work
+//              only envies the rail when it is properly beating them.
+//   NEXT DOOR  the mean rate of every OTHER employing shop in town (mean, not
+//              max, so one rich shop cannot drag the whole town's demands up).
+//   THE CRAB   the best-paid other staffer AT THEIR OWN SHOP. This is the
+//     BESIDE   sharp one, and it is the one Matt asked for: being the
+//     THEM     worst-paid crab in the room stings more than a low number does.
+//
+// At the shipped defaults all three sit at or below WAGE_STD (the pier tops
+// out at 7 x 5 x 0.6 = 21 against a wage of 23), so nobody is aggrieved in a
+// default town and the whole layer is inert until somebody moves a stepper.
+const WAGE_CFG = {
+  FISH_DAY: 5,        // fish landed in a day on the rail (the job board's own figure)
+  PIER_TOUGH: 0.6,    // a steady wage is worth this much of a lucky day's fishing
+  GRACE: 2,           // nights on a new job before anybody starts counting
+  GAIN: 1.0,          // grievance per night, per full unit of shortfall
+  CALM: 0.34,         // grievance shed per night when the pay is fair (3 good nights clears a bad week)
+  GRUMBLE: 0.35,      // a quip, a mood, a line on the dossier
+  WARN: 0.70,         // a named toast and a day-report line: they are asking around
+  LEAVE: 1.0,         // NPC staff walk; crew refuse the shift
+  POACH: 0.5,         // grievance at which a better-paying vacancy turns a head
+};
+function pierDay() { return (trade.price || FISH_START) * WAGE_CFG.FISH_DAY; }
+function pierClaim() { return pierDay() * WAGE_CFG.PIER_TOUGH; }
+function townWage(exceptBiz) {   // the mean rate of the other shops hiring in town
+  const rates = Object.keys(BIZ).filter(b => b !== exceptBiz && bizUnlocked(b) && bizOwner(b)).map(bizWage);
+  return rates.length ? rates.reduce((s, r) => s + r, 0) / rates.length : WAGE_STD;
+}
+function peerWage(c) {   // the best-paid OTHER crab on the same roster
+  let best = 0;
+  for (const k of allCrabs()) if (k !== c && k.p.job === c.p.job && !k.p.owner) best = Math.max(best, wageRate(k));
+  return best;
+}
+// the number a crab thinks it is worth tonight
+function goingRate(c) { return Math.max(pierClaim(), townWage(c.p.job), peerWage(c)); }
+function payRatio(c) { const g = goingRate(c); return g > 0 ? wageRate(c) / g : 1; }
+// wage-earners only: fishers sell fish and owners draw from their own till,
+// so neither has a boss to be aggrieved at.
+function onPayroll(c) { return !c.p.owner && c.p.job !== "fishing" && !!BIZ[c.p.job] && !!bizOwner(c.p.job); }
+function wageGripe(c) { return onPayroll(c) ? (c.p.gripe || 0) : 0; }
+function wageMoodLabel(c) {
+  const g = wageGripe(c);
+  return g >= WAGE_CFG.LEAVE ? "WALKING OUT" : g >= WAGE_CFG.WARN ? "ASKING AROUND"
+    : g >= WAGE_CFG.GRUMBLE ? "UNDERPAID" : payRatio(c) > 1.08 ? "WELL PAID" : "";
+}
+// A CREW CRAB DOES NOT RESIGN, IT WALKS OUT FOR THE DAY. The player's crew are
+// under contract - the same reasoning that keeps them out of the pool of crabs
+// who can buy a failed business - so an aggrieved crew crab does not vanish
+// into the townsfolk. They refuse tomorrow's shift instead: unpaid, no
+// commute, no duty, and repeated every night the pay stays wrong. That costs
+// the player the one currency the hours pass proved is expensive (a staffed
+// hour), it is decided at settlement so there is a whole evening to fix it,
+// and it is fully reversible - raise the wage and they clock back on. Routing
+// it through offToday is deliberate: a walkout IS an unauthorised day off, so
+// the wage skip, the BILL dip, the placard and the errands-all-day behaviour
+// all come for free, while `coveringToday` (which reads the ROTA, not this)
+// correctly refuses to hand the shop a free cover double for it.
+function walkoutToday(c) { return c.p.walkout === day && onPayroll(c); }
 function bizRestingToday(b) {   // nobody on the roster works today (rest day or sick day)
   const staff = allCrabs().filter(k => k.p.job === b);
   return staff.length > 0 && staff.every(k => offToday(k) || onSickDay(k));
 }
 function restingLabel(b) {   // what the placard says - illness reads differently from a rota day
   const staff = allCrabs().filter(k => k.p.job === b);
+  if (staff.some(k => walkoutToday(k)) && staff.every(k => walkoutToday(k) || offToday(k))) return "NO CREW IN";
   return staff.some(k => onSickDay(k)) && staff.every(k => onSickDay(k) || offToday(k))
     && staff.some(k => !offToday(k)) ? "OUT SICK" : "DAY OFF";
 }
@@ -1067,6 +1206,175 @@ function runLaborPolicy(b) {
 function otEligibleTomorrow(c) {
   return !c.p.sick && c.p.job !== "fishing" && !!BIZ[c.p.job] && !c.p.owner
     && dayOffIdx(c) !== weekdayIdx(day + 1);
+}
+
+// ---- WAGE RELATIONS --------------------------------------------------------
+// Read once per settlement, right after the night's wages are actually paid,
+// so every crab is reacting to the money that just did (or didn't) land in
+// their wallet. THREE THINGS HAPPEN HERE AND NOTHING ELSE IN THE GAME MOVES
+// PAY: grievance accrues, the town says so out loud, and only then does
+// anybody act. There is never a silent snap - a crab grumbles, then asks
+// around, then goes, with at least GRACE + 3 nights between a wage cut and
+// anybody's feet.
+//
+// A CRAB WHO IS PAID ABOVE THE GOING RATE CANNOT BE POACHED, by construction:
+// grievance is the only thing that turns a head, and a crab on the best deal
+// in the room has a payRatio >= 1 and sheds grievance every night.
+function poachTarget(c) {
+  // a vacancy somewhere that pays this crab strictly more than they get now.
+  // Peer shops only: an NPC on the PLAYER's payroll would be a new class of
+  // crab (the player buys labour with the SHOP's hire, not the job board), and
+  // that is a bigger change than a wage setting should smuggle in.
+  const mine = wageRate(c);
+  let best = null;
+  for (const b of Object.keys(BIZ)) {
+    if (b === c.p.job || !bizUnlocked(b) || forSale(b)) continue;
+    const oid = bizOwner(b);
+    if (!oid || oid === "player") continue;
+    const o = OWNERS[oid];
+    if (!o || o.gone || (o.darkT || 0) > 0) continue;
+    if (allCrabs().filter(k => k.p.job === b).length >= 2) continue;   // no room on the roster
+    const w = bizWage(b);
+    if (w <= mine || (best && w <= bizWage(best))) continue;
+    if (o.till < w * 2) continue;                                      // they have to be able to pay it
+    best = b;
+  }
+  return best;
+}
+function quitOverPay(c, why) {
+  const to = poachTarget(c), from = c.p.job;
+  c.p.gripe = 0; c.p.wageJob = null;
+  noteWageLoss(from);   // the boss they left remembers, and their policy answers it
+  if (to) {
+    const oid = bizOwner(to);
+    abortErrand(c); abortChef(c);
+    c.duty = false; c.pendingOff = false; c.kstate = "idle"; c.carrying = null;
+    c.dayState = "home"; c.cstate = "";
+    c.p.job = to; c.p.employer = oid; c.workBiz = to; c.p.fisher = false;
+    delete c.p.wage; delete c.p.wageOwner;   // a new boss, a new rate
+    toast = { text: c.p.name + " LEFT FOR " + BIZ[to].name + " - $" + bizWage(to) + " BEATS $" + Math.round(wageRate(c)), t: 8 };
+    today.moved.push(c.p.name + " POACHED BY " + BIZ[to].short + " OVER PAY");   // DIARY HOOK: poached
+  } else {
+    layOff(c);
+    toast = { text: c.p.name + " QUIT OVER THE PAY - BACK TO THE PIER", t: 8 };
+    today.moved.push(c.p.name + " QUIT OVER PAY - BACK TO THE PIER");   // DIARY HOOK: quit over pay
+  }
+  if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+  if (window._stats) (window._stats.wageQuits = window._stats.wageQuits || [])
+    .push({ day, name: c.p.name, to: to || "fishing", why: why || "pay" });
+}
+function runWageRelations() {
+  if (window._noWageRelations) return;
+  const leavers = [];
+  for (const c of allCrabs()) {
+    // a private deal is a deal with a BOSS: it lapses the moment somebody else
+    // signs the cheque, and it says so rather than quietly evaporating
+    if (c.p.wage != null && c.p.wageOwner !== bizOwner(c.p.job)) {
+      delete c.p.wage; delete c.p.wageOwner;
+      today.moved.push(c.p.name + " IS BACK ON THE SHOP RATE - $" + bizWage(c.p.job));   // DIARY HOOK: deal lapsed
+    }
+    if (!onPayroll(c)) { c.p.gripe = 0; c.p.wageJob = null; continue; }
+    if (c.p.wageJob !== c.p.job) {   // a new job restarts the clock: nobody resents a boss they met yesterday
+      c.p.wageJob = c.p.job; c.p.wageDay = day; c.p.gripe = 0; continue;
+    }
+    if (day - (c.p.wageDay || 0) < WAGE_CFG.GRACE) continue;
+    const r = payRatio(c), was = c.p.gripe || 0, rate = Math.round(wageRate(c));
+    c.p.gripe = Math.max(0, Math.min(2, r < 1 ? was + (1 - r) * WAGE_CFG.GAIN
+      : was - WAGE_CFG.CALM - (r - 1)));
+    const g = c.p.gripe;
+    // ---- the warnings, in order, each fired once on the way up
+    if (was < WAGE_CFG.GRUMBLE && g >= WAGE_CFG.GRUMBLE) {
+      c.quip = { text: "$" + rate + "? THE PIER PAYS BETTER", t: 6 };
+      today.moved.push(c.p.name + " IS GRUMBLING ABOUT $" + rate);   // DIARY HOOK: first grumble
+    } else if (was < WAGE_CFG.WARN && g >= WAGE_CFG.WARN) {
+      toast = { text: c.p.name + " IS ASKING AROUND - $" + rate + " ISN'T ENOUGH", t: 8 };
+      today.moved.push(c.p.name + " IS ASKING AROUND ABOUT PAY");   // DIARY HOOK: second warning
+      popText("ASKING AROUND", c.x - 14, FLOOR_Y - 34, [255, 190, 90]);
+    }
+    // ---- and only then, feet
+    if (g >= WAGE_CFG.LEAVE) {
+      if (c.p.npc) { leavers.push(c); continue; }
+      // crew: tomorrow's shift is refused, and the refusal repeats until the
+      // pay is right. Announced tonight, so there is a whole evening to fix it.
+      if (c.p.walkout !== day + 1) {
+        c.p.walkout = day + 1;
+        toast = { text: c.p.name + " WON'T WORK TOMORROW AT $" + rate, t: 8 };
+        today.moved.push(c.p.name + " REFUSES TOMORROW'S SHIFT OVER $" + rate);   // DIARY HOOK: walkout
+        if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+        if (window._stats) (window._stats.walkouts = window._stats.walkouts || [])
+          .push({ day: day + 1, name: c.p.name, rate });
+      }
+    } else if (c.p.walkout != null && g < WAGE_CFG.GRUMBLE) {
+      delete c.p.walkout;   // fixed: back on the clock, no lingering grudge state
+    } else if (g >= WAGE_CFG.POACH && c.p.npc) {
+      const to = poachTarget(c);
+      if (to) leavers.push(c);   // somebody better is hiring and they've had enough to listen
+    }
+  }
+  for (const c of leavers) quitOverPay(c);
+}
+
+// ---- CPU OWNERS RUN THE SAME LEVER -----------------------------------------
+// Built on the HOURS_POLICY pattern, table-driven, one move per settlement, a
+// cooldown day after each, a named toast every time. Deliberately SHOP-LEVEL:
+// a peer owner sets ONE rate for their shop and never negotiates per crab.
+// That is more machinery than the town needs, and the player having the finer
+// instrument is a fair asymmetry - the same shape as the player being the only
+// one who can give right-click orders.
+//
+//   RAISE  +$1  a post they cannot fill, or a staffer asking around, or they
+//               lost somebody over pay in the last LOSS_MEMORY days
+//   TRIM   -$1  fully staffed, nobody aggrieved, and paying more than TRIM_OVER
+//               times what the rest of the market asks
+//
+// CONVERGENCE, by the same argument the hours policy uses: the two regimes are
+// DISJOINT with a dead band between them. RAISE needs somebody's grievance (or
+// an empty post) and every raise cuts that grievance; TRIM needs zero
+// grievance AND a rate above going x TRIM_OVER, and every trim walks the rate
+// toward that ceiling and stops at it. Between goingRate and goingRate x 1.12
+// nothing fires at all, so the rate cannot ping-pong across a knife edge.
+const WAGE_POLICY = {
+  showers: { postDays: 1, trimOver: 1.12, tillFloor: 40, lossMemory: 3 },
+};
+let wagePolicyState = {};   // biz -> { cd, lost }  (persisted)
+function noteWageLoss(b) {  // somebody walked: the owner remembers for a few days
+  const st = wagePolicyState[b] = wagePolicyState[b] || { cd: 0, lost: 0 };
+  st.lost = day;
+}
+function runWagePolicy(b) {
+  const cfg = WAGE_POLICY[b];
+  if (!cfg || window._noWagePolicy || forSale(b)) return;
+  const oid = bizOwner(b);
+  if (!oid || oid === "player") return;
+  const o = OWNERS[oid];
+  if (!o || o.gone) return;
+  const st = wagePolicyState[b] = wagePolicyState[b] || { cd: 0, lost: 0 };
+  if (st.cd > 0) { st.cd--; return; }
+  const rate = bizWage(b);
+  const staff = allCrabs().filter(k => k.p.job === b && !k.p.owner);
+  const post = jobBoard.find(j => j.biz === b);
+  const stale = !!post && day - post.day >= cfg.postDays;          // advertised, nobody came
+  const aggrieved = staff.some(k => wageGripe(k) >= WAGE_CFG.WARN);
+  const lostRecently = st.lost && day - st.lost <= cfg.lossMemory;
+  const going = Math.max(pierClaim(), townWage(b));
+  let line = null;
+  if ((stale || aggrieved || lostRecently) && rate < WAGE_MAX
+      && o.till >= cfg.tillFloor + (rate + 1) * Math.max(1, staff.length)) {
+    setBizWage(b, rate + 1);
+    line = "RAISES THE WAGE TO $" + bizWage(b);
+  } else if (!post && staff.length >= 2 && !staff.some(k => wageGripe(k) > 0.1)
+      && rate > going * cfg.trimOver && rate - 1 >= WAGE_MIN) {
+    setBizWage(b, rate - 1);
+    line = "TRIMS THE WAGE TO $" + bizWage(b);
+  }
+  if (!line) return;
+  st.cd = 1;
+  for (const j of jobBoard) if (j.biz === b) j.wage = bizWage(b);   // the posting is the advert: keep it honest
+  const who = OWNERS[oid].name;
+  toast = { text: who + " " + line, t: 7 };
+  today.moved.push(who + " " + line);   // DIARY HOOK: a peer owner moved the wage
+  if (window._stats) (window._stats.wageMoves = window._stats.wageMoves || [])
+    .push({ day, biz: b, rate: bizWage(b), line });
 }
 function darkness() { // 0 = day, 1 = full night
   const t = tmin;
@@ -1222,7 +1530,10 @@ function loadSlot(i) {
   setActiveSlot(i);
   reloadGame();
 }
-const CRAB_WAGE = 23, HOUSE_RENT = 10;   // wage raised 22 -> 23 with T2 thirst: crews drink at retail, the wage keeps their wallets liquid
+// CRAB_WAGE is now the STANDARD rate a business opens on, not the rate anybody
+// is stuck with - see WAGE_STD / bizWage / wageRate. Kept as the name the rest
+// of the file (and the tools) already say when they mean "the town's wage".
+const CRAB_WAGE = WAGE_STD, HOUSE_RENT = 10;   // wage raised 22 -> 23 with T2 thirst: crews drink at retail, the wage keeps their wallets liquid
 function rentAmount() { return BIZ.shack.rent; }   // shack lease (legacy name); due from night one
 function totalRent() {   // the PLAYER's nightly property bill, due from night one
   return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player")
@@ -1671,8 +1982,12 @@ function slotMeta(s) {
   const shackH = s.hours && Array.isArray(s.hours.shack) ? s.hours.shack : null;
   const span = shackH ? Math.max(0, (+shackH[1] || 0) - (+shackH[0] || 0)) : 2 * STD_SHIFT;
   const shiftLen = Math.min(STD_SHIFT, Math.round(span / 2) || STD_SHIFT);
-  const crewWages = Math.round((Array.isArray(s.personas) ? s.personas.length : 0)
-    * CRAB_WAGE * shiftLen / STD_SHIFT);
+  // ...and at whatever rate that town pays: the preview card totals each
+  // saved crab's own deal, falling back to the shack's rate then WAGE_STD.
+  const savedWage = (p) => clampWage(p && p.wage != null ? p.wage
+    : (s.wage && s.wage.shack != null ? s.wage.shack : WAGE_STD));
+  const crewWages = Math.round((Array.isArray(s.personas) ? s.personas : [])
+    .reduce((n, p) => n + savedWage(p), 0) * shiftLen / STD_SHIFT);
   const purse = (Array.isArray(s.personas) ? s.personas : [])
     .reduce((n, p) => n + Math.max(0, (p && p.wallet) || 0), 0);
   const boats = (Array.isArray(s.personas) ? s.personas : [])
@@ -1758,6 +2073,11 @@ function save() {
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
     mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
     hoursPol: hoursPolicyState,
+    // THE WAGE: per-business rates here, per-crab deals (p.wage/p.wageOwner)
+    // and grievance (p.gripe/p.wageJob/p.wageDay/p.walkout) inside the
+    // personas above, and the CPU owners' move ledger.
+    wage: (() => { const m = {}; for (const k in BIZ) m[k] = bizWage(k); return m; })(),
+    wagePol: wagePolicyState,
     // labor policy: per-biz sick-day setting + auto-manage delegation, and the
     // auto-manager's cooldown ledger (per-crab ot/sickPol/restT ride along
     // inside the personas above)
@@ -1890,6 +2210,13 @@ function load(slot) {
     if (BIZ[b] && Array.isArray(s.hours[b])) setBizHours(b, +s.hours[b][0] || 0, +s.hours[b][1] || 0);
   if (s.mealPol) for (const b in s.mealPol)
     if (BIZ[b] && MEAL_POLS.includes(s.mealPol[b])) BIZ[b].mealPol = s.mealPol[b];
+  // the wage settings. Old saves have none: every business opens on WAGE_STD,
+  // which is exactly the flat rate they were playing with. clampWage keeps a
+  // hand-edited or degenerate save inside the stepper's own band.
+  if (s.wage) for (const b in s.wage)
+    if (BIZ[b] && s.wage[b] != null) setBizWage(b, s.wage[b]);
+  if (s.wagePol) for (const b in s.wagePol)
+    if (BIZ[b] && s.wagePol[b]) wagePolicyState[b] = { cd: s.wagePol[b].cd || 0, lost: s.wagePol[b].lost || 0 };
   if (s.hoursPol) for (const b in s.hoursPol)
     if (BIZ[b] && s.hoursPol[b] && Array.isArray(s.hoursPol[b].hist))
       hoursPolicyState[b] = { hist: s.hoursPol[b].hist.slice(-4), cd: s.hoursPol[b].cd || 0 };
@@ -2248,8 +2575,10 @@ function runJobBoard() {
     // never triggers the emergency HELP WANTED posting (that gate is for a
     // shop that has genuinely lost its people)
     const staff = allCrabs().filter(k => k.p.job === b).length;
-    if ((o.till >= 260 && staff < 2) || (staff === 0 && o.till >= NPC_WAGE * 2))
-      jobBoard.push({ biz: b, wage: NPC_WAGE, day });
+    // THE POSTING ADVERTISES THE SHOP'S OWN RATE - it is the wage setting made
+    // public, and it is what the fisher weighs against the water below.
+    if ((o.till >= 260 && staff < 2) || (staff === 0 && o.till >= bizWage(b) * 2))
+      jobBoard.push({ biz: b, wage: bizWage(b), day });
   }
   // the macro response: a fish price pinned at the ceiling for a full day is
   // the town asking for more fishers - the pier posts on the same board
@@ -2272,7 +2601,8 @@ function runJobBoard() {
     // a free agent weighs the posting against the pier: a day's casting is
     // about five fish, so when that strictly beats the wage, nobody signs
     // (ties go to the steady paycheck - pier luck is still luck)
-    const cands = trade.price * 5 > j.wage ? [] :
+    j.wage = bizWage(j.biz);   // the board always shows today's rate, not the day it was pinned up
+    const cands = trade.price * WAGE_CFG.FISH_DAY > j.wage ? [] :
       npcs.filter(k => k.p.fisher && k.p.job === "fishing" && !k.p.sick && !k.p.employer);
     let hire = null;
     if (cands.length) {
@@ -2351,6 +2681,15 @@ function convertTourist(k) {
   c.quip = { text: "I LIVE HERE NOW!", t: 3 };
   return c;
 }
+// THE PLAYER COMPETES FOR LABOUR TOO. The SHOP's hire is recruitment, not a
+// vending machine: the ad carries the shack's advertised rate, and a recruit
+// weighs it against the pier exactly as a fisher weighs a job-board posting -
+// the same PIER_TOUGH discount, because a wage is steady and the water is not.
+// INERT AT DEFAULTS BY CONSTRUCTION: the pier's claim tops out at
+// FISH_IMPORT x FISH_DAY x PIER_TOUGH = 7 x 5 x 0.6 = $21, under WAGE_STD 23,
+// so a shop on the standard rate can always hire. Undercut it and, on a day
+// the fish are paying, nobody answers the ad.
+function recruitBites(b) { return bizWage(b) >= pierClaim(); }
 function hireCrew() {
   // a tourist mid-visit is the preferred recruit - they're right there in
   // the queue or at a table. Skip locals (k.isCrab: they have their own
@@ -3707,6 +4046,8 @@ function tapStatus(c) {
 function crabStatus(c) {
   if (c.p.sick) return (gravelyIll(c) ? "GRAVELY ILL - DAY " : "SICK - DAY ") + ((c.p.sick.days || 0) + 1)
     + (onSickDay(c) ? " - RESTING UP" : " - WORKING THROUGH IT");
+  if (walkoutToday(c) && c.dayState === "home" && darkness() <= 0.7)
+    return "WALKED OUT OVER THE PAY";
   if (offToday(c)) {   // sick beats off; off beats everything but the commute home
     if (c.dayState === "toErrand") return "DAY OFF - OFF TO " + BIZ[c.errandBiz].short;
     if (c.dayState === "errand") return "DAY OFF - AT " + BIZ[c.errandBiz].name;
@@ -3765,6 +4106,12 @@ function buttonKey(b) {
 function tryBuy(key) {
   const u = UPS[key];
   if (!u || u.lvl >= u.max || coins < upCost(u)) return;
+  if (key === "chef" && !recruitBites("shack")) {   // refused BEFORE the money moves
+    toast = { text: "NOBODY'S BITING AT $" + bizWage("shack") + " - THE FISH ARE PAYING $"
+      + Math.round(pierDay()) + " A DAY", t: 8 };
+    if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+    return;
+  }
   coins -= upCost(u); u.lvl++;
   if (key === "arcade") {
     toast = { text: "THE CLAWCADE IS YOURS! CLICK A CRAB, THEN ITS CARD, TO STAFF IT", t: 8 };
@@ -3909,9 +4256,23 @@ cv.addEventListener("click", (ev) => {
         toast = { text: BIZ[manage].short + " SICK DAYS: " + SICK_POL_LABEL[b.sickPol], t: 5 };
         return;
       }
+      // the shop rate: what the board advertises, what a new hire starts on,
+      // and the default every crab falls back to
+      if (hit(R.wm)) { setBizWage(manage, bizWage(manage) - 1); sfx.buy(); save(); return; }
+      if (hit(R.wp)) { setBizWage(manage, bizWage(manage) + 1); sfx.buy(); save(); return; }
+      if (hit(R.wall)) {   // APPLY TO ALL: tear up every private deal at this shop
+        const n = applyShopWage(manage);
+        toast = { text: n ? BIZ[manage].short + ": " + n + " BACK ON $" + bizWage(manage)
+          : BIZ[manage].short + ": EVERYONE'S ALREADY ON $" + bizWage(manage), t: 5 };
+        sfx.buy(); save(); return;
+      }
       const staff = allCrabs().filter(c => c.p.job === manage);
       for (let i = 0; i < Math.min(staff.length, R.rows.length); i++) {
         const c = staff[i], cell = R.cells[i];
+        if (hit(cell.wdn) || hit(cell.wup)) {   // a private deal, above or below the shop rate
+          setCrabWage(c, Math.round(wageRate(c)) + (hit(cell.wup) ? 1 : -1));
+          sfx.buy(); save(); return;   // DIARY HOOK: the player moved this crab's rate
+        }
         if (hit(cell.name)) { dossier = c; sfx.ding(); return; }
         if (hit(cell.shift)) {   // M -> E -> D -> M: the roster's one real assignment
           const order = ["M", "E", "D"];
@@ -4618,6 +4979,7 @@ function drawNight() {
 
 function crabMood(c) {
   if (gravelyIll(c)) return ["FADING", [220, 60, 60]];   // the town SEES it: the death roll is armed
+  if (wageGripe(c) >= WAGE_CFG.WARN) return ["SORE ABOUT PAY", [200, 60, 60]];   // one warning short of the door
   if (c.p.homeless) return ["DOWN", [190, 80, 80]];
   if (c.p.wallet < 10) return ["BROKE", [190, 80, 80]];
   if (c.p.wallet > 120) return ["FLUSH", [180, 140, 30]];
@@ -4782,7 +5144,12 @@ function drawPanel() {
     // labor is priced by the hour now, so the rate is quoted per STANDARD
     // shift and the column sums what each crab's own contracted hours cost
     const baseBill = owed.reduce((s, c) => s + Math.round(basePayToday(c)), 0);
-    smallText(ctx, "WAGES " + owedN + "X$" + CRAB_WAGE + "/" + (STD_SHIFT / 60) + "H" + (owedN < crabs.length ? " (" + (crabs.length - owedN) + " OUT)" : ""), 132, by, [190, 175, 160]);
+    // the rate quoted here is the crew's OWN rate when they all share one, and
+    // MIXED the moment somebody is on a private deal - the column below is
+    // always the exact per-crab total either way
+    const rates = Array.from(new Set(owed.map(c => Math.round(wageRate(c)))));
+    const rateTxt = rates.length === 1 ? "$" + rates[0] : "MIXED";
+    smallText(ctx, "WAGES " + owedN + "X" + rateTxt + "/" + (STD_SHIFT / 60) + "H" + (owedN < crabs.length ? " (" + (crabs.length - owedN) + " OUT)" : ""), 132, by, [190, 175, 160]);
     smallText(ctx, "$" + baseBill, 224, by, [235, 160, 130]); by += MROW;
     const otBill = owed.reduce((s, c) => s + Math.round(otPayForecast(c)), 0);
     if (otBill > 0) {
@@ -4864,7 +5231,7 @@ function drawIntro() {
     ["THE SHACK IS YOURS TO RUN", [70, 70, 90]],
     ["RENT: $" + BIZ.shack.rent + ", NIGHTLY AT 20:00", [170, 50, 50]],
     ["RENT IS DUE TONIGHT. GOOD LUCK.", [170, 50, 50]],
-    ["CREW WAGES: $" + CRAB_WAGE + " A SHIFT, NIGHTLY", [70, 70, 90]],
+    ["CREW WAGES: $" + bizWage("shack") + " A SHIFT - YOUR CALL", [70, 70, 90]],
     ["CREW PAY THEIR OWN $" + HOUSE_RENT + " HOME RENT", [70, 70, 90]],
     ["MISS RENT AND I TAKE THE SHACK", [170, 50, 50]],
   ];
@@ -5052,7 +5419,19 @@ function drawDossier() {
     : baseShift(c).label + (p.ot ? "  OT (NO ROOM TODAY)" : "")),
     otM ? [200, 110, 40] : [40, 30, 40], canOT ? "ot" : null);
   if (canOT) smallText(ctx, p.ot ? "TAP: NO OT" : "TAP: OT", x + w2 - (p.ot ? 44 : 36), ly - 9, [96, 170, 220]);
-  row("OFF", WEEKDAY_FULL[dayOffIdx(c)] + (offToday(c) ? " - THAT'S TODAY!" : ""), [70, 140, 200]);
+  row("OFF", WEEKDAY_FULL[dayOffIdx(c)] + (walkoutToday(c) ? " - WALKED OUT TODAY!"
+    : offToday(c) ? " - THAT'S TODAY!" : ""), walkoutToday(c) ? [190, 80, 80] : [70, 140, 200]);
+  // PAY: the rate, whose rate it is, and what the crab makes of it
+  if (onPayroll(c)) {
+    const mood = wageMoodLabel(c), gr = wageGripe(c);
+    row("PAY", "$" + Math.round(wageRate(c)) + "/SHIFT " + (onShopRate(c) ? "(SHOP RATE)" : "(PRIVATE DEAL)")
+      + (mood ? " - " + mood : ""),
+      gr >= WAGE_CFG.WARN ? [190, 80, 80] : gr >= WAGE_CFG.GRUMBLE ? [200, 110, 40]
+      : !onShopRate(c) ? [190, 110, 30] : [40, 30, 40]);
+    if (gr >= WAGE_CFG.GRUMBLE)
+      smallText(ctx, "THE GOING RATE IS $" + Math.round(goingRate(c)) + " (PIER $" + Math.round(pierDay()) + ")",
+        x + 56, ly, [110, 100, 110]), ly += 9;
+  }
   row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
   const [hl, hcol] = homeLabel(p);
   row("HOME", hl, hcol);
@@ -5166,8 +5545,13 @@ function manageRects() {
     cp: { x: x + 200, y: y + 44, w: 16, h: 16 },  // close +30
     meal: { x: x + 6, y: y + 108, w: 156, h: 14 },
     // ---- SCHEDULE tab
-    auto: { x: x + 6, y: y + 32, w: 104, h: 13 },
-    sickPol: { x: x + 114, y: y + 32, w: 104, h: 13 },
+    auto: { x: x + 6, y: y + 30, w: 104, h: 13 },
+    sickPol: { x: x + 114, y: y + 30, w: 104, h: 13 },
+    // the shop-wide wage: big steppers, the payroll it implies, and APPLY TO
+    // ALL - the bulk action that makes per-crab rates bearable
+    wm: { x: x + 40, y: y + 45, w: 16, h: 15 },
+    wp: { x: x + 82, y: y + 45, w: 16, h: 15 },
+    wall: { x: x + 102, y: y + 45, w: 46, h: 15 },
     rows: [], cells: [],
     // ---- TOWN tab
     csort: { x: x + 6, y: y + 31, w: 62, h: 13 },
@@ -5179,14 +5563,19 @@ function manageRects() {
   };
   MANAGE_TABS.forEach((t, i) => R.tab[t] = { x: x + 6 + i * 52, y: y + 16, w: 50, h: 12 });
   for (let i = 0; i < 7; i++) {
-    const ry = y + 66 + i * 12;
+    const ry = y + 67 + i * 11;
     R.rows.push({ x: x + 6, y: ry, w: w2 - 12, h: 11 });
-    R.cells.push({                                     // one row, four tap targets (OFF is derived: display only)
-      name:  { x: x + 6,   y: ry, w: 42, h: 11 },
-      shift: { x: x + 50,  y: ry, w: 44, h: 11 },
-      off:   { x: x + 96,  y: ry, w: 28, h: 11 },
-      ot:    { x: x + 126, y: ry, w: 40, h: 11 },
-      sick:  { x: x + 168, y: ry, w: 50, h: 11 },
+    R.cells.push({                                     // one row, six tap targets (OFF is derived: display only)
+      name:  { x: x + 6,   y: ry, w: 34, h: 11 },
+      shift: { x: x + 40,  y: ry, w: 40, h: 11 },
+      off:   { x: x + 80,  y: ry, w: 18, h: 11 },
+      ot:    { x: x + 98,  y: ry, w: 30, h: 11 },
+      sick:  { x: x + 128, y: ry, w: 42, h: 11 },
+      // the per-crab wage stepper: two halves of one cell, "-$23+", so the
+      // rate and both directions live in 48px of a 12px row
+      wdn:   { x: x + 170, y: ry, w: 22, h: 11 },
+      wup:   { x: x + 196, y: ry, w: 22, h: 11 },
+      wage:  { x: x + 170, y: ry, w: 48, h: 11 },
     });
   }
   for (let i = 0; i < CENSUS_ROWS; i++) R.crows.push({ x: x + 4, y: y + 47 + i * 16, w: w2 - 8, h: 15 });
@@ -5254,26 +5643,49 @@ function drawManage() {
     const auto = !!b.autoLabor;
     chip(R.auto, "AUTO-MANAGE " + (auto ? "ON" : "OFF"), null, auto);
     chip(R.sickPol, "SICK: " + (b.sickPol === "require" ? "MUST WORK" : "GRANT"), null, b.sickPol !== "require");
-    smallText(ctx, auto ? "AUTO: SICK DAYS GRANTED, OT CALLED WHEN COVER IS SHORT"
-      : "YOU CALL IT: TAP A ROW'S SHIFT, OT OR SICK CELL", x + 6, y + 48, [110, 100, 110]);
-    smallText(ctx, "OT: " + (OT_SPAN / 60) + "H AT " + OT_RATE + "X PAY, INSIDE OPEN HOURS",
-      x + 6, y + 57, [150, 140, 160]);
     const staff = allCrabs().filter(c => c.p.job === key);
+    // ---- THE WAGE. Shop rate on the left with real steppers, APPLY TO ALL
+    // beside it, and the consequences written out on the right: what tonight's
+    // payroll comes to at these rates, and what the rest of town is paying.
+    smallText(ctx, "WAGE", x + 8, y + 49, [58, 42, 38]);
+    btn(R.wm, "-"); btn(R.wp, "+");
+    const wtxt = "$" + bizWage(key);
+    text(ctx, wtxt, x + 58 + ((22 - textWidth(wtxt)) >> 1), y + 49, [40, 30, 40]);
+    const deals = staff.filter(c => !onShopRate(c)).length;
+    chip(R.wall, "ALL $" + bizWage(key), null, deals > 0);
+    const bill = staff.reduce((s2, c) => s2 + Math.round(crabDueTonight(c)), 0);
+    smallText(ctx, "TONIGHT $" + fmt(bill), x + 152, y + 45, [190, 80, 80]);
+    smallText(ctx, "TOWN $" + townWage(key).toFixed(0) + "  PIER $" + Math.round(pierDay()),
+      x + 152, y + 54, [110, 100, 110]);
+    smallText(ctx, deals ? deals + " ON A PRIVATE DEAL - ALL PUTS THEM BACK ON $" + bizWage(key)
+      : auto ? "AUTO: SICK DAYS GRANTED, OT CALLED WHEN COVER IS SHORT"
+      : "TAP A ROW: SHIFT, OT, SICK, OR - / + ON THE WAGE", x + 6, y + 61, [110, 100, 110]);
     if (!staff.length) smallText(ctx, "NOBODY ASSIGNED - REASSIGN FROM A DOSSIER", x + 8, y + 70, [190, 80, 80]);
     for (let i = 0; i < Math.min(staff.length, R.rows.length); i++) {
       const c = staff[i], cell = R.cells[i], ry = R.rows[i].y;
       if (i % 2 === 0) rect(ctx, R.rows[i].x, ry - 1, R.rows[i].w, 11, [244, 238, 224]);
-      smallText(ctx, c.p.name.slice(0, 9), cell.name.x + 2, ry + 2, [40, 30, 40]);
+      const gripe = wageGripe(c);
+      smallText(ctx, c.p.name.slice(0, 8), cell.name.x + 1, ry + 2,
+        gripe >= WAGE_CFG.WARN ? [190, 80, 80] : [40, 30, 40]);
       const otM = otMinutes(c), cov = coveringToday(c);
       smallText(ctx, (cov ? "CVR " : c.p.shift + " ") + (otM ? effShift(c).label : baseShift(c).label),
         cell.shift.x, ry + 2, cov ? [140, 90, 160] : otM ? [200, 110, 40] : [70, 90, 130]);
-      smallText(ctx, WEEKDAYS[dayOffIdx(c)] + (offToday(c) ? "!" : ""), cell.off.x, ry + 2, [70, 140, 200]);
-      smallText(ctx, c.p.ot ? (otM ? "OT +" + Math.round(otM / 60) + "H" : "OT LATER") : "NO OT",
+      smallText(ctx, walkoutToday(c) ? "OUT!" : WEEKDAYS[dayOffIdx(c)] + (offToday(c) ? "!" : ""),
+        cell.off.x, ry + 2, walkoutToday(c) ? [190, 80, 80] : [70, 140, 200]);
+      smallText(ctx, c.p.ot ? (otM ? "OT+" + Math.round(otM / 60) + "H" : "OT LTR") : "NO OT",
         cell.ot.x, ry + 2, c.p.ot ? (otM ? [200, 110, 40] : [170, 150, 130]) : [150, 140, 160]);
       const sp = sickPolFor(c);
-      smallText(ctx, c.p.sick ? (onSickDay(c) ? "SICK: REST" : "SICK: WORKS")
+      smallText(ctx, c.p.sick ? (onSickDay(c) ? "SICK:REST" : "SICK:WORK")
+        : gripe >= WAGE_CFG.GRUMBLE ? wageMoodLabel(c)
         : sp === "require" ? "MUST WORK" : c.p.sickPol ? "SICK DAY OK" : "SHOP RULE",
-        cell.sick.x, ry + 2, c.p.sick ? [190, 80, 80] : sp === "require" ? [200, 110, 40] : [110, 100, 110]);
+        cell.sick.x, ry + 2, c.p.sick ? [190, 80, 80]
+        : gripe >= WAGE_CFG.WARN ? [190, 80, 80] : gripe >= WAGE_CFG.GRUMBLE ? [200, 110, 40]
+        : sp === "require" ? [200, 110, 40] : [110, 100, 110]);
+      // the per-crab rate: highlighted the moment it stops being the shop's
+      const rate = Math.round(wageRate(c)), own = !onShopRate(c);
+      smallText(ctx, "-", cell.wdn.x + 2, ry + 2, [120, 90, 60]);
+      smallText(ctx, "$" + rate, cell.wdn.x + 8, ry + 2, own ? [190, 110, 30] : [90, 80, 90]);
+      smallText(ctx, "+", cell.wup.x + 16, ry + 2, [120, 90, 60]);
     }
     if (staff.length > R.rows.length)
       smallText(ctx, "+" + (staff.length - R.rows.length) + " MORE - SEE THE TOWN TAB", x + 8, y + h2 - 26, [150, 140, 160]);
@@ -5578,7 +5990,10 @@ function drawJobBoard() {
       continue;
     }
     smallText(ctx, "HELP WANTED: " + BIZ[j.biz].name, x + 6, ly, [40, 30, 40]); ly += 7;
-    smallText(ctx, "$" + j.wage + "/DAY - SEE " + ownerName(bizOwner(j.biz)) + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 9;
+    smallText(ctx, "$" + j.wage + "/DAY - SEE " + ownerName(bizOwner(j.biz)) + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 7;
+    // what the posting is competing WITH: a day on the rail at today's price
+    smallText(ctx, "A DAY ON THE PIER PAYS ABOUT $" + Math.round(pierDay()), x + 12, ly,
+      pierDay() > j.wage ? [180, 60, 40] : [110, 110, 130]); ly += 9;
   }
   {   // BUSINESSES FOR SALE: the board carries the town's opportunities, not
       // just its vacancies. Price, why it closed, and how long it has stood
@@ -5627,7 +6042,9 @@ function drawJobBoard() {
     ly += 2; smallText(ctx, "WHO WORKS FOR WHOM", x + 6, ly, [58, 42, 38]); ly += 8;
     for (const c of staff.slice(0, 4)) {
       if (ly > y + h2 - 16) break;   // the sparkline ate a row or two - keep inside the card
-      smallText(ctx, c.p.name + " - " + BIZ[c.p.job].name + ", PAID BY " + ownerName(c.p.employer), x + 6, ly, [90, 90, 105]); ly += 7;
+      smallText(ctx, c.p.name + " - " + BIZ[c.p.job].short + " $" + Math.round(wageRate(c))
+        + ", PAID BY " + ownerName(c.p.employer) + (wageGripe(c) >= WAGE_CFG.WARN ? " (RESTLESS)" : ""),
+        x + 6, ly, wageGripe(c) >= WAGE_CFG.WARN ? [180, 60, 40] : [90, 90, 105]); ly += 7;
     }
   }
   {   // the board advertises the labor the town WANTS; the census reads the
@@ -5823,6 +6240,10 @@ function frame(now) {
         toast = { text: c.p.name + " QUIT: " + (o ? o.name : "THE BOSS") + " COULDN'T PAY", t: 6 };
       }
     }
+    // 2a3. the money has landed (or hasn't): every crab on a payroll compares
+    // tonight's wage with what the water, the shop next door and the crab at
+    // the next station are getting, and grumbles, asks around or goes.
+    runWageRelations();
     // 2b. peer owners settle their own books on the same line of credit:
     // shortfalls draw on the line and interest compounds exactly as it does
     // for the player. A settlement that misses the minimum (or can't even
@@ -5846,6 +6267,7 @@ function frame(now) {
       if (nf.ok && !nf.missedMin) bizStrike[b] = 0;        // a clean night wipes the slate
       else if (noteLeaseMiss(b, o)) continue;              // shutters up: nothing left to manage tonight
       runHoursPolicy(b);   // books settled: the day's demand signals tune tomorrow's hours
+      runWagePolicy(b);    // ...and the day's labour signals tune tomorrow's wage
     }
     // the day's takings are booked, empty shops go on the market, and the
     // market clears - one call, all of it in its own block above
