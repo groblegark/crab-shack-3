@@ -488,7 +488,12 @@ unit economics.
   furniture-aware (pick the lane, or a brief detour-y within the lane
   band, that clears the solids ahead), or carve stable gap waypoints
   through the picnic area. Keep the occasional bump (charm), kill the
-  constant plowing (terrible). Coordinates with the trip-chaining agent
+  constant plowing (terrible). PLUS Matt's last-resort valve: a crab that
+  has been obstructed ~30 IN-GAME MINUTES cumulative on one trip gets a
+  tiny warp — a few pixels, just past the blocker, ideally on a frame
+  where they're behind furniture so it reads as squeezing through, maybe
+  with an "EXCUSE ME" quip. (Different scale than the 1.5-real-second
+  unstick watchdog: that breaks pins; this caps a trip's bounce budget.) Coordinates with the trip-chaining agent
   (same locomotion layer) — likely same worktree or immediately adjacent
   in the queue.
 - **Route optimization / trip-chaining** (Matt: "folks are taking weird
