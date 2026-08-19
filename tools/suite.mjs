@@ -1267,12 +1267,28 @@ scenario("tired: fatigue scales with the hours actually worked", () => {
   // and an 18-hour trading day cannot conjure a longer shift to accrue from
   if (capped[3] !== 360 || Math.abs(capped[1] - 0.45) > 1e-6)
     return "long hours stretched the fatigue bump: " + JSON.stringify(capped);
-  // the cover double is a real double: twelve hours, and it tires like it
-  const cov = JSON.parse(sim.G(`{ const c = crabs[0];
-    const w = bizShiftWindow(c.p.job, "cover");
-    JSON.stringify([(w.end - w.start), +(TIRED_SHIFT * (w.end - w.start) / SHIFT_SPAN.M).toFixed(6)]); }`));
-  if (cov[0] !== 720 || Math.abs(cov[1] - 0.9) > 1e-6)
-    return "a full-open cover double is not two shifts' worth of work: " + JSON.stringify(cov);
+  // A COVER DOUBLE IS A REAL DOUBLE. Pay and fatigue part company here, on
+  // purpose: covering a coworker's day off is ONE contract and one wage - the
+  // rota generosity that has always filled the shift for free, untouched - but
+  // it is twelve hours of work, and workLoad says so. (Pricing the cover by
+  // the hour as well was measured and rejected: growth 40d fell 4/8 -> 1/8,
+  // because _needCover is per-BUSINESS, so a whole six-crab roster doubles at
+  // once. Fatiguing it alone measured baseline 0/8 median 14 and growth 5/8 -
+  // both inside the documented band.)
+  const cs = createSim({ seed: 7 });
+  cs.runUntil("day === 3 && tmin >= 9 * 60", { maxSteps: 900000,
+    onTick: (G) => { if (G("coins") < 300) G("coins = 600"); } });
+  const cov = JSON.parse(cs.G(`{ const c = crabs.find(k => coveringToday(k));
+    c ? JSON.stringify([c.p.name, dutyShift(c).end - dutyShift(c).start,
+      +workLoad(c).toFixed(6), +shiftLoad(c).toFixed(6), Math.round(basePayToday(c)),
+      +(TIRED_SHIFT * workLoad(c)).toFixed(6)]) : "null"; }`));
+  if (!cov) return "nobody covered a day off on day 3 (WED) - fixture drifted";
+  if (cov[1] !== 720 || Math.abs(cov[2] - 2) > 1e-6)
+    return cov[0] + " covered but it did not count as two shifts of work: " + JSON.stringify(cov);
+  if (Math.abs(cov[5] - 0.9) > 1e-6)
+    return "a cover double did not tire like a double: " + JSON.stringify(cov);
+  if (Math.abs(cov[3] - 1) > 1e-6 || cov[4] !== 23)
+    return "the cover double stopped being one wage: " + JSON.stringify(cov);
   // overtime accrues on the same clock, weighted at OT_FATIGUE
   const ot = JSON.parse(sim.G(`{ const c = crabs[0]; const f = 120 / ownStdSpan(c);
     JSON.stringify([+(TIRED_SHIFT * (1 + OT_FATIGUE * f)).toFixed(6), +TIRED_SHIFT.toFixed(6), +f.toFixed(6)]); }`));

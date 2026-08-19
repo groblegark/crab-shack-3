@@ -633,6 +633,12 @@ function ownStdSpan(c) {   // the crab's own contracted standard, never the cove
   return SHIFT_SPAN[c.p.shift] || SHIFT_SPAN.cover;
 }
 function dutyStdSpan(c) { return coveringToday(c) ? SHIFT_SPAN.cover : ownStdSpan(c); }
+// what today's shift COSTS the crab, in standard days of their own shift. Pay
+// and fatigue part company on exactly one day: a full-open cover double is one
+// contract (SHIFT_SPAN.cover, one wage - the rota generosity that has always
+// filled a coworker's day off for free) but it is TWO shifts of work, and the
+// end-of-shift accrual says so.
+function workLoad(c) { const s = dutyShift(c); return Math.max(0, s.end - s.start) / ownStdSpan(c); }
 function hourlyRate(c) { return wageRate(c) / ownStdSpan(c); }
 // today's contracted hours as a share of a standard day of that shift: 1.0 on
 // any trading day long enough to hold it, less when the shop's hours squeeze it.
@@ -1936,18 +1942,26 @@ function updateSchedule(c, dt) {
     if (lingering) return;
     c.duty = false; c.pendingOff = false;
     if (c.carrying) c.carrying = null;
-    // THE COST OF THE DAY, in one accrual, scaled by the hours actually
-    // worked. `load` is today's contracted shift as a share of a STANDARD one
-    // (1.0 on default 8-20 hours, 1.5 when the shop opens 6-24, 2.0 on a
-    // full-open cover double) and `otF` the overtime minutes on top of it.
-    // Tiredness weights the overtime at OT_FATIGUE because the last two hours
-    // are the ones that break you. A flat bump was the other half of the
-    // always-open exploit: 50% more staffed hours used to cost 0% more crab.
+    // THE COST OF THE DAY, scaled by the hours worked. A flat bump was the
+    // other half of the always-open exploit: 50% more staffed hours used to
+    // cost 0% more crab. Two measures, and they differ on exactly one day:
+    //   contract (shiftLoad) - today's shift against a standard day of that
+    //     KIND, so a full-open cover double is one contracted day. Pay and
+    //     appetite read this: you eat your meals and draw your wage as usual.
+    //   work (workLoad)      - the same span against the crab's OWN standard,
+    //     so a cover double is TWO shifts. Tiredness reads this: twelve hours
+    //     on your claws is twelve hours, whoever's day off it filled.
+    // Measured receipt for the split: putting hunger/thirst on the work
+    // measure too spiked a covering crab to +0.5 hunger and a clamped 1.0
+    // thirst, and they spent the evening running the errands their DAY OFF
+    // is for - the days-off scenario fell from 3/4 crew shopping to 2/4.
+    // `otF` is the overtime minutes on top, weighted at OT_FATIGUE for
+    // tiredness because the last two hours are the ones that break you.
     // Under default hours with no cover this is byte-for-byte the old numbers.
-    const load = shiftLoad(c), otF = (c.otMin || 0) / ownStdSpan(c);
+    const load = shiftLoad(c), work = workLoad(c), otF = (c.otMin || 0) / ownStdSpan(c);
     c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25 * (load + otF));  // a shift works up an appetite - a long one, more
     c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * (load + otF) * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));  // working a whole shift ALREADY tired makes you thirsty (checked pre-bump: same firing rate the sandy coupling had)
-    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT * (load + OT_FATIGUE * otF));   // a full shift takes it out of you - a long one or overtime more so
+    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT * (work + OT_FATIGUE * otF));   // a long day, a cover double or overtime all take it out of you
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and grubbies up the shell
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
     // grab dinner on the way home instead of trekking back later (gated on
@@ -4096,7 +4110,7 @@ function drawIntro() {
     ["THE SHACK IS YOURS TO RUN", [70, 70, 90]],
     ["RENT: $" + BIZ.shack.rent + ", NIGHTLY AT 20:00", [170, 50, 50]],
     ["RENT IS DUE TONIGHT. GOOD LUCK.", [170, 50, 50]],
-    ["CREW WAGES: $" + CRAB_WAGE + " EACH, NIGHTLY", [70, 70, 90]],
+    ["CREW WAGES: $" + CRAB_WAGE + " A SHIFT, NIGHTLY", [70, 70, 90]],
     ["CREW PAY THEIR OWN $" + HOUSE_RENT + " HOME RENT", [70, 70, 90]],
     ["MISS RENT AND I TAKE THE SHACK", [170, 50, 50]],
   ];
