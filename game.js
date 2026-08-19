@@ -397,7 +397,7 @@ function forecastBankruptcy() {
   // run rate = AVERAGE income (Matt: one bad day shouldn't cry wolf over a
   // healthy average); the replay bills FULL wages every night - tonight's
   // day-off skips are noise over a 10-settlement horizon
-  const g = sum / n, due = totalRent() + CRAB_WAGE * crabs.length;
+  const g = sum / n, due = totalRent() + crabs.reduce((s2, c2) => s2 + Math.round(contractPay(c2)), 0);
   // income still to come before the next settlement (the town trades 8:00-20:00)
   const frac = lastRentDay === day ? 1 : Math.max(0, Math.min(1, (20 * 60 - tmin) / (12 * 60)));
   let c = coins, b = credit.bal;
@@ -719,13 +719,45 @@ function coveringToday(c) {
 // and the biz hours give it a frame. Under the default 8-20 hours these
 // evaluate to exactly the old fixed SHIFTS. Fishing has no storefront, so
 // pier shifts stay the fixed table.
+//
+// A WORKING DAY HAS A LENGTH. The hours sign says WHERE a shift sits; it does
+// not say how long a crab works. Every derived window is capped at SHIFT_SPAN
+// for its kind - exactly what that kind evaluates to under the town's default
+// 8:00-20:00 day - and a window that outgrows its cap keeps its middle,
+// centred on the middle of the trading day. So a trading day of 12h or less
+// is BYTE-FOR-BYTE the old geometry (the cap never binds), while a shop open
+// 6:00-24:00 still gets two six-hour shifts, 9-15 and 15-21: the shoulders
+// are open but UNSTAFFED, and nobody walks into an unstaffed shop.
+//
+// This is the load-bearing half of the always-open fix. Wages scaling with
+// hours (see hourlyRate) is the honest price of a longer shift, but it can
+// never be the whole answer: a staffed hour is worth ~$25 of takings in this
+// town and costs $3.83 of wage, so no plausible wage - and no fatigue model,
+// measured with the crew PINNED at exhaustion for 30 days - makes buying
+// hours off the hours sign a bad deal. Staffed hours have to be bought with
+// CRABS (hire another one and it gets its own shift) or with OVERTIME (up to
+// OT_SPAN, at OT_RATE, inside the open hours) - which is the emergency lever,
+// priced and bounded, exactly as Matt asked.
+// THE STANDARD WORKING DAY, for the crew's ordinary M/E shifts. Labour is
+// bought by the hour against it (see hourlyRate / basePayToday) and a shift
+// tires the crab by the same measure (the accrual in updateSchedule). 360 is
+// what M and E evaluate to under the default 8-20 hours, so a default town is
+// byte-for-byte the flat-wage game this replaced.
+const STD_SHIFT = 6 * 60;
+const SHIFT_SPAN = { M: STD_SHIFT, E: STD_SHIFT, D: 10 * 60, cover: 2 * STD_SHIFT };
+function capWindow(start, end, cap, mid) {
+  if (end - start <= cap) return { start, end };   // inert on any normal trading day
+  const s = Math.max(start, Math.min(end - cap, mid - Math.round(cap / 2 / 30) * 30));
+  return { start: s, end: s + cap };
+}
 function bizShiftWindow(b, kind) {
   const h = BIZ[b].hours;
   const mid = h.open + Math.round((h.close - h.open) / 2 / 30) * 30;
-  const w = kind === "M" ? { start: h.open, end: mid }
+  const raw = kind === "M" ? { start: h.open, end: mid }
     : kind === "E" ? { start: mid, end: h.close }
     : kind === "D" ? { start: h.open + 30, end: h.close - 90 }
     : { start: h.open, end: h.close };   // covering double: the full window
+  const w = capWindow(raw.start, raw.end, SHIFT_SPAN[kind] || SHIFT_SPAN.cover, mid);
   w.label = fmtHr(w.start) + "-" + fmtHr(w.end);
   return w;
 }
@@ -835,14 +867,53 @@ function onOvertimeNow(c) {
   return tmin < sh.start || tmin >= sh.end;
 }
 function wageRate(c) { return c.p.npc ? NPC_WAGE : CRAB_WAGE; }
-// OT minutes at OT_RATE x the normal hourly rate. The hourly rate comes from
-// the crab's OWN contracted shift (baseShift), never the cover double - a
-// cover day is a separate, pre-existing generosity and must not dilute the
-// premium. Exact by construction: the suite pins the RATIO, not a magic number.
-function otPremium(c, mins) {
-  const b = baseShift(c);
-  return wageRate(c) * OT_RATE * mins / Math.max(60, b.end - b.start);
+// ---- THE HOURLY RATE (one clock for all labor) -----------------------------
+// CRAB_WAGE / NPC_WAGE are DAY RATES FOR A STANDARD DAY OF THAT SHIFT - the
+// span the shift has under the town's default 8:00-20:00 hours (SHIFT_SPAN: a
+// six-hour M or E, a ten-hour owner-operator D, a twelve-hour cover double).
+// Everything is then priced off the hourly rate they imply, so ordinary hours
+// and overtime hours are quoted in the same currency:
+//   ordinary  wage x (today's contracted span / that standard)   basePayToday
+//   overtime  hourlyRate x OT_RATE x minutes worked              otPremium
+// Labour is bought by the hour: shorten the trading day and the shifts inside
+// it shorten, and the wage bill shortens with them. Lengthen it and the shift
+// CAP (bizShiftWindow) holds a working day to a working day - you buy extra
+// staffed hours with another crab or with overtime, never off the hours sign.
+// Every one of these evaluates to the pre-hourly flat numbers on a default
+// trading day, by construction.
+function ownStdSpan(c) {   // the crab's own contracted standard, never the cover double
+  if (c.p.job === "fishing") { const s = SHIFTS[c.p.shift]; return Math.max(60, s.end - s.start); }
+  return SHIFT_SPAN[c.p.shift] || SHIFT_SPAN.cover;
 }
+function dutyStdSpan(c) { return coveringToday(c) ? SHIFT_SPAN.cover : ownStdSpan(c); }
+// what today's shift COSTS the crab, in standard days of their own shift. Pay
+// and fatigue part company on exactly one day: a full-open cover double is one
+// contract (SHIFT_SPAN.cover, one wage - the rota generosity that has always
+// filled a coworker's day off for free) but it is TWO shifts of work, and the
+// end-of-shift accrual says so.
+function workLoad(c) { const s = dutyShift(c); return Math.max(0, s.end - s.start) / ownStdSpan(c); }
+function hourlyRate(c) { return wageRate(c) / ownStdSpan(c); }
+// today's contracted hours as a share of a standard day of that shift: 1.0 on
+// any trading day long enough to hold it, less when the shop's hours squeeze it.
+function shiftLoad(c, sh) {
+  const s = sh || dutyShift(c);
+  return Math.max(0, s.end - s.start) / (sh ? ownStdSpan(c) : dutyStdSpan(c));
+}
+// the flat day, priced by the hours actually contracted (callers handle the
+// day-off and sick-day skips)
+function basePayToday(c) { return wageRate(c) * shiftLoad(c); }
+// the crab's OWN contracted day, ignoring today's cover double - what the
+// bankruptcy forecaster bills as steady state, on the same reasoning it
+// already bills through day-off skips: covers are episodic, and noise over a
+// ten-settlement horizon.
+function contractPay(c) { return wageRate(c) * shiftLoad(c, baseShift(c)); }
+// OT minutes at OT_RATE x that same hourly rate. The rate comes from the
+// crab's OWN standard day, never the cover double - a cover day is a separate,
+// pre-existing generosity and must not dilute the premium - and from the
+// STANDARD span rather than today's, so a squeezed shift cannot quietly make
+// overtime cheaper than straight time. Byte-for-byte the old formula on a
+// default trading day.
+function otPremium(c, mins) { return hourlyRate(c) * OT_RATE * mins; }
 function otPayToday(c) { return otPremium(c, c.otMin || 0); }        // truthful: minutes actually worked
 // tonight's forecast: scheduled while they're still on OT, else what they worked
 function otPayForecast(c) { return otEligible(c) ? otPremium(c, otMinutes(c)) : otPayToday(c); }
@@ -1110,7 +1181,7 @@ function totalRent() {   // the PLAYER's nightly property bill, due from night o
 function crabDueTonight(c) {
   if (onSickDay(c) && !c.workedToday) return 0;
   if (offToday(c) && !c.workedToday) return 0;
-  return wageRate(c) + Math.round(otPayForecast(c));
+  return Math.round(basePayToday(c)) + Math.round(otPayForecast(c));
 }
 function wagesOwedTonight() { return crabs.reduce((s, c) => s + crabDueTonight(c), 0); }
 function nightlyDue() { return totalRent() + wagesOwedTonight(); }
@@ -1175,6 +1246,17 @@ function initNpcs() {
 // "tired:" suite scenarios before touching these numbers.
 const TIRED_SHIFT = 0.45, TIRED_ERRAND = 0.03, TIRED_NIGHT = 0.05;
 const TIRED_DRAIN = { bed: 0.5, cot: 0.25 };   // fraction drained per game hour, asleep
+// ...and while merely HOME, settled and off the clock in daylight: a nap, not
+// a night. Same housing rung, a fraction of the rate - chosen by measurement
+// (the M/E shift-fairness probe), not by feel. Too fast and tiredness stops
+// mattering; too slow and the morning shift stays the punishing one.
+// Measured on the M-vs-E probe (6 seeds x 10 days, mean tiredness): before the
+// nap M 0.153 / E 0.087 (gap 0.066); at 0.15 gap 0.047, 0.25 -> 0.039,
+// 0.35 -> 0.033, 0.40 -> 0.024, 0.50 -> 0.020 (and 0.50 IS the bed rate, which
+// would make an afternoon on the porch a night's sleep). 0.40 is the slowest
+// rate that clears the 0.03 tolerance, and the town's illness rate is
+// untouched by it (10.40% -> 9.39%), so tiredness keeps its teeth.
+const TIRED_NAP = { bed: 0.4, cot: 0.2 };
 
 // who lives at lot h (boat owners have house === null and match nothing).
 // This is THE draw-side derivation too: drawTown renders every lot and asks
@@ -1221,6 +1303,16 @@ function updateHome(c, dt) {
   // full rate in your own bed (house/boat), half on a shelter cot
   if (darkness() > 0.7 && (c.p.tired || 0) > 0) {
     const rate = c.p.homeless ? TIRED_DRAIN.cot : TIRED_DRAIN.bed;
+    c.p.tired = Math.max(0, (c.p.tired || 0) * (1 - rate * dt * TS / 60));
+  } else if ((c.p.tired || 0) > 0 && Math.abs(c.x - s.x) < 20) {
+    // ...AND SO DOES A DAYTIME NAP. Rest was gated on the SUN, not on being
+    // home: a morning crab's long free afternoon indoors repaired nothing
+    // while an evening crab banked the whole night, so the shift you drew -
+    // not the crab you were - decided your fatigue. A crab who is actually
+    // home, settled, and off the clock now recovers at TIRED_NAP, which is a
+    // fraction of the bedtime rate (a nap on the porch is not a night's
+    // sleep) and keeps the same housing rung: a cot naps worse than a bed.
+    const rate = c.p.homeless ? TIRED_NAP.cot : TIRED_NAP.bed;
     c.p.tired = Math.max(0, (c.p.tired || 0) * (1 - rate * dt * TS / 60));
   }
   routedWalk(c, s.x, s.y, crabMove(c) * 0.7, dt);
@@ -1433,7 +1525,14 @@ function slotMeta(s) {
   const owned = Object.keys(BIZ).filter(b => BIZ[b].owner === "player" &&
     (b === "shack" || (lv[b] || 0) > 0));
   const rentDue = owned.reduce((n, b) => n + BIZ[b].rent, 0);
-  const crewWages = (Array.isArray(s.personas) ? s.personas.length : 0) * CRAB_WAGE;
+  // labor is priced by the hour: a town saved with a long trading day carries
+  // a proportionally bigger payroll, and the preview card must say so. Shifts
+  // tile the open window, so the whole roster's bill scales with its span.
+  const shackH = s.hours && Array.isArray(s.hours.shack) ? s.hours.shack : null;
+  const span = shackH ? Math.max(0, (+shackH[1] || 0) - (+shackH[0] || 0)) : 2 * STD_SHIFT;
+  const shiftLen = Math.min(STD_SHIFT, Math.round(span / 2) || STD_SHIFT);
+  const crewWages = Math.round((Array.isArray(s.personas) ? s.personas.length : 0)
+    * CRAB_WAGE * shiftLen / STD_SHIFT);
   const purse = (Array.isArray(s.personas) ? s.personas : [])
     .reduce((n, p) => n + Math.max(0, (p && p.wallet) || 0), 0);
   const boats = (Array.isArray(s.personas) ? s.personas : [])
@@ -2134,14 +2233,26 @@ function updateSchedule(c, dt) {
     if (lingering) return;
     c.duty = false; c.pendingOff = false;
     if (c.carrying) c.carrying = null;
-    // OVERTIME'S HEALTH COST: no parallel system - the existing end-of-shift
-    // accrual just scales with the extra hours. Hunger rises in proportion to
-    // the longer day; tiredness rises at OT_FATIGUE x that share, because the
-    // last two hours are the ones that break you.
-    const otF = (c.otMin || 0) / Math.max(60, baseShift(c).end - baseShift(c).start);
-    c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25 * (1 + otF));  // a shift works up an appetite
-    c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));  // working a whole shift ALREADY tired makes you thirsty (checked pre-bump: same firing rate the sandy coupling had)
-    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT * (1 + OT_FATIGUE * otF));   // a full shift takes it out of you - overtime more so
+    // THE COST OF THE DAY, scaled by the hours worked. A flat bump was the
+    // other half of the always-open exploit: 50% more staffed hours used to
+    // cost 0% more crab. Two measures, and they differ on exactly one day:
+    //   contract (shiftLoad) - today's shift against a standard day of that
+    //     KIND, so a full-open cover double is one contracted day. Pay and
+    //     appetite read this: you eat your meals and draw your wage as usual.
+    //   work (workLoad)      - the same span against the crab's OWN standard,
+    //     so a cover double is TWO shifts. Tiredness reads this: twelve hours
+    //     on your claws is twelve hours, whoever's day off it filled.
+    // Measured receipt for the split: putting hunger/thirst on the work
+    // measure too spiked a covering crab to +0.5 hunger and a clamped 1.0
+    // thirst, and they spent the evening running the errands their DAY OFF
+    // is for - the days-off scenario fell from 3/4 crew shopping to 2/4.
+    // `otF` is the overtime minutes on top, weighted at OT_FATIGUE for
+    // tiredness because the last two hours are the ones that break you.
+    // Under default hours with no cover this is byte-for-byte the old numbers.
+    const load = shiftLoad(c), work = workLoad(c), otF = (c.otMin || 0) / ownStdSpan(c);
+    c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25 * (load + otF));  // a shift works up an appetite - a long one, more
+    c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * (load + otF) * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));  // working a whole shift ALREADY tired makes you thirsty (checked pre-bump: same firing rate the sandy coupling had)
+    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT * (work + OT_FATIGUE * otF));   // a long day, a cover double or overtime all take it out of you
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and grubbies up the shell
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
     // grab dinner on the way home instead of trekking back later (gated on
@@ -4246,8 +4357,11 @@ function drawPanel() {
     // settlement loop all read crabDueTonight, so the column always adds up
     const owed = crabs.filter(c => crabDueTonight(c) > 0);
     const owedN = owed.length;
-    smallText(ctx, "WAGES " + owedN + "X$" + CRAB_WAGE + (owedN < crabs.length ? " (" + (crabs.length - owedN) + " OUT)" : ""), 132, by, [190, 175, 160]);
-    smallText(ctx, "$" + CRAB_WAGE * owedN, 224, by, [235, 160, 130]); by += MROW;
+    // labor is priced by the hour now, so the rate is quoted per STANDARD
+    // shift and the column sums what each crab's own contracted hours cost
+    const baseBill = owed.reduce((s, c) => s + Math.round(basePayToday(c)), 0);
+    smallText(ctx, "WAGES " + owedN + "X$" + CRAB_WAGE + "/" + (STD_SHIFT / 60) + "H" + (owedN < crabs.length ? " (" + (crabs.length - owedN) + " OUT)" : ""), 132, by, [190, 175, 160]);
+    smallText(ctx, "$" + baseBill, 224, by, [235, 160, 130]); by += MROW;
     const otBill = owed.reduce((s, c) => s + Math.round(otPayForecast(c)), 0);
     if (otBill > 0) {
       const otN = owed.filter(c => otPayForecast(c) > 0).length;
@@ -4328,7 +4442,7 @@ function drawIntro() {
     ["THE SHACK IS YOURS TO RUN", [70, 70, 90]],
     ["RENT: $" + BIZ.shack.rent + ", NIGHTLY AT 20:00", [170, 50, 50]],
     ["RENT IS DUE TONIGHT. GOOD LUCK.", [170, 50, 50]],
-    ["CREW WAGES: $" + CRAB_WAGE + " EACH, NIGHTLY", [70, 70, 90]],
+    ["CREW WAGES: $" + CRAB_WAGE + " A SHIFT, NIGHTLY", [70, 70, 90]],
     ["CREW PAY THEIR OWN $" + HOUSE_RENT + " HOME RENT", [70, 70, 90]],
     ["MISS RENT AND I TAKE THE SHACK", [170, 50, 50]],
   ];
@@ -5173,7 +5287,7 @@ function frame(now) {
       if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay (a REQUIRED crab who worked is paid in full)
       if (offToday(c) && !c.workedToday) continue;   // day off: same rule - the bill dips, the wallet doesn't
       const prem = Math.round(otPayToday(c));        // overtime premium on top of the flat day
-      const due = CRAB_WAGE + prem;
+      const due = Math.round(basePayToday(c)) + prem;   // the day, priced by the hours contracted
       if (coins >= due) {
         coins -= due; c.p.wallet += due; wages += due;
         if (prem > 0) {
@@ -5266,7 +5380,7 @@ function frame(now) {
       const o = OWNERS[emp];
       if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay - same deal as the crew
       if (offToday(c) && !c.workedToday) continue;   // day off: unpaid, but the job is safe
-      const npcDue = NPC_WAGE + Math.round(otPayToday(c));   // peer owners pay the same overtime premium
+      const npcDue = Math.round(basePayToday(c)) + Math.round(otPayToday(c));   // peer owners buy hours at the same rate, premium included
       if (o && o.till >= npcDue) { o.till -= npcDue; c.p.wallet += npcDue; }
       else {
         c.p.job = "fishing"; c.p.employer = null;
