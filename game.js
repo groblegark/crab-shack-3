@@ -755,7 +755,8 @@ const PLAYLIST = [
   { src: "music/butter-pow.mp3", name: "BUTTER POW" },
   { src: "music/carnival-of-the-glitch.mp3", name: "CARNIVAL OF THE GLITCH" },
 ];
-let musicOn = true, music = null, muted = false;
+let musicOn = false, music = null, muted = false;   // opt-IN for new players (SFX stays on)
+let musNudges = 0, musNudged = false;               // invite, don't nag: gives up after 3 sessions
 function toggleMute() {
   muted = !muted;
   if (muted) { if (music) music.pause(); }
@@ -842,6 +843,7 @@ function save() {
       credit: { sudsy: { bal: OWNERS.sudsy.credit || 0, darkT: OWNERS.sudsy.darkT || 0 } },
       personas: npcs.map(c => c.p) },
     board: jobBoard, hireDay, trade, sudsRefund: sudsRefunded, firstPour,
+    musicOn, musNudges,
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
     mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
     hoursPol: hoursPolicyState,
@@ -910,6 +912,9 @@ function load() {
     }
   }
   jobBoard = Array.isArray(s.board) ? s.board : [];
+  // pre-toggle saves had music on by default - keep their experience
+  musicOn = s.musicOn !== undefined ? !!s.musicOn : true;
+  musNudges = (s.musNudges || 0) + 1;
   hireDay = s.hireDay || 0;
   if (s.trade && s.trade.total) trade = { total: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, s.trade.total),
     day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, s.trade.day), spent: s.trade.spent || 0,
@@ -2983,7 +2988,16 @@ function drawPanel() {
   rect(ctx, 146, PANEL_Y + 1, 19, 11, muted ? [140, 50, 50] : [30, 20, 20]);
   rect(ctx, 147, PANEL_Y + 2, 17, 9, muted ? [90, 35, 35] : [90, 70, 60]);
   blit(ctx, muted ? SPEAKER_OFF : SPEAKER_ON, 150, PANEL_Y + 3);
-  smallText(ctx, "MUS", 169, PANEL_Y + 3, !muted && musicOn ? [140, 220, 140] : [140, 120, 110]);
+  {
+    const invite = !musicOn && !muted && musNudges < 3;
+    const pulse = invite && (time % 2) < 1.2;
+    smallText(ctx, "MUS", 169, PANEL_Y + 3,
+      !muted && musicOn ? [140, 220, 140] : pulse ? [255, 216, 96] : [140, 120, 110]);
+    if (invite && !musNudged && screen === "play" && tmin > 9.5 * 60 && !toast && reportT <= 0) {
+      toast = { text: "THE BAND IS WARMED UP - MUS TO LISTEN", t: 6 };
+      musNudged = true;
+    }
+  }
   smallText(ctx, "SND", 190, PANEL_Y + 3, !muted && soundOn ? [140, 220, 140] : [140, 120, 110]);
   smallText(ctx, ">>", 206, PANEL_Y + 3, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
   smallText(ctx, ">>>", 219, PANEL_Y + 3, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
