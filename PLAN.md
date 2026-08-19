@@ -153,7 +153,10 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **53 scenarios, must stay green before any push.**
+<<<<<<< HEAD
+=======
+- `node tools/suite.mjs` — **59 scenarios, must stay green before any push.**
+>>>>>>> worktree-agent-a09ec4a3ffc9d25b9
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
@@ -171,9 +174,16 @@ vm — never fork game logic into tools/) and perf expectations live there.
   migration.
   serviced by showers alone, days-off rota (weekly rest + off-day
   spending, cover-shift/stagger coverage, exact wage-skip bill math),
+<<<<<<< HEAD
   hiring-as-recruitment (tourist conversion with clean entity teardown,
   bus-arrival fallback working day-of, all-9-lots occupancy derivation
   with no house conjured on hire).
+=======
+  shop hours (frozen day-2 default fingerprint, shortened hours really
+  close, SUDSY policy convergence + extend rule + tiredness budget,
+  sun-skip across an hours change, AT COST/FREE staff-meal accounting,
+  hours/mealPol/policy save roundtrip with degenerate-save clamping).
+>>>>>>> worktree-agent-a09ec4a3ffc9d25b9
 
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
   [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
@@ -190,6 +200,38 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- **Shop hours + management screen + CPU owner policy** (shipped 2026-08-18,
+  realizes backlog "Business settings"): every business carries real OPEN
+  HOURS (`BIZ[k].hours`, default 8-20 = the old hard-coded day; bounds
+  6:00-24:00, min 4h, `setBizHours` clamps). Hours gate tourist admission
+  (spawn filter + `anyBizOpenNow`), home-errand dispatch (per target biz),
+  the CLOSED sign, and ANCHOR the shifts: `bizShiftWindow` derives M = first
+  half, E = second half, D = open+30..close-90, cover = full window - the
+  SHIFTS table keeps the shape, hours give it a frame (defaults evaluate to
+  the exact old windows). Deliberately staffing-gated, not hours-gated: the
+  fisher-breakfast and after-shift-dinner paths, so a staffed counter still
+  serves the early/late crowd (bit-identity depends on this). MANAGEMENT
+  screen: tap a player-owned shop's sign/MANAGE chip - hour steppers (30min),
+  today's per-biz takings/costs (`today.biz` via creditBiz/debitBiz), roster
+  with derived shifts + days off, and staff-meal policy RETAIL/AT COST/FREE
+  (`BIZ[k].mealPol`, wired at the selfCook charge site; retail default).
+  CPU owners: `HOURS_POLICY` table + `runHoursPolicy` at settlement - dead
+  first hours 3 days -> open 1h later; dead last hours + clean closes ->
+  close 1h earlier (span floor 6h); queue at close 2 days -> extend 1h within
+  the staff-tiredness budget (tired < 0.75). One move/day max, history resets
+  after a move + 1-day cooldown -> converges, never thrashes (suite-proved
+  over 24 days; SUDSY typically walks 8-20 down to ~9-17/8-14 because her
+  boundary hours genuinely see no traffic; toast "SUDSY NOW OPENS AT 9").
+  All of hours/mealPol/policy state save-roundtrip with clamping migration.
+  Measured: defaults BYTE-IDENTICAL to the pre-feature build (8 seeds x 30d,
+  full stats blobs, policy disabled via `window._noHoursPolicy`); with the
+  policy live the baseline is 0/8, 7-11 median 10 vs 7-14 median 10 (only
+  the day-14 tail seed moved) and growth chef,table reads median 9 vs 10 -
+  one seed-day, the documented per-build wobble; an 8h-floor damping probe
+  measured the identical growth list (the shift is stream chaos from her
+  first move, not the shrink depth), so the 6h floor stays. Her till:
+  seed-dependent (one seed way up, one down, two a wash - the fixed-hours
+  control drains to ~$0 in 3/4 seeds too over 24 kept-alive days).
 - **Weekends / days off** (shipped 2026-08-18): a 7-day week derived from
   `day` (day 1 = MON, weekday in the clock). Every working crab — crew, NPC
   staff, owner-operators, fishers — rests one weekday, derived at runtime
@@ -390,9 +432,9 @@ payroll-scaled limit 90 + 70/crew, both inert); the collapse is growth-town
 unit economics.
 
 ## Backlog (rough priority)
-1. **Business settings** — per-business config (staff-meal pricing
-   retail/at-cost/free is already TODO-marked in game.js; then prices, hours,
-   staffing rules). Matt: "seems obvious now".
+1. ~~**Business settings**~~ — **shipped 2026-08-18** as shop hours + the
+   management screen (see the systems bullet). Remaining loosenings from the
+   original idea: per-business PRICES and staffing rules.
 2. **More peer owners moving in** — the owner layer makes this content, not
    surgery: an OWNERS entry + BIZ entry + an NPC crab. Fish market buying
    wholesale off the pier is the natural next one.
