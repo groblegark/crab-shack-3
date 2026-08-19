@@ -1454,6 +1454,11 @@ function chatReady(c) {
   if ((c.p.bored || 0) < CHAT_AT || boredYields(c)) return false;
   const ds = c.dayState;
   if (ds === "working") return !c.pendingOff && (c.p.job === "fishing" || c.kstate === "idle" || c.kstate === "wander");
+  // ...and NOBODY strikes up a conversation in their sleep. Without this a
+  // pair of shelter cots 26px apart chat at 04:30, which reads as a bug even
+  // though the arithmetic is fine. The walk home in the dark still counts:
+  // that is exactly when two crabs fall into step.
+  if (ds === "home" && darkness() > 0.6) return false;
   return ds === "home" || ds === "toWork" || ds === "toHome";
 }
 function startChat(a, b) {
@@ -5923,7 +5928,7 @@ function drawReport() {
   for (const n of (report.critical || [])) smallText(ctx, n + " IS FADING - NEEDS CARE", x + 6, ly, [200, 90, 70]), ly += 7;
   // IDLE HANDS' late stage, announced the night BEFORE it costs anything
   for (const n of (report.walked || []))
-    smallText(ctx, n + " HAS HAD ENOUGH - TAKING TOMORROW OFF", x + 6, ly, [110, 120, 180]), ly += 7;
+    smallText(ctx, n + " HAS HAD ENOUGH - OFF TOMORROW", x + 6, ly, [110, 120, 180]), ly += 7;
   for (const n of report.sick) smallText(ctx, n + " FELL ILL", x + 6, ly, [120, 150, 90]), ly += 7;
   for (const n of report.recovered) smallText(ctx, n + " IS BACK ON THEIR CLAWS", x + 6, ly, [40, 110, 60]), ly += 7;
   for (const m of report.moved) smallText(ctx, m, x + 6, ly, [110, 100, 110]), ly += 7;

@@ -43,6 +43,16 @@ compounds or collapses → the landlord collects at 20:00 either way.
   homeless, disease + contagion + death with beach memorials. **Every crab is
   mortal** (2026-08-19) - crew and townsfolk alike, off the same care ladder;
   the roll arms on day 4 of NEGLECT, day 7 of anything better.
+- **Needs that fail in their own character** (2026-08-19): boredom **DRIFTS**
+  and tiredness **STALLS**, instead of both quietly shaving crabEff. A bored
+  crab on shift leaves its post for the tide line or the arcade window and has
+  to walk back when an order lands; past 0.95 for four settlements it takes an
+  unauthorised, unpaid day nobody covers. An exhausted crab nods off mid-task
+  while HOLDING the station slot, and past 0.97 may not make it home at all -
+  and sleeping rough banks no repair, so exhaustion prevents its own cure.
+  Boredom's only two cures are the ARCADE (money) and a CONVERSATION (time);
+  there is no free-fun venue and no solo cure, by the owner's ruling. See the
+  feature entry below for every number and the attribution table.
 - **Public taps** (`WATER_TAPS`, 2026-08-19): two free standpipes, promenade
   (x640) and pier head (x1844). No queue, no staff, no till, no hours - the
   floor under every crab's thirst, plus a cold rinse for a crab the showers
@@ -204,7 +214,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **88 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **103 scenarios, must stay green before any push.**
 
 - `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
@@ -272,6 +282,8 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- See also **NEEDS THAT FAIL IN THEIR OWN CHARACTER** (its own section below
+  the public-taps entry): boredom's drift and tiredness's stall, 2026-08-19.
 - **Business failure, FOR SALE and succession** (Matt's fault report, built
   2026-08-19, worktree — a directed build during the closing act, not a new
   front): *"sudsy goes bankrupt every day.. the shop needs to close till some
@@ -1123,6 +1135,261 @@ without a drink. That is the shape of the dial - too generous breaks the
 economy, too mean breaks the fairness the tap exists to provide.
 
 Apply this rule to the beach forage and any free-fun cure before building them.
+
+**Applied, and the receipt is in the entry below**: the boredom pass was
+measured against exactly this rule. Its ONLY free cure is a conversation, which
+costs two crabs 40-64 game-minutes of the working day and cannot keep them
+topped up on its own - and the owner's "no fun till arcade" ruling means there
+is nothing else.
+
+## NEEDS THAT FAIL IN THEIR OWN CHARACTER (shipped 2026-08-19, worktree)
+Boredom **drifts**, tiredness **stalls**. Builds `design/needs-failure-patterns.md`
+B1 + B3 and TI1 + TI4 — the owner's picks: *"Dirt boredom and tiredness are good"*.
+
+Until this pass all five needs failed the same way: the bar filled, `crabEff`
+shaved a few percent, and at 0.95 a flat number joined a sickness roll. Parched
+and bored looked identical from the boardwalk. Two of them now have a VERB.
+
+### THE OWNER'S TWO RULINGS, and both are load-bearing
+1. **"No fun till arcade is part of the game for now, it's fun."** The design
+   doc recommended a FREE FUN environmental fix (pier rail, tide line, busker).
+   **Rejected.** There is no free-fun venue, no ambient boredom decay and no
+   solo cure. The town visibly drifting until you can afford the $650 CLAWCADE
+   IS the pressure to buy one.
+2. **"Can do the social thing tho when bored, since it's very costly for
+   efficiency; I like that. Might make game much harder."** So CHATTER is in —
+   not as a freebie but *because* it is expensive. That makes it the model case
+   for THE SELF-HEALING RULE rather than an exception to it: the way out costs
+   TIME and never money, and it never pays the rent.
+
+**THE CURE LEDGER.** Boredom has exactly two cures and neither is free: the
+**ARCADE** (money — instant and total, `bored = 0`) and a **CONVERSATION**
+(time — 40–64 game-minutes stood still, for 0.06 off the bar). A crab with
+nobody to talk to — the lone shower attendant, the fisher on the far rail — has
+no way down at all, which is the loneliness shape the doc wanted. And a pair
+**cannot keep itself topped up**: `CHAT_CD` allows at most two chats in a
+trading day at `CHAT_RELIEF` 0.06, against a worked shift's **+0.20**. Measured:
+a solvent arcade-less town still sits at **mean boredom 0.832** over 24 days of
+chatter (0.857 with the chatter off). The cure takes the edge off; nothing more.
+
+### BOREDOM — DRIFT
+- **IDLE HANDS (the wander-off).** A crab on shift with no order to claim and no
+  dirty stall stops loitering by the door and takes itself to the tide line, the
+  sea wall, the notice board, the pier rail or the arcade window it cannot
+  afford (`WANDER_SPOTS`, filtered to `WANDER_PX` **340** of their post, every
+  spot through `clearSpotY`). **Still clocked in** — `kstate` stays `"idle"` and
+  the claim scan runs every frame, so a guest landing costs exactly the walk
+  back and nothing else.
+  What keeps it CHARMING at saturation (boredom is 0.72–0.85 town-wide with
+  everyone touching 1.0, so this fires constantly by design): `WANDER_AT`
+  **0.6**; the counter must be DEAD for `WANDER_QUIET` **3s** first, so nobody
+  bolts the instant the queue empties; and a wander is a **trip**, not a
+  posting — `WANDER_DWELL` **14–24s** stood there, then back to the post, then
+  `WANDER_CD` **20s** before the next. A six-hour shift is only 90 REAL seconds,
+  so those three numbers are what set the share of a dead spell spent off post:
+  about half. Plus **RULE 3 — boredom yields to everybody** (`boredYields`,
+  `BORED_YIELD` 0.8 on hunger / thirst / tiredness). Dirt is deliberately NOT in
+  that list: dirt is passive and always-on (Rule 2) and the town sits near 0.7
+  forever, so including it would switch the whole pattern off.
+  Measured cost: the 8-seed baseline reads median 12 **with** it and median 12
+  **without** (lifetime $30,224 vs $31,319) — inside the documented per-build
+  wobble. It is nearly free, and it lands hardest exactly when the shop is
+  quiet, which is when it costs the town least.
+- **THE WALK-OUT (B3, the late stage).** Pinned past `WALKOUT_AT` **0.95** at
+  `WALKOUT_DAYS` settlements running and the crab takes an unauthorised day: no
+  commute, no shift, **NO WAGE**, and **nobody covering**, because nobody was
+  told. Announced by name the night before — toast plus a day-report line,
+  "PINCHY HAS HAD ENOUGH - OFF TOMORROW" — so it is a thing the player could
+  have prevented.
+  `awayToday()` is the single predicate every downstream rule reads: the commute
+  gate, the beach amble, `pickErrand`'s relaxed thresholds (so a crab who walked
+  out of boredom will absolutely spend the day at the arcade, if the town has
+  one), `crabDueTonight`, both wage loops, and `bizRestingToday`. **`offToday()`
+  stays the ROTA and nothing else**, because the cover-shift promotion keys on
+  it and NOBODY COVERS A WALK-OUT. The job board is untouched by construction:
+  its emergency HELP WANTED gate counts roster HEADCOUNT, not who clocked in.
+  The shopfront gets a third placard, **NOBODY CAME IN**, beside DAY OFF and
+  OUT SICK.
+  **`WALKOUT_DAYS` ships at 4, not the doc's 2, and that is measured.** The doc
+  wrote 2 assuming a free-fun venue would exist to bring the bar down. It
+  doesn't: boredom PINS at 1.00 by about day 5 and never falls, so a threshold
+  of 2 makes the late stage the *steady state* — every crab losing every third
+  day forever, which is a paywall rather than pressure. At 2 the 8-seed baseline
+  took **48 walk-outs and the eviction median fell 17 → 11**; at 4 it takes 26
+  and lands at 12. Four means a bored crew loses roughly one extra day a week —
+  visible, expensive, survivable, and it stops the day you buy the arcade.
+- **CHATTER.** `CHAT_AT` 0.55 on BOTH parties, within `CHAT_PX` 26, neither
+  carrying / claimed / holding a slot / in a queue / under a player order;
+  `CHAT_SECS` 10–16 real seconds, `CHAT_RELIEF` 0.06 each, `CHAT_CD` 360
+  game-minutes. Its own `runChatter()` pass over the crab list — **deliberately
+  NOT folded into `collide()`**, which belongs to the locomotion layer. A chat
+  takes its own `dayState "chat"` and stops the day dead: not the schedule, not
+  the kitchen, not the commute. That is the price, and it is the whole reason
+  the cure is allowed to exist at all.
+  One gate found by reading a log rather than a matrix: **nobody strikes up a
+  conversation in their sleep.** Two shelter cots 26px apart were chatting at
+  04:30, which reads as a bug however good the arithmetic is. Chat is now
+  refused to a crab who is HOME and in the dark; the walk home still counts,
+  because that is exactly when two crabs fall into step. It cost real balance
+  (chats 237 → 140 across the 8-seed baseline, eviction median 15 → 12) and it
+  was still right.
+
+### TIREDNESS — STALL
+- **THE MICROSLEEP (TI1).** Past `NOD_AT` **0.85**, timed work has a `NOD_RATE`
+  **0.05**/second chance to stop dead for 2–5 seconds: eyes shut, the existing
+  sleep pose, the existing Z drift, the prep bar frozen mid-taco, then a jolt
+  awake ("WHAT? I'M UP"). The crab **KEEPS THE STATION SLOT** — `release()` is
+  not called and `workT` does not tick — so the cost lands on the whole kitchen
+  and not just the sleeper. Only in `NOD_STATES` (walk / toSlot / work /
+  toStallClean / cleaningStall): never `idle`, where a nod would cost nobody
+  anything, and never `waitSlot`/`waitCash`, which hold nothing.
+- **THE SHORTCUT HOME (TI4, the late stage).** Past `ROUGH_AT` **0.97**, with
+  more than `ROUGH_PX` 250 of the walk home left and the light gone, a
+  `ROUGH_RATE` **0.03**/second roll beds them down where they stand. Sleeping
+  rough banks **NO** repair — bed 0.4–0.5/h, cot 0.2–0.25/h, street 0 — so
+  exhaustion prevents its own cure. Honest and frightening, and nothing
+  "punished" the crab: they just didn't make it home.
+  It is a ROLL rather than a cliff for a measured reason. A flat rule dropped
+  every exhausted crab the instant they left the shack (home is always further
+  than 250px from a counter), which made it a one-way ratchet with no exit but
+  the weekly rota day: **94 rough nights per 6 towns × 15d**, against **18** as
+  a roll, and the probe town's mean tiredness fell 0.373 → 0.215 with the change.
+  Escapable by exactly the levers the player already has — a day off, a
+  right-click knock-off order, a shorter shift — and suite-pinned as such.
+  `careLane` was checked and deliberately left alone: it reads the housing RUNG
+  and DAYLIGHT rest hours, never position, so a rough night proves nothing on
+  the care ladder either way. That is the right answer, not an oversight.
+
+**TIREDNESS IS A GROWTH-TOWN PRESSURE, and the numbers say so loudly.** Nothing
+accrues tiredness *during* a shift — `TIRED_SHIFT` lands as a step at knock-off
+— so the only way to be past 0.85 while actually mid-task is to have arrived
+that way. Measured share of STATION time at each band (4 seeds × 12d, 4 crew): a
+plain town spends **0.0%** above *every* band from 0.5 up; an all-overtime town
+spends **2.3%** at ≥ 0.85. So the microsleep lands on one badly-run crab at a
+time — and for THAT crab, whose whole station day is eligible, `NOD_RATE` 0.05
+works out at ~4 nods that day, which is the design doc's 2–5/crew-day target
+hitting the crab it is actually about. Town-wide it reads 0.04–0.06
+nods/crew-day and **~0.2% of station time** (the brief's ceiling was ~5%), and
+in the 8-seed BASELINE matrix it fires **zero times** — the "no nod" arm is
+byte-identical to the shipped one.
+**Auto-manage measurably protects a delegated town**, and this was verified
+rather than assumed: same probe, rough nights **18 with auto-manage OFF vs 4
+with it ON**, mean tiredness 0.215 vs 0.144 — because `LABOR_CFG` pulls a crab
+off overtime at tired **0.75, below the nod line**. That is the auto-manage
+feature finally having a visible payoff.
+
+### The watchdogs, and why none of them fight this
+A napping, chatting or rough-sleeping crab **never calls `stepTo`**, and the
+auto-unstick watchdog's `walking` test requires `c._stepped` — so the 1.5s
+sidestep and the 30-game-minute `BOUNCE_BUDGET` warp both look straight past all
+three by construction. `updateStuck` says it out loud anyway, because a sidestep
+mid-nap would shove a crab off the station it is holding. The suite's freeze
+detector samples `dayState` in `["toWork","toHome","toErrand"]` and `kstate` in
+`["walk","toSlot","toBus","toSink"]`: `kstate "nap"` and `dayState "chat"` are
+in neither list, which is *why* they were given their own states instead of a
+flag on the old ones.
+**No deadlock.** The nap is hard-capped at `NOD_MIN + NOD_SPAN`, and a coworker
+who wants the station sits in `waitSlot` **in the clear lane** polling
+`tryAcquire` — the hold-and-wait fix this project already made. Suite-pinned
+with a `waitSlot`-run tripwire on a kitchen held at exhaustion for four days.
+And **`abortChef` now wakes a sleeper**: without it the guard would keep
+returning early forever on a crab whose station had already been released — the
+exact shape of the stall-occupant leak `abortErrand` exists to fix.
+`abortActivity` ends a chat unpaid and puts a rough sleeper back on their feet;
+`killCrab` ends a chat too.
+
+### Balance — measured, attributed, and NOT tuned away
+Every arm is the same 8 seeds through the same harness with only
+`window._failOff` different, so each movement can be blamed on one thing.
+**`ALL OFF` reproduces the pre-pass build's eviction list exactly**
+(11,14,14,15,17,17,18,20, median 17) — the receipt that nothing else moved.
+
+| baseline 30d × 8 | alive | eviction days | median | lifetime | serves |
+|---|---|---|---|---|---|
+| **ALL OFF** (= the pre-pass build) | 0/8 | 11,14,14,15,17,17,18,20 | **17** | $40,810 | 2165 |
+| no walk-out | 1/8 | 12,13,14,14,14,15,15,31 | 14 | $41,271 | 2105 |
+| no wander | 0/8 | 11,11,12,12,12,13,13,15 | 12 | $31,319 | 1631 |
+| no nod | 0/8 | 11,11,12,12,12,13,13,14 | 12 | $30,224 | 1609 |
+| no rough | 0/8 | 11,11,12,12,12,13,13,14 | 12 | $30,230 | 1609 |
+| no chatter | 0/8 | 10,11,11,11,11,11,12,13 | **11** | $27,197 | 1480 |
+| **ALL ON (shipped)** | 0/8 | 11,11,12,12,12,13,13,14 | **12** | $30,224 | 1609 |
+
+- **Growth `--buy chef,table` 40d × 8: 6/8 alive before → 5/8 after**
+  (evictions 11,14 → 10,13,14). One marginal seed moved. The suite's gate
+  (≥ 3/8) is nowhere near, and the escape promise stands.
+- **Baseline: median 17 → 12, lifetime −26%, tourist serves −26%.** A real cost,
+  and meant to be: both patterns cost throughput by design and the do-nothing
+  town is the one that pays. Median 12 sits dead centre of the band CLAUDE.md
+  documents (~11–13) and the lose-by-default pillar holds at 0/8. Documented,
+  not neutralised — **no price, wage or rent was touched.**
+- **The movement is the WALK-OUT and the CHATTER, and they pull opposite ways.**
+  Switching the walk-out off recovers the median to 14 and lifetime to $41k;
+  switching the CONVERSATION off drops it to 11 and $27k. Wander, nod and rough
+  sleep are each worth a day or less.
+- **The chatter row is the surprising one, and it is honest.** Taking the
+  conversation AWAY makes the town measurably *worse*, because boredom finally
+  has teeth — the `crabMove` −20% drag and the walk-outs it feeds. The owner
+  expected chatter to make the game harder; what it actually does is sit exactly
+  where he put it: a town with a cure that costs time beats a town with no cure
+  at all, and both lose to a town that bought the arcade. That is the purchase
+  decision, working.
+- **Illness and death** (6 SOLVENT towns × 24d, paired arms — an evicted town
+  stops telling you anything about health): infections **15 → 8**, illness
+  spells **12 → 8**, mean illness **3.50 → 1.88 days**, deaths **1 → 0**.
+  Slightly *healthier*, and the mechanism is legible rather than lucky: a crab
+  who walked out spends the day on the beach eating, drinking and washing
+  instead of working, and dirt-caused infections fall 12 → 4. Serves
+  3225 → 3195 (−0.9%), lifetime $76,045 → $71,873 (−5.5%). Mean tiredness
+  0.131 → 0.127.
+
+### Legibility
+Statuses: `WANDERED OFF TO THE ARCADE WINDOW` / `WATCHING THE PIER RAIL` /
+`CHEWING THE FAT WITH SALTY` / `NODDED OFF AT THE GRILL` /
+`ASLEEP WHERE THEY DROPPED` / `WALKED OUT - ON THE BEACH`. Moods **RESTLESS**
+(0.6) and **AT A LOOSE END** (0.95), slotted into `crabMood`'s ladder so a crab
+mid-task still reads BUSY. Dossier rows TODAY (`WALKED OUT - UNPAID, NOBODY
+COVERING` / `AT A LOOSE END - N NIGHTS OF IT`) and LAST NIGHT (`SLEPT ROUGH - NO
+REST BANKED`). Day report: the walk-out warning line, plus `X NEVER CAME IN - NO
+WAGE` and `X SLEPT ROUGH - NO REST BANKED`. Quips for the bored ("I'D KILL FOR
+AN ARCADE"), the wanderer ("NOTHING DOING"), the skiver ("THEY'LL COPE") and the
+waker ("WHAT? I'M UP"). The microsleep and the rough sleeper both wear the
+**existing** closed-eye sleep pose and Z drift — a crab motionless at a grill
+with a Z over it and a half-finished taco is the ten-second tell.
+
+`window._failOff` is a measurement hatch read through one helper at five gates
+(the game never sets it): it is how the table above was attributed, and one
+suite scenario uses it for a paired control arm.
+
+### Suite 98 → 103, ZERO re-pointing
+New: `idle hands: a bored crab leaves its post - and an order brings it back`,
+`idle hands: the WALK-OUT costs the wage, and coverage stays honest`,
+`microsleep: the nod holds the station slot, then gives it back`,
+`shortcut home: sleeping rough banks nothing - and the player can break it`,
+`boredom has NO free cure: only a conversation, and it never pays for itself`.
+**All five verified RED on the pre-pass build**, four for the right behavioural
+reason ("a bored crab on a dead counter never left its post"; "an exhausted
+kitchen never nodded off once in four days"; "an exhausted crab walking the
+whole promenade home ALWAYS made it"; "boredom never moved down at all - the
+chatter cure is not firing"). The walk-out scenario goes red on a ReferenceError
+instead, which is honest but weaker, and is noted as such in the scenario.
+**No existing scenario needed re-pointing — including the frozen day-2
+fingerprint**, which passes unchanged. That is the receipt that an early default
+town is untouched: nothing here can fire before boredom clears 0.6, and on day 2
+it is 0.2.
+
+### Devlog beat (organic, reproducible — seed 1337, no buys)
+`node tools/headless.mjs --days 20 --seeds 1`. **SUDSY, the lone shower
+attendant, has nobody to talk to.** From **day 5** she starts leaving her own
+stalls: the sea wall at 08:26, the sea wall again at 12:10; **day 6** the notice
+board, the sea wall, the town tap; **day 8 and 9** the tide line, twice each
+day, boredom climbing 0.68 → 1.00 with no arcade in town and no conversation
+long enough to matter. On **day 12** she does not open at all — SUDS SHOWERS
+hangs the **NOBODY CAME IN** placard and takes nothing. PINCHY, who at least has
+coworkers, holds out two days longer on a diet of doorstep conversations (SUDSY
+day 6, CLAWDIA days 7–9, SALTY day 11) before **day 14**, when he doesn't come
+in either. Shots: `idle-hands-pier-rail`, `microsleep-at-the-grill`,
+`asleep-on-the-sand`, `walkout-day-report` under `shots/`.
+
 
 ## (superseded by the retune above) Lose-by-default after the tap
 The public tap fixed a structural unfairness (crabs could be barred from ever
