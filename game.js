@@ -2440,7 +2440,7 @@ function save() {
   if (FRESH || wiping) return;
   const lv = {}; for (const k in UPS) lv[k] = UPS[k].lvl;
   const env = {
-    coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, rate: incomeRate(), t: nowMs(),
+    coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, t: nowMs(),   // (no `rate`: nothing accrues offline)
     bankrupt, credit: { bal: Math.round(credit.bal), warned: credit.warned },
     dayLog: (window.dayLog || []).slice(-6),   // keeps the forecaster warm across reloads
     personas: crabs.map(c => c.p),
@@ -2622,11 +2622,11 @@ function load(slot) {
     if (BIZ[b]) BIZ[b].autoLabor = !!s.autoLabor[b];
   if (s.laborPol) for (const b in s.laborPol)
     if (BIZ[b] && s.laborPol[b]) laborPolicyState[b] = { cd: s.laborPol[b].cd || 0 };
-  const away = (nowMs() - (s.t || nowMs())) / 1000;
-  if (away > 60 && s.rate > 0) {
-    const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
-    if (gain > 0) { coins += gain; lifetime += gain; toast = { text: "WELCOME BACK! THE CRABS MADE $" + fmt(gain), t: 7 }; }
-  }
+  // NO OFFLINE EARNINGS (owner, 2026-08-19: "eliminate that whole mechanic").
+  // The town used to pay out for the hours the tab was closed - "WELCOME BACK!
+  // THE CRABS MADE $35,000" - which is money nobody watched anybody earn, in a
+  // game whose entire premise is watching crabs earn it. Nothing accrues while
+  // you are away; the town is exactly where you left it.
   return true;
 }
 
