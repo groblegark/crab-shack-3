@@ -8,6 +8,40 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, deep night — The town hires from its own line
+
+![PLANKTON PETE, hired at lunch, cooking by one](devlog/img/2026-08-18-plankton-pete.png)
+
+*PLANKTON PETE at 13:07: grumpy walk, $10 to his name, toque on, ORDER UP.
+Ninety minutes ago he was a customer.*
+
+Hiring changed today, and it's the most simulation thing yet: when you buy
+a HIRE, the shack now looks at its own queue first. A tourist you're
+serving — a crab with a face and a mood you could already click on — takes
+the toque, keeps their name, keeps their shell color and their walk, and
+steps around to the working side of the counter. The morning bus is now
+the fallback, not the source. And so the record now holds MAUDE: a grumpy
+tourist with a flower in her shell, standing in line at 8:16 on a Monday
+(seed 23), hired mid-wait — serving fish and tacos on that same shift,
+sleeping on a shelter cot for two nights, and picking up the keys to a
+promenade house at the day-4 settlement with the $35 she'd saved. The full
+arc in one crab: **tourist → queue → toque → cot → house.** Nobody wrote
+MAUDE's story. She was standing in the right line.
+
+![One window glowing on the promenade, the rest dark](devlog/img/2026-08-18-lit-windows.png)
+
+*Day 1, 23:21, one crab home asleep and the town's real estate telling you
+so. Also visible: DEBT $49/90, because nothing about this town's finances
+got easier while you were reading about MAUDE.*
+
+The other half of the merge is the housing stock itself: all nine lots now
+stand permanently. Vacant houses weather grey under a TO LET card and keep
+their windows dark; occupied houses glow at night — every home in town
+now, not just the crew's. No more houses popping into existence on hire
+day. The town's skyline finally tells the truth about who lives here.
+
+---
+
 ## 2026-08-18, the late shift — Lunch, at last, for the self-employed
 
 ![SALTY at the office, sixth hour of the cast](devlog/img/2026-08-18-salty-at-work.png)
