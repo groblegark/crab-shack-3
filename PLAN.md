@@ -197,10 +197,13 @@ vm — never fork game logic into tools/) and perf expectations live there.
   All of hours/mealPol/policy state save-roundtrip with clamping migration.
   Measured: defaults BYTE-IDENTICAL to the pre-feature build (8 seeds x 30d,
   full stats blobs, policy disabled via `window._noHoursPolicy`); with the
-  policy live the curve is 0/8, 7-11 median 10 vs 7-14 median 10 (only the
-  day-14 tail seed moved - her earlier closings trim its runway). Her till:
+  policy live the baseline is 0/8, 7-11 median 10 vs 7-14 median 10 (only
+  the day-14 tail seed moved) and growth chef,table reads median 9 vs 10 -
+  one seed-day, the documented per-build wobble; an 8h-floor damping probe
+  measured the identical growth list (the shift is stream chaos from her
+  first move, not the shrink depth), so the 6h floor stays. Her till:
   seed-dependent (one seed way up, one down, two a wash - the fixed-hours
-  control drains in 3/4 seeds too); the 6h span floor is the damping.
+  control drains to ~$0 in 3/4 seeds too over 24 kept-alive days).
 - **Weekends / days off** (shipped 2026-08-18): a 7-day week derived from
   `day` (day 1 = MON, weekday in the clock). Every working crab — crew, NPC
   staff, owner-operators, fishers — rests one weekday, derived at runtime
