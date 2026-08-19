@@ -40,7 +40,14 @@ compounds or collapses → the landlord collects at 20:00 either way.
   key on the BUSINESS. See the feature entry below for the numbers.
 - **Crabs**: personas (name, trait, commute mode, accessory, shift, wallet,
   house), needs FED/THIRST/CLN/FUN/SPA, homes they live inside, the shelter for the
-  homeless, disease + contagion + death with beach memorials.
+  homeless, disease + contagion + death with beach memorials. **Every crab is
+  mortal** (2026-08-19) - crew and townsfolk alike, off the same care ladder;
+  the roll arms on day 4 of NEGLECT, day 7 of anything better.
+- **Public taps** (`WATER_TAPS`, 2026-08-19): two free standpipes, promenade
+  (x640) and pier head (x1844). No queue, no staff, no till, no hours - the
+  floor under every crab's thirst, plus a cold rinse for a crab the showers
+  cannot serve. Pitched ABOVE the drink errand's threshold so the juice bar
+  keeps first refusal (see the public-taps entry for the numbers).
 - **Facilities pattern**: guests occupy things. Shower stalls — attendant
   hands out a kit, guest showers, stall goes dirty, staff cleans it. Dining —
   guests are seated when their order is claimed, server carries the plate to
@@ -198,6 +205,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
 - `node tools/suite.mjs` — **88 scenarios, must stay green before any push.**
+
 - `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
   distributions per housing tier. Paired arms per seed: the care ladder live
@@ -207,6 +215,7 @@ vm — never fork game logic into tools/) and perf expectations live there.
   labor-policy bullet come from.
 
 - `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
+- (count above is the live one; the two older figures in this file are historic.)
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
@@ -894,7 +903,7 @@ the feature entry above), alongside a free public water tap and NPC
 mortality from sibling agents.
 
 ## DEFERRED TO CS4 (decided 2026-08-18, not forgotten)
-Both belong to Matt's "all crabs should be equal" directive, and both were
+Both belonged to Matt's "all crabs should be equal" directive, and both were
 deferred deliberately as design questions rather than bugs:
 - **NPC mortality** — NPCs still cannot die (the `!k.p.npc` guard in the
   settlement illness block). Also why a sick NPC can linger indefinitely.
@@ -905,6 +914,203 @@ deferred deliberately as design questions rather than bugs:
 - **Wage asymmetry** — NPC_WAGE 20 vs CRAB_WAGE 23.
 These are the last places the sim treats some crabs as more real than
 others. Tomorrow is the day for that.
+- ~~**NPC mortality**~~ — **REOPENED BY MATT AND SHIPPED 2026-08-19** ("we do
+  need to make death an option in such cases"). See the public-taps entry
+  below: the `!k.p.npc` guard is gone and every crab is mortal.
+- **Wage asymmetry** — NPC_WAGE 20 vs CRAB_WAGE 23. Still the last place the
+  sim treats some crabs as more real than others.
+
+## PUBLIC TAPS + UNIVERSAL MORTALITY (shipped 2026-08-19, worktree)
+Matt, from play, two sentences that turned out to be one job: **"some crabs
+just never drink, that must be a bug"** and **"we do need to make death an
+option in such cases."** A town where a crab cannot meet a need has no
+business making that need fatal, so both halves land in one measured pass:
+the ENVIRONMENT first, then the stakes.
+
+### THE FAULT — three traps of the same shape
+`pickErrand` let a crab drink only at a **STAFFED** counter, and the
+self-serve fallback was gated `!c.p.npc`. SUDSY works 8:30–18:30 — exactly
+the hours the counters are staffed — so she is never free while a vendor is
+open; the fishers hold the rail all day for the same reason; and as townsfolk
+neither may pour their own. Same class as the trap weekends fixed (crabs
+couldn't use facilities that closed during their shift).
+
+Measured, seed 5, 12 days, `pickErrand` instrumented — parched errand checks
+vs how many of them had a drink on offer:
+
+| crab | parched checks | a drink available | drinks in 12 days |
+|---|---|---|---|
+| SUDSY (owner-operator) | 73 | 8 (11%) | 4 |
+| SALTY (fisher) | 293 | 10 (3%) | 7 |
+| DRIFT (fisher) | 157 | 7 (4%) | 7 |
+| SCUTTLE (drifter) | 13 | **0** | **0. Ever.** |
+
+Two more of the same shape found en route, both pre-existing:
+- **THE SHOWER ATTENDANT COULD NEVER SHOWER.** The bath was gated on
+  `c.workBiz !== "showers"`, and `workBiz` is set at clock-in and NEVER
+  CLEARED — so SUDSY was barred from her own stalls for life. Measured: 161
+  of 161 grubby errand checks blocked by that field, 0 baths in 12 days, dirt
+  pinned at 1.00 (−6% pace, −30% on every tip, +0.06 sickness a night). Now
+  scoped to actually being ON DUTY, which is all the gate ever meant.
+- **THE EVENING QUEUE NEVER REACHES THE LOCAL** — *not fixed, flagged.* SUDSY
+  can afford food on 35 of 35 hungry errand checks, but the shack is dark on
+  28 of them and on the other 7 she joins the line at 18:30 and leaves
+  UNSERVED at 20:45 / 21:03 / 22:26. Measured on the pre-pass build too (one
+  meal in eight days), so it is not this pass's doing. **This is the next
+  instance of the class** and the reason the mortality model below refuses to
+  execute a crab on day three of a cared-for illness.
+
+### THE TAP (the environmental fix)
+Two public standpipes — `WATER_TAPS`, one on the promenade beside the notice
+board (x640) and one at the foot of the pier (x1844), where a fisher hoses
+down the catch. Free, always on, no queue, no staff, no till, no shop hours.
+A stop in `pickErrand` that every crab can reach: crew, townsfolk,
+owner-operators, fishers. Its own tiny `dayState` ("atTap"), so nothing in the
+customer pipeline has to learn about a stop that never pays anybody.
+
+**The juice bar keeps its business by construction, three ways:**
+1. **First refusal.** `TAP_AT` **0.70** sits ABOVE the drink errand's own 0.45,
+   so the whole 0.45–0.70 band belongs to the counters. You'd buy a juice when
+   you fancy one; you walk to the standpipe when you're properly thirsty.
+2. **Plain water.** `TAP_QUENCH` 0.6 off the meter, where any juice ZEROES it —
+   a bought drink buys about twice the runway, and a COOLER is still a treat.
+3. **A real stop.** `TAP_SIP` 3.2s at the spout, `TAP_APPEAL` 0.5 halving its
+   pull in the errand score, `TAP_CD` 20 cooldown after a sip.
+
+**THE STANDPIPE RINSE** — the safety net, not a free shower. Cold water, no
+soap: `TAP_RINSE` −0.35 against a $5 rinse's −0.5, at `TAP_RINSE_AT` **0.85**
+(0.66 while ill — the CARED bar), and offered ONLY to a crab the market cannot
+serve right now: nobody on the stalls, no fare in pocket, or they ARE the
+attendant. A crab who could walk into a staffed shower with the fare in hand
+never sees it, so SUDSY's takings do not pay for the fix.
+
+**Measured, 6 seeds × 14 days, full town (bar + arcade + 5 crew), before → after:**
+
+| | before | after |
+|---|---|---|
+| PARCHED (thirst ≥ 0.8, the −15% walk) | 7.2% | **1.3%** |
+| at the dehydration sickness line (≥ 0.95) | 6.28% | **0.88%** |
+| worst unbroken parched streak | **6.3 days** | **0.9 days** |
+| mean dirt, town-wide | 0.670 | **0.523** |
+| infections | 21 | **11** |
+| **JUICE BAR takings** | **$14,347** | **$15,386 (+7.2%)** |
+| shack takings | $27,092 | $27,435 |
+| SUDS SHOWERS takings | $2,758 | $3,665 (+33% — she finally washes) |
+
+The bar goes UP, not down: a hydrated town walks faster and shops more. Tourist
+drinks were always ~88% of its trade, and tourists don't use taps.
+
+### UNIVERSAL MORTALITY
+The `!k.p.npc` guard in the settlement illness block is gone. Same odds off the
+same `CARE_LANES`, byte-for-byte, so looking after somebody is worth exactly
+what it was worth. What makes it FAIR is **when the roll arms**:
+
+    NEGLECT lane      DEATH_DAY  4   (hungry >= 0.5 or dirty >= 0.66 while ill)
+    any lane above it LINGER_DAY 7   (fed, watered, clean — the tide has to wait)
+
+A crab dies of a neglect somebody could have fixed. A crab who is being looked
+after is not taken on day three, ever — which is what keeps the care ladder
+worth climbing now that everyone is mortal, and which is the honest answer to
+the evening-queue trap above (a crab starving at the back of a line it cannot
+reach is not a fair execution).
+
+**LEGIBLE — the town sees it coming.** The settlement before the roll arms
+names the crab: a `FADING` mood on the follow card, `GRAVELY ILL - DAY N` on
+the status line and the dossier's HEALTH row, a "GRAVELY ILL" pop over their
+shell, a named toast, and a **day-report line** ("SALTY IS FADING - NEEDS
+CARE") beside the existing died / fell ill / recovered lines. Then the memorial.
+
+**Measured, 12 solvent towns × 30 days:** 9 deaths (0.75/town), **8 of 9 on the
+NEGLECT lane**, illnesses running 4–9 days before the end. Crew 0, townsfolk 9
+— a solvent player's crew eat and wash, which is the ladder paying out; crew
+mortality itself is unchanged and suite-pinned. In the true do-nothing baseline
+(16 seeds × 30d) there is exactly **one** death all told, so mortality is not
+what moved the eviction curve.
+
+**CONSEQUENCES the town feels.** A dead owner-operator shutters the shop
+(`OWNERS[id].gone`, which `bizDark` reads and the settlement skips; persisted),
+her staff go back to the pier rather than draw wages from a till nobody keeps,
+and her postings come off the job board. **SEAM, deliberately left:** proper
+succession belongs to the bankrupt-shop ownership-transfer work happening in
+parallel — `gone` is the flag to hang it on. A dead fisher frees their place on
+the rail: `freeFishSpot()` takes the lowest spot nobody holds, where
+`fishSpotFor(count)` used to hand a newcomer a spot somebody was standing on.
+The dead stay dead across save/load — `initNpcs()` stands the founders up
+BEFORE `load()` runs, so the saved persona list is now the roll of the living
+and anybody missing from it is in the memorial row.
+
+**Cosmetic, found while shooting it:** the memorial row was laid out westward
+from the shelter at a 16px pitch, which since all nine lots stood permanently
+put headstones inside the front rooms of houses 4 and 5. Moved to the dune
+between the last promenade lot and the town tap, two to a row, DERIVED from the
+index (old saves relocate), grounded, and each marker now carries its name.
+
+### Balance (30 days, `--jobs`)
+- **Baseline 8 seeds: 0/8, evictions 13,14,14,14,15,15,16,18, median 15**
+  (before: 0/8, 11–16, median 14). Lose-by-default holds; +1 median, +2 tail.
+- Baseline 16 seeds: 1/16, median 14 (before 0/16, median 13). One seed now
+  reaches day 30.
+- Growth `--buy chef,table` 40d × 8: **3/8 alive** (before 4/8).
+- The move is the TAP, not the deaths, and its mechanism is measured: crabs
+  spend ~20% more of their existence clocked in (dutyFrac 0.27 → 0.33) because
+  they are not walking at −15% and not losing shifts to illness. Same shape as
+  the routing pass's recovered crab-hours. TAP_AT was swept against the matrix
+  — 0.45 measured 5/16 surviving, 0.55 worse, 0.65 3/16, **0.70 1/16** — and
+  0.70 is where the fix is complete (0.9-day worst parched streak) AND the
+  curve holds. Lower it and the town gets measurably richer; that is the knob,
+  and it is documented rather than hidden.
+
+### Suite 82 → 87
+New: the anti-trap gate (nobody parched for a week, crew AND townsfolk), the
+tap's free-and-reachable + juice-bar revenue floor, neglect kills a crew crab
+AND a townsfolk crab (with the warning, the memorial and the report line), a
+cared-for crab is not taken on day three, and a dead NPC leaves the town sane
+(shop shut, no orphaned rail spot, save/load clean). **All five verified RED on
+the pre-pass build**, the behavioural two for the right reason ("a crab spent
+3.1 days straight in the parched band: SUDSY (town)@9"; "SUDSY never died").
+
+Two re-pointings, receipts in the scenarios:
+1. `hours: defaults are behavior-identical (frozen day-2 fingerprint)` — seed
+   1337 is BYTE-IDENTICAL except SUDSY, who moves from (743.8, 167.6), still
+   out on the boardwalk at midnight, to (388, 154), asleep at home. Seed 4242
+   shows the trade in one line: she drinks free water instead of buying, so her
+   wallet holds 40 instead of 18 and the player's till is $19 lighter.
+2. `auto-manage: grants a sick day` — the FIXTURE, not the rule. It demanded
+   the grant at the FIRST settlement, which only worked while the crab reliably
+   failed that night's cure roll (the illness block runs before runLaborPolicy
+   in the same frame). A hydrated town cures faster.
+
+**Note for `tools/illness.mjs`:** its BED/COT arms now record 0 deaths in both
+paired arms (they were 4 and 4 of 120). That is the linger rule by
+construction, not a regression — those arms hold a crab on a rest lane all the
+way through, and rest lanes no longer arm the roll before day 7.
+
+### Devlog beat (organic, reproducible — seed 1337, SUDSY)
+`node tools/headless.mjs --days 12 --seeds 1`.
+**Before:** from day 3 she is pinned at hunger 1.00, thirst 1.00, dirt 1.00,
+wallet $0, ill six straight days on the NEGLECT lane and still ill on day 12 —
+the zombie Matt was reacting to. Over twelve days `pickErrand` hands her
+NOTHING 463 times and a meal once; she sets off for the shack, waits in the
+line to 21:55, and never gets home to bed.
+**After:** she eats on day 4 and day 7, drinks at the town tap, hoses off at
+the standpipe five times, and her dirt oscillates 0.45–0.85 instead of pinning.
+When she does fall ill on day 7 she is NEGLECT for one night — then gets
+herself fed, watered and clean and reaches **BED REST** on day 8, where the
+roll cures her at the improved 0.55 lane. She is back on her stalls on day 9,
+and she sleeps at home every night. Shots: `tap-drinking`, `tap-night`,
+`tap-pier`, `fading-dossier`, `death-report`, `memorial-townsfolk`.
+
+## Lose-by-default after the tap (2026-08-19, for Matt)
+The public tap fixed a structural unfairness (crabs could be barred from ever
+drinking) and the town got measurably healthier: crabs spend ~20% more of their
+lives clocked in, so even a DO-NOTHING two-crab shack now earns more. Measured
+on the finished tree: **2 of 16 baseline towns survive 30 days** (on ~$113 —
+barely), where it used to be 0. Growth escape holds at 4/8.
+Rent was tested as the counter-lever and REJECTED: 236 restores 0/16 but takes
+growth to 0/8 — it hits the escape promise harder than the exploit. Spawn pacing
+is the other honest lever if Matt wants the pillar absolute again. Left as
+measured, documented, and NOT tuned away, per standing policy. The suite gate
+now asserts "all but at most one of six", not "every one".
 
 ## THE ESCAPE PROMISE IS BACK (2026-08-18, after routing) — supersedes the ruling
 Matt ruled escape-as-rare while it was measurably broken (0/6 at day 40). It is
@@ -912,7 +1118,9 @@ no longer broken, and nothing in the economy was touched to fix it: trip-chainin
 and furniture-aware travel gave crabs back the hours they were spending walking
 and bouncing. Measured on the finished tree (with fishing experience): baseline (do nothing)
 0/8, evictions 11-16, median 14 — lose-by-default holds. Hire-and-seat growth:
-**4/8 alive at day 40**. (Experienced fishers land more, which feeds the town.) That is the founding promise met — "lose by default, but a growth
+**4/8 alive at day 40**. (Experienced fishers land more, which feeds the town.)
+(Public taps moved this a notch on 2026-08-19: baseline 0/8, 13-18, median 15;
+growth 3/8 at day 40. See the public-taps entry.) That is the founding promise met — "lose by default, but a growth
 strategy can escape" — arrived at by fixing the environment rather than the
 numbers. If Matt wants it harder, the honest levers stay spawn pacing and rent,
 chosen deliberately; do NOT re-cripple the routing to get there.
