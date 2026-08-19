@@ -806,7 +806,7 @@ let ffSleep = false, ffSleepDay = 0, ffChain = 0;   // the little sun: skip to m
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
 let today = newDayLog();
-let report = null, reportT = 0, dossier = null, boardView = false;
+let report = null, reportT = 0, dossier = null, boardView = false, dossierHit = {};
 let manage = null;   // key of the player-owned business whose MANAGEMENT card is open
 let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
@@ -2641,29 +2641,89 @@ cv.addEventListener("click", (ev) => {
   }
   if (gameOver) { newGame(); return; }
   if (dossier) {
-    // the DOES row doubles as the reassignment control for crew crabs
+    // the DOES row doubles as the reassignment control for crew crabs; the
+    // SHIFT and HEALTH rows are the labor-policy controls (OT / sick day)
     const pt = evPos(ev);
     const owned = Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player");
-    if (dossier.p && !dossier.p.npc && owned.length > 1 && pt.y >= 47 && pt.y < 57 && pt.x >= 24 && pt.x < 232) {
-      const c = dossier;
+    const c = dossier;
+    const inRow = (r) => r && pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h;
+    if (c.p && !c.p.npc && owned.length > 1 && pt.y >= 47 && pt.y < 57 && pt.x >= 24 && pt.x < 232) {
       c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
       sfx.buy();
       popText("NEW JOB: " + BIZ[c.p.job].name, c.x - 20, FLOOR_Y - 34, [140, 255, 160]);
       return;
     }
-    dossier = null; return;
+    if (c.p && inRow(dossierHit.ot)) {
+      c.p.ot = !c.p.ot; sfx.buy(); save();
+      popText(c.p.ot ? "OVERTIME REQUESTED" : "OFF OVERTIME", c.x - 22, FLOOR_Y - 34,
+        c.p.ot ? [255, 216, 96] : [180, 170, 190]);
+      return;
+    }
+    if (c.p && inRow(dossierHit.sick)) {
+      c.p.sickPol = onSickDay(c) ? "require" : "grant"; sfx.buy(); save();
+      popText(onSickDay(c) ? "GO HOME AND REST" : "WE NEED YOU IN", c.x - 22, FLOOR_Y - 34,
+        onSickDay(c) ? [140, 255, 160] : [255, 150, 130]);
+      return;
+    }
+    dossier = null;
+    if (manage) sfx.ding();   // opened from the census: fall back to the card underneath
+    return;
   }
   if (manage) {
     // the management card swallows every click; only its controls act
-    const pt = evPos(ev), R = manageRects(), h = BIZ[manage].hours;
+    const pt = evPos(ev), R = manageRects(), b = BIZ[manage], h = b.hours;
     const hit = (r) => pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h;
-    if (hit(R.om)) { setBizHours(manage, h.open - 30, h.close); sfx.buy(); save(); return; }
-    if (hit(R.op)) { setBizHours(manage, Math.min(h.open + 30, h.close - HOURS_SPAN_MIN), h.close); sfx.buy(); save(); return; }
-    if (hit(R.cm)) { setBizHours(manage, h.open, Math.max(h.close - 30, h.open + HOURS_SPAN_MIN)); sfx.buy(); save(); return; }
-    if (hit(R.cp)) { setBizHours(manage, h.open, h.close + 30); sfx.buy(); save(); return; }
-    if ((manage === "shack" || manage === "juicebar") && hit(R.meal)) {
-      BIZ[manage].mealPol = MEAL_POLS[(MEAL_POLS.indexOf(BIZ[manage].mealPol) + 1) % MEAL_POLS.length];
-      sfx.ding(); save(); return;
+    for (const t of MANAGE_TABS) if (hit(R.tab[t])) { manageTab = t; sfx.ding(); return; }
+    if (manageTab === "HOURS") {
+      if (hit(R.om)) { setBizHours(manage, h.open - 30, h.close); sfx.buy(); save(); return; }
+      if (hit(R.op)) { setBizHours(manage, Math.min(h.open + 30, h.close - HOURS_SPAN_MIN), h.close); sfx.buy(); save(); return; }
+      if (hit(R.cm)) { setBizHours(manage, h.open, Math.max(h.close - 30, h.open + HOURS_SPAN_MIN)); sfx.buy(); save(); return; }
+      if (hit(R.cp)) { setBizHours(manage, h.open, h.close + 30); sfx.buy(); save(); return; }
+      if ((manage === "shack" || manage === "juicebar") && hit(R.meal)) {
+        b.mealPol = MEAL_POLS[(MEAL_POLS.indexOf(b.mealPol) + 1) % MEAL_POLS.length];
+        sfx.ding(); save(); return;
+      }
+    } else if (manageTab === "SCHEDULE") {
+      if (hit(R.auto)) {
+        b.autoLabor = !b.autoLabor; sfx.buy(); save();
+        toast = { text: b.autoLabor ? BIZ[manage].short + ": THE ROTA MANAGES ITSELF NOW"
+          : BIZ[manage].short + ": YOU'RE CALLING THE SHIFTS", t: 5 };
+        return;
+      }
+      if (hit(R.sickPol)) {
+        b.sickPol = b.sickPol === "require" ? "grant" : "require"; sfx.buy(); save();
+        toast = { text: BIZ[manage].short + " SICK DAYS: " + SICK_POL_LABEL[b.sickPol], t: 5 };
+        return;
+      }
+      const staff = allCrabs().filter(c => c.p.job === manage);
+      for (let i = 0; i < Math.min(staff.length, R.rows.length); i++) {
+        const c = staff[i], cell = R.cells[i];
+        if (hit(cell.name)) { dossier = c; sfx.ding(); return; }
+        if (hit(cell.shift)) {   // M -> E -> D -> M: the roster's one real assignment
+          const order = ["M", "E", "D"];
+          c.p.shift = order[(order.indexOf(c.p.shift) + 1) % order.length];
+          sfx.buy(); save(); return;
+        }
+        if (hit(cell.ot)) {
+          if (c.p.owner || c.p.job === "fishing") { toast = { text: c.p.name + " WORKS FOR THEMSELVES", t: 4 }; sfx.angry(); return; }
+          c.p.ot = !c.p.ot; sfx.buy(); save(); return;
+        }
+        if (hit(cell.sick)) {   // per-crab override cycles: shop rule -> always grant -> must work
+          c.p.sickPol = c.p.sickPol == null ? "grant" : c.p.sickPol === "grant" ? "require" : null;
+          if (c.p.sickPol == null) delete c.p.sickPol;
+          sfx.buy(); save(); return;
+        }
+      }
+    } else {   // TOWN census
+      if (hit(R.csort)) { censusSort = (censusSort + 1) % CENSUS_SORTS.length; censusPage = 0; sfx.ding(); return; }
+      if (hit(R.cfilt)) { censusFilter = (censusFilter + 1) % CENSUS_FILTERS.length; censusPage = 0; sfx.ding(); return; }
+      if (hit(R.cprev)) { censusPage = (censusPage + censusPages() - 1) % censusPages(); sfx.ding(); return; }
+      if (hit(R.cnext)) { censusPage = (censusPage + 1) % censusPages(); sfx.ding(); return; }
+      const list = censusList();
+      for (let i = 0; i < CENSUS_ROWS; i++) {
+        const c = list[censusPage * CENSUS_ROWS + i];
+        if (c && hit(R.crows[i])) { dossier = c; sfx.ding(); return; }
+      }
     }
     const owned = ownedBizList();
     if (owned.length > 1 && hit(R.next)) { manage = owned[(owned.indexOf(manage) + 1) % owned.length]; sfx.ding(); return; }
@@ -2671,7 +2731,13 @@ cv.addEventListener("click", (ev) => {
     if (hit(R.done) || !onCard) manage = null;
     return;
   }
-  if (boardView) { boardView = false; return; }
+  if (boardView) {
+    const pt = evPos(ev), r = jobBoardCensusRect();
+    if (pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h) {
+      boardView = false; manage = ownedBizList()[0] || null; manageTab = "TOWN"; sfx.ding(); return;
+    }
+    boardView = false; return;
+  }
   if (reportT > 0) { reportT = 0; return; }
   startMusic();
   const p = evPos(ev);
@@ -3158,6 +3224,13 @@ function drawCrab(c) {
     }
   }
   if (c.p.sick && ((c.animT * 2) | 0) % 2) wblit(SICK_MARK, c.x + 10, y - 8);
+  // the OVERTIME POWERUP: readable at a glance to everyone, from live state,
+  // so it appears the minute they clock past their shift and clears itself the
+  // minute overtime ends. Bobs so it reads as a marker, not a hat.
+  if (onOvertimeNow(c)) {
+    const bobb = Math.sin(time * 3 + c.animT) > 0 ? 0 : 1;
+    wblit(OT_MARK[((time * 2.2) | 0) % 2], c.x + 5, y - 11 - bobb);
+  }
   if (c.p.job === "fishing" && c.dayState === "working") wblit(ROD[((c.animT * 2) | 0) % 2], c.x + 12, y - 3, c.flip);
   if (c.carrying) wblit(ITEMS[c.carrying], c.x + 4, y - 7);
   if (working && c.workMax > 0.7) {
@@ -3316,14 +3389,18 @@ function drawFollowCard() {
   smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
   smallText(ctx, TRAITS[p.trait].label + " " + MODES[p.mode].label, 29, 13, [120, 90, 60]);
   smallText(ctx, crabStatus(c).slice(0, 26), 29, 21, [30, 110, 60]);
-  const shiftTxt = "SHIFT " + baseShift(c).label;
-  smallText(ctx, shiftTxt, 29, 28, [110, 110, 130]);
+  // SHIFT reads the hours they ACTUALLY work today, so an OT day shows the
+  // longer window with the OT tag right beside it
+  const ot = otMinutes(c) > 0;
+  const shiftTxt = "SHIFT " + (ot ? effShift(c).label : baseShift(c).label);
+  smallText(ctx, shiftTxt, 29, 28, ot ? [200, 110, 40] : [110, 110, 130]);
   const wTxt = "$" + fmt(Math.max(0, p.wallet));
   const wx3 = 126 - textWidth(wTxt, 5);
-  {   // the weekly day off, when the row has room for it
-    const offTxt = "OFF " + WEEKDAYS[dayOffIdx(c)];
+  {   // the OT tag, else the weekly day off, when the row has room for it
+    const tag = ot ? "OT +" + Math.round(otMinutes(c) / 60) + "H" : "OFF " + WEEKDAYS[dayOffIdx(c)];
     const ox = 29 + smallTextWidth(shiftTxt) + 5;
-    if (ox + smallTextWidth(offTxt) < wx3 - 2) smallText(ctx, offTxt, ox, 28, [70, 140, 200]);
+    if (ox + smallTextWidth(tag) < wx3 - 2)
+      smallText(ctx, tag, ox, 28, ot ? [255, 190, 90] : [70, 140, 200]);
   }
   text(ctx, wTxt, wx3, 28, p.homeless ? [190, 80, 80] : [140, 110, 40], 5);
   const trend = p.walletPrev == null ? 0 : p.wallet - p.walletPrev;
@@ -3637,9 +3714,11 @@ function drawDossier() {
     if (line) smallText(ctx, "'" + line + "'", x + 48, y + 24, [255, 215, 150]);
   }
   let ly = y + 42;
-  const row = (label, val, col) => {
+  dossierHit = {};   // draw and hit-test share one geometry table (see manageRects)
+  const row = (label, val, col, key) => {
     smallText(ctx, label, x + 8, ly, [120, 110, 125]);
     smallText(ctx, val, x + 56, ly, col || [40, 30, 40]);
+    if (key) dossierHit[key] = { x: x, y: ly - 1, w: w2, h: 9 };
     ly += 9;
   };
   const doesTxt = p.npc
@@ -3650,13 +3729,27 @@ function drawDossier() {
   row("DOES", doesTxt, [70, 90, 130]);
   if (!p.npc && Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1)
     smallText(ctx, "TAP: REASSIGN", x + w2 - 58, ly - 9, [96, 170, 220]);
-  row("SHIFT", baseShift(c).label);
+  // SHIFT doubles as the OVERTIME control - the other half of the labor suite,
+  // sitting right beside TAP: REASSIGN exactly as the backlog asked
+  const otM = otMinutes(c), canOT = !p.owner && p.job !== "fishing" && !!BIZ[p.job] && !p.npc;
+  row("SHIFT", (otM ? effShift(c).label + "  OT +" + Math.round(otM / 60) + "H"
+    : baseShift(c).label + (p.ot ? "  OT (NO ROOM TODAY)" : "")),
+    otM ? [200, 110, 40] : [40, 30, 40], canOT ? "ot" : null);
+  if (canOT) smallText(ctx, p.ot ? "TAP: NO OT" : "TAP: OT", x + w2 - (p.ot ? 44 : 36), ly - 9, [96, 170, 220]);
   row("OFF", WEEKDAY_FULL[dayOffIdx(c)] + (offToday(c) ? " - THAT'S TODAY!" : ""), [70, 140, 200]);
   row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
   const [hl, hcol] = homeLabel(p);
   row("HOME", hl, hcol);
   row("NOW", crabStatus(c).slice(0, 34));
-  if (p.sick) row("HEALTH", "SICK - DAY " + ((p.sick.days || 0) + 1), [190, 80, 80]);
+  // HEALTH doubles as the SICK DAY control: grant the rest, or require the shift
+  if (p.sick) {
+    const granted = onSickDay(c);
+    row("HEALTH", "SICK DAY " + ((p.sick.days || 0) + 1) + " - "
+      + (granted ? "RESTING (UNPAID)" : "AT WORK, PAID"), granted ? [120, 150, 90] : [190, 80, 80], canOT ? "sick" : null);
+    if (canOT) smallText(ctx, granted ? "TAP: REQUIRE" : "TAP: EXCUSE", x + w2 - 48, ly - 9, [96, 170, 220]);
+    if (granted) smallText(ctx, "RESTED " + (p.restT || 0).toFixed(1) + "H OF " + REST_HOURS
+      + "H - " + CARE_LANES[careLane(c)].label, x + 56, ly, [110, 100, 110]), ly += 9;
+  }
   const eff = crabEff(c) * (p.sick ? 0.5 : 1);
   if (eff < 0.995) {
     const why = [];
@@ -3701,19 +3794,74 @@ function drawDossier() {
 // shifts + days off, and the staff-meal pricing policy. Same overlay-card
 // idiom as the dossier; one geometry table feeds both draw and hit-testing
 // so the tap targets stay honest on phones.
+// Three tabs now: HOURS (the original), SCHEDULE (the labor policy suite -
+// shift assignments, days off, OT toggles, sick-day policy and AUTO-MANAGE)
+// and TOWN (the census). Census reviews, scheduling acts: they sit one tap
+// apart on purpose.
 function ownedBizList() { return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player"); }
+const MANAGE_TABS = ["HOURS", "SCHEDULE", "TOWN"];
+let manageTab = "HOURS";
+// census view state (transient: a review surface, not a save concern)
+const CENSUS_SORTS = ["NAME", "JOB", "HOME", "HEALTH", "WALLET"];
+const CENSUS_FILTERS = ["ALL", "CREW", "TOWN", "SICK", "OT"];
+let censusSort = 0, censusFilter = 0, censusPage = 0;
+const CENSUS_ROWS = 6;   // 17px two-line rows: phone-thumb targets, ~2-3 pages for a 12+ crab town
+function censusList() {
+  let all = allCrabs().slice();
+  const f = CENSUS_FILTERS[censusFilter];
+  if (f === "CREW") all = all.filter(c => !c.p.npc);
+  else if (f === "TOWN") all = all.filter(c => c.p.npc);
+  else if (f === "SICK") all = all.filter(c => c.p.sick);
+  else if (f === "OT") all = all.filter(c => otMinutes(c) > 0 || c.p.ot);
+  const homeRank = (c) => c.p.boat != null ? 0 : c.p.homeless ? 2 : 1;
+  const s = CENSUS_SORTS[censusSort];
+  all.sort((a, b) =>
+    s === "JOB" ? (a.p.job < b.p.job ? -1 : a.p.job > b.p.job ? 1 : a.p.name < b.p.name ? -1 : 1)
+    : s === "HOME" ? (homeRank(a) - homeRank(b) || (a.p.name < b.p.name ? -1 : 1))
+    : s === "HEALTH" ? ((b.p.sick ? (b.p.sick.days || 0) + 1 : 0) - (a.p.sick ? (a.p.sick.days || 0) + 1 : 0)
+        || (a.p.name < b.p.name ? -1 : 1))
+    : s === "WALLET" ? (b.p.wallet - a.p.wallet)
+    : (a.p.name < b.p.name ? -1 : 1));
+  return all;
+}
+function censusPages() { return Math.max(1, Math.ceil(censusList().length / CENSUS_ROWS)); }
 function manageRects() {
   const x = 16, y = 6, w2 = 224, h2 = 164;
-  return {
+  const R = {
     x, y, w: w2, h: h2,
     next: { x: x + w2 - 40, y: y + 2, w: 38, h: 11 },
-    om: { x: x + 34, y: y + 28, w: 16, h: 16 },   // open -30
-    op: { x: x + 88, y: y + 28, w: 16, h: 16 },   // open +30
-    cm: { x: x + 146, y: y + 28, w: 16, h: 16 },  // close -30
-    cp: { x: x + 200, y: y + 28, w: 16, h: 16 },  // close +30
-    meal: { x: x + 6, y: y + h2 - 30, w: 156, h: 14 },
+    tab: {},
+    // ---- HOURS tab (shifted down by the tab strip)
+    om: { x: x + 34, y: y + 44, w: 16, h: 16 },   // open -30
+    op: { x: x + 88, y: y + 44, w: 16, h: 16 },   // open +30
+    cm: { x: x + 146, y: y + 44, w: 16, h: 16 },  // close -30
+    cp: { x: x + 200, y: y + 44, w: 16, h: 16 },  // close +30
+    meal: { x: x + 6, y: y + 108, w: 156, h: 14 },
+    // ---- SCHEDULE tab
+    auto: { x: x + 6, y: y + 32, w: 104, h: 13 },
+    sickPol: { x: x + 114, y: y + 32, w: 104, h: 13 },
+    rows: [], cells: [],
+    // ---- TOWN tab
+    csort: { x: x + 6, y: y + 32, w: 62, h: 13 },
+    cfilt: { x: x + 72, y: y + 32, w: 58, h: 13 },
+    cprev: { x: x + 152, y: y + 32, w: 16, h: 13 },
+    cnext: { x: x + 202, y: y + 32, w: 16, h: 13 },
+    crows: [],
     done: { x: x + w2 - 46, y: y + h2 - 15, w: 42, h: 13 },
   };
+  MANAGE_TABS.forEach((t, i) => R.tab[t] = { x: x + 6 + i * 52, y: y + 16, w: 50, h: 12 });
+  for (let i = 0; i < 7; i++) {
+    const ry = y + 66 + i * 12;
+    R.rows.push({ x: x + 6, y: ry, w: w2 - 12, h: 11 });
+    R.cells.push({                                     // one row, four tap targets
+      name:  { x: x + 6,   y: ry, w: 46, h: 11 },
+      shift: { x: x + 54,  y: ry, w: 50, h: 11 },
+      ot:    { x: x + 108, y: ry, w: 46, h: 11 },
+      sick:  { x: x + 158, y: ry, w: 60, h: 11 },
+    });
+  }
+  for (let i = 0; i < CENSUS_ROWS; i++) R.crows.push({ x: x + 4, y: y + 50 + i * 17, w: w2 - 8, h: 16 });
+  return R;
 }
 function drawManage() {
   if (!manage) return;
@@ -3734,43 +3882,136 @@ function drawManage() {
     rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [190, 140, 80]);
     text(ctx, label, r.x + ((r.w - textWidth(label)) >> 1), r.y + 5, [40, 24, 16]);
   };
-  smallText(ctx, "HOURS", x + 8, y + 19, [58, 42, 38]);
-  smallText(ctx, "6:00-24:00, AT LEAST 4H OPEN", x + 44, y + 19, [150, 140, 160]);
-  smallText(ctx, "OPEN", x + 8, y + 33, [110, 110, 130]);
-  btn(R.om, "-"); btn(R.op, "+");
-  text(ctx, fmtClock(h.open), x + 54 + ((32 - textWidth(fmtClock(h.open))) >> 1), y + 33, [40, 30, 40]);
-  smallText(ctx, "CLOSE", x + 118, y + 33, [110, 110, 130]);
-  btn(R.cm, "-"); btn(R.cp, "+");
-  text(ctx, fmtClock(h.close), x + 164 + ((34 - textWidth(fmtClock(h.close))) >> 1), y + 33, [40, 30, 40]);
-  smallText(ctx, "SHIFTS  M " + bizShiftWindow(key, "M").label + "   E " + bizShiftWindow(key, "E").label
-    + "   COVER " + bizShiftWindow(key, "cover").label, x + 8, y + 49, [70, 90, 130]);
-  const bk = today.biz[key] || { take: 0, cost: 0 };
-  smallText(ctx, "TODAY", x + 8, y + 61, [58, 42, 38]);
-  smallText(ctx, "TOOK $" + fmt(bk.take), x + 44, y + 61, [40, 150, 70]);
-  smallText(ctx, "COSTS $" + fmt(bk.cost), x + 104, y + 61, [190, 80, 80]);
-  smallText(ctx, "RENT TONIGHT $" + b.rent, x + 158, y + 61, [140, 110, 40]);
-  smallText(ctx, "STAFF", x + 8, y + 73, [58, 42, 38]);
-  const staff = crabs.filter(c => c.p.job === key);
-  if (!staff.length) smallText(ctx, "NOBODY ASSIGNED - REASSIGN FROM A DOSSIER", x + 8, y + 81, [190, 80, 80]);
-  for (let i = 0; i < Math.min(staff.length, 6); i++) {
-    const c = staff[i];
-    smallText(ctx, c.p.name, x + 8, y + 81 + i * 8, [40, 30, 40]);
-    smallText(ctx, "SHIFT " + baseShift(c).label + (coveringToday(c) ? " (COVERING " + bizShiftWindow(key, "cover").label + ")" : ""),
-      x + 62, y + 81 + i * 8, [110, 110, 130]);
-    smallText(ctx, "OFF " + WEEKDAYS[dayOffIdx(c)] + (offToday(c) ? " (TODAY)" : ""), x + 158, y + 81 + i * 8, [70, 140, 200]);
+  // tab strip
+  for (const t of MANAGE_TABS) {
+    const r = R.tab[t], on = manageTab === t;
+    rect(ctx, r.x, r.y, r.w, r.h, on ? [190, 140, 80] : [222, 212, 196]);
+    smallText(ctx, t, r.x + ((r.w - smallTextWidth(t)) >> 1), r.y + 4, on ? [40, 24, 16] : [130, 118, 112]);
   }
-  if (staff.length > 6) smallText(ctx, "+" + (staff.length - 6) + " MORE", x + 8, y + 129, [150, 140, 160]);
-  if (key === "shack" || key === "juicebar") {
-    rect(ctx, R.meal.x, R.meal.y, R.meal.w, R.meal.h, [30, 20, 36]);
-    rect(ctx, R.meal.x + 1, R.meal.y + 1, R.meal.w - 2, R.meal.h - 2, [235, 225, 205]);
-    smallText(ctx, "STAFF MEALS: " + MEAL_POL_LABEL[b.mealPol], R.meal.x + 4, R.meal.y + 4, [90, 60, 40]);
-    smallText(ctx, "TAP TO CHANGE", R.meal.x + R.meal.w - 56, R.meal.y + 4, [96, 170, 220]);
-    smallText(ctx, b.mealPol === "retail" ? "CREW PAY MENU PRICE AT THE PANTRY"
-      : b.mealPol === "atcost" ? "CREW PAY ONLY THE INGREDIENTS"
-      : "ON THE HOUSE - THE TILL EATS THE COST", R.meal.x + 4, R.meal.y + R.meal.h + 2, [110, 100, 110]);
+  const chip = (r, label, hint, hot) => {   // a wide tap target with its state written on it
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, hot ? [190, 140, 80] : [235, 225, 205]);
+    smallText(ctx, label, r.x + 4, r.y + 4, hot ? [40, 24, 16] : [90, 60, 40]);
+    if (hint) smallText(ctx, hint, r.x + r.w - smallTextWidth(hint) - 4, r.y + 4, [110, 100, 110]);
+  };
+  if (manageTab === "HOURS") {
+    smallText(ctx, "HOURS", x + 8, y + 33, [58, 42, 38]);
+    smallText(ctx, "6:00-24:00, AT LEAST 4H OPEN", x + 44, y + 33, [150, 140, 160]);
+    smallText(ctx, "OPEN", x + 8, y + 49, [110, 110, 130]);
+    btn(R.om, "-"); btn(R.op, "+");
+    text(ctx, fmtClock(h.open), x + 54 + ((32 - textWidth(fmtClock(h.open))) >> 1), y + 49, [40, 30, 40]);
+    smallText(ctx, "CLOSE", x + 118, y + 49, [110, 110, 130]);
+    btn(R.cm, "-"); btn(R.cp, "+");
+    text(ctx, fmtClock(h.close), x + 164 + ((34 - textWidth(fmtClock(h.close))) >> 1), y + 49, [40, 30, 40]);
+    smallText(ctx, "SHIFTS  M " + bizShiftWindow(key, "M").label + "   E " + bizShiftWindow(key, "E").label
+      + "   COVER " + bizShiftWindow(key, "cover").label, x + 8, y + 65, [70, 90, 130]);
+    smallText(ctx, "OVERTIME RUNS INSIDE THESE HOURS - LONGER DAY, MORE OT ROOM", x + 8, y + 74, [150, 140, 160]);
+    const bk = today.biz[key] || { take: 0, cost: 0 };
+    smallText(ctx, "TODAY", x + 8, y + 88, [58, 42, 38]);
+    smallText(ctx, "TOOK $" + fmt(bk.take), x + 44, y + 88, [40, 150, 70]);
+    smallText(ctx, "COSTS $" + fmt(bk.cost), x + 104, y + 88, [190, 80, 80]);
+    smallText(ctx, "RENT TONIGHT $" + b.rent, x + 158, y + 88, [140, 110, 40]);
+    if (key === "shack" || key === "juicebar") {
+      chip(R.meal, "STAFF MEALS: " + MEAL_POL_LABEL[b.mealPol], "TAP", false);
+      smallText(ctx, b.mealPol === "retail" ? "CREW PAY MENU PRICE AT THE PANTRY"
+        : b.mealPol === "atcost" ? "CREW PAY ONLY THE INGREDIENTS"
+        : "ON THE HOUSE - THE TILL EATS THE COST", R.meal.x + 4, R.meal.y + R.meal.h + 2, [110, 100, 110]);
+    }
+    smallText(ctx, "ROSTER, OVERTIME + SICK DAYS LIVE ON THE SCHEDULE TAB", x + 8, y + h2 - 26, [150, 140, 160]);
+  } else if (manageTab === "SCHEDULE") {
+    const auto = !!b.autoLabor;
+    chip(R.auto, "AUTO-MANAGE " + (auto ? "ON" : "OFF"), null, auto);
+    chip(R.sickPol, "SICK: " + (b.sickPol === "require" ? "MUST WORK" : "GRANT"), null, b.sickPol !== "require");
+    smallText(ctx, auto ? "THE ROTA GRANTS SICK DAYS AND CALLS OVERTIME WHEN COVER IS SHORT"
+      : "YOU CALL IT: TAP A ROW'S SHIFT, OT OR SICK CELL", x + 6, y + 48, [110, 100, 110]);
+    smallText(ctx, "OT = " + (OT_SPAN / 60) + "H AT " + OT_RATE + "X, INSIDE OPEN HOURS. DAYS OFF ARE DERIVED",
+      x + 6, y + 57, [150, 140, 160]);
+    const staff = allCrabs().filter(c => c.p.job === key);
+    if (!staff.length) smallText(ctx, "NOBODY ASSIGNED - REASSIGN FROM A DOSSIER", x + 8, y + 70, [190, 80, 80]);
+    for (let i = 0; i < Math.min(staff.length, R.rows.length); i++) {
+      const c = staff[i], cell = R.cells[i], ry = R.rows[i].y;
+      if (i % 2 === 0) rect(ctx, R.rows[i].x, ry - 1, R.rows[i].w, 11, [244, 238, 224]);
+      smallText(ctx, c.p.name.slice(0, 9), cell.name.x + 2, ry + 2, [40, 30, 40]);
+      const otM = otMinutes(c), cov = coveringToday(c);
+      smallText(ctx, (cov ? "COVER " : c.p.shift + " ") + (otM ? effShift(c).label : baseShift(c).label),
+        cell.shift.x, ry + 2, cov ? [140, 90, 160] : otM ? [200, 110, 40] : [70, 90, 130]);
+      smallText(ctx, "OFF " + WEEKDAYS[dayOffIdx(c)] + (offToday(c) ? "!" : ""), cell.shift.x + 32, ry + 2, [70, 140, 200]);
+      smallText(ctx, c.p.ot ? (otM ? "OT +" + Math.round(otM / 60) + "H" : "OT (NO ROOM)") : "NO OT",
+        cell.ot.x, ry + 2, c.p.ot ? [200, 110, 40] : [150, 140, 160]);
+      const sp = sickPolFor(c);
+      smallText(ctx, c.p.sick ? (onSickDay(c) ? "SICK: RESTING" : "SICK: AT WORK")
+        : sp === "require" ? "MUST WORK" : c.p.sickPol ? "SICK DAY OK" : "(SHOP RULE)",
+        cell.sick.x, ry + 2, c.p.sick ? [190, 80, 80] : sp === "require" ? [200, 110, 40] : [110, 100, 110]);
+    }
+    if (staff.length > R.rows.length)
+      smallText(ctx, "+" + (staff.length - R.rows.length) + " MORE - SEE THE TOWN TAB", x + 8, y + h2 - 26, [150, 140, 160]);
+  } else {
+    drawCensus(R);
   }
   rect(ctx, R.done.x, R.done.y, R.done.w, R.done.h, [190, 140, 80]);
   text(ctx, "DONE", R.done.x + 9, R.done.y + 3, [40, 24, 16]);
+}
+
+// ---------------------------------------------------------------- town census
+// Matt: "need an all-crab character menu to review basic stats of whole pop."
+// Every crab in town - crew, townsfolk, peer owners - one two-line row, all of
+// it DERIVED live (job, employer, housing, health, OT), never a cached copy.
+// Rows are 17px so a thumb can hit them; six to a page with < > paging, which
+// is how the card idiom scales past a dozen crabs without a scrollbar.
+// Tapping a row opens that crab's dossier ON TOP of this card, so closing it
+// drops you back into the census: review here, act there (or on SCHEDULE).
+function homeTag(p) { return p.boat != null ? "BOAT" : p.homeless ? "COT" : "HOUSE"; }
+function drawCensus(R) {
+  const { x, y } = R, w2 = R.w, h2 = R.h;
+  const list = censusList(), pages = censusPages();
+  if (censusPage >= pages) censusPage = pages - 1;
+  const chip = (r, label, hot) => {
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, hot ? [190, 140, 80] : [235, 225, 205]);
+    smallText(ctx, label, r.x + ((r.w - smallTextWidth(label)) >> 1), r.y + 4, hot ? [40, 24, 16] : [90, 60, 40]);
+  };
+  chip(R.csort, "SORT " + CENSUS_SORTS[censusSort], censusSort > 0);
+  chip(R.cfilt, CENSUS_FILTERS[censusFilter], censusFilter > 0);
+  chip(R.cprev, "<", false); chip(R.cnext, ">", false);
+  smallText(ctx, (censusPage + 1) + "/" + pages, x + 176, y + 36, [90, 60, 40]);
+  smallText(ctx, list.length + " CRABS", x + 132, y + 36, [110, 100, 110]);
+  smallText(ctx, "TAP A ROW FOR THE FULL RECORD", x + 6, y + 46, [150, 140, 160]);
+  for (let i = 0; i < CENSUS_ROWS; i++) {
+    const c = list[censusPage * CENSUS_ROWS + i];
+    if (!c) break;
+    const p = c.p, r = R.crows[i], ry = r.y;
+    if (i % 2 === 0) rect(ctx, r.x, ry, r.w, 16, [244, 238, 224]);
+    // a chunky little shell in their own colors: the row's portrait
+    const col = CRAB_COLORS[p.color] || [200, 90, 70];
+    rect(ctx, r.x + 2, ry + 4, 7, 6, col);
+    px(ctx, r.x + 3, ry + 5, [255, 255, 255]); px(ctx, r.x + 7, ry + 5, [255, 255, 255]);
+    // line 1: who they are, who they work for, what they're worth, how they are
+    smallText(ctx, p.name.slice(0, 9), r.x + 12, ry + 1, [40, 30, 40]);
+    const jobTag = p.job === "fishing" ? "PIER" : BIZ[p.job].short;
+    const boss = p.owner ? "OWNER" : p.job === "fishing" ? "SELF"
+      : p.employer ? OWNERS[p.employer].name : "YOU";
+    smallText(ctx, jobTag + " / " + boss, r.x + 54, ry + 1, [70, 90, 130]);
+    const wTxt = "$" + fmt(Math.max(0, Math.round(p.wallet)));
+    smallText(ctx, wTxt, r.x + 128 - smallTextWidth(wTxt), ry + 1, p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
+    smallText(ctx, homeTag(p), r.x + 132, ry + 1, p.homeless ? [190, 80, 80] : p.boat != null ? [70, 140, 200] : [40, 150, 70]);
+    const hp = p.sick ? "SICK DAY " + ((p.sick.days || 0) + 1) : offToday(c) ? "DAY OFF" : "WELL";
+    smallText(ctx, hp, r.x + 160, ry + 1, p.sick ? [190, 80, 80] : offToday(c) ? [70, 140, 200] : [40, 150, 70]);
+    // line 2: when they work, how hard, and the five needs at a glance
+    const otM = otMinutes(c);
+    smallText(ctx, p.job === "fishing" ? "PIER " + baseShift(c).label
+      : (coveringToday(c) ? "COVER " : "") + effShift(c).label, r.x + 12, ry + 9, otM ? [200, 110, 40] : [110, 100, 110]);
+    smallText(ctx, WEEKDAYS[dayOffIdx(c)], r.x + 46, ry + 9, [70, 140, 200]);
+    if (otM) smallText(ctx, "OT", r.x + 64, ry + 9, [255, 150, 40]);
+    const eff = crabEff(c) * (p.sick ? 0.5 : 1);
+    smallText(ctx, Math.round(eff * 100) + "%", r.x + 76, ry + 9, eff < 0.8 ? [190, 80, 80] : eff < 0.995 ? [200, 110, 40] : [110, 100, 110]);
+    const bars = [1 - (p.hunger || 0), 1 - (p.thirst || 0), 1 - (p.dirt || 0), 1 - (p.bored || 0), 1 - (p.tired || 0)];
+    for (let bi = 0; bi < bars.length; bi++) {
+      const bx = r.x + 96 + bi * 10, f = Math.max(0, Math.min(1, bars[bi]));
+      rect(ctx, bx, ry + 9, 9, 4, [30, 20, 36]);
+      rect(ctx, bx + 1, ry + 10, Math.round(7 * f), 2, f > 0.5 ? [96, 200, 120] : f > 0.25 ? [235, 200, 90] : [235, 90, 90]);
+    }
+  }
+  smallText(ctx, "NEEDS: FED SIP CLN FUN ZZZ", x + 100, y + h2 - 12, [150, 140, 160]);
 }
 
 function drawJobBoard() {
@@ -3824,8 +4065,16 @@ function drawJobBoard() {
       smallText(ctx, c.p.name + " - " + BIZ[c.p.job].name + ", PAID BY " + OWNERS[c.p.employer].name, x + 6, ly, [90, 90, 105]); ly += 7;
     }
   }
+  {   // the board advertises the labor the town WANTS; the census reads the
+      // labor it already has. One tap between them.
+      const r = jobBoardCensusRect();
+      rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+      rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [96, 170, 220]);
+      smallText(ctx, "TOWN CENSUS >", r.x + 4, r.y + 4, [255, 255, 255]);
+  }
   smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
 }
+function jobBoardCensusRect() { return { x: 46, y: 22 + 158 - 16, w: 60, h: 13 }; }
 
 function drawReport() {
   if (!report || reportT <= 0) return;
@@ -4274,10 +4523,10 @@ function frame(now) {
     }
   }
   drawNight();
-  drawDossier();
   drawJobBoard();
   drawReport();
   drawManage();
+  drawDossier();   // above the management card: a census row opens a dossier ON TOP of it
   drawFollowCard();
   {  // town reputation chip, top-right of the world
     const rTxt = "REP " + Math.round(rep);
