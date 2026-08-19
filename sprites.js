@@ -915,6 +915,26 @@ const OT_MARK = [
     ".KKKK..",
   ], swap(PAL, { Y: [255, 235, 180], W: [180, 110, 60], K: [40, 26, 20] })),
 ];
+// THE WIDE BERTH's badge: two wavy lines and a fly, bobbing over a crab whose
+// personal space has inflated (dirt past BERTH_AT). Same read-at-a-glance
+// family as OT_MARK - live state in, no reset needed. It exists so the bubble
+// of empty boardwalk has a legible CAUSE at a glance.
+const STINK_MARK = [
+  parseArt([
+    ".G..G..",
+    "G..G..K",
+    ".G..G..",
+    "G..G...",
+    ".G..G..",
+  ], swap(PAL, { G: [150, 190, 110], K: [40, 30, 26] })),
+  parseArt([
+    "..G..G.",
+    "K.G..G.",
+    "..G..G.",
+    ".G..G..",
+    "..G..G.",
+  ], swap(PAL, { G: [170, 205, 125], K: [40, 30, 26] })),
+];
 const NOTICE_BOARD = parseArt([
   "KKKKKKKKKKKK",
   "KEEEEEEEEEEK",

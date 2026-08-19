@@ -204,7 +204,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **88 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **102 scenarios, must stay green before any push.**
 
 - `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
@@ -235,7 +235,10 @@ vm — never fork game logic into tools/) and perf expectations live there.
   juicebar economics (ledger flows charged-vs-tracked, staff retail,
   save/load roundtrip of thirst + unlock + firstPour), tired
   accrual/sleep-repair (bed vs cot rates) and the sandy->tired save
-  migration.
+  migration, the needs-failure gates (the trudge's curve + scaling + the
+  shimmer's mean-neutrality, the anti-spiral paired arms, the wide berth's
+  separation + declined table + sit-anyway out, and a filthy crab wedging
+  nobody in a crowded shack).
   serviced by showers alone, days-off rota (weekly rest + off-day
   spending, cover-shift/stagger coverage, exact wage-skip bill math),
   hiring-as-recruitment (tourist conversion with clean entity teardown,
@@ -272,6 +275,181 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- **Needs fail in their own character: THE TRUDGE and THE WIDE BERTH** (built
+  2026-08-19, worktree — realizes `design/needs-failure-patterns.md` for three
+  of the five needs, to Matt's pick, verbatim: *"Dirt boredom and tiredness are
+  good; hunger and thirst should just be a speed penalty."* The doc's RAID
+  (H1) and SHORT LEASH (T1) are therefore **rejected and not built**, and so
+  is D2, the smudge trail, which the doc holds back and the owner did not
+  pick.)
+  - **HUNGER AND THIRST ARE A SPEED PENALTY — one shape, two needs.** A linear
+    ramp to **−25% at a pinned 1.00**, so the player watches a crab FLAG rather
+    than a switch flip. Each ramp starts where that need already cost the town
+    something, which is why the thresholds differ and the slope does not:
+    **hunger from 0.30** (crabEff's own hunger line — past 0.30 it already
+    slowed prep; now it slows pace too) and **thirst from 0.50**, pitched so
+    the ramp passes through **exactly 0.85 at thirst 0.80** — the same value
+    as the −15% cliff it replaces, at the same threshold. **The cliff is
+    deleted**; nothing about the T2 balance point was moved on the way past.
+  - **THE ANTI-SPIRAL GUARD is a FLOOR plus an EXEMPTION.** Hunger already
+    drags prep through `crabEff` and both needs already feed the nightly
+    sickness roll, so the two ramps MULTIPLY but are floored at
+    **`DRAG_FLOOR` 0.70** — starving *and* parched is −30%, never −44%. And a
+    crab is **never slowed on the walk to the thing that would fix it**
+    (`selfCareNeed`: the tap, the counter, their own kitchen — the need being
+    fixed is the only ramp switched off). That is THE SELF-HEALING RULE read
+    straight, and it is the doc's own guard on the rejected leash ("the leash
+    exempts water") carried across to the penalty that replaced it. It also
+    makes the fix legible: the moment a starving crab decides to eat, it picks
+    its feet up.
+  - **HEAT SHIMMER** (the doc's T2, shipped as the free companion it was
+    pitched as): a parched crab LURCHES rather than walking uniformly slow — a
+    sine about 1.0 keyed to `time` and the crab's own `animT`, so it is
+    **mean-preserving by construction** and costs nothing mechanically (suite
+    -asserted: two minutes of parched walking with and without it land within
+    2%). It never reaches zero either, so a panting crab still counts as a
+    MOVER to `collide()` and still clears the no-progress watchdog.
+  - **DIRT IS THE WIDE BERTH (doc D1).** `crabBerth` opens a crab's personal
+    space from the collider's **12px to 22px** on a ramp from dirt **0.60**
+    (crabEff's dirt line) to 1.00. Three deliberate shapes, and all three are
+    wedge guards rather than taste: it is **asymmetric** (only the CLEANER crab
+    gives ground, so the filthy crab is never pushed and can always reach its
+    station, its queue or its cot); the ground is given **sideways in Y**, and
+    **backwards in X only by a crab that is standing still** (a still crab has
+    no forward progress to lose, which is the same still-vs-mover distinction
+    the core collider already makes, so the 1.5s watchdog can never read the
+    bubble as a pin); and it **adds to** the core 12px physics rather than
+    replacing any of it, so ordinary crab traffic is byte-for-byte what it was.
+    It has to run *inside* 12px as well as outside — the core push shrinks to
+    nothing as it approaches 12, so a pair resting AT the old radius would
+    otherwise never enter the bubble's range (measured: three crabs in a staged
+    huddle sat at exactly 12px and never got the berth). **Suppressed at home
+    and after dark** — four crabs on shelter cots cannot each have two
+    body-widths, and this is a boardwalk read.
+  - **The town's other two refusals.** A tourist **will not sit at the table
+    beside a visibly filthy crab** (`SHUN_AT` 0.80, a 26px ellipse — geometry,
+    not taste: the shack's tables sit 40px apart across and 24px back-to-front,
+    so a wider radius would shun the whole dining room and turn the refusal
+    into a no-op). **There is always an out, and the out is THEY SIT ANYWAY**:
+    if every free table has a filthy crab beside it the guest takes the first
+    one rather than standing, so filth can never deadlock the dining room. (The
+    alternatives — queue, or walk out — were rejected because seating is the one
+    place a refusal could strand a paying guest for good.) Their **own** server
+    never counts as "the crab at the next table" — a filthy server is already
+    charged for through the tip and through the patience drain. **Patience**:
+    a tourist served by a filthy crab burns it up to **30% faster**, on the same
+    0.60→1.00 ramp the bubble opens on. Locals are colleagues and are not fussy.
+    The doc's REP clause is deliberately NOT built (the doc itself says ship it
+    dark and turn it on in a second measured pass).
+  - **Legibility.** A two-frame `STINK_MARK` (wavy lines) bobs over any crab
+    whose bubble is open, so the empty boardwalk has a cause at a glance; the
+    follow card gets a **RANK** mood; and the dossier gets a **WALK** row next
+    to PACE — "TRUDGING AT 70% — HUNGRY, PARCHED" — so the number and the reason
+    are both on the record.
+  - **Measured, illness and death** (12 solvent towns × 30 days, the shape the
+    mortality work used), before → after:
+    | | before | after |
+    |---|---|---|
+    | deaths | 11 (0.92/town) | **9 (0.75/town)** |
+    | lane | 11/11 NEGLECT | 9/9 NEGLECT |
+    | crew / townsfolk | 0 / 11 | 0 / 9 |
+    | infections | 51 | **37** |
+    | causes | hunger 12, thirst 16, dirt 28, contagion 11 | hunger 13, thirst 18, dirt 19, contagion 5 |
+    The anti-spiral gate is met with room: **the trudge does not kill anybody**.
+    Paired arms inside the same build (`window._noNeedDrag`) agree — with the
+    ramps collapsed the same 12 towns read 13 deaths and 54 infections, i.e. the
+    signal is noise at ~1 death per town, and the shipped build is on the low
+    side of it either way.
+  - **Measured, no wedge.** This was the named risk — an inflated collision
+    radius is exactly the thing that could make crabs bounce off each other
+    forever — and it is the reason the berth is asymmetric, sideways, and
+    additive. The routing pass's own busy town (arcade + 4 crew, 5 days),
+    widened to **three** towns because one town's sidestep count swings ±2 on
+    stream order alone: **0 warps + 17 unsticks before → 0 warps + 18 after**,
+    i.e. one extra sidestep in fifteen busy town-days. Across the 12 solvent
+    towns × 30d: warps **0 → 5**, unsticks **237 → 266** over 360 town-days —
+    0.014 warps and 0.74 sidesteps a town-day, inside PLAN's documented
+    "~1-2x/day town-wide". The suite gate runs the crowded shack with a crab
+    **pinned filthy all week** against a `window._noBerth` paired arm.
+  - **Balance**: baseline 16 × 30d **0/16**, evictions 11,12,13,13,13,13,13,
+    14,14,14,14,14,14,14,14,20, **median 14** (before 0/16, 11–20, median 15 —
+    the documented per-build day of wobble). Growth `--buy chef,table` 8 × 40d
+    **6/8 alive**, 11,14,41,41,41,41,41,41 — **byte-identical to before**.
+    **One number was tuned, and it was one of ours**: with the hunger ramp
+    starting at 0.5 the do-nothing town came out RICHER than the pillar allows
+    (2 of 16 surviving 30 days, median 14) because the self-care exemption
+    makes the trips that matter for health *faster* than the pre-merge build
+    — the same mechanism the public tap moved the curve by. `DRAG_HUNGER_AT`
+    0.5 → **0.3** restored 0/16 and left growth untouched. No price, wage or
+    rent was touched.
+  - **Suite 98 → 102.** New: `trudge: hunger and thirst are a speed penalty,
+    and it SCALES` (the curve, a two-minute walk-distance integration, the
+    shimmer's mean-neutrality, and a real commute that finishes measurably
+    later when starved), `trudge: the speed penalty does not kill anybody
+    (anti-spiral gate)` (paired arms over 6 solvent towns × 30d), `dirt: THE
+    WIDE BERTH` (the ramp, the separation, that the FILTHY crab is never the
+    one pushed, that the bubble is suppressed indoors, the declined table, the
+    sit-anyway out, and the patience multiplier), and `dirt: a filthy crab in
+    a crowded shack wedges nobody` (warps/unsticks against a `_noBerth` arm).
+    **Re-pointings (4, receipts written into the scenarios):**
+    1. `hours: defaults are behavior-identical (frozen day-2 fingerprint)` —
+       re-baselined, because `crabMove` itself changed and SUDSY ends day 2 at
+       hunger 0.70 / thirst 0.50 in both seeds. Receipt: on seed 4242 **every
+       position is byte-identical** (all five crabs asleep in the same beds)
+       and the books give a little back (coins 214.01 → 200.80, serves 39 → 37)
+       — which is what a throughput cost looks like; on seed 1337 exactly one
+       crab moves, SALTY sleeping on a shelter cot instead of in house 7,
+       a day behind on the housing ladder rather than stranded.
+    2. `taps: nobody in a full town is left parched for a week` — a
+       **measurement bug**, not a loosened gate. `perDay` was each crab's OWN
+       sample count / 10, so a drifter who steps off the bus on day 8 and is
+       thirsty from arrival divides two real days by 0.2 samples-per-day and
+       scores "10.0 days without a drink". Latent (it needs a late, thirsty,
+       short-lived arrival) and this build's stream produced four of them.
+       Normalised on the TOWN's sample rate the same three seeds read a worst
+       dry spell of **3.1 days here and 2.6 days on the pre-merge build**.
+       Recorded honestly alongside it: the worst crab's time on the 0.95
+       dehydration line went **~7% → 18.7%** of its life (SUDSY, seed 17, a
+       ten-hour owner-operator day). That is the trudge's price, it sits under
+       the 25% gate, and it does not reach the mortality — same matrix, fewer
+       infections and fewer deaths.
+    3. `routes: furniture avoidance keeps warps + unsticks near zero` —
+       **widened from one town to three**, which is a stricter gate, not a
+       looser one. Receipt: its own comment still claimed "0 + 2", but the
+       PRE-MERGE tree measured **0 + 7 against a gate of 8**, so it had
+       quietly become a coin flip that the next merge in either direction was
+       going to trip. Paired arms inside the needs build read 5, 7 and 9 on
+       that single town with identical code. Three towns read 0 + 17 before
+       and 0 + 18 after.
+    4. `cpu hours: SUDSY's policy converges and never thrashes` — the FIXTURE,
+       for the third time and the same reason. It already props SUDSY's TILL
+       because a bankrupt shop cannot demonstrate 30 days of hours policy;
+       seed 1337's SUDSY now **dies on day 15** of a seven-day neglect illness
+       (an owner-operator on a ten-hour day is the crab the trudge is hardest
+       on), her lease sweeps onto the market, and `runHoursPolicy` rightly
+       declines to run for a business nobody owns. So the fixture props her
+       health as well: she still falls ill and still takes her own sick days,
+       the tide just doesn't take her. Not a hidden regression — the 12-town
+       matrix has SUDSY taken in **3 of 12 towns before and 3 of 12 after**,
+       with the total down 11 → 9.
+  - **Story beat (organic, reproducible)**: `node tools/headless.mjs --days 12
+    --seeds 1` — seed 1337, no buys, no props, the town still standing on day
+    13. **SUDSY spends day 4 walking at the 0.70 floor for one hundred percent
+    of the day**, pinned at hunger 1.00 / thirst 1.00 / dirt 1.00, with the
+    wide berth open around her every minute of it: the slowest crab in town
+    and the only one nobody will stand next to. Day 5 the same. Then day 6 she
+    eats and drinks — peaks fall to 0.33 / 0.46 — and **the trudge vanishes
+    while the bubble stays**: day 7 she walks at 96% and is *still* given a
+    wide berth for the whole day, because her dirt is 0.80 and dirt is a
+    different failure. That is the thesis in one working day. Day 9 she
+    relapses to 1.00 / 1.00 / 0.90, trudges at 75% for most of it, and falls
+    ill; days 10–12 she convalesces, needs nursed down to 0.10–0.30, pace back
+    to 100%, and by day 11 the boardwalk closes back around her.
+    Shots: `trudge-race` (a fed crab and a starving one, same trait, level
+    start, 86px apart six seconds later), `trudge-dossier` (PACE and the new
+    WALK row together), `berth-clean` / `berth-filthy` (eight crabs shoulder to
+    shoulder, then the line breaking open around the one with stink lines over
+    her head) under shots/.
 - **Business failure, FOR SALE and succession** (Matt's fault report, built
   2026-08-19, worktree — a directed build during the closing act, not a new
   front): *"sudsy goes bankrupt every day.. the shop needs to close till some
@@ -728,6 +906,11 @@ vm — never fork game logic into tools/) and perf expectations live there.
   town eats the catch, and any measurable drag there re-tilts the calibrated
   economy (tried at full and half weight; both broke the knife-edge one-crab
   states). Tune only against the matrices + suite, never by feel.
+  **Paired with `needDrag` since 2026-08-19** (see "Needs fail in their own
+  character"): `crabEff` is what a neglected crab's WORK costs, `needDrag` is
+  what its WALK costs. Two separate curves on purpose — a crab can be visibly
+  trudging and still working at 100%, or the other way round — and the dossier
+  shows them on two rows, PACE and WALK.
 
 ## The trade horizon (Matt, 2026-08-18) — land it by degrees
 
@@ -762,6 +945,9 @@ Staged landings (each stage ships alone, suite-green, balance re-verified):
   - Landed exactly as spec'd: accrual +0.35 shift end / +0.15 nightly /
     +50% while sandy > 0.5; drink errand at 0.45 between food and clean;
     landing risk +0.12/night at 0.95; −15% walk at 0.8; NO crabEff term.
+    (The −15% CLIFF was replaced 2026-08-19 by the scaled trudge, which passes
+    through exactly 0.85 at thirst 0.8 — same value, same threshold. The "no
+    crabEff term" call still stands.)
     JUICE $6 / COOLER $9 (first two-input recipe via optional `raw2`),
     juicer x2 + counter in the old cleaners lot at 752-880 (the job board
     at x716 keeps its sliver), rent 55, $400 in the vacated shop slot.
