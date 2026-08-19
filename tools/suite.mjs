@@ -444,6 +444,151 @@ scenario("old save (homeX era) migrates; corrupt save rejected clean", () => {
     ? true : "corrupt save leaked state: [day,chefLvl,gameOver,coins]=" + JSON.stringify(st);
 });
 
+scenario("slots: a legacy single-key save migrates into slot 1, losing nothing", () => {
+  const store = new Map();
+  const legacy = {
+    coins: 512, lifetime: 900, day: 6, tmin: 640, lastRentDay: 5,
+    lv: { chef: 2, table: 1 }, memorials: [{ x: 100, name: "OLD SHELL" }],
+    rep: 44, townCatch: 3, rate: 0, t: 1700000000000, musicOn: false,
+    hireDay: 5, board: [], gameOver: false,
+    personas: [
+      { name: "PINCHY", trait: "speedy", mode: "walk", acc: "none", color: 0, shift: "M", wallet: 30, house: 0, homeless: false, job: "shack" },
+      { name: "CLAWDIA", trait: "tidy", mode: "bike", acc: "flower", color: 1, shift: "E", wallet: 25, house: 1, homeless: false, job: "shack" },
+    ],
+    npc: { tills: { sudsy: 150 }, personas: [{ name: "SUDSY", npc: true, wallet: 12, job: "showers" }] },
+  };
+  store.set(LEGACY, JSON.stringify(legacy));
+  const sim = createSim({ seed: 3, storage: store, fresh: false });
+  if (store.has(LEGACY)) return "the legacy key survived migration";
+  const slot = JSON.parse(store.get(SLOT1));
+  for (const k of Object.keys(legacy))          // every field arrives byte-identical
+    if (JSON.stringify(slot[k]) !== JSON.stringify(legacy[k])) return "migration changed " + k;
+  if (slot._ver !== 1 || !slot._meta) return "migrated slot carries no version/meta";
+  if (slot._meta.day !== 6 || slot._meta.coins !== 512 || slot._meta.crew.length !== 2)
+    return "migrated meta wrong: " + JSON.stringify(slot._meta);
+  const st = JSON.parse(sim.G("JSON.stringify([Math.round(coins), day, UPS.chef.lvl, activeSlot, crabs.map(c => c.p.name), memorials.length])"));
+  if (st[0] !== 512 || st[1] !== 6 || st[2] !== 2) return "the migrated town did not load: " + JSON.stringify(st);
+  if (st[3] !== 1) return "active slot should be 1, was " + st[3];
+  if (st[4].join() !== "PINCHY,CLAWDIA" || st[5] !== 1) return "crew/memorials lost: " + JSON.stringify(st);
+  sim.G("coins = 600; save()");                 // and autosave keeps landing in slot 1
+  if (JSON.parse(store.get(SLOT1)).coins !== 600) return "autosave did not land in slot 1";
+  if (store.has(LEGACY)) return "save() rewrote the legacy key";
+  return true;
+});
+
+scenario("slots: two towns stay independent, switching never crosses them", () => {
+  const store = new Map();
+  const a = createSim({ seed: 21, storage: store, fresh: false });
+  a.G('coins = 700; day = 9; crabs[0].p.name = "SLOTONE"; save()');
+  a.G('setActiveSlot(2); coins = 111; day = 3; crabs[0].p.name = "SLOTTWO"; save()');
+  const s1 = JSON.parse(store.get(SLOT1)), s2 = JSON.parse(store.get(SLOT2));
+  if (s1.coins !== 700 || s1.day !== 9 || s1.personas[0].name !== "SLOTONE")
+    return "slot 1 was disturbed: " + JSON.stringify([s1.coins, s1.day, s1.personas[0].name]);
+  if (s2.coins !== 111 || s2.day !== 3 || s2.personas[0].name !== "SLOTTWO")
+    return "slot 2 wrong: " + JSON.stringify([s2.coins, s2.day, s2.personas[0].name]);
+  if (store.get(ACTIVE) !== "2") return "the active slot did not persist";
+  // a fresh boot opens the ACTIVE slot, and a day in it can't touch the other
+  const frozen1 = store.get(SLOT1);
+  const b = createSim({ seed: 22, storage: store, fresh: false });
+  const bst = JSON.parse(b.G("JSON.stringify([Math.round(coins), day, crabs[0].p.name, activeSlot])"));
+  if (bst[0] !== 111 || bst[1] !== 3 || bst[2] !== "SLOTTWO" || bst[3] !== 2)
+    return "boot opened the wrong town: " + JSON.stringify(bst);
+  b.runDays(4);
+  b.G("save()");
+  if (store.get(SLOT1) !== frozen1) return "playing slot 2 rewrote slot 1";
+  // switch back: slot 1 is exactly where it was left
+  b.G("setActiveSlot(1)");
+  const c = createSim({ seed: 23, storage: store, fresh: false });
+  const cst = JSON.parse(c.G("JSON.stringify([Math.round(coins), day, crabs[0].p.name])"));
+  if (cst[0] !== 700 || cst[1] !== 9 || cst[2] !== "SLOTONE")
+    return "slot 1 came back changed: " + JSON.stringify(cst);
+  return true;
+});
+
+scenario("slots: a foreign or broken import is refused, the live town untouched", () => {
+  const store = new Map();
+  const sim = createSim({ seed: 8, storage: store, fresh: false });
+  sim.runDays(2);
+  sim.G("save()");
+  const live = () => sim.G("JSON.stringify([Math.round(coins), day, crabs.map(c => c.p.name), crabs.length])");
+  const before = live(), slotBefore = store.get(SLOT1);
+  const junk = [
+    "not json at all {",                                        // not JSON
+    JSON.stringify({ hello: "world" }),                         // some other app's file
+    JSON.stringify([1, 2, 3]),                                  // an array
+    JSON.stringify(null),
+    JSON.stringify({ personas: [] }),                           // a CS3 shape with no crew
+    JSON.stringify({ personas: [{ nope: 1 }] }),                // crew without names
+    JSON.stringify({ personas: [{ name: "X" }], day: -4 }),     // nonsense day
+    JSON.stringify({ personas: [{ name: "X" }], coins: "lots" }),
+    JSON.stringify({ personas: [{ name: "X" }], _ver: 99 }),    // from a newer build
+  ];
+  for (const j of junk) {
+    const why = sim.G("importJson(" + JSON.stringify(j) + ', "x.json")');
+    if (!why) return "accepted junk: " + j.slice(0, 44);
+    if (sim.G("pendingImport !== null")) return "a rejected import was staged: " + j.slice(0, 44);
+  }
+  if (live() !== before) return "a rejected import moved the live game";
+  if (store.get(SLOT1) !== slotBefore) return "a rejected import wrote a slot";
+  if (store.has(SLOT2)) return "a rejected import created a slot";
+  // a genuine save file: staged first, written only on confirm, into the chosen slot
+  const good = store.get(SLOT1);
+  const why2 = sim.G("importJson(" + JSON.stringify(good) + ', "town.json")');
+  if (why2) return "a real save was refused: " + why2;
+  if (store.has(SLOT2)) return "staging wrote a slot before confirmation";
+  if (live() !== before) return "staging moved the live game";
+  sim.G("commitImport(2)");
+  const landed = JSON.parse(store.get(SLOT2));
+  if (landed.day !== JSON.parse(good).day || landed.personas.length !== JSON.parse(good).personas.length)
+    return "the import landed wrong";
+  if (store.get(SLOT1) !== slotBefore) return "the import disturbed slot 1";
+  if (live() !== before) return "the import moved the live game";
+  if (sim.G("pendingImport !== null")) return "the staged import was not cleared";
+  // an imported OLD-build save migrates through the same path a stored one does
+  const old = JSON.parse(good);
+  delete old._ver; delete old._meta; delete old.trade;
+  old.personas.forEach(p => { delete p.tired; p.sandy = 0.4; });
+  if (sim.G("importJson(" + JSON.stringify(JSON.stringify(old)) + ', "old.json")')) return "an old-build save was refused";
+  sim.G("commitImport(3)");
+  const d = createSim({ seed: 9, storage: store, fresh: false });
+  d.G("setActiveSlot(3)");
+  const e = createSim({ seed: 10, storage: store, fresh: false });
+  const mig = JSON.parse(e.G('JSON.stringify([crabs[0].p.tired, "sandy" in crabs[0].p, trade.price])'));
+  if (mig[0] !== 0.4 || mig[1]) return "the imported old save skipped the sandy migration: " + JSON.stringify(mig);
+  if (mig[2] !== 4) return "the imported old save skipped the fish-price default: " + JSON.stringify(mig);
+  return true;
+});
+
+scenario("slots: the preview card reflects the town it came from", () => {
+  const store = new Map();
+  const sim = createSim({ seed: 12, storage: store, fresh: false });
+  sim.runDays(3);
+  sim.G('coins = 843; rep = 51; crabs[0].p.sick = { days: 2 };'
+    + ' crabs[1].p.boat = null; crabs[1].p.house = 7; crabs[1].p.homeless = false; save()');
+  const meta = JSON.parse(store.get(SLOT1))._meta;
+  const town = JSON.parse(sim.G('JSON.stringify([day, WEEKDAYS[weekdayIdx(day)], crabs.length + npcs.length, crabs.map(c => c.p.name)])'));
+  if (meta.day !== town[0] || meta.weekday !== town[1]) return "day/weekday wrong: " + JSON.stringify(meta);
+  if (meta.coins !== 843 || meta.rep !== 51) return "till/rep wrong: " + JSON.stringify(meta);
+  if (meta.pop !== town[2]) return "population " + meta.pop + " vs " + town[2];
+  if (JSON.stringify(meta.crew.map(c => c.name)) !== JSON.stringify(town[3]))
+    return "roster wrong: " + JSON.stringify(meta.crew.map(c => c.name));
+  if (!meta.crew[0].sick || meta.crew[0].sickDays !== 2) return "health not in the card: " + JSON.stringify(meta.crew[0]);
+  if (meta.crew[1].home !== "COTTAGE" || meta.crew[1].tier !== 1) return "housing not in the card: " + JSON.stringify(meta.crew[1]);
+  if (!meta.crew.every(c => typeof c.job === "string" && typeof c.color === "number" && typeof c.acc === "string"))
+    return "the card can't draw a portrait: " + JSON.stringify(meta.crew);
+  if (!(meta.t > 0)) return "no timestamp on the card";
+  // the card reads the same through slotCard(), which is what the screen calls
+  if (sim.G("JSON.stringify(slotCard(1))") !== JSON.stringify(meta)) return "slotCard disagrees with the stored card";
+  // ...and a save with no card at all still gets one derived from the envelope
+  const raw = JSON.parse(store.get(SLOT1));
+  delete raw._meta;
+  store.set(SLOT2, JSON.stringify(raw));
+  const derived = JSON.parse(sim.G("JSON.stringify(slotCard(2))"));
+  if (derived.day !== meta.day || derived.coins !== meta.coins || derived.pop !== meta.pop
+    || JSON.stringify(derived.crew) !== JSON.stringify(meta.crew)) return "the derived card disagrees: " + JSON.stringify(derived);
+  return true;
+});
+
 scenario("queue hard cap holds for locals too", () => {
   const sim = createSim({ seed: 4242 });
   sim.G(`coins = 5000; tryBuy("chef"); tryBuy("chef"); tryBuy("chef"); tryBuy("chef");`);
