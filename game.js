@@ -1415,12 +1415,82 @@ function newCrab(persona) {
     quip: null, quipT: 8 + Math.random() * 15,
   };
 }
+// ---- THE TRUDGE: hunger and thirst fail as a SPEED PENALTY (Matt's call:
+// "dirt boredom and tiredness are good; hunger and thirst should just be a
+// speed penalty" - the design doc's RAID and SHORT LEASH are both rejected).
+// ONE SHAPE, TWO NEEDS: a linear ramp to -DRAG_MAX at a pinned 1.00, so what
+// the player sees is a crab FLAGGING rather than a switch flipping - a crab
+// that just got peckish walks normally, a crab an hour past its lunch is
+// visibly labouring, a starving one trudges. Each ramp STARTS where that need
+// already started costing the town something, which is why the two thresholds
+// differ (see each constant); the slope and the depth are shared, so the two
+// read as one family from the boardwalk.
+// Thirst's old -15% CLIFF at 0.8 is GONE, replaced by a ramp that passes
+// through EXACTLY 0.85 at thirst 0.8 - same value, same threshold - so the T2
+// balance point is not quietly moved on the way past.
+// DRAG_FLOOR is the anti-spiral guard. Hunger already drags prep through
+// crabEff and both needs already feed the nightly sickness roll; a crab that
+// is starving AND parched must not compound into one that can no longer walk
+// to the food and water that would fix it. The two multiply, floored at 0.70.
+const DRAG_HUNGER_AT = 0.3;   // = crabEff's own hunger line: past 0.3 hunger
+                              // already costs prep, and now it costs pace too.
+                              // Swept against the baseline matrix: at 0.5 the
+                              // do-nothing town got RICHER than it is meant to
+                              // be (2 of 16 surviving 30 days against the
+                              // documented 0 of 16), at 0.3 it reads 0/16 again
+const DRAG_THIRST_AT = 0.5;   // pitched so the ramp passes through 0.85 at
+                              // thirst 0.8 - the EXACT value of the -15% cliff
+                              // it replaces, at the exact threshold it fired
+                              // at. Swept against the tap's anti-trap probe,
+                              // which is where thirst's fairness is measured:
+                              // 0.45 put the worst crab on the 0.95 dehydration
+                              // line for 21% of its life against 6% at 0.5.
+                              // (The shipped build reads 18.7% on that probe -
+                              // the hunger ramp's own move to 0.3 costs the
+                              // same crab errand hours. Under the 25% gate,
+                              // documented in the scenario, and this is the
+                              // knob if it ever climbs past it.)
+const DRAG_MAX = 0.25;        // each need, at a pinned 1.00
+const DRAG_FLOOR = 0.70;      // the two TOGETHER can never go below this
+// ...and the ONE exemption, which is THE SELF-HEALING RULE read straight: the
+// way out of a deficiency costs TIME, but it can never be closed off. A crab
+// is not slowed on the walk to the very thing that would fix it - the trudge
+// is what a neglected crab does on the way to WORK, not on the way to lunch.
+// (This is the doc's own guard on the rejected SHORT LEASH - "the leash
+// exempts water" - carried across to the penalty that replaced it. Measured,
+// and it is not decoration: WITHOUT it the tap's anti-trap gate breaks, a
+// townsfolk crab going 7.0 days without a drink because it was too slow to
+// reach free water 100px away. It also makes the fix LEGIBLE - the moment a
+// starving crab decides to eat, it picks its feet up.)
+function selfCareNeed(c) {
+  if (c.dayState === "atTap") return c.tapStop ? c.tapStop.need : null;
+  if (c.dayState === "selfCook") return c.cookNeed || "food";
+  if ((c.dayState === "toErrand" || c.dayState === "errand") && c.errand) return c.errand.need;
+  return null;
+}
+function needDrag(c) {
+  if (window._noNeedDrag) return 1;   // paired-arm probe (see the anti-spiral suite gate)
+  const fixing = window._noSelfCareExempt ? null : selfCareNeed(c);
+  const ramp = (v, at, off) => off ? 1 : 1 - DRAG_MAX * Math.min(1, Math.max(0, (v - at) / (1 - at)));
+  return Math.max(DRAG_FLOOR, ramp(c.p.hunger || 0, DRAG_HUNGER_AT, fixing === "food")
+    * ramp(c.p.thirst || 0, DRAG_THIRST_AT, fixing === "drink"));
+}
+// HEAT SHIMMER (the doc's T2, shipped as the cheap visual companion it was
+// pitched as): a parched crab does not walk uniformly slow, it LURCHES -
+// stride, flag, stride. Mean-preserving by construction (a sine about 1.0),
+// so it costs nothing mechanically: the ramp above is the whole penalty.
+// It never reaches zero either, so a panting crab still counts as a MOVER to
+// collide() and still clears the no-progress watchdog's 2px in 1.5s.
+const SHIMMER_AT = 0.6, SHIMMER_AMP = 0.5, SHIMMER_HZ = 4.0;
+function heatShimmer(c) {
+  if (window._noShimmer) return 1;
+  const f = Math.min(1, Math.max(0, ((c.p.thirst || 0) - SHIMMER_AT) / (1 - SHIMMER_AT)));
+  return f <= 0 ? 1 : 1 + SHIMMER_AMP * f * Math.sin(time * SHIMMER_HZ + c.animT * 6.3);
+}
 function crabMove(c) {
   const t = TRAITS[c.p.trait];
-  // parched crabs trudge (-15% at thirst >= 0.8). Deliberately NO crabEff
-  // prep-drag term for thirst - one new spiral pressure at a time (PLAN T2).
   return 40 * t.move * (1 - 0.2 * Math.max(0, (c.p.bored || 0) - 0.5)) * (c.p.sick ? 0.5 : 1)
-    * ((c.p.thirst || 0) >= 0.8 ? 0.85 : 1);
+    * needDrag(c) * heatShimmer(c);
 }
 function crabWork(c) { return TRAITS[c.p.trait].work; }
 // needs -> output: a well-kept crab works at 1.0. Let hunger or dirt slide
@@ -1434,6 +1504,21 @@ function crabEff(c) {
   const hungry = Math.max(0, (c.p.hunger || 0) - 0.3) / 0.7;
   const grubby = Math.max(0, (c.p.dirt || 0) - 0.6) / 0.4;
   return 1 - 0.18 * Math.min(1, hungry) - 0.06 * Math.min(1, grubby);
+}
+// ---- THE WIDE BERTH (design doc D1, Matt's pick): dirt is the town's one
+// SOCIAL need, so it fails socially. A filthy crab's personal space inflates -
+// the 12px separation radius in collide() grows to 22px, tourists take the far
+// table, and a tourist served by one runs out of patience quicker. The tell is
+// a bubble of empty boardwalk that follows one crab around.
+// (The doc's D2, the smudge trail, is deliberately NOT built - the doc holds
+// it back until dirt is reliably serviceable and the owner did not pick it.)
+const BERTH_AT = 0.6;     // where the bubble starts to open (= crabEff's dirt line)
+const BERTH_PX = 10;      // full bubble at dirt 1.00: 12px personal space -> 22px
+const SHUN_AT = 0.8;      // a tourist takes the FAR table - binary, and pitched
+                          // high on purpose so seating does not churn on a 0.61
+const PATIENCE_FILTH = 0.3;   // up to +30% patience drain from a filthy server
+function crabBerth(c) {
+  return BERTH_PX * Math.min(1, Math.max(0, ((c.p.dirt || 0) - BERTH_AT) / (1 - BERTH_AT)));
 }
 
 // ---------------------------------------------------------------- sound (from CS1)
@@ -1952,6 +2037,42 @@ function stepTo(c, tx, speed, dt, ty) {
   c._mx = tx;          // actual motion target this frame (collision uses this, not c.tx)
   return false;
 }
+// THE WIDE BERTH, in the collider. Deliberately ASYMMETRIC and SIDEWAYS, and
+// both of those are wedge guards rather than taste:
+//   - only the CLEANER crab gives ground, so the filthy crab is never pushed
+//     by the berth and can always reach its own station, queue or cot;
+//   - the ground is given in Y (step around, toward whichever side of the
+//     boardwalk has more room), so the passer-by keeps its forward progress
+//     and the 1.5s no-progress watchdog never reads the bubble as a pin;
+//   - it ADDS to the core 12px physics rather than replacing any of it, so
+//     ordinary crab traffic is byte-for-byte what it always was (crabBerth is
+//     0 below BERTH_AT, so a clean pair returns on the first line). It has to
+//     run inside 12px as well as outside: the core push shrinks to nothing as
+//     it approaches 12, so a pair resting AT the old radius would otherwise
+//     never enter the bubble's range at all - measured, three crabs in a
+//     staged huddle sat at exactly 12px and never got the berth.
+// Suppressed at home and after dark: four crabs on shelter cots cannot each
+// have two body-widths, and this is a boardwalk read, not a bedroom one.
+// A crab standing in its station slot is exempt too - shoving a chef off the
+// grill is not "the town parts for him", it is a bug.
+function giveBerth(a, b, d, dt) {
+  const ra = crabBerth(a), rb = crabBerth(b);
+  const r = Math.max(ra, rb);
+  if (r <= 0 || d >= 12 + r || window._noBerth) return;   // _noBerth: the paired-arm wedge probe
+  const dirty = ra >= rb ? a : b, clean = ra >= rb ? b : a;
+  if (darkness() > 0.6) return;
+  if (dirty.dayState === "home" || clean.dayState === "home") return;
+  if (clean.slotKind && clean.slot >= 0) return;
+  let away = clean.y - dirty.y;
+  if (Math.abs(away) < 1) away = (dirty.y - FLOOR_MIN < FLOOR_MAX - dirty.y) ? 1 : -1;
+  const push = Math.min((12 + r - d) * 0.5 * Math.min(1, dt * 12), 3);
+  clean.y = clampY(clean.y + Math.sign(away) * push);
+  // a crab who is STANDING there also steps BACK, which is what gives the
+  // bubble its width. Only a still crab: it has no forward progress to lose,
+  // so the no-progress watchdog can never read this as a pin (the same
+  // still-vs-mover distinction the core collider already makes).
+  if (!clean._stepped) clean.x += Math.sign(clean.x - dirty.x || 1) * push;
+}
 // soft-radius separation + station bodies: nobody stands inside anybody
 function collide(dt) {
   const bodies = [];
@@ -1982,6 +2103,7 @@ function collide(dt) {
           b.x += ux * push; b.y = clampY(b.y + uy * push);
         }
       }
+      if (d > 0.01 && d < 12 + BERTH_PX) giveBerth(a, b, d, dt);
     }
   // solid tables: nobody walks through the picnic area
   for (const bizKey of Object.keys(BIZ)) {
@@ -2667,7 +2789,7 @@ function updateErrand(c, dt) {
       }
       const cust = { biz: c.errandBiz, recipe: c.errand.recipe, isCrab: true, crab: c,
         need: c.errand.need, x: c.x, spawnX: c.x, state: "waiting",
-        patience: 90, maxPatience: 90, claimed: false, served: false };   // locals will wait
+        patience: 90, maxPatience: 90, claimed: false, served: false, server: null };   // locals will wait
       customers.push(cust); noteArrival(c.errandBiz);
       c.errandCust = cust; c.dayState = "errand";
     }
@@ -2903,7 +3025,7 @@ function freeFishSpot() {
 }
 function abortChef(c) {
   release(c);   // covers kitchen work AND a selfCook grip on a grill (e.g. death mid-meal)
-  if (c.cust && !c.cust.served) c.cust.claimed = false;   // let another chef pick the order up
+  if (c.cust && !c.cust.served) { c.cust.claimed = false; c.cust.server = null; }   // let another chef pick the order up
   if (c.cleanStall) { c.cleanStall.cleaning = false; c.cleanStall = null; }
   c.kstate = "idle"; c.cust = null; c.carrying = null; c.stepIdx = 0;
 }
@@ -3143,6 +3265,43 @@ function updateFishing(c, dt) {
         : ["BIG ONE!", "THEY'RE BITING", "SEA PROVIDES"][(Math.random() * 3) | 0], t: 2.2 };
   }
 }
+// A tourist will not sit at the table beside a visibly filthy crab: they take
+// the far one. THERE IS ALWAYS AN OUT - if every free table has one beside it
+// they sit anyway rather than stand, so a filthy crab can never deadlock the
+// dining room (chosen over queueing or walking out: seating is the one place
+// in this game where a refusal could strand a paying guest for good).
+// Locals are colleagues, not strangers; they are not fussy.
+// SHUN_PX is geometry, not taste: the shack's tables sit 40px apart across and
+// 24px apart back-to-front, so a radius of 26 (ellipse-corrected the way
+// collide() corrects for wide sprites) means "the table you are standing at"
+// and never "the whole dining room". Pitch it larger and every table is always
+// beside somebody, which turns the refusal into a no-op.
+const SHUN_PX = 26;
+function tableShunned(t, skip) {
+  return allCrabs().some(c => !c.hidden && c !== skip && (c.p.dirt || 0) >= SHUN_AT &&
+    Math.hypot(c.x + 8 - (t.x + 10), (c.y - (t.y + 12)) * 1.8) < SHUN_PX);
+}
+function pickSeat(tables, cust) {
+  const free = (tables || []).filter(t => !t.occupant && t.dishes === 0);
+  if (!free.length) return null;
+  if (cust && cust.isCrab) return free[0];
+  // their OWN server is not "the crab at the next table": a filthy server is
+  // already charged for through the tip and the patience drain, and counting
+  // them here would shun every table in the room the moment they walked over.
+  const clear = free.find(t => !tableShunned(t, cust && cust.server));
+  if (clear) {
+    if (clear !== free[0] && window._stats) window._stats.seatDecline = (window._stats.seatDecline || 0) + 1;
+    return clear;
+  }
+  if (window._stats) window._stats.seatSatAnyway = (window._stats.seatSatAnyway || 0) + 1;
+  return free[0];   // every table is beside one: sit anyway, never strand a guest
+}
+// ...and a tourist being served BY one runs out of patience quicker, on the
+// same ramp the bubble opens on (up to +30% at a pinned 1.00).
+function serverFilth(k) {
+  const s = k.server;
+  return s && s.p && !k.isCrab ? 1 + PATIENCE_FILTH * (crabBerth(s) / BERTH_PX) : 1;
+}
 function updateKitchen(c, dt) {
   if (c.cust && (c.cust.state === "leaving" || c.cust.served)) { abortChef(c); return; }
   const bizKey = c.workBiz, biz = BIZ[bizKey];
@@ -3163,11 +3322,11 @@ function updateKitchen(c, dt) {
       const o = pending.find(k => k.isCrab && k.patience < k.maxPatience * 0.5)
         || pending.find(k => !k.isCrab) || pending[0];
       if (o) {
-        o.claimed = true; c.cust = o; c.stepIdx = -1; c.kstate = "walk";
+        o.claimed = true; c.cust = o; o.server = c; c.stepIdx = -1; c.kstate = "walk";
         // send dine-in guests to a table right away - the server brings it out
         const bts = bizTables(bizKey);
         if (o.state === "waiting" && bts) {
-          const seat = bts.find(t => !t.occupant && t.dishes === 0);
+          const seat = pickSeat(bts, o);
           if (seat) { seat.occupant = o; o.table = seat; o.state = "toSeat"; }
         }
         const s0 = stationSpot(bizKey, biz.source, 0); setT(c, s0.x, s0.y);
@@ -3398,7 +3557,7 @@ function serve(c) {
     cust.served = true; cust.happy = true; sfx.ding();
     if (!cust.isCrab) rep = Math.min(100, rep + 0.4);
     const tables = bizTables(cust.biz), stalls = BIZ[cust.biz].stalls;
-    const seat = tables ? tables.find(t => !t.occupant && t.dishes === 0) : null;
+    const seat = tables ? pickSeat(tables, cust) : null;
     const stall = stalls ? stalls.find(t => !t.occupant && !t.dirty) : null;
     if (stalls) {
       if (stall) { stall.occupant = cust; cust.state = "toStall"; cust.stall = stall; }
@@ -3424,7 +3583,7 @@ function newCustomer(bizKey) {
     acc: ACC_KEYS[(Math.random() * ACC_KEYS.length) | 0],
     animT: Math.random() * 9,
     x: spawnX, spawnX, state: "arriving", patience: 50, maxPatience: 50,
-    claimed: false, served: false };
+    claimed: false, served: false, server: null };
 }
 function updateCustomers(dt) {
   trackCloseQueues();   // hours-policy signal: who was still in line when a shop shut
@@ -3441,7 +3600,7 @@ function updateCustomers(dt) {
         }
       } else {
         if (k.x > slot) k.x = Math.max(slot, k.x - 45 * dt);
-        k.patience -= dt * (bizStaffed(k.biz) ? 1 : 6);   // nobody home? give up quick
+        k.patience -= dt * (bizStaffed(k.biz) ? 1 : 6) * serverFilth(k);   // nobody home? give up quick
         if (k.patience <= 0) {
           k.state = "leaving"; k.happy = false; k.claimed = false;
           if (window._stats) window._stats[k.isCrab ? "crabRage" : "tourRage"]++;
@@ -3484,7 +3643,7 @@ function updateCustomers(dt) {
       if (Math.abs(dxs2) > 2) k.x += Math.sign(dxs2) * Math.min(45 * dt, Math.abs(dxs2));
       else k.state = "seatedWaiting";
     } else if (k.state === "seatedWaiting") {
-      k.patience -= dt * 0.35;   // seated guests relax
+      k.patience -= dt * 0.35 * serverFilth(k);   // seated guests relax
       if (k.patience <= 0) {
         k.state = "leaving"; k.happy = false; k.claimed = false;
         if (k.table) { k.table.occupant = null; k.table = null; }
@@ -4343,6 +4502,10 @@ function drawCrab(c) {
     wblit(acc.art, c.x + ax, y + acc.dy, c.flip);
   }
   if ((c.p.dirt || 0) >= 0.66) wblit(DIRT, c.x, y, c.flip);
+  // THE WIDE BERTH's badge: the bubble of empty boardwalk needs a visible
+  // cause, so a crab whose personal space has inflated wears stink lines.
+  if (crabBerth(c) > 0 && darkness() <= 0.6 && c.dayState !== "home")
+    wblit(STINK_MARK[((time * 3.1) | 0) % 2], c.x + 12, y - 7);
   if (sleeping) {   // a little Z drifts up from the shell
     const ph = (time * 0.45 + c.animT * 0.37) % 1;
     if (ph < 0.75) {
@@ -4460,6 +4623,7 @@ function crabMood(c) {
   if (c.p.wallet > 120) return ["FLUSH", [180, 140, 30]];
   if ((c.p.hunger || 0) > 0.7) return ["HUNGRY", [200, 110, 40]];
   if ((c.p.thirst || 0) > 0.8) return ["PARCHED", [200, 110, 40]];
+  if ((c.p.dirt || 0) >= SHUN_AT) return ["RANK", [150, 110, 60]];   // the wide berth, named
   if ((c.p.tired || 0) > 0.85) return ["EXHAUSTED", [190, 80, 80]];
   if (darkness() > 0.7 && c.dayState !== "home") return ["UP LATE", [120, 120, 140]];
   if (darkness() > 0.7 && c.dayState === "home") return ["COZY", [180, 120, 60]];
@@ -4911,6 +5075,16 @@ function drawDossier() {
     if ((p.dirt || 0) > 0.6) why.push("GRUBBY");
     row("PACE", "WORKING AT " + Math.round(eff * 100) + "%" + (why.length ? " - " + why.join(", ") : ""),
       eff < 0.8 ? [190, 80, 80] : [200, 110, 40]);
+  }
+  // THE TRUDGE, named the way PACE names the prep drag: hunger and thirst fail
+  // as a speed penalty, so the card says how slow and says why.
+  const walk = needDrag(c);
+  if (walk < 0.995) {
+    const wwhy = [];
+    if ((p.hunger || 0) > DRAG_HUNGER_AT) wwhy.push("HUNGRY");
+    if ((p.thirst || 0) > DRAG_THIRST_AT) wwhy.push("PARCHED");
+    row("WALK", "TRUDGING AT " + Math.round(walk * 100) + "%" + (wwhy.length ? " - " + wwhy.join(", ") : ""),
+      walk < 0.85 ? [190, 80, 80] : [200, 110, 40]);
   }
   ly += 2;
   const bars = [["FED", 1 - (p.hunger || 0)], ["QUENCHED", 1 - (p.thirst || 0)],
