@@ -401,6 +401,26 @@ unit economics.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Fish price discovery** (Matt, on the fishers-break-for-anything collapse:
+  "we can't force folks to work like that! This is a sign that the price of
+  fish is artificially low"). Directive: replace the lunch-and-thirst-only
+  labor restriction with a PRICE mechanism — the restriction was a
+  command-economy patch on a price problem. Design sketch:
+  - Pier fish price FLOATS with scarcity (townCatch vs recent demand),
+    bounded above by the $7 import price — the world price is the natural
+    ceiling, which is the trade-horizon stub doing real economic work.
+  - Fishers are paid PER CATCH AT MARKET PRICE (replacing/absorbing the flat
+    $13 subsistence; keep the $2/catch housing-fund flow). Output = income:
+    a scarce-fish day is a lucrative day, so free crabs return to the pier
+    because it pays, not because they're forced.
+  - RESTORE full fisher freedom (breaks for fun too — self-employed means
+    self-employed; "I'VE GOT MY OWN LIFE" applies to fishers most of all).
+  - Job board already provides labor-supply response: fishing postings when
+    price runs high pull drifters to the pier.
+  - Watch for: price oscillation (hog cycle) in the sim; shack margin under
+    floating input costs; interaction with the escape-as-rare baseline.
+    Full matrix. First real price mechanism in the game — the doorway to T5
+    exports (exports need prices to mean anything).
 - ~~Tiredness replaces sandiness~~ — **built (worktree branch, 2026-08-18),
   after the T2 merge as sequenced**: `p.sandy` renamed `p.tired` with save
   migration (old sandy seeds tired, crew + townsfolk paths, nothing strands).
