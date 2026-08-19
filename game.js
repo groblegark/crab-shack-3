@@ -83,6 +83,15 @@ const TAP_CD = 20;           // errand cooldown after a sip
 const TAP_RINSE = 0.35;      // a cold rinse under the spout: worse than a $5 shower
 const TAP_RINSE_AT = 0.85;   // ...and only when filthy - the showers own 0.66 upward
 const TAP_RINSE_SICK = 0.66; // an ill crab hoses down at the CARED bar, shower or no shower
+// the memorial plot: three markers to a row on the dune between the last
+// promenade lot (ends x440... the shelter and house 6 fill 444-572) and the
+// town tap at 640, rows stacking up the sand
+const MEM_X0 = 576, MEM_DX = 32, MEM_PER_ROW = 2, MEM_DY = 16;   // pitch fits the longest crab name without the labels running together
+function memorialSpot(i) {
+  const j = i % (MEM_PER_ROW * 3);
+  return { x: MEM_X0 + (j % MEM_PER_ROW) * MEM_DX,
+    y: HOME_BOTTOM - MEMORIAL.h + 1 - ((j / MEM_PER_ROW) | 0) * MEM_DY };
+}
 let townCatch = 6;   // the day's landed fish, crate-side
 let rep = 30;        // word of mouth (0-100): happy guests talk, rage-quits talk louder
 const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
@@ -3667,8 +3676,9 @@ function drawTown() {
     const t = WATER_TAPS[i];
     wblit(STANDPIPE2, t.x, HOME_BOTTOM - STANDPIPE2.h);
     if (t.x - camX > -60 && t.x - camX < W) {
-      smallText(ctx, "WATER", t.x - 3 - camX, HOME_BOTTOM - STANDPIPE2.h - 7, [30, 20, 36]);
-      smallText(ctx, "WATER", t.x - 4 - camX, HOME_BOTTOM - STANDPIPE2.h - 8, [150, 210, 255]);
+      const lx = t.x + ((STANDPIPE2.w - smallTextWidth("WATER")) >> 1) - camX;
+      smallText(ctx, "WATER", lx + 1, HOME_BOTTOM - STANDPIPE2.h - 8, [30, 20, 36]);
+      smallText(ctx, "WATER", lx, HOME_BOTTOM - STANDPIPE2.h - 9, [235, 248, 255]);
     }
     if (allCrabs().some(c => c.dayState === "atTap" && c.tapStop && c.tapStop.tap === i && c.tapT > 0))
       wblit(TAP_FLOW[((time * 6) | 0) % 2], t.x + 15, HOME_BOTTOM - STANDPIPE2.h + 12);
@@ -3679,8 +3689,23 @@ function drawTown() {
     smallText(ctx, "SHELTER", SHELTER_X + 22 - camX, HOME_BOTTOM - SHELTER2.h + 3, [30, 20, 36]);
     smallText(ctx, "SHELTER", SHELTER_X + 21 - camX, HOME_BOTTOM - SHELTER2.h + 2, [240, 235, 220]);
   }
-  // the town remembers: driftwood memorials on the dune west of the shelter
-  for (const m of memorials) wblit(MEMORIAL, m.x, 150 - MEMORIAL.h);
+  // THE TOWN REMEMBERS. Driftwood markers, now on the little dune between the
+  // last promenade lot and the town tap - the only clear sand on this side of
+  // the road. They used to be laid out westward from the shelter at a 16px
+  // pitch, which put them floating inside the front rooms of houses 4 and 5
+  // once every lot stood permanently; nobody noticed while only crew could
+  // die. Townsfolk die now, so this row gets read: the layout is DERIVED from
+  // the index (the stored x rides along for old saves) and each stone carries
+  // its name.
+  for (let i = 0; i < memorials.length; i++) {
+    const m = memorials[i], sp = memorialSpot(i);
+    wblit(MEMORIAL, sp.x, sp.y);
+    if (sp.x - camX > -40 && sp.x - camX < W) {
+      const nx = sp.x + ((MEMORIAL.w - smallTextWidth(m.name)) >> 1) - camX;
+      smallText(ctx, m.name, nx + 1, sp.y - 6, [30, 20, 36]);
+      smallText(ctx, m.name, nx, sp.y - 7, [225, 220, 235]);
+    }
+  }
   // bus stops on the shoulder
   for (const s of BUS_STOPS) wblit(BUS_STOP, s - 3, ROAD_Y1 + 3);
   // scenery fills the beach pockets between lots
