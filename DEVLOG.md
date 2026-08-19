@@ -8,6 +8,38 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, closing the shop — Five towns, and everyone in them
+
+![SAVED TOWNS: the crew of slot 1, portraits and all](devlog/img/2026-08-18-saved-towns.png)
+
+*Slot 1, day 10, $1284, rep 96, eight in town. PINCHY is on sick day two —
+that's why his portrait is pink and tagged ILL. CLAWDIA made cottage.
+SHELLDON's in house 5. And SANDY, who you may remember stepping off the
+morning bus to take a job nobody else wanted, is still on a shelter cot.*
+
+The town can be saved properly now: five slots, each remembered by day,
+till, reputation, population and when you last looked in. Export a town to
+a file, import one back, start a new town without bulldozing the old one.
+
+But the part worth showing is the roster underneath. Pick a slot and you
+don't get a save file, you get **the crew** — two-times portraits in their
+own shell colors and accessories, names on strips, and a line each saying
+what they do, where they sleep, and how they're feeling. A cot in red. A
+house in green. A boat in blue. A sick crab tinted pink.
+
+That's the whole game in one card, and it's the first thing this project
+has built that's *only* about looking at your crabs. You can read a town's
+entire fortune in four rows: who's housed, who's still on a cot, who
+didn't make it to work today. We did not plan for save slots to be the
+most sentimental screen in the game. That's simulations for you.
+
+*(Import is paranoid, by the way: nine different malformed or foreign save
+files were offered to it and refused, and your old single save migrated
+into slot 1 byte-for-byte. The one thing a returning player will actually
+notice is that the NEW button is now called SAVE.)*
+
+---
+
 ## 2026-08-18, the small hours — The town discovers a price (and the house was a trap)
 
 ![SALTY lands one at the ceiling: CATCH! +$7, $65 on the day](devlog/img/2026-08-18-catch-market-price.png)
