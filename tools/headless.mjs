@@ -80,7 +80,7 @@ const G = (expr) => vm.runInContext(expr, C);
 for (const kv of SET) {
   const [k, v] = kv.split("=");
   G(`UPS[${JSON.stringify(k)}].lvl = ${parseInt(v)};
-     if (${JSON.stringify(k)} === "chef") while (crabs.length < UPS.chef.lvl) crabs.push(newCrab(makeCrabPersona(crabs.length)));`);
+     if (${JSON.stringify(k)} === "chef") while (crabs.length < UPS.chef.lvl) hireCrew();`);   // the game's own recruitment path: hires start homeless
 }
 
 // ---- run ----------------------------------------------------------------

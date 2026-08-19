@@ -1045,11 +1045,7 @@ function runJobBoard() {
 }
 function spawnDrifter() {
   const p2 = makeCrabPersona((Math.random() * 12) | 0);
-  const used = new Set(allCrabs().map(k => k.p.name));
-  if (used.has(p2.name)) {
-    const free = CRAB_NAMES.find(n => !used.has(n));
-    if (free) p2.name = free;
-  }
+  p2.name = freeCrewName(p2.name);   // deduped across BOTH name pools (converted tourists live here too)
   Object.assign(p2, { npc: true, fisher: true, homeless: true, wallet: 12, job: "fishing", shift: "D", mode: "walk" });
   const c = newCrab(p2);
   c.fishSpot = FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
@@ -1057,6 +1053,80 @@ function spawnDrifter() {
   npcs.push(c);
   today.moved.push(c.p.name + " NEW IN TOWN");
   toast = { text: c.p.name + " GOT OFF THE BUS - NEW IN TOWN", t: 5 };
+  return c;
+}
+
+// ---------------------------------------------------------------- hiring
+// The directive: hiring must not make a house pop into existence. A hire is
+// RECRUITED, not minted - preferably a tourist who's in town right now
+// (their customer entity converts into a resident crab: same name, shell
+// color, accessory - the guest you served yesterday joining the crew), else
+// a new face answers the ad and rides in on the morning bus. Either way the
+// hire completes immediately (they start working today), starts HOMELESS at
+// the shelter like everyone else, and climbs the housing ladder on wages.
+function freeCrewName(preferred) {
+  const used = new Set(allCrabs().map(k => k.p.name));
+  if (preferred && !used.has(preferred)) return preferred;
+  return CRAB_NAMES.concat(CUSTOMER_NAMES).find(n => !used.has(n)) || preferred || "CRAB";
+}
+// alternate M/E like makeCrabPersona always did - but a hire starts TODAY,
+// so if the parity shift is already over while the other still has hours,
+// take the shift that can actually work
+function hireShift() {
+  const par = crabs.length % 2 === 0 ? "M" : "E";
+  const oth = par === "M" ? "E" : "M";
+  return (tmin >= SHIFTS[par].end - 30 && tmin < SHIFTS[oth].end - 30) ? oth : par;
+}
+// tourist -> resident: release everything the visit holds (abortErrand's
+// checklist, tourist-side: stall, table + plate, any chef mid-claim), drop
+// the customer entity from the queue, and stand a crew crab up in its place
+function convertTourist(k) {
+  if (k.stall) { k.stall.occupant = null; k.stall.dirty = true; k.stall = null; }
+  if (k.table) { k.table.occupant = null; k.table.dishes = 0; k.table = null; }
+  for (const w of allCrabs()) if (w.cust === k) abortChef(w);   // unclaim a mid-prep order
+  k.done = true; k.state = "leaving"; k.claimed = false;
+  customers = customers.filter(q => q !== k);
+  const p2 = makeCrabPersona(2 + ((Math.random() * 10) | 0));   // fresh trait/mode roll; identity comes from the tourist
+  p2.name = freeCrewName(k.name);
+  p2.color = k.color; p2.acc = k.acc;
+  p2.shift = hireShift(); p2.homeless = true; p2.house = null;
+  const c = newCrab(p2);
+  c.x = k.x; c.y = 166;
+  crabs.push(c);
+  // the person you were watching is still the person you're watching
+  if (followCust === k) { followCust = null; followIdx = crabs.length - 1; followNpc = null; }
+  if (dossier === k) dossier = c;
+  c.quip = { text: "I LIVE HERE NOW!", t: 3 };
+  return c;
+}
+function hireCrew() {
+  // a tourist mid-visit is the preferred recruit - they're right there in
+  // the queue or at a table. Skip locals (k.isCrab: they have their own
+  // lives) and anyone already walking out; prefer someone standing in line
+  // over someone mid-shower
+  const eligible = customers.filter(k => !k.isCrab && k.state !== "leaving" && k.state !== "outStall");
+  const pick = eligible.find(k => k.state === "waiting" || k.state === "arriving")
+    || eligible.find(k => k.state !== "showering" && k.state !== "toStall" && k.state !== "waitStall")
+    || eligible[0];
+  let c;
+  if (pick) {
+    c = convertTourist(pick);
+    today.moved.push(c.p.name + " JOINED THE CREW (WAS VISITING)");
+    toast = { text: c.p.name + " LOVED IT HERE - JOINED THE CREW!", t: 6 };
+  } else {
+    // nobody's visiting: the ad goes out and a new face answers, riding the
+    // morning bus in - mechanically the hire completes now, so they walk
+    // straight off the bus and into today's shift
+    const p2 = makeCrabPersona(2 + ((Math.random() * 10) | 0));
+    p2.name = freeCrewName(null);
+    p2.shift = hireShift(); p2.homeless = true; p2.house = null; p2.mode = "walk";
+    c = newCrab(p2);
+    c.x = BUS_STOPS[0]; c.y = 158;   // one bag, one toque
+    crabs.push(c);
+    today.moved.push(c.p.name + " JOINED THE CREW (OFF THE BUS)");
+    toast = { text: c.p.name + " ANSWERED THE AD - JUST OFF THE BUS", t: 6 };
+  }
+  popText(c.p.name + " JOINS THE CREW!", c.x - 20, FLOOR_Y - 30, [140, 255, 160]);
   return c;
 }
 
@@ -1962,21 +2032,7 @@ function tryBuy(key) {
     toast = { text: "THE JUICE BAR IS YOURS! REASSIGN A CRAB TO WORK THE JUICERS", t: 8 };
     popText("GRAND OPENING!", BIZ.juicebar.x0 + 20, 100, [140, 255, 160]);
   }
-  if (key === "chef") {
-    const p2 = makeCrabPersona(crabs.length + ((Math.random() * 6) | 0));
-    const usedNames = new Set(crabs.map(k => k.p.name));
-    if (usedNames.has(p2.name)) {
-      const free = CRAB_NAMES.find(n => !usedNames.has(n));
-      if (free) p2.name = free;
-    }
-    const used = new Set(allCrabs().filter(k => !k.p.homeless).map(k => k.p.house));
-    p2.homeless = true;
-    for (let h = 0; h < HOUSE_XS.length; h++) if (!used.has(h)) { p2.house = h; p2.homeless = false; break; }
-    const c = newCrab(p2);
-    c.x = homeX(c);
-    crabs.push(c);
-    popText(c.p.name + " JOINS THE CREW!", c.x - 20, FLOOR_Y - 30, [140, 255, 160]);
-  }
+  if (key === "chef") hireCrew();   // recruited from the tourist pool (or the bus), never minted with a house
   sfx.buy(); save();
 }
 
