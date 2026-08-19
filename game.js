@@ -1798,7 +1798,13 @@ function payAndBenefit(c, cust) {
     const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0))
       * (1 - ((c.p.tired || 0) >= 0.85 ? 0.15 : 0));   // an EXHAUSTED server fumbles the charm (0.85 = the mood line; evenings routinely reach the old 0.66)
     const tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult;
-    creditBiz(cust.biz, cust.recipe.pay + tip, cust.x, 126);
+    // one price on the menu, one price on the pop: the base. The tip is its
+    // own little moment (Matt: 'are tacos 17 or 23? there are discrepancies')
+    creditBiz(cust.biz, cust.recipe.pay, cust.x, 126);
+    if (tip >= 0.5) {
+      creditBiz(cust.biz, tip, cust.x, 108);   // credited separately, popped separately
+      popText("+$" + Math.round(tip) + " TIP", cust.x - 8, 100, [255, 216, 96]);
+    }
     popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
   }
 }
@@ -2827,6 +2833,7 @@ function drawPanel() {
         my += MROW;
       }
     }
+    smallText(ctx, "LOCALS PAY +25%", 4, my + 1, [170, 150, 135]);   // under the last menu row
     smallText(ctx, "TONIGHT AT 20:00", 132, ROW_Y, [230, 215, 195]);
     let by = ROW_Y + MROW + 1;
     const owedN = crabs.filter(c => !c.p.sick && !(offToday(c) && !c.workedToday)).length;
