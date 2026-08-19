@@ -478,6 +478,20 @@ unit economics.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Decouple selection from camera follow** (Matt: "we can't order crabs
+  around cause when you drag it deselects them; need to be able to select
+  a crab without it focusing basically; should focus till click away, then
+  keep select but lose camera"). Today follow-cam IS selection (followIdx)
+  and any drag/pan clears it — so you can't line up a right-click order
+  while panning to the destination; the order system fights the camera.
+  Spec per Matt: clicking a crab SELECTS it and focuses the camera;
+  clicking/dragging away releases the CAMERA but keeps the SELECTION
+  (visible highlight — ring/outline under the crab + their card stays up);
+  right-click orders go to the selected crab from anywhere on the map.
+  Click empty ground / Esc / selecting another crab changes selection.
+  Follow-cam can be re-engaged from the selected card. UI-layer only, no
+  matrix; touches the same input layer as right-click orders and merge-mode
+  hold — mind the 6px drag threshold lessons.
 - **Labor policy suite: sick days + overtime + scheduling menu** (Matt).
   Three pieces, one family, built on the management screen:
   - **Sick days** — a sick crab can take the day off, UNPAID, to care for
