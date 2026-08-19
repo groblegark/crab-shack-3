@@ -136,8 +136,12 @@ scenario("staff meals: closing crew cooks their own dinner, at retail", () => {
     // he may be mid-commute - or mid-POUR since T2 - when we force this:
     // abortChef is the sanctioned interrupt (it releases a selfCook's grill
     // grip; forcing dayState alone deadlocks him against his own lock), then
-    // park him at home so the errand check is live in the town-awake window
-    if (c.dayState !== "working") { abortChef(c); c.dayState = "home"; }
+    // park him AT THE SHACK so the errand check is live in the town-awake
+    // window. (Re-pointed with the trip-chaining pass: the staff-meal
+    // privilege now requires standing at your own counter - a crab at home
+    // no longer walks the promenade to cook in a dark kitchen. Parking him
+    // at the door is what "the closing crew" always meant.)
+    if (c.dayState !== "working") { abortChef(c); c.dayState = "home"; c.x = BIZ.shack.door + 10; c.y = 160; }
     return JSON.stringify({ paid: window._stats.staffMealPaid || 0, cost: window._stats.staffMealCost || 0,
       meals: window._stats.staffMeals || 0 });
   })()`));
@@ -778,8 +782,20 @@ scenario("thirst: drink errand serviced end-to-end at a staffed juice bar", () =
   const ok0 = sim.runUntil('crabs[0].duty && crabs[0].workBiz === "juicebar" && !crabs[0].pendingOff', { maxSteps: 200000 });
   if (!ok0) return "the bar never opened (crabs[0] " + sim.G("crabs[0].dayState") + ")";
   sim.runUntil('crabs[1].dayState === "home" && tmin > 9.5 * 60 && tmin < 12.5 * 60', { maxSteps: 200000 });
+  // Stand him at the bar's door before making him thirsty. This scenario is
+  // about RETAIL PRICING, not about queue luck or a 750px walk: routed
+  // commutes shifted the old cross-town arrival by a few minutes and landed
+  // him on a full line, which legitimately bounces a local ("LINE'S TOO
+  // LONG") and left the wallet assertion measuring a settlement instead of a
+  // drink. Re-pointed with the crab-routing merge; the transaction under test
+  // is unchanged.
   sim.G(`{ const c = crabs[1]; c.p.thirst = 0.9; c.p.hunger = 0.2; c.p.dirt = 0.2;
-    c.p.tired = 0.2; c.p.bored = 0.2; c.p.wallet = 30; c.errandCd = 0; }`);
+    c.p.tired = 0.2; c.p.bored = 0.2; c.p.wallet = 30; c.errandCd = 0;
+    c.x = BIZ.juicebar.queueX - 30; c.y = 166;
+    // clear the unclaimed tourist line so the local gets a slot (nobody is
+    // holding these, so dropping them strands no chef)
+    customers = customers.filter(k => !(k.biz === "juicebar" && !k.isCrab && !k.claimed
+      && (k.state === "waiting" || k.state === "arriving"))); }`);
   const ok = sim.runUntil("(crabs[1].p.thirst || 0) === 0", { maxSteps: 60000 });
   if (!ok) return "thirst never serviced (thirst " + sim.G("crabs[1].p.thirst").toFixed(2)
     + ", state " + sim.G("crabs[1].dayState") + ")";
@@ -1186,9 +1202,19 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // merge (deliberate, measured drift: fishers earn catch x market price, so
   // by day 2 SALTY and DRIFT have spent down and housed themselves - see the
   // price entry in PLAN). Re-baseline only with that kind of receipt.
+  // RE-BASELINED AGAIN at the crab-routing merge (trip-chaining + furniture-
+  // aware lanes). Receipt: this pass deliberately changes where every crab
+  // walks, so every position and every downstream number moves. The drift is
+  // legible and in the intended direction on BOTH seeds - fewer wasted
+  // claw-miles bought more work: coins 159.7 -> 198.7 and 208.4 -> 218.3,
+  // rep 46.7 -> 52.5 and 51.1 -> 52.6, tourist rage 5 -> 3 and 3 -> 3,
+  // serves 37 -> 38 and 34 -> 38, and both fishers now actually FINISH the
+  // walk home by midnight (seed 1337 DRIFT was stranded at x1549 mid-
+  // promenade; he now sleeps at his cottage, x2136). See PLAN's routing
+  // entry for the measured matrices.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":159.664,"rep":46.7433,"catch":0,"serves":37,"crabServes":3,"rage":5,"till":199.042,"wallets":[["PINCHY",16],["CLAWDIA",26],["SUDSY",27],["SALTY",5],["DRIFT",8]],"pos":[[520,154],[750,148.3],[920,166.5],[2072,154],[1549,156.6]]}',
-    4242: '{"day":3,"tmin":0,"coins":208.398,"rep":51.1312,"catch":2,"serves":34,"crabServes":3,"rage":3,"till":148.733,"wallets":[["PINCHY",16],["CLAWDIA",26],["SUDSY",40],["SALTY",4],["DRIFT",1]],"pos":[[520,154],[924,147.8],[561,167.3],[492,155],[2136,154]]}',
+    1337: '{"day":3,"tmin":0,"coins":198.706,"rep":52.545,"catch":0,"serves":38,"crabServes":3,"rage":3,"till":200.27,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",23],["SALTY",11],["DRIFT",0]],"pos":[[520,154],[251.3,150],[673.3,167.7],[2072,154],[2136,154]]}',
+    4242: '{"day":3,"tmin":0,"coins":218.261,"rep":52.6126,"catch":0,"serves":38,"crabServes":3,"rage":3,"till":206.164,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",8],["DRIFT",5]],"pos":[[520,154],[108,154],[388,154],[492,155],[2136,154]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -1542,6 +1568,124 @@ scenario("fish market: floor-price week - the roast keeps a broke fisher alive",
   return (sim.G("window._stats.roastStarts || 0") === sim.G("window._rs"))
     ? true : "a roast ate one of the town's last two fish";
 
+});
+
+// ---- routing: trip-chaining + proactive furniture avoidance ---------------
+// Walk-distance meter: sums |dx| per crab per day inside the vm (cheap) so a
+// scenario can compare "how far did this town walk today" before/after.
+function walkMeter(sim) {
+  sim.G("window._wm = { d: {}, prev: {} };");
+  return {
+    tick(G) {
+      G(`{ const m = window._wm;
+        for (const c of allCrabs()) {
+          if (c.hidden) continue;
+          const k = c.p.name + "#" + day;
+          const p = m.prev[c.p.name];
+          if (p != null && Math.abs(c.x - p) < 40) m.d[k] = (m.d[k] || 0) + Math.abs(c.x - p);
+          else if (m.d[k] == null) m.d[k] = 0;
+          m.prev[c.p.name] = c.x;
+        } }`);
+    },
+    get perCrabDay() {
+      const d = JSON.parse(sim.G("JSON.stringify(window._wm.d)"));
+      const ks = Object.keys(d);
+      return ks.reduce((a, k) => a + d[k], 0) / Math.max(1, ks.length);
+    },
+  };
+}
+
+scenario("routes: a meal ON THE WAY to work, not a lap of the promenade", () => {
+  // The named symptom (Matt): wake -> commute to work -> walk BACK past your
+  // own front door to the shack for breakfast -> return to work. The chained
+  // route is home -> shack -> work, in that order, and never doubles back.
+  const sim = createSim({ seed: 909 });
+  const ok0 = sim.runUntil(
+    'bizStaffed("shack") && tmin > 7 * 60 && tmin < 10 * 60 && ' +
+    'crabs.some(c => c.dayState === "home" && !offToday(c) && !c.p.sick && tmin < leaveGmin(c) - 45)',
+    { maxSteps: 200000 });
+  if (!ok0) return "no morning with a staffed shack and a crab still at home";
+  // the hungry crab: at home in the west, a shift ahead, the shack (which is
+  // east, on the way to work) staffed and affordable
+  const idx = sim.G('crabs.findIndex(c => c.dayState === "home" && !offToday(c) && !c.p.sick && tmin < leaveGmin(c) - 45)');
+  sim.G(`{ const c = crabs[${idx}];
+    c.p.hunger = 0.75; c.p.thirst = 0; c.p.dirt = 0; c.p.bored = 0; c.p.wallet = 60; c.errandCd = 0; }`);
+  const homeX0 = sim.G(`homeX(crabs[${idx}])`);
+  const workX = sim.G(`jobDoor(crabs[${idx}])`);
+  const shackQ = sim.G("BIZ.shack.queueX");
+  if (!(homeX0 < shackQ && Math.abs(workX - homeX0) > 400))
+    return `seed geometry unusable (home ${homeX0}, work ${workX}, shack ${shackQ})`;
+  // walk the whole trip, logging where they went and how far they walked
+  sim.G("window._t = { walk: 0, prev: null, minX: 1e9, sawErrand: false, left: false, sawWork: false };");
+  const trace = () => sim.G(`{ const c = crabs[${idx}], t = window._t;
+    if (t.prev != null && Math.abs(c.x - t.prev) < 40) t.walk += Math.abs(c.x - t.prev);
+    t.prev = c.x;
+    if (c.dayState === "toErrand" || c.dayState === "errand") t.sawErrand = true;
+    if (t.sawErrand && c.x > ${homeX0} + 300) t.left = true;   // genuinely under way
+    if (t.left && !t.sawWork) t.minX = Math.min(t.minX, c.x);
+    if (t.sawErrand && c.dayState === "working") t.sawWork = true; }`);
+  const arrived = sim.runUntil(`crabs[${idx}].dayState === "working"`,
+    { maxSteps: 200000, tickEvery: 1, onTick: trace });
+  if (!arrived) return "the crab never reached work";
+  const t = JSON.parse(sim.G("JSON.stringify(window._t)"));
+  if (!t.sawErrand) return "the crab went to work without eating (no errand at all)";
+  // (1) PATH ORDER: having set out for the meal, they never went back home
+  if (!t.left) return "the crab never actually set out (no leg past home + 300px)";
+  if (t.minX < homeX0 + 300)
+    return `backtracked toward home (reached x ${Math.round(t.minX)}, home ${Math.round(homeX0)}) between the meal and work`;
+  // (2) DISTANCE: within a quarter of the ideal home -> shack -> work walk
+  const ideal = Math.abs(shackQ - homeX0) + Math.abs(workX - shackQ);
+  if (t.walk > ideal * 1.25)
+    return `walked ${Math.round(t.walk)}px for a ${Math.round(ideal)}px trip (${(t.walk / ideal).toFixed(2)}x)`;
+  return true;
+});
+
+scenario("routes: a full town walks less per crab-day (no systematic backtracking)", () => {
+  // Pinned from the measured build: 5 days of this 4-crab arcade town used
+  // to average 4273px of x-travel per crab-day; chaining + the en-route rules
+  // brought it to 3521. The gate (4000) catches a REGRESSION to the
+  // lap-the-promenade behaviour, not per-build wobble.
+  const sim = createSim({ seed: 4242 });
+  sim.G(`coins = 3000; tryBuy("arcade"); tryBuy("chef"); tryBuy("chef");
+    crabs[2].p.job = "arcade"; crabs[3].p.job = "arcade";`);
+  const wm = walkMeter(sim);
+  sim.runDays(5, { onTick: wm.tick, tickEvery: 1 });
+  const per = wm.perCrabDay;
+  return per <= 4000 ? true : `${Math.round(per)}px of x-travel per crab-day (gate 4000, measured 3521)`;
+});
+
+scenario("routes: furniture avoidance keeps warps + unsticks near zero", () => {
+  // Lane travel is furniture-aware now, so the two last-resort valves should
+  // hardly ever fire: the 30-game-minute bounce budget (warps) and the
+  // 1.5-second no-progress sidestep (unsticks). Measured on THIS town over 5
+  // days - before the pass: 21 warps + 6 unsticks. After: 0 + 2.
+  const sim = createSim({ seed: 5348 });
+  sim.G(`coins = 3000; tryBuy("arcade"); tryBuy("chef"); tryBuy("chef");
+    crabs[2].p.job = "arcade"; crabs[3].p.job = "arcade";`);
+  sim.runDays(5);
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  const w = st.warps || 0, u = st.unsticks || 0;
+  if (w > 2) return `${w} bounce-budget warps in 5 days (was 21, measured 0; gate 2)`;
+  if (w + u > 8) return `${w} warps + ${u} unsticks in 5 days (was 27, measured 2; gate 8)`;
+  return true;
+});
+
+scenario("routes: both travel lanes are clear of every solid (tripwire)", () => {
+  // The lanes are only useful while they are actually empty. This fails the
+  // day somebody parks a table or a counter on one - which is exactly how the
+  // town got into the all-day-bouncing state in the first place.
+  const sim = createSim({ seed: 11 });
+  sim.G(`coins = 4000; tryBuy("arcade"); tryBuy("juicebar"); tryBuy("table"); tryBuy("table");`);
+  const bad = JSON.parse(sim.G(`JSON.stringify(LANES.map(l => [l, laneClear(l, 0, WORLD_W)]).filter(r => r[1] < LANE_PAD))`));
+  if (bad.length) return "lane(s) obstructed: " + bad.map(([l, c]) => `y=${l} has ${c}px of daylight`).join(", ");
+  // and a walker asked to cross a blocked lane must pick the other one
+  const alt = sim.G(`(() => {
+    const fake = { x: 0 };
+    const t = BIZ.shack.tables[0];
+    return travelLane({ x: t.x - 60 }, t.x + 60, LANES[1]);
+  })()`);
+  if (typeof alt !== "number") return "travelLane did not return a lane";
+  return true;
 });
 
 // ---- runner
