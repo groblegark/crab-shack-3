@@ -598,6 +598,28 @@ first, connect later. Don't build the network before the node is beautiful.
   easy remembering" which town is which. Validate-before-mutate on import;
   a bad file must never touch the running game.
 
+## CLOSING ACT — CS3 is feature-complete (Matt, 2026-08-18)
+Matt, verbatim: "I feel spiritually that once this stuff rolls and is
+quality crab shack 3 will be complete. Crab shack 4 we will work on the
+design for tomorrow."
+
+POSTURE: **quality, not features.** All agents have landed; the day closed
+at 23 merges, suite 82/82 (independently re-run green by the coordinator
+session). Do NOT open new CS3 feature fronts — park new ideas as CS4
+DESIGN MATERIAL. The unbuilt trade-horizon items (T3 sourcing, T5 exports
+and sibling nodes) plus business settings, more peer owners, the
+player-avatar crab, staff-bused service and NPC eviction are the CS4 seed
+bed, not a CS3 backlog. The devlog capstone (73f209c) closes the serial.
+
+## DEFERRED TO CS4 (decided 2026-08-18, not forgotten)
+Both belong to Matt's "all crabs should be equal" directive, and both were
+deferred deliberately as design questions rather than bugs:
+- **NPC mortality** — NPCs still cannot die (the `!k.p.npc` guard in the
+  settlement illness block). Also why a sick NPC can linger indefinitely.
+- **Wage asymmetry** — NPC_WAGE 20 vs CRAB_WAGE 23.
+These are the last places the sim treats some crabs as more real than
+others. Tomorrow is the day for that.
+
 ## THE ESCAPE PROMISE IS BACK (2026-08-18, after routing) — supersedes the ruling
 Matt ruled escape-as-rare while it was measurably broken (0/6 at day 40). It is
 no longer broken, and nothing in the economy was touched to fix it: trip-chaining
