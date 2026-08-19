@@ -153,11 +153,7 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-<<<<<<< HEAD
-=======
 - `node tools/suite.mjs` — **59 scenarios, must stay green before any push.**
->>>>>>> worktree-agent-a09ec4a3ffc9d25b9
-
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
@@ -174,16 +170,13 @@ vm — never fork game logic into tools/) and perf expectations live there.
   migration.
   serviced by showers alone, days-off rota (weekly rest + off-day
   spending, cover-shift/stagger coverage, exact wage-skip bill math),
-<<<<<<< HEAD
   hiring-as-recruitment (tourist conversion with clean entity teardown,
   bus-arrival fallback working day-of, all-9-lots occupancy derivation
-  with no house conjured on hire).
-=======
-  shop hours (frozen day-2 default fingerprint, shortened hours really
-  close, SUDSY policy convergence + extend rule + tiredness budget,
-  sun-skip across an hours change, AT COST/FREE staff-meal accounting,
-  hours/mealPol/policy save roundtrip with degenerate-save clamping).
->>>>>>> worktree-agent-a09ec4a3ffc9d25b9
+  with no house conjured on hire), and shop hours (frozen day-2 default
+  fingerprint, shortened hours really close, SUDSY policy convergence +
+  extend rule + tiredness budget, sun-skip across an hours change,
+  AT COST/FREE staff-meal accounting, hours/mealPol/policy save roundtrip
+  with degenerate-save clamping).
 
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
   [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
