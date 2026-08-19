@@ -194,6 +194,7 @@ vm — never fork game logic into tools/) and perf expectations live there.
   on an identical RNG stream. This is where the cared-seam numbers in the
   labor-policy bullet come from.
 - `node tools/suite.mjs` — **73 scenarios, must stay green before any push.**
+
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
@@ -203,6 +204,9 @@ vm — never fork game logic into tools/) and perf expectations live there.
   save/load (incl. boat berths), save SLOTS (legacy-key migration into
   slot 1, two independent towns across a switch, import refusal + staged
   commit + old-build import re-migration, the preview card), no-inflation wallet bounds, needs-drag
+  crab routing (chained trip, town walk-distance, warps+unsticks floor,
+  travel-lane clearance tripwire),
+  save/load (incl. boat berths), no-inflation wallet bounds, needs-drag
   visibility, laundromat-removal migration (one-shot refund) + dirt
   serviced by showers alone, thirst serviced end-to-end at the bar,
   parched-spiral sickness attribution (with a watered control arm),
@@ -594,7 +598,18 @@ first, connect later. Don't build the network before the node is beautiful.
   easy remembering" which town is which. Validate-before-mutate on import;
   a bad file must never touch the running game.
 
-## DECIDED — growth escape is RARE for now (Matt, 2026-08-18)
+## THE ESCAPE PROMISE IS BACK (2026-08-18, after routing) — supersedes the ruling
+Matt ruled escape-as-rare while it was measurably broken (0/6 at day 40). It is
+no longer broken, and nothing in the economy was touched to fix it: trip-chaining
+and furniture-aware travel gave crabs back the hours they were spending walking
+and bouncing. Measured on the finished tree: baseline (do nothing) 0/8, evictions
+7-14, median 12 — lose-by-default holds exactly. Hire-and-seat growth: **5/8 alive
+at day 40**. That is the founding promise met — "lose by default, but a growth
+strategy can escape" — arrived at by fixing the environment rather than the
+numbers. If Matt wants it harder, the honest levers stay spawn pacing and rent,
+chosen deliberately; do NOT re-cripple the routing to get there.
+
+## (superseded) DECIDED — growth escape is RARE for now (Matt, 2026-08-18)
 Matt's call on the open question: **option 2 — escape-as-rare stands as the
 design for the moment.** "We'll choose (2) for the moment, we can calibrate
 again once we've told some new stories." The promise is redefined, not
@@ -730,6 +745,177 @@ unit economics.
   PLAYING banner already selling track titles. Existing saves keep their
   current choice; the encouragement shows only while music is off and
   gives up after a few sessions rather than nagging.
+- ~~Stop the table-bumping~~ + ~~Route optimization / trip-chaining~~ —
+  **shipped together (worktree, 2026-08-19)** as ONE pass over the
+  locomotion/errand-dispatch layer (both directives are the same code; the
+  originals are kept below for the record).
+
+  **The chaining rule, as shipped** — one comparison per candidate stop, no
+  path search. `pickErrand` now GATHERS every stop the crab could make right
+  now (the old priority order survives as `ERRAND_RANK` food 4 / drink 3 /
+  clean 2 / fun 1) and takes the best
+
+      score = (rank + need level) / (1 + detour / DETOUR_SCALE)     [400px]
+
+  where the DETOUR is only what the stop ADDS to the walk that was happening
+  anyway:
+
+      detour = |here → stop| + |stop → anchor| − |here → anchor|
+
+  `anchorX(c)` is where the trip ends regardless: the workplace while a shift
+  is coming or under way, home the rest of the time. A stop ON the route
+  scores its full urgency (detour 0); a stop the other way costs twice the
+  backtrack. Escape hatches, both deliberate: a need past **DIRE (0.9)**
+  ignores geography entirely (desperate crabs walk), and the
+  "don't-backtrack-the-promenade-before-9-AM" rule drops any stop more than
+  **DETOUR_MAX (900px)** out of the way *while a crab is at home with a shift
+  ahead* — it will still be there tonight. Three companion rules do the rest
+  of the work:
+  - `afterErrand()` sends **anyone** with a shift ahead on to WORK (it was a
+    fisher-only shortcut). This single line is what turns "eat, walk all the
+    way home, turn round, walk back past the shack" into "eat en route".
+  - `afterErrand()` also **CHAINS**: a second stop within `CHAIN_PX` (260px)
+    of the way onward happens now instead of after a lap home. Two stops per
+    outing, then the schedule takes over — imperfection is charming, a third
+    lap is not. A bounced queue never chains (you were not served).
+  - A **shift-end crab takes their staff meal at the counter they are standing
+    at** (`startSelfCook` at the pendingOff branch). Refusing it there was the
+    entire reason a crab walked home across town at 15:00 and back to the same
+    dark kitchen at 20:00 to cook it.
+
+  **The avoidance mechanism** — lane travel was furniture-BLIND, and commutes
+  did not route at all: `stepTo(dest, y=167)` drew a straight diagonal from
+  the front room (y≈155) to a shop door, which crosses the entire front row of
+  counters *for the whole trip*. That one line was most of the town's bouncing.
+  Now `solidBands()` mirrors `collide()`'s two furniture passes EXACTLY (same
+  x/y tolerances, cached on unlocks + table level), `laneClear(lane, x0, x1)`
+  reports a lane's daylight over a span, and `travelLane()` reads
+  `LANE_LOOK` (64px) ahead — one comparison — taking the other lane only when
+  the near one is under `LANE_PAD` (2px) of daylight and the other is better.
+  Commutes, walk-home, the day-off amble and the idle loiter all route through
+  it. Two constants moved with measured receipts: the **aisle 147 → 146** (the
+  centre of the corridor the furniture leaves — 147 sat 2px off the picnic
+  tables) and the **lane merge 3px → 1.5px** so walkers hold their lane
+  instead of drifting into the counters over a thousand pixels (that drift was
+  a 44-unstick pin on one town). `clearSpotY()` keeps loitering spots out of
+  the furniture — the lower idle spot (y=156) sat squarely inside the front-row
+  band, which is why SUDSY spent her shift being shoved off her own towel
+  counter. The shipped BOUNCE_BUDGET/WARP_PX valve is untouched and now
+  almost never fires.
+
+  **Measured — locomotion** (5 days × 4 seeds):
+
+  | town | metric | before | after |
+  |---|---|---|---|
+  | plain | warps | 34 | **0** |
+  | plain | unsticks | 19 | **6** |
+  | plain | frames deflected by furniture | 12239 | **2265** (−81%) |
+  | plain | distance walked / crab-day | 5115px | **4438px** (−13%) |
+  | plain | x-walk / crab-day | 4140px | **3563px** (−14%) |
+  | plain | "laps" of own territory (mean / median) | 2.20 / 1.79 | **1.91 / 1.32** |
+  | arcade (4 crabs, 4 seeds) | warps | 19–25 | **0** |
+  | arcade | unsticks | 6–11 | **2–9** |
+  | arcade | x-walk / crab-day | 4147–4286px | **3506–3706px** |
+
+  A "lap" is `x-distance walked that day ÷ 2 × (that day's x-span)`: home →
+  work → home is exactly 1. The median crab-day went from nearly two laps to
+  1.32.
+
+  Scripted single-crab probe, the SAME hungry-crab-at-home construction driven
+  in the browser on both builds (CLAWDIA, home x134, shack queue x1570, shack
+  door x1247, shift 14-20):
+  - **before**: home → shack (1436px) → **all the way home again** (x141, at
+    15:21) → then out to work (2948px cumulative when the work leg starts) —
+    about **4050px** to eat a plate of fish and clock in.
+  - **after**: home → shack (1436px) → straight on to work (1513px cumulative
+    at the work leg) — about **1840px**, and she is on the bike to the door,
+    fed, at 13:29 for a 14:00 shift. **2.2x less walking for the same day.**
+    (shots/before-chained-trip.png vs shots/after-chained-trip.png.)
+
+  Scripted single-crab probe, same walk both builds (x890 → x977, straight
+  past SUDSY's towel counter): **before 421 frames, 222 of them deflected
+  (53%), 412 spent inside the counter's solid band, 50 GAME-MINUTES for 90
+  pixels, ending shoved up over the counter at y=148.6. After: 49 frames, 0
+  deflected, 6 game-minutes, out on the boardwalk at y=167.4.** That 8.6×
+  is the "all day" Matt was watching. (shots/before-towel-counter.png vs
+  shots/after-towel-counter.png — the clock in the corner reads 09:56 vs
+  09:06.)
+
+  **Measured — balance** (`--jobs 4`, this tree, before vs after):
+  - Baseline 30d × 8: 0/8 both. Evictions **7,8,10,11,11,11,12,14 (median 11)
+    → 9,10,10,11,12,12,12,13 (median 12)**. +1 median, tails tightened at both
+    ends. This is the documented drift: commute time is work time, so saved
+    claw-miles are recovered crab-hours — same shape as the auto-unstick fix.
+  - Growth 40d × 8 `--buy chef,table`: **0/8, evictions 6,7,7,9,10,10,11,16
+    (median 10) → 2/8 survive, evictions 11,11,12,27,33,37,41,41 (median
+    33).** This is a BIG move and it is NOT tuned away (standing policy: a
+    behaviour fix's balance consequence gets documented, not neutralised).
+    **FLAG FOR MATT**: this bumps hard against "escape-as-rare stands for the
+    moment". A growth town that no longer spends a third of its crew-hours
+    walking in circles is simply a better-run town, and the honest levers if
+    escape should come back down are the deliberate ones named in the
+    escape-as-rare entry (spawn pacing / rent), chosen on purpose — not
+    re-crippling the routing.
+  - Six-seed 8-day service probe: **5/6 → 6/6 towns alive, 881 → 905 tourist
+    serves, mean crew hunger 0.174 → 0.190** (crabs eat marginally later
+    because they no longer make a special trip for it, but they eat).
+
+  **Suite: 69/69**, four new `routes:` scenarios, all four verified RED on the
+  pre-pass build:
+  - `routes: a meal ON THE WAY to work, not a lap of the promenade` — builds
+    the named symptom (hungry crab at home, shift ahead, shack on the way) and
+    asserts BOTH the path order (never turns back toward home between the meal
+    and work) and the distance (≤ 1.25 × the ideal home→shack→work walk).
+  - `routes: a full town walks less per crab-day` — 4-crab arcade town, 5 days:
+    was 4273px of x-travel per crab-day, now 3521; gate 4000.
+  - `routes: furniture avoidance keeps warps + unsticks near zero` — same town:
+    was 21 warps + 6 unsticks, now 0 + 2; gates 2 and 8.
+  - `routes: both travel lanes are clear of every solid (tripwire)` — fails the
+    day somebody parks a table or a counter on a travel lane, which is exactly
+    how the town got into the all-day-bouncing state in the first place.
+
+  **Re-pointings (3, each with its receipt written into the scenario):**
+  1. `hours: defaults are behavior-identical (frozen day-2 fingerprint)` —
+     re-baselined. Receipt: this pass deliberately moves where every crab
+     walks, so every position and every downstream number moves, and the drift
+     runs the right way on BOTH seeds — coins 159.7→198.7 and 208.4→218.3,
+     rep 46.7→52.5 and 51.1→52.6, tourist rage 5→3 and 3→3, serves 37→38 and
+     34→38 — and both fishers now actually FINISH the walk home by midnight
+     (seed 1337's DRIFT used to be stranded at x1549 mid-promenade; he now
+     sleeps at his cottage).
+  2. `thirst: drink errand serviced end-to-end at a staffed juice bar` —
+     the fixture, not the assertion. Routed commutes shifted its 750px
+     cross-town walk by a few minutes and landed the crab on a full line,
+     which legitimately bounces a local ("LINE'S TOO LONG") and left the
+     wallet check measuring a settlement instead of a drink. The crab is now
+     stood at the bar's door with the unclaimed tourist line cleared; the
+     retail-pricing transaction under test is unchanged.
+  3. `staff meals: closing crew cooks their own dinner, at retail` — the
+     fixture parks the crab AT THE SHACK instead of at home, which is what
+     "the closing crew" always meant. (Kept honest: an earlier draft of this
+     pass ALSO gated the staff meal on standing at your own counter; measured
+     6-seed, that starved crews whose kitchen goes dark — 5/6 towns alive vs
+     6/6, mean hunger 0.233 vs 0.190 — so the gate was dropped and only the
+     fixture moved.)
+
+  **Devlog beat (organic, reproducible)**: seed 1337 (`node tools/headless.mjs
+  --days 5 --seeds 1`), **PINCHY, day 3**. Before: clocks off at 21:10, walks
+  1011px home to his lot at x520, arrives at 22:25 — and immediately turns
+  round and walks 860px BACK to the shack grill at x1382 to cook himself
+  dinner, getting there after midnight. After: he cooks it at the counter he
+  was already standing at and makes exactly one walk home, in bed by 21:43.
+  Shots: `shots/before-towel-counter.png`, `shots/after-towel-counter.png`,
+  `shots/before-picnic-tables.png`, `shots/after-picnic-tables.png`,
+  `shots/after-chained-trip.png`.
+
+  **Left on the table** (measured, deliberately not taken): the boardwalk lane
+  has only 2px of daylight under the front row because `FLOOR_MAX` is 168 and
+  the counters' solid band ends at 166. A probe at `FLOOR_MAX` 170 with the
+  boardwalk at 169 cut the residual deflection a further 25%, but that changes
+  the walkable floor of the whole town (framing + the draw layer), which is
+  outside a locomotion pass. Worth a look if the bouncing ever reads as
+  "still too much".
+
 - **Stop the table-bumping** (Matt: "crabs keep running into tables...
   too much. It's cute if it's just for like 10 minutes but all day? that's
   terrible"). Root cause is structural: routedStep travels exactly two

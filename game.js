@@ -949,10 +949,10 @@ function updateHome(c, dt) {
     if (c._offPause > 0) { c._offPause -= dt; return; }
     if (c._offWt == null) {
       c._offWt = Math.max(24, Math.min(WORLD_W - 40, homeX(c) + Math.random() * 240 - 120));
-      c._offWy = 150 + Math.random() * 16;
+      c._offWy = clearSpotY(c._offWt, 150 + Math.random() * 16);   // amble on the sand, not through the picnic tables
       setT(c, c._offWt, c._offWy);
     }
-    if (stepTo(c, c._offWt, crabMove(c) * 0.55, dt, c._offWy)) {
+    if (routedStep(c, crabMove(c) * 0.55, dt)) {
       c._offWt = null; c._offPause = 2 + Math.random() * 5;
     }
     return;
@@ -970,8 +970,7 @@ function updateHome(c, dt) {
     const rate = c.p.homeless ? TIRED_DRAIN.cot : TIRED_DRAIN.bed;
     c.p.tired = Math.max(0, (c.p.tired || 0) * (1 - rate * dt * TS / 60));
   }
-  setT(c, s.x, s.y);
-  stepTo(c, s.x, crabMove(c) * 0.7, dt, s.y);
+  routedWalk(c, s.x, s.y, crabMove(c) * 0.7, dt);
 }
 
 function newCrab(persona) {
@@ -1593,20 +1592,20 @@ function updateCommute(c, dt) {
   if (c.pauseT > 0) { c.pauseT -= dt; return; }
 
   if (c.cstate === "travel") {           // walking the whole way
-    if (stepTo(c, dest, wspd, dt, 167)) arriveCommute(c, toWork);
+    if (routedWalk(c, dest, 167, wspd, dt)) arriveCommute(c, toWork);
   } else if (c.cstate === "drive") {     // bike/buggy: ride to park spot, walk rest
     const b = BIZ[c.p.job];
     const park = toWork ? (m === "buggy" ? b.park + (c.p.house % 6) * 18 : b.rack + (c.p.house % 6) * 7) : homeX(c);
-    if (stepTo(c, park, vspd, dt, 150)) {
+    if (stepTo(c, park, vspd, dt, 150)) {   // on the road, out of collide entirely
       if (toWork) { c.cstate = "walkFromPark"; }
       else arriveCommute(c, false);
     }
   } else if (c.cstate === "walkFromPark") {
-    if (stepTo(c, dest, wspd, dt, 167)) arriveCommute(c, true);
+    if (routedWalk(c, dest, 167, wspd, dt)) arriveCommute(c, true);
   } else if (c.cstate === "walkToVehicle") {   // heading home: fetch parked ride
     const b = BIZ[c.p.job];
     const park = m === "buggy" ? b.park + (c.p.house % 6) * 18 : b.rack + (c.p.house % 6) * 7;
-    if (stepTo(c, park, wspd, dt, 150)) c.cstate = "drive";
+    if (routedWalk(c, park, 150, wspd, dt)) c.cstate = "drive";
   } else if (c.cstate === "walkToStop") {
     setT(c, BUS_STOPS[c.busFrom], 148);
     if (routedStep(c, wspd, dt)) c.cstate = "waitBus";
@@ -1620,7 +1619,7 @@ function updateCommute(c, dt) {
       c.hidden = false; c.x = BUS_STOPS[c.busTo]; c.cstate = "walkOff";
     }
   } else if (c.cstate === "walkOff") {
-    if (stepTo(c, dest, wspd, dt, 167)) arriveCommute(c, toWork);
+    if (routedWalk(c, dest, 167, wspd, dt)) arriveCommute(c, toWork);
   }
 }
 
@@ -1848,9 +1847,13 @@ function updateSchedule(c, dt) {
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and grubbies up the shell
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
     // grab dinner on the way home instead of trekking back later (gated on
-    // STAFFING, not hours: a staffed counter serves the after-shift crowd)
+    // STAFFING, not hours: a staffed counter serves the after-shift crowd).
+    // The staff meal counts too: refusing it here was the whole reason a crab
+    // walked home across town at 15:00 and back to the same dark kitchen at
+    // 20:00 to cook it - they are STANDING at the counter, let them eat.
     const e = !c.p.sick && pickErrand(c);
-    if (e && !e.selfCook) startErrand(c, e);
+    if (e && e.selfCook) startSelfCook(c, e);
+    else if (e) startErrand(c, e);
     else startCommute(c, false);
   }
   // self-employed: a fisher answers to nobody - break for ANY need, whenever
@@ -1903,8 +1906,58 @@ function updateSchedule(c, dt) {
 
 // ---------------------------------------------------------------- errands
 function bizStaffed(b) { return bizUnlocked(b) && !bizDark(b) && allCrabs().some(k => k.duty && !k.pendingOff && k.workBiz === b); }
+// ------------------------------------------------------------ trip-chaining
+// Crabs used to pick an errand on need-priority alone and ignore the map
+// completely - which is how you get "wake up, walk the promenade to work,
+// then walk BACK past your own front door for breakfast". Now every stop the
+// crab could make right now is scored
+//
+//     urgency / (1 + detour / DETOUR_SCALE)
+//
+// and the best one wins. The DETOUR is only what the stop ADDS to the walk
+// this crab was going to make anyway:
+//
+//     detour = |here -> stop| + |stop -> anchor| - |here -> anchor|
+//
+// A stop that lies along the route is FREE (detour 0, full urgency); a stop
+// the other way costs twice the backtrack. The anchor is wherever the trip
+// ends regardless - the workplace while a shift is coming, otherwise home.
+// One comparison per candidate, no path search, and imperfection survives:
+// a genuinely desperate crab (need >= DIRE) still ignores the map entirely.
+const ERRAND_RANK = { food: 4, drink: 3, clean: 2, fun: 1 };   // the old priority order, as a number
+const DETOUR_SCALE = 400;   // px of added walking that halves a stop's appeal
+const DETOUR_MAX = 900;     // ~half the promenade: not before a shift, it can wait
+const DIRE = 0.9;           // this needy and geography stops mattering
+const CHAIN_PX = 260;       // a second stop this close beats walking home and back out
+function needLevel(c, need) {
+  return need === "food" ? (c.p.hunger || 0) : need === "drink" ? (c.p.thirst || 0)
+    : need === "clean" ? (c.p.dirt || 0) : (c.p.bored || 0);
+}
+// where this trip ends no matter what: the job while a shift is still coming
+// (or under way), home the rest of the time
+function anchorX(c) {
+  const sh = effShift(c);
+  const bound = !offToday(c) && !c.p.sick && tmin >= leaveGmin(c) - 60 && tmin < sh.end - 30
+    && !(c.restDay === day && c.restUntil > tmin);
+  return bound ? jobDoor(c) : homeX(c);
+}
+function errandDetour(c, biz, selfCook) {
+  const stop = selfCook ? BIZ[biz].door : BIZ[biz].queueX, a = anchorX(c);
+  return Math.abs(c.x - stop) + Math.abs(stop - a) - Math.abs(c.x - a);
+}
+function errandScore(c, e) {
+  const lvl = needLevel(c, e.need || "food");
+  if (lvl >= DIRE) return 99 + ERRAND_RANK[e.need];   // desperate: walk it, wherever it is
+  const d = errandDetour(c, e.biz || "shack", e.selfCook);
+  // the "don't backtrack the whole promenade before 9 AM" rule: on the way
+  // out to a shift, a stop clear across town waits for the trip home
+  if (d > DETOUR_MAX && c.dayState === "home" && anchorX(c) !== homeX(c)) return -1;
+  return (ERRAND_RANK[e.need] + lvl) / (1 + d / DETOUR_SCALE);
+}
 function pickErrand(c) {
   const staffed = bizStaffed;
+  const cand = [];
+  const take = (e) => cand.push(e);   // gather every stop, then score - see errandScore
   // a day off is for spending: lower need thresholds, so the off crab eats
   // out, soaks, and finally gets that arcade morning their shift always ate.
   // Full retail, full queue rules - off crabs are customers, not staff.
@@ -1918,7 +1971,7 @@ function pickErrand(c) {
     if (affordable.length) {
       affordable.sort((a, b) => a.pay - b.pay);
       const r = c.p.wallet > 40 ? affordable[(Math.random() * affordable.length) | 0] : affordable[0];
-      return { selfCook: true, recipe: r };
+      take({ selfCook: true, recipe: r, need: "food" });
     }
   }
   if (wantFood && staffed("shack")) {
@@ -1927,7 +1980,7 @@ function pickErrand(c) {
       // treat yourself when flush, eat cheap when broke
       affordable.sort((a, b) => a.pay - b.pay);
       const r = c.p.wallet > 40 ? affordable[(Math.random() * affordable.length) | 0] : affordable[0];
-      return { biz: "shack", recipe: r, need: "food" };
+      take({ biz: "shack", recipe: r, need: "food" });
     }
   }
   // thirst sits between food and clean: cheap, casual, frequent. The juice
@@ -1940,14 +1993,14 @@ function pickErrand(c) {
       if (drinks.length) {
         drinks.sort((a, b) => a.pay - b.pay);
         const r = c.p.wallet > 40 ? drinks[drinks.length - 1] : drinks[0];   // a COOLER when flush
-        return { biz: drinkAt, recipe: r, need: "drink" };
+        take({ biz: drinkAt, recipe: r, need: "drink" });
       }
     } else if (!c.p.npc && (c.p.job === "shack" || c.p.job === "juicebar")
         && bizUnlocked(c.p.job) && !staffed(c.p.job)) {
       const drinks = BIZ[c.p.job].recipes.filter(r => DRINKS[r.id] && c.p.wallet >= staffMealCharge(c.p.job, r) + 2);
       if (drinks.length) {
         drinks.sort((a, b) => a.pay - b.pay);
-        return { selfCook: true, biz: c.p.job, recipe: drinks[0], need: "drink" };
+        take({ selfCook: true, biz: c.p.job, recipe: drinks[0], need: "drink" });
       }
     }
   }
@@ -1958,14 +2011,19 @@ function pickErrand(c) {
     || (c.p.sick && (c.p.dirt || 0) >= 0.4);   // the sick drag themselves to the taps - staying clean is the cure
   if (needsBath && staffed("showers") && c.workBiz !== "showers") {
     const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
-    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "showers", recipe: r, need: "clean" };
+    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) take({ biz: "showers", recipe: r, need: "clean" });
   }
-  if (c.p.sick) return null;   // bed rest otherwise: no arcade nights while ill
-  if ((c.p.bored || 0) >= (off ? 0.35 : 0.6) && staffed("arcade")) {
+  // bed rest otherwise: no arcade nights while ill
+  if (!c.p.sick && (c.p.bored || 0) >= (off ? 0.35 : 0.6) && staffed("arcade")) {
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
-    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) return { biz: "arcade", recipe: r, need: "fun" };
+    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) take({ biz: "arcade", recipe: r, need: "fun" });
   }
-  return null;
+  let best = null, bestScore = 0;   // the chaining pick: best urgency per unit of detour
+  for (const e of cand) {
+    const s = errandScore(c, e);
+    if (s > bestScore) { bestScore = s; best = e; }
+  }
+  return best;
 }
 function startSelfCook(c, e) {
   c.dayState = "selfCook"; c.cookStep = 0; c.cookRecipe = e.recipe;
@@ -2021,13 +2079,31 @@ function startErrand(c, e) {
   c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_ERRAND);   // errand legwork tires, a little
   setT(c, BIZ[e.biz].queueX + 4, 166);
 }
-// where to head when an errand ends: a mid-shift self-employed fisher goes
-// straight back to the rail - the pier pays, and the old home-then-pier
-// round trip measured at hours of lost casting (the real supply collapse)
-function afterErrand(c) {
+// Where to head when an errand ends. Two rules, both about not walking the
+// promenade twice:
+//   1. CHAIN - if another stop worth making is right here (small detour off
+//      the way home / to work), do it now rather than walk home, come back
+//      out and cross town again. Two stops to an outing, then the schedule
+//      takes over; imperfection is charming, a third lap is not.
+//   2. GO WHERE THE TRIP WAS GOING - if a shift is coming (or under way),
+//      carry on to WORK. This used to be a fisher-only shortcut (the pier
+//      pays, and the old home-then-pier round trip measured at hours of lost
+//      casting); it is the same argument for everyone, and it is what turns
+//      "eat, walk all the way home, turn around, walk back past the shack"
+//      into "eat on the way in".
+function afterErrand(c, chain) {
   const sh = effShift(c);
-  if (c.p.job === "fishing" && !c.p.employer && !offToday(c) && !c.p.sick &&
-      tmin >= leaveGmin(c) && tmin < sh.end - 30 &&
+  if (chain && !c.p.sick && (c.chainN || 0) < 2) {
+    const e = pickErrand(c);
+    if (e && !e.selfCook && e.biz !== c.errandBiz && bizOpenNow(e.biz)
+        && errandDetour(c, e.biz) <= CHAIN_PX) {
+      c.chainN = (c.chainN || 0) + 1; c.errandCd = 0;
+      startErrand(c, e);
+      return;
+    }
+  }
+  c.chainN = 0;
+  if (!offToday(c) && !c.p.sick && tmin >= leaveGmin(c) && tmin < sh.end - 30 &&
       !(c.restDay === day && c.restUntil > tmin)) startCommute(c, true);
   else startCommute(c, false);
 }
@@ -2039,7 +2115,7 @@ function updateErrand(c, dt) {
       if (q >= QUEUE_MAX) {
         c.quip = { text: "LINE'S TOO LONG", t: 2.4 };
         c.errandCd = 12; c.dayState = "home";
-        afterErrand(c);
+        afterErrand(c, false);   // no chaining off a bounced queue: you never got served
         return;
       }
       const cust = { biz: c.errandBiz, recipe: c.errand.recipe, isCrab: true, crab: c,
@@ -2050,7 +2126,7 @@ function updateErrand(c, dt) {
     }
   } else if (c.dayState === "errand") {
     const k = c.errandCust;
-    if (!k) { c.dayState = "home"; afterErrand(c); return; }
+    if (!k) { c.dayState = "home"; afterErrand(c, false); return; }
     const open = allCrabs().some(w => w.duty && w.workBiz === k.biz &&
       (!w.pendingOff || tmin < effShift(w).end + 45));
     if (!open && k.state === "waiting" && !k.claimed) {
@@ -2073,7 +2149,7 @@ function finishErrand(k) {
     c.errandCust = null; c.errandCd = 25;
     if (!k.served) c.quip = { text: "LINE WAS TOO LONG", t: 2.4 };
     c.dayState = "home";
-    afterErrand(c);
+    afterErrand(c, k.served);   // a served crab may chain on; a rage-quit just leaves
   }
 }
 
@@ -2084,13 +2160,84 @@ function stationSpot(bizKey, kind, slot) {
   return { x: st.x + 2, y: st.y + 7 };   // stand just in front of the appliance
 }
 function setT(c, x, y) { c.tx = x; c.ty = y; }
-// kitchen walking: use the clear lanes (aisle y=147 between rows, boardwalk
-// y=168 below the front row) for horizontal travel, cut in at the end
+
+// ------------------------------------------------- furniture-aware travel
+// Lane travel used to be furniture-BLIND: routedStep picked one of two lane
+// y's with no idea what stood on them, so any counter beside a lane made
+// every passing trip a visible bounce, forever ("cute for ten minutes; all
+// day, terrible"). solidBands() mirrors collide()'s two furniture passes
+// EXACTLY - same x and y tolerances - so "clear here" means "collide will
+// not touch me there". Furniture never moves during a day, so the corridors
+// it leaves are stable waypoints, not a search problem.
+function solidBandsKey() {
+  return Object.keys(BIZ).map(b => (bizUnlocked(b) ? 1 : 0)).join("") + ":" + UPS.table.lvl;
+}
+let _bands = null, _bandsKey = "";
+function solidBands() {
+  const key = solidBandsKey();
+  if (_bands && _bandsKey === key) return _bands;
+  const out = [];
+  for (const b of Object.keys(BIZ)) {
+    if (!bizUnlocked(b)) continue;
+    for (const t of (bizTables(b) || []).concat(BIZ[b].stalls || []))
+      out.push({ x0: t.x - 12, x1: t.x + 16, y0: t.y - 9, y1: t.y + 6 });   // collide(): |c.x+8-(t.x+10)|<14, -9<dy<6
+    const sts = BIZ[b].stations;
+    for (const kind of Object.keys(sts)) for (const st of sts[kind])
+      out.push({ x0: st.x - 11, x1: st.x + 15, y0: st.y - 10, y1: st.y + 6 });   // |c.x+8-(st.x+10)|<13, -10<dy<6
+  }
+  _bands = out; _bandsKey = key;
+  return out;
+}
+// daylight this lane has over the stretch of x it is about to cross (0 = the
+// lane runs straight through a solid)
+function laneClear(lane, x0, x1) {
+  const a = Math.min(x0, x1), b = Math.max(x0, x1);
+  let min = 99;
+  for (const s of solidBands()) {
+    if (s.x1 < a || s.x0 > b) continue;
+    const gap = lane < s.y0 ? s.y0 - lane : lane > s.y1 ? lane - s.y1 : 0;
+    if (gap < min) min = gap;
+  }
+  return min;
+}
+// a loitering spot (day-off amble, idling) that is not inside the furniture:
+// nudge y to the nearer edge of whatever solid it landed in
+function clearSpotY(x, y) {
+  for (const s of solidBands()) {
+    if (x < s.x0 || x > s.x1 || y <= s.y0 || y >= s.y1) continue;
+    const up = s.y0 - 1, down = s.y1 + 1;
+    y = (y - s.y0 < s.y1 - y ? up : down);
+    if (y < FLOOR_MIN || y > FLOOR_MAX) y = (y < FLOOR_MIN ? down : up);
+  }
+  return Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, y));
+}
+// The two lanes: the AISLE between the back and front rows of a shop, and the
+// BOARDWALK below the front row. Their y's are the CENTRES of the corridors
+// the furniture leaves - the back row's solids end at y=142 and the front
+// row's begin at y=149, so the aisle sits at 146 (was 147, two pixels off the
+// picnic tables, close enough that one jostle put a walker inside them); the
+// boardwalk gets the sliver between the front row's y=166 and the floor.
+// LANE_LOOK is how far ahead a walker reads the furniture - a shade more than
+// the 2:1 merge needs to slide the 22px between lanes, so a sidestep happens
+// BEFORE the counter rather than on it. The suite pins the lane clearances,
+// so a table parked on a lane fails a test instead of bouncing crabs forever.
+const LANES = [146, 168];
+const LANE_PAD = 2;      // a lane needs this much daylight to be worth walking
+const LANE_LOOK = 64;    // px of lookahead
+function travelLane(c, tx, ty) {
+  const near = Math.abs(LANES[0] - ty) <= Math.abs(LANES[1] - ty) ? LANES[0] : LANES[1];
+  const ahead = c.x + Math.sign(tx - c.x) * LANE_LOOK;   // from here to just past the next obstacle
+  const clearNear = laneClear(near, c.x, ahead);
+  if (clearNear >= LANE_PAD) return near;                // the usual case: wide open, carry on
+  const alt = near === LANES[0] ? LANES[1] : LANES[0];   // one comparison, then commit
+  return laneClear(alt, c.x, ahead) > clearNear ? alt : near;
+}
+// kitchen + town walking: travel a clear lane horizontally, cut in at the end
 function routedStep(c, spd, dt) {
   const tx = c.tx, ty = c.ty;
   if (Math.abs(c.x - tx) <= 5) return stepTo(c, tx, spd, dt, ty);   // final approach: straight in
-  const lane = ty <= 147 ? 147 : 168;
-  if (Math.abs(c.y - lane) > 3) {
+  const lane = travelLane(c, tx, ty);
+  if (Math.abs(c.y - lane) > 1.5) {
     // merge at a 2:1 slope: reaches the lane quickly, keeps x-motion to slide off colliders
     stepTo(c, c.x + Math.sign(tx - c.x) * Math.abs(c.y - lane) * 2, spd, dt, lane);
     return false;
@@ -2098,6 +2245,11 @@ function routedStep(c, spd, dt) {
   stepTo(c, tx, spd, dt, lane);   // travel the lane
   return false;
 }
+// walk somewhere across town: same lanes, used by commutes and the walk home.
+// (These used to be raw stepTo calls - a straight diagonal from the front
+// room at y~155 to a shop door at y=167, which crosses the ENTIRE front row
+// of counters on the way. That single line was most of the town's bouncing.)
+function routedWalk(c, tx, ty, spd, dt) { setT(c, tx, ty); return routedStep(c, spd, dt); }
 function tryAcquire(bizKey, kind) {
   const cap = stationCap(bizKey, kind);
   for (let i = 0; i < cap; i++) if (!busy[bizKey][kind][i]) { busy[bizKey][kind][i] = true; return i; }
@@ -2395,8 +2547,12 @@ function updateKitchen(c, dt) {
         return;
       }
     }
-    setT(c, biz.door + 4 + (Math.max(0, crabs.indexOf(c)) % 3) * 10, 146 + (Math.max(0, crabs.indexOf(c)) % 2) * 10);
-    stepTo(c, c.tx, spd, dt, c.ty);
+    // loiter by the door - but NOT inside the counter. The lower of the two
+    // idle spots (y=156) sits squarely in the front-row solid band, which is
+    // why SUDSY spent her whole shift being shoved off her own towel counter.
+    const ix = biz.door + 4 + (Math.max(0, crabs.indexOf(c)) % 3) * 10;
+    setT(c, ix, clearSpotY(ix, 146 + (Math.max(0, crabs.indexOf(c)) % 2) * 10));
+    routedStep(c, spd, dt);
   } else if (c.kstate === "walk") {
     if (routedStep(c, spd, dt)) {
       if (c.stepIdx === -1) {

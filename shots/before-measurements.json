@@ -1,0 +1,47 @@
+{
+  "build": "undefined",
+  "towel": {
+    "x": 977,
+    "y": 168,
+    "blocked": false,
+    "hits": 227,
+    "samples": 422,
+    "inBand": 420
+  },
+  "tables": {
+    "x": 1500,
+    "y": 167.6,
+    "blocked": false,
+    "hits": 11,
+    "samples": 847,
+    "inBand": 103
+  },
+  "chain": {
+    "legs": [
+      [
+        "home",
+        134,
+        430
+      ],
+      [
+        "toErrand:shack",
+        135,
+        570
+      ],
+      [
+        "errand",
+        1570,
+        714
+      ],
+      [
+        "toHome",
+        1502,
+        918
+      ]
+    ],
+    "x": 1044,
+    "y": 166.3,
+    "hunger": 0,
+    "n": 4001
+  }
+}
