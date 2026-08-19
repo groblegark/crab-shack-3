@@ -186,14 +186,14 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-- `node tools/suite.mjs` — **69 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
   distributions per housing tier. Paired arms per seed: the care ladder live
   vs collapsed back onto the pre-seam CARED odds *inside the same build*, plus
   a RUNG arm (a housed crab rolled at cot odds) that isolates the housing rung
   on an identical RNG stream. This is where the cared-seam numbers in the
   labor-policy bullet come from.
-- `node tools/suite.mjs` — **73 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
@@ -245,6 +245,135 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- **A working day has a length; labour is bought by the hour** (two measured
+  balance faults, fixed 2026-08-19, worktree — Matt: "the strategy of just
+  making your restaurant open all the time is way too powerful; we need to
+  make that non viable except in emergencies", and the owner's reading that
+  "CLAWDIA is OP"):
+
+  **FAULT 1 — ALWAYS-OPEN WAS STRICTLY BEST.** Shifts DERIVE from the shop's
+  hours, so setting the shack 6:00-24:00 handed two crabs nine-hour shifts —
+  50% more staffed hours — for a flat `CRAB_WAGE` and a flat `TIRED_SHIFT`
+  bump. Measured on this tree (player shack only; peer owners keep running
+  their own hours policy in both arms, which is the honest comparison):
+
+  | arm (30d/40d x 8 seeds) | default 8-20 | always-open 6-24 |
+  |---|---|---|
+  | baseline, survivors | 0/8, evictions 11-16, median 14 | **6/8**, median 31 |
+  | baseline, lifetime | $34,238 | **$104,876** |
+  | growth `--buy chef,table`, survivors | 4/8 | **8/8** |
+  | growth, lifetime | $94,258 | **$279,000** |
+
+  **The wage lever cannot reach it, and that is measured, not argued.** A
+  staffed hour is worth ~$25 of takings in this town and costs $3.83 of wage,
+  so cancelling always-open through pay alone would need a ~12x wage. Nor can
+  fatigue: a CEILING PROBE that pinned the crew at `tired = 1.0` on every tick
+  for 30 solid days still ended a 6-24 town on $9,713 against a default town's
+  $2,331. Cost-side levers are an order of magnitude short. The environment
+  had to change.
+
+  Two changes, both **inert on a default trading day** (verified: with the two
+  new loads forced to 1 and the nap off, the 8-seed growth matrix reproduces
+  the pre-pass build byte-for-byte — 7,9,15,22,41,41,41,41, lifetime $94,258,
+  wages $16,330):
+
+  - **A WORKING DAY HAS A LENGTH** (the load-bearing half). `bizShiftWindow`
+    caps every derived window at `SHIFT_SPAN` for its kind — a six-hour M or
+    E, a ten-hour owner-operator D, a twelve-hour cover double, which is
+    exactly what each evaluates to under the town's default 8-20 — and a
+    window that outgrows its cap keeps its MIDDLE, centred on the middle of
+    the trading day. The cap never binds on a trading day of 12h or less, so
+    8-20 is the old geometry to the minute (and 6-22 still reads 8-14/14-20).
+    Open 6-24 and the crew still work 9-15 and 15-21: the shoulders are open
+    but UNSTAFFED, and nothing walks into an unstaffed shop — tourist spawn
+    and errand dispatch are both staffing-gated already, so there is no
+    wedge and no queue to strand.
+    **Staffed hours are bought with CRABS or with OVERTIME, never off the
+    hours sign.**
+  - **LABOUR IS PRICED BY THE HOUR.** `CRAB_WAGE`/`NPC_WAGE` are day rates for
+    a STANDARD day of that shift. Two measures, differing on exactly one day:
+    `shiftLoad` (today's span / a standard day of that KIND — the CONTRACT;
+    a cover double is one contracted day) drives pay and the shift-end
+    hunger/thirst bump, and `workLoad` (the same span / the crab's OWN
+    standard — the WORK; a cover double is two shifts) drives tiredness.
+    `otPremium` now reads a constant `hourlyRate` instead of dividing by
+    today's shift, so a squeezed or stretched shift can never make overtime
+    cheaper than straight time. Shorten the day and the wage bill shortens
+    with it: a 9-17 shack pays its four-hour shifts $15 and tires them 0.30.
+
+  **FAULT 2 — THE EVENING SHIFT WAS FREE REST.** Sleep only repaired tiredness
+  while `darkness() > 0.7`, so a crab up at 07:15 for a morning shift lost
+  recovery the evening crab kept, and the morning crab's long free AFTERNOON
+  at home repaired nothing. It followed the SHIFT, not the crab: swapping the
+  two founders' shifts swapped the penalty. Fix the environment — `TIRED_NAP`
+  repairs tiredness while a crab is home, SETTLED and off the clock in
+  daylight, at a fraction of the bedtime rate and on the same housing rung (a
+  cot naps worse than a bed). Night sleep is untouched, including the walk
+  home, so nothing else moves.
+
+  | 6 seeds x 10 days, mean tiredness | M | E | gap |
+  |---|---|---|---|
+  | before | 0.153 | 0.087 | 0.066 |
+  | before, founders' shifts SWAPPED | 0.171 | 0.084 | 0.087 |
+  | after | **0.106** | 0.085 | **0.022** |
+  | after, SWAPPED | 0.119 | 0.089 | **0.030** |
+
+  `TIRED_NAP` 0.4/0.2 was chosen by measurement, not taste — the sweep read
+  gap 0.047 at 0.15, 0.039 at 0.25, 0.033 at 0.35, 0.024 at 0.40, 0.020 at
+  0.50 (and 0.50 IS the bed rate, which would make an afternoon on the porch a
+  night's sleep). **Tiredness keeps its teeth**: the town's illness rate is
+  10.40% before and 10.40% after, to two decimal places. TRAITS were not
+  touched — the brief's measurement (tidy 87 dishes vs speedy 101 per 10 days)
+  stands and nothing here re-tested it.
+
+  **Measured after** (same arms, same seeds):
+
+  | arm | default 8-20 | always-open 6-24 |
+  |---|---|---|
+  | baseline, survivors | 0/8, evictions 11-17, **median 14** | 0/8, 11-14, median 14 |
+  | baseline, lifetime | $34,523 | $33,506 |
+  | growth, survivors | **4/8** at day 40 | 4/8 |
+  | growth, lifetime | $99,162 | $91,145 |
+
+  Both documented curves hold (baseline 0/8 median 14; growth 4/8 at day 40)
+  and always-open now earns LESS on both. The sharpest single number is
+  takings per crew-day — dollars earned per dollar of wage bill, the one thing
+  the hours sign used to inflate for free: **1.58-1.84 before, 0.98-1.08
+  after**. A subsidised steady-state probe (6 seeds, both arms kept solvent)
+  lands the two within ~3% of each other, i.e. a wash — which is the honest
+  landing for "non viable except in emergencies": there is no longer a reason
+  to do it, but nothing forbids it.
+
+  **The emergency lever survives, priced.** Long hours open ROOM at both ends
+  of the day that OVERTIME can fill. Under the default 8-20 an OT request just
+  doubles up inside the same 12 hours (union 720 min); open 6-24 and the same
+  request extends the town's trading to 14 hours (union 840 min) at $11.50 a
+  crab — exactly 1.5x the standard hourly rate — and switches off cleanly back
+  to a $46 bill.
+
+  **Interactions checked**, all still correct: a COVER DOUBLE pays one wage
+  (untouched) and now tires like a double (0.9); an OT SHIFT pays and fatigues
+  on the same clock, byte-identical at default hours; a DAY OFF is still
+  unpaid and still promotes a coworker; SICK DAYS, AUTO-MANAGE and SUDSY's
+  hours policy all pass unchanged (her policy walking showers down to 9-17
+  now also shrinks that shop's wage bill, which is the same rule read the
+  other way). Every render path — MENU bill, all three management tabs, the
+  dossier — smoke-tested at 8-20, 6-24 and 9-17.
+
+  **Suite 82 -> 87.** Five new scenarios, ALL FOUR of the gates plus the
+  geometry pin verified RED on the pre-pass build:
+  `hours: a working day has a length`, `hours: always-open does not out-earn a
+  normal day (anti-exploit gate)`, `hours: the emergency lever survives`,
+  `tired: fatigue scales with the hours actually worked`, `tired: the morning
+  and evening shifts end the week level`.
+  **Re-pointing: exactly one.** `tired: a workday accrues it; sleep drains it,
+  bed beating cot` — (a) the +0.45 bump was read off the roster at 19:30,
+  which now measures the AFTERNOON NAP instead of the bump, so it is read as
+  the day's PEAK (the bump itself is unchanged); (b) the "daylight accrues
+  nothing passively" clause asserted tiredness never MOVES off the clock, and
+  daylight rest is the whole fix — it now asserts tiredness never RISES off
+  the clock. The frozen day-2 fingerprint tripwire needed NO re-baseline: it
+  passes unchanged, which is the receipt that a default town is untouched.
 - **Labor policy suite: sick days + overtime + scheduling + town census**
   (shipped 2026-08-18, worktree — realizes the "Labor policy suite" and
   "Town census" feature requests and the parked **Overtime** backlog entry):
@@ -377,7 +506,8 @@ vm — never fork game logic into tools/) and perf expectations live there.
     `sick-day-placard`, `dossier-sick-day`, `dossier-overtime`, plus
     `census-portrait` / `schedule-portrait` under shots/.
 - **Shop hours + management screen + CPU owner policy** (shipped 2026-08-18,
-  realizes backlog "Business settings"): every business carries real OPEN
+  realizes backlog "Business settings"; SHIFT CAP added 2026-08-19,
+  see "A working day has a length" above): every business carries real OPEN
   HOURS (`BIZ[k].hours`, default 8-20 = the old hard-coded day; bounds
   6:00-24:00, min 4h, `setBizHours` clamps). Hours gate tourist admission
   (spawn filter + `anyBizOpenNow`), home-errand dispatch (per target biz),
