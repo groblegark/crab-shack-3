@@ -604,7 +604,32 @@ function newDayLog() {
     moved: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {} };
 }
 let screen = "title", hasSave = false, wiping = false;
-function newGame() { wiping = true; localStorage.removeItem(SAVE_KEY); location.reload(); }
+// SAVED TOWNS screen state (its own overlay, its own rect table)
+let saveView = false, saveSel = 1;
+let saveConfirm = null, saveConfirmT = 0;   // { kind: "del"|"new", slot } - the second tap
+let pendingImport = null;                   // { env, meta, name } - validated, written nowhere yet
+let saveMsg = null;                         // { text, t, bad }
+function reloadGame() { if (location && typeof location.reload === "function") location.reload(); }
+function newGame(slot) {
+  wiping = true;                            // nothing writes between here and the reload
+  const i = slot == null ? activeSlot : slot;
+  clearSlot(i); setActiveSlot(i);
+  reloadGame();
+}
+// Switching towns: the one you're leaving keeps its progress, then a clean boot
+// loads the target - no partial swap of live state, ever.
+function loadSlot(i) {
+  if (!slotCard(i)) return;
+  if (i === activeSlot && hasSave) {
+    saveView = false;
+    if (screen === "title") { screen = "play"; startMusic(); sfx.ding(); }
+    return;
+  }
+  save();
+  wiping = true;
+  setActiveSlot(i);
+  reloadGame();
+}
 const CRAB_WAGE = 23, HOUSE_RENT = 10;   // wage raised 22 -> 24 with T2 thirst: crews drink at retail, the wage keeps their wallets liquid
 function rentAmount() { return BIZ.shack.rent; }   // shack lease (legacy name); due from night one
 function totalRent() {   // the PLAYER's nightly property bill, due from night one
@@ -864,14 +889,108 @@ function incomeRate() {
 }
 
 // ---------------------------------------------------------------- save
-const SAVE_KEY = "crabshack3_v1";
+// N SLOTS, not one key. Every slot holds the SAME envelope save() has always
+// written - treated here as an OPAQUE blob so other systems can keep adding
+// fields to it - plus two sidecar keys this layer owns:
+//   _ver   the format guard an import is checked against
+//   _meta  the at-a-glance card (day, till, rep, pop, crew roster) the SAVED
+//          TOWNS screen renders without loading anything
+// _meta is always derivable from the envelope alone (slotMeta), so migrated and
+// imported saves get one for free and a stale one can never lie.
+const SAVE_KEY = "crabshack3_v1";        // the legacy single-slot key: migration source only
+const SAVE_VER = 1;
+const SLOTS = 5;
+const ACTIVE_KEY = SAVE_KEY + "_active";
+function slotKey(i) { return SAVE_KEY + "_s" + i; }
+function nowMs() { try { return Date.now(); } catch (e) { return 0; } }   // headless sandboxes may not have a clock
+let activeSlot = 1;                      // autosave goes here; persisted in ACTIVE_KEY
 const FRESH = location.search.includes("fresh");
 const TURBO = Math.max(1, parseInt((location.search.match(/turbo=(\d+)/) || [0, 1])[1]) || 1);
+
+// The one gate every save passes - stored, migrated or imported. Returns null
+// when the blob really is a CRAB SHACK 3 town, else a short reason to show on
+// canvas. Nothing in the game may be mutated before this says yes.
+function saveProblem(s) {
+  if (!s || typeof s !== "object" || Array.isArray(s)) return "NOT A SAVE FILE";
+  if (s._ver != null && (typeof s._ver !== "number" || s._ver > SAVE_VER)) return "FROM A NEWER CRAB SHACK";
+  if (!Array.isArray(s.personas) || !s.personas.length) return "NO CREW - NOT A CRAB SHACK 3 SAVE";
+  for (const p of s.personas)
+    if (!p || typeof p !== "object" || typeof p.name !== "string") return "THE CREW RECORD IS DAMAGED";
+  if (s.day != null && (typeof s.day !== "number" || !isFinite(s.day) || s.day < 1)) return "BAD DAY COUNTER";
+  if (s.coins != null && (typeof s.coins !== "number" || !isFinite(s.coins))) return "BAD TILL";
+  return null;
+}
+function homeOf(p) {   // housing tier + a label, from a persona alone
+  if (p.boat != null && BOAT_NAMES[p.boat]) return { tier: 2, label: "THE " + BOAT_NAMES[p.boat] };
+  if (p.homeless || p.house == null) return { tier: 0, label: "SHELTER COT" };
+  return { tier: 1, label: p.house >= 7 ? "COTTAGE" : "HOUSE " + (p.house + 1) };
+}
+// The preview card: derived from the envelope, no game state touched.
+function slotMeta(s) {
+  const crew = (Array.isArray(s.personas) ? s.personas : []).slice(0, 8).map(p => {
+    const h = homeOf(p || {});
+    return {
+      name: String((p && p.name) || "?"), color: ((p && p.color) | 0) % CRAB_COLORS.length,
+      acc: (p && p.acc) || "none", job: (p && p.job) || "shack",
+      home: h.label, tier: h.tier,
+      sick: !!(p && p.sick), sickDays: (p && p.sick && p.sick.days) || 0, ot: !!(p && p.ot),
+    };
+  });
+  const npcN = s.npc && Array.isArray(s.npc.personas) ? s.npc.personas.length : 0;
+  const d = s.day || 1;
+  return { ver: SAVE_VER, day: d, weekday: WEEKDAYS[weekdayIdx(d)],
+    coins: Math.round(s.coins || 0), rep: Math.round(s.rep != null ? s.rep : 30),
+    pop: crew.length + npcN, crew, t: s.t || 0 };
+}
+function readSlotEnv(i) {   // parsed + validated, or null - never a half-read
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(slotKey(i))); } catch (e) {}
+  return s && !saveProblem(s) ? s : null;
+}
+// What the SAVED TOWNS screen draws for one row. The screen asks for all five
+// every frame, so the parse is memoized against the raw string - a stale card
+// is impossible (the string changes the moment the slot does) and a redraw
+// costs five map lookups instead of five JSON.parse.
+const _cardCache = {};
+function slotCard(i) {
+  let raw = null;
+  try { raw = localStorage.getItem(slotKey(i)); } catch (e) {}
+  const hit = _cardCache[i];
+  if (hit && hit.raw === raw) return hit.card;
+  let s = null;
+  try { s = JSON.parse(raw); } catch (e) {}
+  if (s && saveProblem(s)) s = null;
+  const card = s ? (s._meta && Array.isArray(s._meta.crew) ? s._meta : slotMeta(s)) : null;
+  _cardCache[i] = { raw, card };
+  return card;
+}
+function writeSlotEnv(i, env) { localStorage.setItem(slotKey(i), JSON.stringify(env)); }
+function clearSlot(i) { localStorage.removeItem(slotKey(i)); }
+function setActiveSlot(i) { activeSlot = i; try { localStorage.setItem(ACTIVE_KEY, String(i)); } catch (e) {} }
+function readActiveSlot() {
+  let v = NaN;
+  try { v = parseInt(localStorage.getItem(ACTIVE_KEY), 10); } catch (e) {}
+  return v >= 1 && v <= SLOTS ? v : 1;
+}
+// One-time lift of the old single-key save into slot 1. The envelope is stored
+// exactly as it was - nothing is dropped, nothing is reshaped - and only then
+// is the legacy key retired, so a crash mid-migration costs nothing.
+function migrateLegacy() {
+  let raw = null;
+  try { raw = localStorage.getItem(SAVE_KEY); } catch (e) {}
+  if (raw == null) return false;
+  let s = null;
+  try { s = JSON.parse(raw); } catch (e) {}
+  const ok = s && !saveProblem(s) && localStorage.getItem(slotKey(1)) == null;
+  if (ok) { s._ver = SAVE_VER; s._meta = slotMeta(s); writeSlotEnv(1, s); }
+  localStorage.removeItem(SAVE_KEY);
+  return !!ok;
+}
 function save() {
   if (FRESH || wiping) return;
   const lv = {}; for (const k in UPS) lv[k] = UPS[k].lvl;
-  localStorage.setItem(SAVE_KEY, JSON.stringify({
-    coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, rate: incomeRate(), t: Date.now(),
+  const env = {
+    coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, rate: incomeRate(), t: nowMs(),
     bankrupt, credit: { bal: Math.round(credit.bal), warned: credit.warned },
     dayLog: (window.dayLog || []).slice(-6),   // keeps the forecaster warm across reloads
     personas: crabs.map(c => c.p),
@@ -883,14 +1002,16 @@ function save() {
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
     mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
     hoursPol: hoursPolicyState,
-  }));
+  };
+  env._ver = SAVE_VER;
+  env._meta = slotMeta(env);   // written at save time; re-derivable if it ever goes missing
+  writeSlotEnv(activeSlot, env);
 }
 let sudsRefunded = false;   // laundromat-removal migration: refund paid out (persisted)
 let firstPour = false;      // the juice bar's first-ever drink (persisted: one headline per town)
-function load() {
+function load(slot) {
   if (FRESH) return false;
-  let s = null;
-  try { s = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) {}
+  const s = readSlotEnv(slot == null ? activeSlot : slot);
   if (!s) return false;
   if (!Array.isArray(s.personas) || !s.personas.length) return false;   // reject before touching state
   coins = s.coins || 0; lifetime = s.lifetime || 0;
@@ -974,12 +1095,80 @@ function load() {
   if (s.hoursPol) for (const b in s.hoursPol)
     if (BIZ[b] && s.hoursPol[b] && Array.isArray(s.hoursPol[b].hist))
       hoursPolicyState[b] = { hist: s.hoursPol[b].hist.slice(-4), cd: s.hoursPol[b].cd || 0 };
-  const away = (Date.now() - (s.t || Date.now())) / 1000;
+  const away = (nowMs() - (s.t || nowMs())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
     if (gain > 0) { coins += gain; lifetime += gain; toast = { text: "WELCOME BACK! THE CRABS MADE $" + fmt(gain), t: 7 }; }
   }
   return true;
+}
+
+// ------------------------------------------------------- import / export
+function saveFileName(i, m) {
+  let stamp = "";
+  try {
+    const d = new Date(m.t || nowMs());
+    if (isFinite(d.getTime())) {
+      const pad = (n) => (n < 10 ? "0" : "") + n;
+      stamp = "-" + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + "-" + pad(d.getHours()) + pad(d.getMinutes());
+    }
+  } catch (e) {}
+  return "crabshack3-slot" + i + "-day" + m.day + stamp + ".json";
+}
+function exportSlot(i) {
+  let raw = null;
+  try { raw = localStorage.getItem(slotKey(i)); } catch (e) {}
+  const m = slotCard(i);
+  if (!raw || !m) { saveMsg = { text: "NOTHING IN SLOT " + i + " TO EXPORT", t: 4, bad: true }; return; }
+  if (typeof Blob === "undefined" || typeof URL === "undefined" || !URL.createObjectURL) {
+    saveMsg = { text: "THIS BROWSER CAN'T DOWNLOAD FILES", t: 5, bad: true }; return;
+  }
+  const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+  // a real in-document anchor: Firefox ignores .click() on a detached one
+  const a = (document.getElementById && document.getElementById("exportSave")) || document.createElement("a");
+  a.href = url; a.download = saveFileName(i, m);
+  if (a.click) a.click();
+  setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 4000);
+  saveMsg = { text: "SAVED " + a.download, t: 6, bad: false };
+}
+// Parse + validate ONLY. Nothing is written to a slot and no game state is
+// touched until the player confirms the target (commitImport).
+function importJson(text, name) {
+  let s = null;
+  try { s = JSON.parse(text); } catch (e) { return "THAT FILE ISN'T JSON"; }
+  const bad = saveProblem(s);
+  if (bad) return bad;
+  s._ver = SAVE_VER;
+  s._meta = slotMeta(s);   // a hand-made or older file gets its card derived here
+  pendingImport = { env: s, meta: s._meta, name: String(name || "") };
+  return null;
+}
+function commitImport(i) {
+  if (!pendingImport) return;
+  // straight into the slot, envelope untouched: the migrations in load() run on
+  // it exactly as they do for a save this build wrote itself
+  writeSlotEnv(i, pendingImport.env);
+  const d = pendingImport.meta.day;
+  pendingImport = null;
+  saveSel = i;
+  saveMsg = { text: "IMPORTED A DAY " + d + " TOWN INTO SLOT " + i, t: 6, bad: false };
+  sfx.ding();
+}
+{  // the hidden file input in index.html is the whole "upload" surface
+  const fi = typeof document !== "undefined" && document.getElementById && document.getElementById("importSave");
+  if (fi && fi.addEventListener) fi.addEventListener("change", (ev) => {
+    const f = ev.target && ev.target.files && ev.target.files[0];
+    ev.target.value = "";                  // so the same file can be picked twice
+    if (!f) return;
+    const r = new FileReader();
+    r.onerror = () => { saveMsg = { text: "COULDN'T READ THAT FILE", t: 5, bad: true }; };
+    r.onload = () => {
+      const why = importJson(String(r.result), f.name);
+      if (why) { pendingImport = null; saveMsg = { text: why, t: 6, bad: true }; sfx.angry && sfx.angry(); }
+      else { saveMsg = null; saveView = true; }
+    };
+    r.readAsText(f);
+  });
 }
 
 // ---------------------------------------------------------------- quips
@@ -2367,6 +2556,7 @@ function clampCam(x) { return Math.max(0, Math.min(WORLD_W - W, x)); }
 
 cv.addEventListener("click", (ev) => {
   if (window.MergeMode && MergeMode.active()) return;
+  if (saveView) { handleSaveClick(evPos(ev)); return; }   // the towns card swallows every click
   if (screen === "title") {
     const p = evPos(ev);
     const bx = W / 2 - 50;
@@ -2378,6 +2568,7 @@ cv.addEventListener("click", (ev) => {
         else { newConfirmT = 3; sfx.buy(); }
         return;
       }
+      if (p.y >= ny + 20 && p.y < ny + 36) { openSaveView(); sfx.ding(); return; }
     }
     return;
   }
@@ -2436,11 +2627,8 @@ cv.addEventListener("click", (ev) => {
     if (p.y >= TAB_Y && p.y < TAB_Y + TAB_H) {
       if (p.x >= 4 && p.x < 36) { tab = "crew"; return; }
       if (p.x >= 38 && p.x < 70) { tab = "shop"; return; }
-      if (p.x >= 128 && p.x < 158) {
-        if (newConfirmT > 0) newGame();
-        else { newConfirmT = 3; sfx.buy(); }
-        return;
-      }
+      // SAVE opens the towns shelf - NEW GAME lives there now, per slot
+      if (p.x >= 128 && p.x < 158) { openSaveView(); sfx.ding(); return; }
       if (p.x >= 168) { tab = tab === "menu" ? "crew" : "menu"; sfx.ding(); return; }
     }
     if (tab === "shop") {
@@ -2539,7 +2727,7 @@ addEventListener("keydown", (e) => {
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; followCust = null; }
-  if (e.key === "Escape") { if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } sel = null; followIdx = -1; followNpc = null; followCust = null; }
+  if (e.key === "Escape") { if (saveView) { closeSaveView(); return; } if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } sel = null; followIdx = -1; followNpc = null; followCust = null; }
 });
 
 // ---------------------------------------------------------------- drawing
@@ -3133,9 +3321,8 @@ function drawPanel() {
   const rateTxt = rate >= 100 ? "$" + Math.round(rate) + "/S" : "$" + rate.toFixed(1) + "/S";
   text(ctx, rateTxt.slice(0, 7), 84, TAB_TX, [170, 150, 135]);
   {
-    const conf = newConfirmT > 0;
-    rect(ctx, 128, TAB_Y, 30, TAB_H, conf ? [140, 40, 40] : [90, 70, 60]);
-    smallText(ctx, conf ? "SURE?" : "NEW", 128 + (conf ? 3 : 7), TAB_TX, conf ? [255, 200, 200] : [160, 140, 130]);
+    rect(ctx, 128, TAB_Y, 30, TAB_H, saveView ? [190, 140, 80] : [90, 70, 60]);
+    smallText(ctx, "SAVE", 128 + 6, TAB_TX, saveView ? [40, 24, 16] : [160, 140, 130]);
   }
   const due = nightlyDue() + creditDueTonight();
   const rTxt = "BILL $" + fmt(due) + (credit.bal > 0 ? " D$" + fmt(Math.round(credit.bal)) : "");
@@ -3294,7 +3481,17 @@ function drawTitle() {
   rect(ctx, bx, ny, 100, 16, [30, 20, 36]);
   rect(ctx, bx + 1, ny + 1, 98, 14, conf ? [150, 60, 60] : [120, 100, 80]);
   text(ctx, conf ? "WIPE SAVE?" : "NEW GAME", bx + (conf ? 21 : 26), ny + 5, conf ? [255, 220, 220] : [235, 225, 210]);
-  if (((time * 1.5) | 0) % 2) text(ctx, "CLICK TO PLAY", W / 2 - 38, 162, [255, 250, 235], 6);
+  // the towns shelf: multiple saves, import, export
+  const sy = ny + 20;
+  rect(ctx, bx, sy, 100, 16, [30, 20, 36]);
+  rect(ctx, bx + 1, sy + 1, 98, 14, [90, 130, 160]);
+  text(ctx, "SAVED TOWNS", bx + 14, sy + 5, [245, 250, 255]);
+  {
+    let n = 0;
+    for (let i = 1; i <= SLOTS; i++) if (slotCard(i)) n++;
+    smallText(ctx, n === 1 ? "1 TOWN SAVED" : n + " TOWNS SAVED", W / 2 - smallTextWidth(n + " TOWNS SAVED") / 2,
+      sy + 19, [200, 190, 180]);
+  }
   smallText(ctx, "MUSIC: PIXEL WAVE WALTZ - MATT CLANKER", 14, PANEL_Y + 8, [170, 150, 135]);
   smallText(ctx, "BUILT ON THE SNESCAT TOY PPU", 44, PANEL_Y + 20, [140, 120, 105]);
 }
@@ -3524,6 +3721,203 @@ function drawManage() {
   text(ctx, "DONE", R.done.x + 9, R.done.y + 3, [40, 24, 16]);
 }
 
+// ------------------------------------------------- SAVED TOWNS (save/load)
+// Its own overlay with its own rect table, drawn last and swallowing every
+// click - the same idiom as the management card. Works on both canvas modes:
+// every offset derives from H via TALL.
+function saveRects() {
+  const w2 = 240, x = 8, y = 4;
+  const h2 = Math.min(H - 8, TALL ? 272 : 232);
+  const rowH = TALL ? 18 : 14, rowY = y + 17;
+  const bh = TALL ? 16 : 14, bw = 55, bx = x + 4;
+  const b1 = y + h2 - (bh * 2 + 8), b2 = y + h2 - (bh + 4);
+  const rows = [];
+  for (let i = 0; i < SLOTS; i++) rows.push({ x: x + 4, y: rowY + i * rowH, w: w2 - 8, h: rowH - 1 });
+  const detY = rowY + SLOTS * rowH + 3;
+  return {
+    x, y, w: w2, h: h2, detY, detH: b1 - detY - 3, rows,
+    close: { x: x + w2 - 15, y: y + 1, w: 13, h: 12 },
+    load: { x: bx, y: b1, w: bw, h: bh },
+    newg: { x: bx + 59, y: b1, w: bw, h: bh },
+    del: { x: bx + 118, y: b1, w: bw, h: bh },
+    exp: { x: bx + 177, y: b1, w: bw, h: bh },
+    imp: { x: bx, y: b2, w: 78, h: bh },
+    yes: { x: bx + 90, y: b2, w: 68, h: bh },
+    no: { x: bx + 164, y: b2, w: 68, h: bh },
+  };
+}
+function stampStr(t) {
+  if (!t) return "";
+  try {
+    const d = new Date(t);
+    if (!isFinite(d.getTime())) return "";
+    const pad = (n) => (n < 10 ? "0" : "") + n;
+    return pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  } catch (e) { return ""; }
+}
+function openSaveView() {
+  saveView = true; saveConfirm = null; saveMsg = null;
+  saveSel = activeSlot;
+  if (!slotCard(saveSel)) for (let i = 1; i <= SLOTS; i++) if (slotCard(i)) { saveSel = i; break; }
+}
+function closeSaveView() { saveView = false; saveConfirm = null; pendingImport = null; }
+function openImportPicker() {
+  const fi = typeof document !== "undefined" && document.getElementById && document.getElementById("importSave");
+  if (fi && fi.click) { fi.click(); saveMsg = { text: "CHOOSE A .JSON CRAB SHACK 3 SAVE", t: 4, bad: false }; }
+  else saveMsg = { text: "FILE UPLOAD ISN'T AVAILABLE HERE", t: 5, bad: true };
+}
+function jobShort(j) { return j === "fishing" ? "PIER" : (BIZ[j] && BIZ[j].short) || "?"; }
+function saveBtn(r, label, on, hot) {
+  rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+  rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, !on ? [130, 120, 118] : hot ? [190, 60, 60] : [190, 140, 80]);
+  smallText(ctx, label, r.x + ((r.w - smallTextWidth(label)) >> 1), r.y + ((r.h - 5) >> 1),
+    !on ? [90, 82, 80] : hot ? [255, 220, 220] : [40, 24, 16]);
+}
+function drawSaveScreen() {
+  if (!saveView) return;
+  const R = saveRects(), x = R.x, y = R.y, w2 = R.w, h2 = R.h;
+  ctx.fillStyle = "rgba(16,12,30,0.72)";
+  ctx.fillRect(0, 0, W, H);
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 14, [58, 42, 38]);
+  text(ctx, "SAVED TOWNS", x + 6, y + 4, [255, 240, 210]);
+  smallText(ctx, "SLOT " + activeSlot + " IS THE TOWN YOU'RE PLAYING", x + 84, y + 5, [200, 180, 160]);
+  rect(ctx, R.close.x, R.close.y, R.close.w, R.close.h, [150, 60, 60]);
+  smallText(ctx, "X", R.close.x + 5, R.close.y + 4, [255, 230, 230]);
+  // ---- the five slots
+  for (let i = 0; i < SLOTS; i++) {
+    const r = R.rows[i], n = i + 1, m = slotCard(n), on = saveSel === n;
+    rect(ctx, r.x, r.y, r.w, r.h, on ? [255, 230, 120] : [214, 200, 182]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, on ? [255, 252, 240] : [238, 230, 215]);
+    if (n === activeSlot) rect(ctx, r.x + 1, r.y + 1, 2, r.h - 2, [96, 200, 120]);
+    const ty = r.y + ((r.h - 5) >> 1);
+    smallText(ctx, String(n), r.x + 6, ty, [140, 120, 100]);
+    if (!m) { smallText(ctx, "EMPTY", r.x + 16, ty, [150, 140, 160]); continue; }
+    smallText(ctx, "DAY " + m.day + " " + m.weekday, r.x + 16, ty, [40, 30, 40]);
+    smallText(ctx, "$" + fmt(m.coins), r.x + 78, ty, [140, 110, 40]);
+    smallText(ctx, "REP " + m.rep, r.x + 120, ty, [70, 90, 130]);
+    smallText(ctx, "POP " + m.pop, r.x + 156, ty, [90, 90, 105]);
+    const ts = stampStr(m.t);
+    if (ts) smallText(ctx, ts, r.x + r.w - 5 - smallTextWidth(ts), ty, [150, 140, 160]);
+  }
+  // ---- the detail: who lives in this town (the point of the screen)
+  const dy = R.detY, card = slotCard(saveSel);
+  if (pendingImport) {
+    const m = pendingImport.meta;
+    rect(ctx, x + 4, dy, w2 - 8, R.detH, [252, 244, 220]);
+    smallText(ctx, "READY TO IMPORT", x + 8, dy + 4, [58, 42, 38]);
+    smallText(ctx, pendingImport.name.slice(0, 40).toUpperCase(), x + 8, dy + 13, [110, 100, 110]);
+    smallText(ctx, "DAY " + m.day + " " + m.weekday + "   $" + fmt(m.coins) + "   REP " + m.rep + "   POP " + m.pop,
+      x + 8, dy + 24, [40, 30, 40]);
+    smallText(ctx, "CREW: " + m.crew.map(c => c.name).join(", ").slice(0, 44), x + 8, dy + 34, [70, 90, 130]);
+    smallText(ctx, "PICK A SLOT ABOVE, THEN CONFIRM.", x + 8, dy + 48, [90, 90, 105]);
+    smallText(ctx, card ? "SLOT " + saveSel + " ALREADY HOLDS A TOWN - IT WILL BE REPLACED"
+      : "SLOT " + saveSel + " IS EMPTY - NOTHING IS LOST", x + 8, dy + 57, card ? [190, 80, 80] : [40, 150, 70]);
+    saveBtn(R.yes, card ? "REPLACE SLOT " + saveSel : "IMPORT TO " + saveSel, true, !!card);
+    saveBtn(R.no, "CANCEL", true, false);
+    smallText(ctx, "NOTHING IS WRITTEN UNTIL YOU CONFIRM", x + 6, R.yes.y - 8, [110, 100, 110]);
+    return;
+  }
+  if (!card) {
+    rect(ctx, x + 4, dy, w2 - 8, R.detH, [244, 238, 224]);
+    smallText(ctx, "SLOT " + saveSel + " IS EMPTY", x + 8, dy + 6, [58, 42, 38]);
+    smallText(ctx, "START A TOWN HERE WITH NEW HERE,", x + 8, dy + 18, [110, 100, 110]);
+    smallText(ctx, "OR IMPORT A SAVE FILE FROM ANOTHER DEVICE.", x + 8, dy + 27, [110, 100, 110]);
+  } else {
+    smallText(ctx, "THE CREW OF SLOT " + saveSel, x + 6, dy, [58, 42, 38]);
+    smallText(ctx, "DAY " + card.day + " " + card.weekday + " - " + card.crew.length + " CREW, " + card.pop + " IN TOWN",
+      x + 92, dy, [110, 100, 110]);
+    // +13, not +9: hats and flowers overhang the portrait box upward
+    const top = dy + 13, shown = Math.min(card.crew.length, 6);
+    for (let i = 0; i < shown; i++) {
+      const c = card.crew[i], bx = x + 6 + i * 38;
+      rect(ctx, bx, top, 36, 30, [30, 20, 36]);
+      rect(ctx, bx + 1, top + 1, 34, 22, c.sick ? [235, 205, 205] : [200, 230, 245]);
+      const art = CRAB_ARTS[c.color] || CRAB_ARTS[0];
+      blit(ctx, art2("c" + c.color, art.a), bx + 2, top + 2);
+      const acc = ACCESSORIES[c.acc];
+      if (acc) blit(ctx, art2("a" + c.acc, acc.art), bx + 2 + acc.dx * 2, top + 2 + acc.dy * 2);
+      if (c.sick) smallText(ctx, "ILL", bx + 24, top + 3, [200, 50, 50]);
+      if (c.ot) smallText(ctx, "OT", bx + 3, top + 3, [255, 200, 60]);
+      const nm = c.name.slice(0, 8);
+      smallText(ctx, nm, bx + 1 + ((34 - smallTextWidth(nm)) >> 1), top + 25, [255, 240, 210]);
+    }
+    if (card.crew.length > shown) smallText(ctx, "+" + (card.crew.length - shown), x + 6 + shown * 38, top + 12, [110, 100, 110]);
+    let ly = top + 34;
+    smallText(ctx, "CRAB", x + 6, ly, [150, 140, 160]);
+    smallText(ctx, "DOES", x + 58, ly, [150, 140, 160]);
+    smallText(ctx, "LIVES", x + 96, ly, [150, 140, 160]);
+    smallText(ctx, "HEALTH", x + 168, ly, [150, 140, 160]);
+    ly += 8;
+    const maxLines = Math.max(1, Math.floor((dy + R.detH - ly) / 8));
+    for (let i = 0; i < Math.min(card.crew.length, maxLines); i++) {
+      const c = card.crew[i];
+      smallText(ctx, c.name.slice(0, 12), x + 6, ly, [40, 30, 40]);
+      smallText(ctx, jobShort(c.job), x + 58, ly, [140, 110, 40]);
+      smallText(ctx, c.home, x + 96, ly, c.tier === 0 ? [190, 80, 80] : c.tier === 2 ? [70, 140, 200] : [40, 150, 70]);
+      smallText(ctx, c.sick ? "SICK DAY " + (c.sickDays + 1) : c.ot ? "ON OVERTIME" : "WELL",
+        x + 168, ly, c.sick ? [190, 80, 80] : c.ot ? [200, 130, 40] : [40, 150, 70]);
+      ly += 8;
+    }
+    if (card.crew.length > maxLines) smallText(ctx, "+" + (card.crew.length - maxLines) + " MORE CREW", x + 6, ly, [110, 100, 110]);
+  }
+  // ---- actions
+  const conf = saveConfirm && saveConfirm.slot === saveSel && saveConfirmT > 0 ? saveConfirm.kind : null;
+  saveBtn(R.load, !card ? "LOAD" : saveSel === activeSlot && hasSave ? "RESUME" : "LOAD", !!card, false);
+  saveBtn(R.newg, conf === "new" ? "WIPE - SURE?" : "NEW HERE", true, conf === "new");
+  saveBtn(R.del, conf === "del" ? "GONE - SURE?" : "DELETE", !!card, conf === "del");
+  saveBtn(R.exp, "EXPORT", !!card, false);
+  saveBtn(R.imp, "IMPORT FILE", true, false);
+  if (saveMsg && saveMsg.t > 0)
+    smallText(ctx, saveMsg.text.slice(0, 38), R.imp.x + R.imp.w + 6, R.imp.y + ((R.imp.h - 5) >> 1),
+      saveMsg.bad ? [190, 80, 80] : [40, 150, 70]);
+  else
+    smallText(ctx, "DELETING A TOWN CAN'T BE UNDONE", R.imp.x + R.imp.w + 6, R.imp.y + ((R.imp.h - 5) >> 1), [110, 100, 110]);
+}
+function handleSaveClick(pt) {
+  const R = saveRects();
+  const hit = (r) => pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h;
+  const onCard = pt.x >= R.x - 2 && pt.x < R.x + R.w + 2 && pt.y >= R.y - 2 && pt.y < R.y + R.h + 2;
+  for (let i = 0; i < SLOTS; i++) if (hit(R.rows[i])) {
+    if (saveSel !== i + 1) { saveSel = i + 1; saveConfirm = null; sfx.ding(); }
+    return;
+  }
+  if (pendingImport) {
+    if (hit(R.yes)) { commitImport(saveSel); return; }
+    if (hit(R.no) || !onCard) { pendingImport = null; saveMsg = { text: "IMPORT CANCELLED", t: 3, bad: false }; }
+    return;
+  }
+  if (hit(R.close)) { closeSaveView(); return; }
+  const card = slotCard(saveSel);
+  if (hit(R.load)) {
+    if (card) loadSlot(saveSel);
+    else saveMsg = { text: "SLOT " + saveSel + " IS EMPTY", t: 3, bad: true };
+    return;
+  }
+  if (hit(R.newg)) {
+    // an occupied slot takes two taps: a town is not thrown away by accident
+    if (card && !(saveConfirm && saveConfirm.kind === "new" && saveConfirm.slot === saveSel && saveConfirmT > 0)) {
+      saveConfirm = { kind: "new", slot: saveSel }; saveConfirmT = 3.5; sfx.buy(); return;
+    }
+    newGame(saveSel); return;
+  }
+  if (hit(R.del)) {
+    if (!card) return;
+    if (!(saveConfirm && saveConfirm.kind === "del" && saveConfirm.slot === saveSel && saveConfirmT > 0)) {
+      saveConfirm = { kind: "del", slot: saveSel }; saveConfirmT = 3.5; sfx.buy(); return;
+    }
+    clearSlot(saveSel); saveConfirm = null; sfx.angry();
+    // the slot you're PLAYING can't be left half-deleted in memory: reboot into it
+    if (saveSel === activeSlot) { wiping = true; reloadGame(); return; }
+    saveMsg = { text: "SLOT " + saveSel + " DELETED", t: 5, bad: true };
+    return;
+  }
+  if (hit(R.exp)) { exportSlot(saveSel); return; }
+  if (hit(R.imp)) { openImportPicker(); return; }
+  if (!onCard) closeSaveView();
+}
+
 function drawJobBoard() {
   if (!boardView) return;
   const x = 40, y = 22, w2 = 176, h2 = 158;
@@ -3632,6 +4026,8 @@ let last = performance.now(), saveT = 0;
 function frame(now) {
   const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
   last = now; time += dt;
+  if (saveConfirmT > 0) { saveConfirmT -= dt; if (saveConfirmT <= 0) saveConfirm = null; }
+  if (saveMsg && saveMsg.t > 0) { saveMsg.t -= dt; if (saveMsg.t <= 0) saveMsg = null; }
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
     tmin -= 1440; day++;
@@ -3885,6 +4281,7 @@ function frame(now) {
     for (const c of crabs) drawCrab(c);
     drawNight();
     drawTitle();
+    drawSaveScreen();
     requestAnimationFrame(frame);
     return;
   }
@@ -4054,6 +4451,7 @@ function frame(now) {
   drawPanel();
   drawToast();
   if (gameOver) drawGameOver();
+  drawSaveScreen();
   if (window.MergeMode) MergeMode.frame(dt);
   // sun mode: chain extra 0.6s sim steps synchronously (same per-step bound the
   // suite verifies at 6x) so the night passes in about a second of real time
@@ -4068,6 +4466,8 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) save(
 addEventListener("beforeunload", save);
 
 initNpcs();
+if (!FRESH) migrateLegacy();   // the old single-key town becomes slot 1, intact
+activeSlot = readActiveSlot();
 hasSave = load();
 if (!hasSave) {
   crabs = [newCrab(makeCrabPersona(0)), newCrab(makeCrabPersona(1))];

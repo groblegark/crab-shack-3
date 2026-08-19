@@ -44,6 +44,10 @@
     <canvas id="screen" width="256" height="240"></canvas>
     <div class="scan"></div>
   </div>
+  <!-- the "upload a save" surface: game.js opens this from the SAVED TOWNS card -->
+  <input id="importSave" type="file" accept=".json,application/json"
+         style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px">
+  <a id="exportSave" style="display:none"></a>
   <script>
     // Fit the screen to any viewport, preferring crisp half-pixel steps.
     // Portrait viewports get a taller 256x288 canvas (the extra rows go to the
