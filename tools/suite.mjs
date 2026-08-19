@@ -1133,6 +1133,196 @@ scenario("tired: save migration seeds it from old sandy, strands nothing", () =>
   return stranded.length === 0 ? true : "sandy stranded in the new save: " + stranded.map(p => p.name).join(",");
 });
 
+scenario("hours: a working day has a length - long hours buy no free labour", () => {
+  // THE FAULT (Matt: "just making your restaurant open all the time is way
+  // too powerful"). Shifts DERIVE from the shop's hours, so opening 6:00-24:00
+  // handed two crabs nine-hour shifts for a flat wage and a flat shift-end
+  // fatigue bump: 50% more staffed hours for nothing. bizShiftWindow now caps
+  // every derived window at a standard day for its kind and keeps the middle.
+  const sim = createSim({ seed: 5 });
+  sim.runUntil("day >= 2 && tmin >= 7 * 60", { maxSteps: 300000 });
+  const read = (open, close) => {
+    sim.G(`setBizHours("shack", ${open} * 60, ${close} * 60);`);
+    return JSON.parse(sim.G(`JSON.stringify({
+      M: [bizShiftWindow("shack", "M").start, bizShiftWindow("shack", "M").end],
+      E: [bizShiftWindow("shack", "E").start, bizShiftWindow("shack", "E").end],
+      D: [bizShiftWindow("shack", "D").start, bizShiftWindow("shack", "D").end],
+      cover: [bizShiftWindow("shack", "cover").start, bizShiftWindow("shack", "cover").end],
+      pay: crabs.map(c => Math.round(basePayToday(c))),
+      load: crabs.map(c => +shiftLoad(c).toFixed(6)) })`));
+  };
+  // the default trading day is untouched, to the minute: the cap never binds
+  // on twelve hours or less, so 8-20 IS the old geometry
+  const d = read(8, 20);
+  if (JSON.stringify([d.M, d.E, d.D, d.cover]) !== JSON.stringify([[480, 840], [840, 1200], [510, 1110], [480, 1200]]))
+    return "the default 8-20 geometry moved: " + JSON.stringify(d);
+  if (d.pay.some(p => p !== 23) || d.load.some(l => l !== 1))
+    return "a default day is not one standard day's pay: " + JSON.stringify(d);
+  // open 6-24 and the crew still work a six-hour shift each, centred on the
+  // trading day - the shoulders are open but UNSTAFFED
+  const l = read(6, 24);
+  if (l.M[1] - l.M[0] !== 360 || l.E[1] - l.E[0] !== 360)
+    return "an 18-hour trading day stretched the shifts: " + JSON.stringify([l.M, l.E]);
+  if (l.E[1] - l.M[0] !== 720)
+    return "the roster covered more than twelve hours off the hours sign: " + JSON.stringify([l.M, l.E]);
+  if (l.cover[1] - l.cover[0] !== 720 || l.D[1] - l.D[0] !== 600)
+    return "the cover double / owner-operator day outgrew a working day: " + JSON.stringify([l.cover, l.D]);
+  // and you are not billed for hours nobody worked
+  if (l.pay.some(p => p !== 23)) return "long hours changed the wage without changing the work: " + JSON.stringify(l.pay);
+  // shorten the day instead and the shifts - and the wage bill - shorten with
+  // it: labour is bought by the hour in both directions
+  const sh = read(9, 17);
+  if (sh.M[1] - sh.M[0] !== 240) return "shortened hours did not shorten the shift: " + JSON.stringify(sh.M);
+  if (sh.pay.some(p => p !== 15) || sh.load.some(l2 => Math.abs(l2 - 2 / 3) > 1e-5))
+    return "a four-hour shift is not paid four hours: " + JSON.stringify(sh);
+  return true;
+});
+
+scenario("hours: always-open does not out-earn a normal day (anti-exploit gate)", () => {
+  // The gate that would have caught the fault. Two arms per seed, same RNG
+  // stream, both subsidised so neither dies on us, and only the PLAYER's shop
+  // moves - peer owners run their own hours policy in both. The measure is
+  // TAKINGS PER CREW-DAY (dollars earned per dollar of wage bill), because it
+  // is the one number the hours sign used to inflate for free.
+  //   pre-pass build: 1.58, 1.84, 1.78 on these seeds - always-open earned
+  //   ~70% more per crab it paid for.
+  //   this build:     0.98, 1.08, 1.02.
+  const run = (seed, open, close) => {
+    const sim = createSim({ seed });
+    sim.G(`coins = 4000; setBizHours("shack", ${open} * 60, ${close} * 60);`);
+    let wages = 0, lastDay = 0;
+    sim.runDays(10, { tickEvery: 20, onTick: (G) => {
+      if (G("tmin") >= 19.5 * 60 && G("day") !== lastDay) { lastDay = G("day"); wages += G("wagesOwedTonight()"); }
+    } });
+    return { life: sim.G("lifetime"), wages };
+  };
+  const ratios = [];
+  for (const seed of [4242, 7, 555]) {
+    const a = run(seed, 8, 20), b = run(seed, 6, 24);
+    if (!(a.wages > 0 && b.wages > 0)) return `seed ${seed} paid no wages at all`;
+    ratios.push((b.life / b.wages) / (a.life / a.wages));
+  }
+  const worst = Math.max(...ratios);
+  return worst <= 1.2 ? true
+    : "always-open earns " + worst.toFixed(2) + "x per crew-day (gate 1.20): " + ratios.map(r => r.toFixed(3));
+});
+
+scenario("hours: the emergency lever survives - long hours PLUS overtime trade longer", () => {
+  // Long hours must stay POSSIBLE: a burst of takings you can pay for. With
+  // the shift cap the hours sign alone buys nothing - but it opens ROOM at
+  // both ends of the day that overtime can fill, at OT_RATE, and that is the
+  // lever. Under the default 8-20 there is no room past the roster, so an OT
+  // request doubles up inside the same twelve hours; open 6-24 and the same
+  // request genuinely extends the town's trading day to fourteen.
+  const sim = createSim({ seed: 5 });
+  sim.runUntil("day >= 2 && tmin >= 7 * 60", { maxSteps: 300000 });
+  const arm = (open, close) => {
+    sim.G(`setBizHours("shack", ${open} * 60, ${close} * 60);
+      for (const c of crabs) { c.p.ot = true; c.p.sick = null; }`);
+    return JSON.parse(sim.G(`JSON.stringify({
+      eff: crabs.map(c => [effShift(c).start, effShift(c).end]),
+      mins: crabs.map(c => otMinutes(c)),
+      prem: crabs.map(c => Math.round(otPremium(c, otMinutes(c)) * 100) / 100),
+      span: OT_SPAN,
+      bill: crabs.reduce((s2, c) => s2 + crabDueTonight(c), 0) })`));
+  };
+  const cover = (a) => Math.max(...a.eff.map(w => w[1])) - Math.min(...a.eff.map(w => w[0]));
+  const base = arm(8, 20), longs = arm(6, 24);
+  if (cover(base) !== 720) return "OT changed the default day's coverage: " + cover(base);
+  if (cover(longs) !== 840)
+    return "long hours + OT did not buy any extra trading: " + cover(longs) + " minutes";
+  // and it is PAID for, at exactly 1.5x straight time on the same clock
+  if (longs.mins.some(m => m !== longs.span)) return "OT room is not the full span: " + longs.mins;
+  const hourly = 23 / 360;
+  if (longs.prem.some(p => Math.abs(p - hourly * 1.5 * longs.span) > 0.01))
+    return "the premium is not 1.5x the standard hourly rate: " + longs.prem;
+  if (longs.bill <= 2 * 23) return "tonight's bill did not carry the overtime: " + longs.bill;
+  // switching the request off puts the town straight back on a normal day
+  sim.G("for (const c of crabs) c.p.ot = false;");
+  const off = JSON.parse(sim.G("JSON.stringify([crabs.map(c => otMinutes(c)), crabs.reduce((s2, c) => s2 + crabDueTonight(c), 0)])"));
+  if (off[0].some(m => m !== 0) || off[1] !== 2 * 23)
+    return "the lever did not switch off cleanly: " + JSON.stringify(off);
+  return true;
+});
+
+scenario("tired: fatigue scales with the hours actually worked", () => {
+  // The other half of the always-open fault: a flat TIRED_SHIFT bump meant a
+  // nine-hour day cost a crab exactly what a six-hour one did. The shift-end
+  // accrual now reads shiftLoad - today's contracted span against a standard
+  // day of that shift - and overtime rides on the same number at OT_FATIGUE.
+  const sim = createSim({ seed: 11 });
+  sim.runUntil("day >= 2 && tmin >= 7 * 60", { maxSteps: 300000 });
+  const at = (open, close) => {
+    sim.G(`setBizHours("shack", ${open} * 60, ${close} * 60);`);
+    return JSON.parse(sim.G(`{ const c = crabs[0];
+      JSON.stringify([+shiftLoad(c).toFixed(6), +(TIRED_SHIFT * shiftLoad(c)).toFixed(6),
+        +(0.25 * shiftLoad(c)).toFixed(6), dutyShift(c).end - dutyShift(c).start]); }`));
+  };
+  const full = at(8, 20), half = at(9, 17), capped = at(6, 24);
+  if (full[3] !== 360 || Math.abs(full[1] - 0.45) > 1e-6)
+    return "a standard day no longer costs the standard bump: " + JSON.stringify(full);
+  // a four-hour day tires (and feeds) a crab two thirds as much - exactly
+  if (half[3] !== 240 || Math.abs(half[1] - 0.45 * 2 / 3) > 1e-6 || Math.abs(half[2] - 0.25 * 2 / 3) > 1e-6)
+    return "a short shift did not cost proportionally less: " + JSON.stringify(half);
+  // and an 18-hour trading day cannot conjure a longer shift to accrue from
+  if (capped[3] !== 360 || Math.abs(capped[1] - 0.45) > 1e-6)
+    return "long hours stretched the fatigue bump: " + JSON.stringify(capped);
+  // the cover double is a real double: twelve hours, and it tires like it
+  const cov = JSON.parse(sim.G(`{ const c = crabs[0];
+    const w = bizShiftWindow(c.p.job, "cover");
+    JSON.stringify([(w.end - w.start), +(TIRED_SHIFT * (w.end - w.start) / SHIFT_SPAN.M).toFixed(6)]); }`));
+  if (cov[0] !== 720 || Math.abs(cov[1] - 0.9) > 1e-6)
+    return "a full-open cover double is not two shifts' worth of work: " + JSON.stringify(cov);
+  // overtime accrues on the same clock, weighted at OT_FATIGUE
+  const ot = JSON.parse(sim.G(`{ const c = crabs[0]; const f = 120 / ownStdSpan(c);
+    JSON.stringify([+(TIRED_SHIFT * (1 + OT_FATIGUE * f)).toFixed(6), +TIRED_SHIFT.toFixed(6), +f.toFixed(6)]); }`));
+  if (!(ot[0] > ot[1]) || Math.abs(ot[0] - 0.45 * (1 + 1.5 / 3)) > 1e-6)
+    return "overtime did not ride the same accrual: " + JSON.stringify(ot);
+  return true;
+});
+
+scenario("tired: the morning and evening shifts end the week level", () => {
+  // THE FAULT (the owner read it as "CLAWDIA is OP"; she was simply the
+  // E-shift founder). Sleep only repaired tiredness while darkness() > 0.7,
+  // so a crab up at 07:15 for a morning shift lost recovery the evening crab
+  // kept, and the morning crab's long free AFTERNOON at home repaired
+  // nothing. It followed the SHIFT, not the crab: swapping the founders'
+  // shifts swapped the penalty (measured M 0.171 / E 0.084). The fix is
+  // environmental - a crab home, settled and off the clock naps in daylight
+  // too, at TIRED_NAP.
+  //   before: mean M 0.153, E 0.087, gap 0.066 (6 seeds x 10 days)
+  //   after:  mean M 0.119, E 0.094, gap 0.024
+  const gaps = [];
+  for (const seed of [1337, 6685]) {
+    const sim = createSim({ seed });
+    sim.G("coins = 3000;");   // keep the town solvent so the week actually runs
+    const acc = { M: [0, 0], E: [0, 0] };
+    let lastSlot = -1;
+    sim.runDays(7, { tickEvery: 20, onTick: (G) => {
+      const slot = G("Math.floor((day * 1440 + tmin) / 15)");
+      if (slot === lastSlot) return;
+      lastSlot = slot;
+      for (const [sh, t] of JSON.parse(G("JSON.stringify(crabs.map(c => [c.p.shift, c.p.tired || 0]))"))) {
+        if (!acc[sh]) continue;
+        acc[sh][0] += t; acc[sh][1]++;
+      }
+    } });
+    if (!acc.M[1] || !acc.E[1]) return `seed ${seed} never ran both shifts`;
+    gaps.push([acc.M[0] / acc.M[1], acc.E[0] / acc.E[1]]);
+  }
+  const worst = Math.max(...gaps.map(([m, e]) => Math.abs(m - e)));
+  if (worst > 0.04)
+    return "the shift you draw still decides your fatigue: gap " + worst.toFixed(3) +
+      " (tolerance 0.04) " + JSON.stringify(gaps.map(g => g.map(v => +v.toFixed(3))));
+  // ...WITHOUT making tiredness free: a nap on the porch stays strictly worse
+  // than a night in your own bed, and the cot rung survives in both
+  const rates = JSON.parse(createSim({ seed: 1 })
+    .G("JSON.stringify([TIRED_NAP.bed, TIRED_DRAIN.bed, TIRED_NAP.cot, TIRED_NAP.bed])"));
+  if (!(rates[0] < rates[1]) || !(rates[2] < rates[3]))
+    return "the nap must stay slower than a bed, and a cot slower than a nap in one: " + JSON.stringify(rates);
+  return true;
+});
+
 scenario("days off: everyone rests their weekday and plays customer", () => {
   // a full week in a grown town: every worker must (a) never clock in on
   // their assigned weekday off, (b) visibly show DAY OFF status that day,
