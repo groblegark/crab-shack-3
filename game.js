@@ -72,13 +72,20 @@ const WATER_TAPS = [
   { x: 640, name: "THE TOWN TAP" },    // promenade, beside the notice board
   { x: 1844, name: "THE PIER TAP" },   // foot of the pier, where the catch gets hosed down
 ];
-const TAP_AT = 0.7;         // you'd BUY a drink at 0.45; you walk to the standpipe once
-                             // you're properly thirsty. That gap is deliberate: the juice
-                             // bar gets first refusal on every thirst, and free water only
-                             // ever picks up what the counters did not.
-const TAP_QUENCH = 0.6;      // plain water takes the edge off; a juice takes it all
-const TAP_SIP = 3.2;         // seconds at the spout - slower than a drink handed to you
-const TAP_APPEAL = 0.5;      // half the pull of a bought drink at the same distance
+// THE STANDING RULE FOR SELF-HEALING (Matt, 2026-08-19): "deficiency should
+// encourage player intervention but have some potential for auto resolution,
+// just make it difficult." So every free cure in this game is a LAST RESORT
+// that costs TIME, never money: it stops a death spiral, it never pays the
+// rent. A crab who lives at the tap is a crab who isn't working - which is a
+// cost the player feels without a single coin changing hands.
+const TAP_AT = 0.72;         // you'd BUY a drink at 0.45; you trudge to the standpipe only
+                             // when you're genuinely parched. The gap is the whole design:
+                             // the juice bar gets first refusal, free water picks up what
+                             // the counters could not - and it picks it up SLOWLY.
+const TAP_QUENCH = 0.5;     // a mouthful, not a drink: a juice zeroes thirst, water takes
+                             // the edge off, so the parched crab is back within the hour
+const TAP_SIP = 6;         // a long draw at the spout - minutes of the working day, gone
+const TAP_APPEAL = 0.35;      // a poor third to anything a counter can hand you
 const TAP_CD = 20;           // errand cooldown after a sip
 const TAP_RINSE = 0.35;      // a cold rinse under the spout: worse than a $5 shower
 const TAP_RINSE_AT = 0.85;   // ...and only when filthy - the showers own 0.66 upward

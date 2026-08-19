@@ -1100,7 +1100,31 @@ roll cures her at the improved 0.55 lane. She is back on her stalls on day 9,
 and she sleeps at home every night. Shots: `tap-drinking`, `tap-night`,
 `tap-pier`, `fading-dossier`, `death-report`, `memorial-townsfolk`.
 
-## Lose-by-default after the tap (2026-08-19, for Matt)
+## THE SELF-HEALING RULE (Matt, 2026-08-19) — read before adding any free cure
+Matt: "I appreciate the self healing stuff but I feel it breaks the economy. I
+think deficiency should encourage player intervention but have some potential
+for auto resolution, just make it difficult." That is now the standing rule for
+every free cure in the game:
+
+  A crab can always claw its way out of a deficiency alone, but the way out
+  costs TIME and never money. It stops a death spiral; it never pays the rent.
+  A crab living at the tap is a crab not working - a cost the player feels
+  without a coin moving.
+
+The tap was the first thing measured against it and it FAILED: at threshold
+0.70 / quench 0.6 / sip 3.2s the town got healthy enough that 2 of 16
+do-nothing towns survived 30 days. Retuned to a genuine last resort - threshold
+0.72 (you'd buy at 0.45), quench 0.5 (a mouthful, not a drink, so they're back
+within the hour), sip 6s of the working day, appeal 0.35 - and lose-by-default
+came back to 0/16 (median 15) with growth still escaping 4/8 and BOTH fairness
+gates green (nobody parched for a week, the juice bar still sells).
+A first attempt at 0.82/0.42/7.5s overshot: a townsfolk crab went 10 days
+without a drink. That is the shape of the dial - too generous breaks the
+economy, too mean breaks the fairness the tap exists to provide.
+
+Apply this rule to the beach forage and any free-fun cure before building them.
+
+## (superseded by the retune above) Lose-by-default after the tap
 The public tap fixed a structural unfairness (crabs could be barred from ever
 drinking) and the town got measurably healthier: crabs spend ~20% more of their
 lives clocked in, so even a DO-NOTHING two-crab shack now earns more. Measured
