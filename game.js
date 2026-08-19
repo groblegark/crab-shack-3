@@ -844,7 +844,7 @@ function loadSlot(i) {
   setActiveSlot(i);
   reloadGame();
 }
-const CRAB_WAGE = 23, HOUSE_RENT = 10;   // wage raised 22 -> 24 with T2 thirst: crews drink at retail, the wage keeps their wallets liquid
+const CRAB_WAGE = 23, HOUSE_RENT = 10;   // wage raised 22 -> 23 with T2 thirst: crews drink at retail, the wage keeps their wallets liquid
 function rentAmount() { return BIZ.shack.rent; }   // shack lease (legacy name); due from night one
 function totalRent() {   // the PLAYER's nightly property bill, due from night one
   return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player")
@@ -2488,13 +2488,17 @@ function updateFishing(c, dt) {
     // a live-aboard works the deeper water off their own deck: quicker bites,
     // and now and then the net comes up double
     const aboard = c.p.boat != null;
-    c.castT = aboard ? 9 + Math.random() * 13 : 14 + Math.random() * 18;
-    const haul = aboard && Math.random() < 0.2 ? 2 : 1;
+    const tier = fishTier(c);   // experience: quicker casts, better hauls
+    c.castT = (aboard ? 9 + Math.random() * 13 : 14 + Math.random() * 18) * tier.cast;
+    let haul = Math.random() < (aboard ? 0.2 : 0) + tier.dbl ? 2 : 1;
+    if (tier.big && Math.random() < tier.big) haul = 4;   // THE BIG ONE
     townCatch += haul; trade.landed += haul; trade.landedDay += haul;
+    creditCatch(c, haul);
     // free agents: no wage anywhere - the catch sold at the pier's market
     // price IS the income. A scarce-fish day is a lucrative day.
     c.p.wallet += trade.price * haul;
-    popText((haul > 1 ? "DOUBLE HAUL! +$" : "CATCH! +$") + trade.price * haul, c.x - 8, c.y - 24, [140, 220, 255]);
+    popText((haul >= 4 ? "THE BIG ONE!! +$" : haul > 1 ? "DOUBLE HAUL! +$" : "CATCH! +$") + trade.price * haul,
+      c.x - 8, c.y - 24, haul >= 4 ? [255, 230, 120] : [140, 220, 255]);
     sfx.splash();
     if (window._stats) {
       window._stats.catches = (window._stats.catches || 0) + haul;
@@ -2642,6 +2646,39 @@ function masteryMult(c, id) {
   const n = (c.p.made && c.p.made[id]) || 0;
   for (const [need, bonus] of MASTERY) if (n >= need) return 1 - bonus;
   return 1;
+}
+// Fishing is a trade like any other (Matt: "fish-catching should give
+// experience"), so it rides the SAME milestones as dishes - 25 / 100 / 250
+// lifetime catches, counted in the persona so it saves. NOTE the counter key
+// is 'caught', not 'fish': the shack sells a dish whose recipe id IS 'fish',
+// and sharing the key would have a cook's plates teaching a fisher to cast.
+// The tiers pay in the only currency a fisher has: time on the water and what
+// comes up on the line - quicker casts, better double-haul odds, then THE BIG ONE.
+const FISH_TIERS = [
+  { at: 250, cast: 0.72, dbl: 0.10, big: 0.05, label: "MASTERED" },
+  { at: 100, cast: 0.84, dbl: 0.07, big: 0,    label: "IS FAMOUS FOR" },
+  { at: 25,  cast: 0.93, dbl: 0.03, big: 0,    label: "HAS THE KNACK FOR" },
+];
+const FISH_TIER0 = { cast: 1, dbl: 0, big: 0 };
+function fishTier(c) {
+  const n = (c.p.made && c.p.made.caught) || 0;
+  for (const t of FISH_TIERS) if (n >= t.at) return t;
+  return FISH_TIER0;
+}
+function creditCatch(c, haul) {
+  if (!c || !c.p) return;
+  if (!c.p.made) c.p.made = {};
+  const before = c.p.made.caught || 0;
+  c.p.made.caught = before + haul;
+  for (const t of FISH_TIERS) {
+    if (before < t.at && c.p.made.caught >= t.at) {
+      toast = { text: c.p.name + " " + t.label + " FISHING! " + c.p.made.caught + " LANDED", t: 6 };
+      popText(t.label + " FISHING", c.x - 26, c.y - 32, [255, 230, 120]);
+      c.quip = { text: ["I KNOW THIS WATER", "THEY COME TO ME NOW", "READ THE TIDE"][(Math.random() * 3) | 0], t: 2.6 };
+      sfx.ding();
+      break;
+    }
+  }
 }
 function creditAccomplishment(c, cust) {
   if (!c || !c.p || cust.isCrab) return;   // paying guests only
@@ -4182,7 +4219,8 @@ function drawDossier() {
     const [id, n] = made[i];
     let tier = "";
     for (const [need, , label] of MASTERY) if (n >= need) { tier = label; break; }
-    smallText(ctx, (ITEM_NAMES[id] || id.toUpperCase()) + " X" + n + (tier ? " - " + tier : ""), x + 8, ly,
+    const what = id === "caught" ? "FISH LANDED" : (ITEM_NAMES[id] || id.toUpperCase());
+    smallText(ctx, what + " X" + n + (tier ? " - " + tier : ""), x + 8, ly,
       tier ? [140, 110, 40] : [90, 90, 105]);
     ly += 8;
   }

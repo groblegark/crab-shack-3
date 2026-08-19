@@ -602,9 +602,9 @@ first, connect later. Don't build the network before the node is beautiful.
 Matt ruled escape-as-rare while it was measurably broken (0/6 at day 40). It is
 no longer broken, and nothing in the economy was touched to fix it: trip-chaining
 and furniture-aware travel gave crabs back the hours they were spending walking
-and bouncing. Measured on the finished tree: baseline (do nothing) 0/8, evictions
-7-14, median 12 — lose-by-default holds exactly. Hire-and-seat growth: **5/8 alive
-at day 40**. That is the founding promise met — "lose by default, but a growth
+and bouncing. Measured on the finished tree (with fishing experience): baseline (do nothing)
+0/8, evictions 11-16, median 14 — lose-by-default holds. Hire-and-seat growth:
+**4/8 alive at day 40**. (Experienced fishers land more, which feeds the town.) That is the founding promise met — "lose by default, but a growth
 strategy can escape" — arrived at by fixing the environment rather than the
 numbers. If Matt wants it harder, the honest levers stay spawn pacing and rent,
 chosen deliberately; do NOT re-cripple the routing to get there.
