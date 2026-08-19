@@ -8,6 +8,51 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, last call — SUDSY discovers banker's hours
+
+![SUDSY NOW OPENS AT 9, announced over a dark storefront](devlog/img/2026-08-18-sudsy-hours.png)
+
+*Day 4, 20:51, the taps dark behind their new CLOSED sign. SUDSY has
+noticed something about dawn showers: nobody takes them.*
+
+Shops have hours now, and owners have opinions about them. Tap your own
+shop's sign and you get a management screen — hour steppers with the
+shifts derived live, today's takings against today's costs, the roster
+with everyone's day off, and (finally wired, after living as a TODO
+comment since the laundromat era) the staff-meal policy: RETAIL, AT COST,
+or FREE. Your call, on the record, next to the rent you owe tonight.
+
+![The management screen: hours, shifts, takings, roster, meal policy](devlog/img/2026-08-18-mgmt-screen.png)
+
+But the headline is what the NPCs do with the same steppers. SUDSY runs
+her shop by three legible rules: extend when there's a queue at closing
+(unless the roster's spent), trim the hours nobody uses, one move a day.
+Watch her run them (seed 1337): day 4, SUDSY NOW CLOSES AT 19. Day 7,
+SUDSY NOW OPENS AT 9. A trim every few days after, until she settles on a
+tidy 10-to-5 and never touches the sign again. Nobody tuned that
+schedule. She *converged* on it, the way shopkeepers do, by noticing when
+the doorbell rings.
+
+### And the taco question, answered
+
+A reader (the owner) wrote in: *"I can't tell if the fish tacos are 17 or
+23 dollars."* Fair. All three numbers were real — $17 menu, $22 for
+locals at the standing 25% markup, $23 with a good tip folded into the
+pop. The rule now: **every price you see is what that customer pays.**
+Tips get their own little gold moment (+$6 TIP) instead of hiding inside
+the total, and the MENU tab carries a one-line footnote about the locals'
+markup. The taco costs $17. It says so, and now it means it.
+
+### Engineering small print
+
+The hours system shipped provably inert at defaults — proven
+byte-identical by tick-level A/B bisection, down to preserving the one
+charming quirk the bisection surfaced: a fisher who buys breakfast at a
+staffed counter minutes before official open. The counter was staffed.
+The fisher was hungry. The sale stands.
+
+---
+
 ## 2026-08-18, deep night — The town hires from its own line
 
 ![PLANKTON PETE, hired at lunch, cooking by one](devlog/img/2026-08-18-plankton-pete.png)
