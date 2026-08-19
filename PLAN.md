@@ -65,14 +65,21 @@ compounds or collapses → the landlord collects at 20:00 either way.
 - **Facilities pattern**: guests occupy things. Shower stalls — attendant
   hands out a kit, guest showers, stall goes dirty, staff cleans it. Dining —
   guests are seated when their order is claimed, server carries the plate to
-  the table, guests bus their own (outdoor casual; staff-bused table service
-  is deferred to "a fancier restaurant").
+  the table, and since 2026-08-19 **staff bus the table too** — a vacated
+  table goes DIRTY with the plates on it and seats nobody until a crab clears
+  it, off the same dirty/cleaning cycle the stalls use. (The old outdoor rule,
+  guests bussing their own, survives only as the `_selfBused` paired-arm probe.)
+- **Tips are the table's** (2026-08-19): a plate handed over the counter tips
+  a token `TIP_COUNTER` 0.15 of the full tip; a seated guest tips the lot AND
+  leaves a $9 table tip on the way out. `BIZ[k].tipShare` splits any tip
+  between the till and the crab who served it (slider on the SCHEDULE tab).
 - **Fishing**: the town's default profession. SALTY + DRIFT cast off the pier,
   earn subsistence pay, spend it in town. `townCatch` stocks the shack:
   fish $4 fresh / $7 imported; catch mostly spoils overnight.
 - **Shop**: concrete equipment only — HIRE CRAB, GRILL+, BOARD+, TABLE+, plus
   business unlocks and their gear upgrades. You start with ONE grill, ONE
-  board, TWO tables. No abstract multipliers (deleted: knife/flame/shoes/ads/
+  board, TWO tables (four more are buyable since 2026-08-19: TABLE+ max 4).
+  No abstract multipliers (deleted: knife/flame/shoes/ads/
   expand).
 - **Reputation** replaces ads: table service and happy guests build word of
   mouth, rage-quits cost triple, nightly regression to the mean; foot traffic
@@ -190,6 +197,11 @@ compounds or collapses → the landlord collects at 20:00 either way.
   leaving a zombie autosave.
 
 ### Verified balance (8 seeds, tools/headless.mjs)
+- **CURRENT (2026-08-19, after the table-service economy):** baseline
+  `--days 30 --seeds 16` **0/16, median 13** (10-19); growth
+  `--buy chef,table --days 40 --seeds 8` **3/8 alive**
+  (13,13,13,14,15,41,41,41). The growth drop from 6/8 is the busing labour
+  cost, not the new table rungs — `--buy chef` alone reads the same 3/8.
 - Baseline (buy nothing): **0/8 survive, median eviction ~11-13** — the
   8-seed snapshot moves a day either way per build; at 16 seeds the tails run
   6–20+. Fully combined tree (credit LIMIT 90 + T2 thirst/juice bar, wage
@@ -233,9 +245,13 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
+<<<<<<< HEAD
 - `node tools/suite.mjs` — **107 scenarios, must stay green before any push.**
 - `node tools/suite.mjs` — **103 scenarios, must stay green before any push.**
 - `node tools/suite.mjs` — **109 scenarios, must stay green before any push.**
+=======
+- `node tools/suite.mjs` — **108 scenarios, must stay green before any push.**
+>>>>>>> worktree-agent-a27942d1aa747a62f
 
 - `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
@@ -308,6 +324,7 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+<<<<<<< HEAD
 - **THE CRAB DIARY — a per-crab activity log, and the record that shows it**
   (Matt's directive, built 2026-08-19, worktree: *"We need a detail view of
   the character where we can see all of their recent actions, because that is
@@ -595,6 +612,201 @@ vm — never fork game logic into tools/) and perf expectations live there.
     site marked `// DIARY HOOK:` — the player moving a rate, a deal lapsing,
     the first grumble, the warning, a walkout, a quit, a poach, and a peer
     owner's move.
+=======
+- **THE TABLE SERVICE ECONOMY** (Matt's four directives, built 2026-08-19,
+  worktree — verbatim: *"Decrease or eliminate tips on counter service it
+  makes tables pointless; also make a setting for tip sharing (slider). Also
+  increase table max, and add table cleanup"*). Also closes backlog item 6,
+  "staff-bused table service for a fancier restaurant tier".
+
+  **1. TIPS BELONG TO TABLE SERVICE.** The owner was right, and it measured
+  WORSE than he thought: under the old rule a counter guest tipped **$3.24**
+  and a seated guest **$2.67** (8 seeds x 30d), because a counter guest is
+  served before their patience has drained while a seated one watches it drain
+  at the table. The counter was literally the better tip. Now
+  `TIP_COUNTER` **0.15** of the full tip for a plate handed over the pass, the
+  whole tip for a seated guest — and because the pre-existing "shrapnel does
+  not move the till" floor drops any tip under $0.50, the counter's *effective*
+  tip measures **$0.50 a guest against the table's $2.67 plus the $9 table
+  tip**. TOKEN, NOT ZERO, on purpose: the jar by the till is a real thing, a
+  filthy or exhausted server can still lose it (the dirt/tiredness multipliers
+  still bite), and a curve reads better than a switch. Swept 0 / 0.15 / 0.3 /
+  1.0 against the do-nothing curve: **0 and 0.15 both land median 14, so the
+  fraction is a design choice, not a balance lever** — a two-table town does
+  most of its trade at the tables either way (1100 table serves to 400 counter
+  serves over 8 seeds x 30d).
+
+  **THE COUNTER-ONLY vs TABLED COMPARISON** (6 solvent towns x 12d, 2 crew,
+  `BIZ.shack.tables = []` for the counter arm):
+
+  | | before | after |
+  |---|---|---|
+  | counter-only, $/tourist | $15.71 | **$14.15** |
+  | tabled, $/tourist | $19.90 | **$23.63** (2 tables) → **$24.60** (4) |
+  | the gap | **+27%** | **+67% to +74%** |
+
+  And the ladder is a real ladder — rung by rung, 6 towns x 12d:
+
+  | tables | 2 crew, lifetime | 4 crew, lifetime |
+  |---|---|---|
+  | 0 (counter only) | $16,127 | $25,819 |
+  | 2 (the start) | $23,011 | $34,126 |
+  | 3 | $23,884 | $37,448 |
+  | 4 | $24,580 | $37,856 |
+  | 6 (the new cap) | $25,022 | **$39,805** |
+
+  Read the two columns together and you have the whole design in one table:
+  with two crabs the 5th and 6th tables are worth **+1.8%** (there is nobody
+  free to bus them); with four crabs they are worth **+5.1%**, and the whole
+  climb from 2 to 6 tables is +8.7% on two crew and **+16.6% on four**. Tables
+  buy seats; seats need hands.
+
+  **2. TIP SHARING — A SLIDER, AND IT MOVES THE HOUSING LADDER.**
+  `BIZ[k].tipShare`, 0..1 in 5% steps, its own **PAY row group** on the
+  SCHEDULE tab (a 120x12 track: tap anywhere on it, or hold and drag the
+  thumb; mouse and touch; both canvas modes). `payTip()` is the ONLY place a
+  tip is split, so the tip at the table and the tip in the jar mean the same
+  thing, and the crab's cut lands in their **wallet**. Default **0** = how the
+  till has always been paid, so an untouched town is untouched.
+  Measured (6 towns x 24d, 4 crew, full table cap, tills propped so the
+  slider is measured against a business rather than a deathbed):
+
+  | share | lifetime | tips to till / to crew | mean crew wallet | crab-samples HOUSED |
+  |---|---|---|---|---|
+  | **0%** | $79,216 | $37,226 / $0 | **$14.9** | **79.3%** |
+  | 25% | $71,570 | $27,521 / $9,133 | $126.1 | 97.6% |
+  | 50% | $62,378 | $18,286 / $18,132 | $308.4 | 98.9% |
+  | **100%** | **$44,210** | $135 / $35,659 | **$687.7** | 98.9% |
+
+  That is the trade the directive asked for, priced: **25% of the tips costs
+  the till 9.7% of its lifetime takings and houses the crew** — on seed 1337
+  at 0% SHELLDON is still on a shelter cot on day 24 with $26 to his name,
+  and at 25% all four crew are in houses with $227-$295 banked. 100% is left
+  reachable and is deliberately ruinous: the till keeps $135 of $35,794 in
+  tips and the crew end on ~$1,300 each with nothing left to buy.
+
+  **3. MORE TABLES.** `UPS.table.max` **2 → 4**: six tables, $60/90/135/203.
+  The two new ones extend the BACK row west along the free wall at
+  **x1444 and x1404, y134** — the only stretch of the shack that is not a
+  station, a queue slot or a travel lane. Both lanes keep their daylight by
+  construction (a table's solid band is y-9..y+6, so the back row has to end
+  above 144 and the front row between 148 and 166) and the suite's own
+  tripwire, `routes: both travel lanes are clear of every solid`, now buys all
+  four rungs before it measures. Verified reachable, seatable and pathable:
+  the throughput scenario seats measurably more guests at the cap, and the
+  routing warp/unstick floor is unchanged.
+
+  **4. TABLE CLEANUP — THE FANCIER TIER.** A vacated table keeps its plates
+  (`dishes = 1`), goes `dirty`, and seats nobody until a staff crab clears it:
+  `toTableClean` → `busingTable`, `BUS_SECS` 1.5s scaled by `crabWork x
+  crabEff`, "CLEARED" on the pop, crumb-flecks on the table art, "BUSING A
+  TABLE" on the follow card, and TABLES BUSED + TIPS TO THE CREW on the day
+  report. Deliberately the stall pattern rather than a second one:
+  `messyTable()` / `startBus()` mirror the `dirty`/`cleaning`/`toStallClean`
+  trio exactly.
+  - **DISPATCH was the whole difficulty, and it took three measured passes.**
+    Busing only in the lull is a DEATH SPIRAL for table service: a shack with
+    a queue is never idle, so the plates never got cleared and the room went
+    permanently dirty (seed 99, 3 days: **47 guests seated → 8**). Busing
+    from the idle loop instead made every bus a lap of the shack — crate at
+    x1232, tables at x1490 — and the do-nothing town died on **day 5 instead
+    of day 14**. What ships is two dispatch points and one rule:
+    (a) **on the way back from a table delivery** the server is already
+    standing in the dining room, so clearing the next table costs a few steps;
+    (b) **in the lull**, like a stall; and (c) **turn the room** — a crab
+    clears a table ahead of taking the next order, but ONLY when there is
+    nowhere clean to seat that guest, and **NEVER ahead of a LOCAL**. That
+    last clause is a health rule, not a nicety: letting a bus-run outrank a
+    waiting neighbour took the trudge's anti-spiral gate from 6 deaths per 12
+    towns to 15, because "the evening queue never reaches the local" is
+    already a named trap in this town.
+  - **THE PRICE WAS PAID IN TIPS, NOT IN FURNITURE.** Busing costs crew hours,
+    and this economy's whole margin is its surplus, so a ~15% revenue cut
+    collapses it. A **third starting table** was tried as the compensation and
+    bought back exactly one day (median eviction 5 → 6) — the crew, not the
+    furniture, is what busing consumes. `TABLE_BASE` therefore stays at **2**
+    and the compensation is the **TABLE TIP $5 → $9**, which lands entirely on
+    table service and so widens the counter/table gap instead of papering over
+    it. `BUS_SECS` came down 2.5 → **1.5** in the same sweep (clearing a table
+    is a swipe of the plates, not a shower-stall scrub); at 2.5 the town read
+    median 14 too but the trudge gate failed at 10 deaths per 6 towns, and at
+    1.5 it reads **6 deaths against 8 with the drag switched off**.
+  - **WEDGE GUARDS** (the named risk, and the stall wedge is the precedent):
+    `abortChef` clears `cleanTable.cleaning` — a crab who dies mid-bus would
+    otherwise strand the table for the run; `abortErrand` releases a yanked
+    diner's table occupant-first and flags it **dirty**, because plates on an
+    unflagged table are unseatable AND unbuseable; and busing eligibility is
+    `(t.dirty || t.dishes > 0)`, which makes "plates on an empty table always
+    get cleared" true by construction whatever route left them there. Suite:
+    `tables can never wedge` drives both abort paths and then soaks two
+    trading days — worst observed out-of-service spell **60 staffed
+    sim-seconds against a gate of 120**.
+
+  **Balance.** Baseline `--days 30 --seeds 16`: **0/16, evictions
+  10,10,11,11,13,13,13,13,13,14,14,15,16,16,17,19, median 13** (before 0/16,
+  11-20, median 14 — one day, the documented per-build wobble).
+  Growth `--buy chef,table --days 40 --seeds 8`: **3/8 alive,
+  13,13,13,14,15,41,41,41** (before 6/8, 11,14,41x6). That drop is the busing
+  labour cost and it is **not** the new table rungs: `--buy chef` alone, which
+  never buys a table, reads the same **3/8**. Documented rather than tuned
+  away, and 3/8 is the level this project shipped at through the public-taps
+  and succession passes.
+
+  **Suite 102 → 108.** New: `tips: the counter gets a token, the table gets
+  the lot` (both paths through payAndBenefit on the same guest, asserted to
+  the cent), `tips: the sharing slider pays the crab's wallet and the till,
+  exactly` (0 / 50 / 100% plus the clamp and the 5% snap), `tables: a vacated
+  table goes dirty, blocks the room, gets bused, comes back`, `tables can
+  never wedge` (both abort paths + the two-day soak), `tables: more tables
+  really do seat more guests`, and `tip sharing + the table cap roundtrip
+  save/load` (including an old save with no key, and a corrupt 7.5 clamped).
+  **Re-pointings (3, receipts written into the scenarios):**
+  1. `dining: outdoor tables, guests bus their own` → **`dining: tables are
+     BUSED BY STAFF, and the room keeps turning`**. Its old assertion — no
+     table ever ends a day with plates on it — WAS the outdoor rule, and the
+     owner asked for that rule to go. What it is really for (the room keeps
+     turning, nothing silts up) is now asserted directly: serves, seatings,
+     tables bused, and no table flagged `cleaning` with nobody clearing it.
+  2. `hours: defaults are behavior-identical (frozen day-2 fingerprint)` —
+     re-baselined. This pass changes what a guest pays AND how a server spends
+     their shift (22 tables are bused on days 1-2 alone), so day 2 could not
+     survive and still be measuring anything. Receipt: on **seed 4242 every
+     position is byte-identical** — all five crabs asleep in the same beds —
+     and only the books move (coins 200.80 → 158.96, rep 49.37 → 50.09,
+     serves 37 → 33, SUDSY's till 185.43 → 172.12). Seed 1337 moves exactly
+     ONE crab, the way this fingerprint has moved twice before: DRIFT sleeps
+     on a shelter cot with $23 saved instead of in cottage 8, a day behind on
+     the housing ladder, and nobody is left on the boardwalk at midnight.
+     Day 2 is this build's WORST day by construction — the busing bill lands
+     from the first guest while the raised table tip only compounds once
+     reputation brings the crowds.
+  3. `staff meals: closing crew cooks their own dinner, at retail` — the
+     FIXTURE. Its ledger is scoped to one meal but nothing kept a second crab
+     out of the pantry while it waited, and the new stream order put CLAWDIA
+     at the juicer for a drink mid-wait. Anybody already cooking is sent away
+     and the others held un-peckish for the duration; the retail transaction
+     under test is untouched.
+
+  **Story beat (organic, reproducible)**: `node tools/headless.mjs --days 12
+  --seeds 1` — seed 1337, no buys, no props, the town still standing on day
+  13. PINCHY and CLAWDIA's two-table dining room runs at **93.7% occupancy**
+  (every table either taken or waiting to be cleared) and they bus **10-13
+  tables a day** — one for very nearly every guest they seat. The shack runs
+  out of room exactly **14 times in twelve days**, and every single one of
+  those fourteen falls between **14:04 and 15:45**: the shift-change lull,
+  when there is one crab on the floor and the plates from lunch are still on
+  the tables. **Day 1, 14:47: PINCHY hands SALTINE a grilled fish across the
+  pass** because both tables are taken and one of them is still stacked. That
+  fish earns the till its $13 and about fifty cents of tip; the guest at the
+  table two feet away is worth $2.67 in tips and $9 more on the way out.
+  Fourteen plates a fortnight is what the third table would have bought him.
+  Shots: `tip-share-slider` (the PAY row at 35%), `tip-share-all-in` (100% —
+  "THE TILL KEEPS NONE OF IT"), `busing-a-table` (SANDY at a dirty table, the
+  follow card reading BUSING A TABLE), `dining-room-full` (five of the six
+  tables in use at the new cap) and `day-report-tips-bused` (TIPS TO THE CREW
+  $74, TABLES BUSED 13) under shots/.
+
+>>>>>>> worktree-agent-a27942d1aa747a62f
 - **Needs fail in their own character: THE TRUDGE and THE WIDE BERTH** (built
   2026-08-19, worktree — realizes `design/needs-failure-patterns.md` for three
   of the five needs, to Matt's pick, verbatim: *"Dirt boredom and tiredness are
@@ -2119,7 +2331,8 @@ unit economics.
    the player does, and three missed settlements CLOSE the business and put it
    on the market (see the failure/succession entry). Still open: NPC mortality
    (a CS4 item — the succession block leaves it a one-loop seam).
-6. Staff-bused table service for a fancier restaurant tier.
+6. ~~Staff-bused table service for a fancier restaurant tier~~ — **shipped
+   2026-08-19** with the table-service economy (see the feature entry).
 7. Cosmetics — mostly **shipped**: pier plank art (boardwalk over the east
    break, pilings, railing, night lamp, perched gull), closed-eye sleep
    sprites with breathing + Z drift, taller shower stalls (curtain with a

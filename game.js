@@ -118,11 +118,21 @@ const BIZ = {
       grill: [{ x: 1380, y: 160 }, { x: 1402, y: 160 }, { x: 1424, y: 160 }],
       pass:  [{ x: 1452, y: 160 }],
     },
+    // THE DINING ROOM. Two rows, and every table sits in one of them because
+    // the two travel lanes (y=146 and y=168) have to keep their daylight: a
+    // table's solid band is y-9..y+6, so the BACK row must end above 144 and
+    // the FRONT row must start below 148 and end above 166. The new tables
+    // (levels 3 and 4) extend the back row WEST along the free wall between
+    // the chopping boards (x<=1325) and the old back pair - the only stretch
+    // of the shack with room for a table that is not a station, a queue slot
+    // or a lane. Suite tripwire: `routes: both travel lanes are clear`.
     tables: [
-      { x: 1492, y: 158, dishes: 0, occupant: null },
-      { x: 1532, y: 158, dishes: 0, occupant: null },
-      { x: 1484, y: 134, dishes: 0, occupant: null },
-      { x: 1524, y: 134, dishes: 0, occupant: null },
+      { x: 1492, y: 158, dishes: 0, occupant: null, dirty: false, cleaning: false },
+      { x: 1532, y: 158, dishes: 0, occupant: null, dirty: false, cleaning: false },
+      { x: 1484, y: 134, dishes: 0, occupant: null, dirty: false, cleaning: false },
+      { x: 1524, y: 134, dishes: 0, occupant: null, dirty: false, cleaning: false },
+      { x: 1444, y: 134, dishes: 0, occupant: null, dirty: false, cleaning: false },
+      { x: 1404, y: 134, dishes: 0, occupant: null, dirty: false, cleaning: false },
     ],
     source: "crate", out: "pass", queueX: 1566,
     park: 1130, rack: 1208,
@@ -274,6 +284,11 @@ for (const k in BIZ) {   // one migration point: defaults = today's behavior
   // auto-manage: OFF for the player (you're the manager), ON for peer owners
   // (SUDSY has always run herself; the same rule table now does it out loud).
   BIZ[k].autoLabor = !!BIZ[k].owner && BIZ[k].owner !== "player";
+  // TIP SHARING (see the tips block): the fraction of every tip that goes to
+  // the crab who served instead of the till. 0 = how the till has always been
+  // paid, so the default moves nothing; the owner opens it on the SCHEDULE
+  // tab's PAY row. Peer owners keep their own number and start at 0 too.
+  BIZ[k].tipShare = 0;
 }
 function setBizHours(b, open, close) {
   const h = BIZ[b].hours;
@@ -323,14 +338,18 @@ function ownerFunds(b) {
 function bizDayBook(b) {   // today's per-business takings/costs (management screen + CPU policy signals)
   return today.biz[b] = today.biz[b] || { take: 0, cost: 0 };
 }
-function creditBiz(b, amt, x, y) {
+function creditBiz(b, amt, x, y, quiet) {   // quiet: the caller pops its own label (tips)
   const o = bizOwner(b);
   if (!o) return;                          // a shuttered shop takes no money
   bizDayBook(b).take += amt;
-  if (o === "player") { today.revenue += amt; earn(amt, x, y); }
+  if (o === "player") {
+    today.revenue += amt;
+    if (quiet) { coins += amt; lifetime += amt; earnHist.push({ t: time, amt }); sfx.coin(); }
+    else earn(amt, x, y);
+  }
   else {
     OWNERS[o].till += amt;
-    popText("+$" + Math.floor(amt), x, y, [150, 210, 255]);
+    if (!quiet) popText("+$" + Math.floor(amt), x, y, [150, 210, 255]);
     if (window._stats) window._stats.npcEarn = (window._stats.npcEarn || 0) + amt;
   }
 }
@@ -1514,7 +1533,7 @@ const UPS = {
   chef:  { name: "HIRE CRAB", base: 60, mult: 2.0, max: 6, lvl: 2 },
   grill: { name: "GRILL+",    base: 120, mult: 1.6, max: 2, lvl: 0 },
   board: { name: "BOARD+",    base: 90, mult: 1.6, max: 2, lvl: 0 },
-  table: { name: "TABLE+",    base: 60, mult: 1.5, max: 2, lvl: 0 },
+  table: { name: "TABLE+",    base: 60, mult: 1.5, max: 4, lvl: 0 },   // 2 to start, 4 more to buy: $60/90/135/203
   juicebar: { name: "JUICE BAR", base: 400, mult: 1, max: 1, lvl: 0 },
   arcade:   { name: "ARCADE",   base: 650, mult: 1, max: 1, lvl: 0 },
   cadegear: { name: "CADE GEAR+", base: 180, mult: 1, max: 1, lvl: 0 },
@@ -1529,11 +1548,23 @@ function stationCap(bizKey, kind) {
   if (bizKey === "juicebar" && kind === "juicer") return 2;
   return 1;
 }
-// the shack opens with two tables; more are bought
+// RETUNED AT THE MERGE. Busing is a real labour cost and it stacked on the
+// needs-failure work: growth escape read 2/8 with the branch's own 1.5s /
+// $9. The response is chaotic seed to seed (1.0/$9 -> 5/8, 1.2/$10 -> 8/8,
+// 1.5/$12 -> 8/8), so these two were chosen where the curve sits: 4/8 at day
+// 40 with baseline still 0/16. Only the feature's own knobs moved.
+const BUS_SECS = 1.3;   // clearing a table is a swipe of the plates, not a shower-stall scrub
+// The shack opens with TABLE_BASE tables; more are bought. TABLE_BASE stays
+// at TWO through the busing pass, and that was measured rather than assumed:
+// a third starting table was tried as compensation for the labour cost and
+// bought back only one day of the do-nothing curve (median eviction 5 -> 6),
+// because the crew, not the furniture, is what busing consumes. The
+// compensation that worked is the raised TABLE_TIP - see the tips block.
+const TABLE_BASE = 2;
 function bizTables(key) {
   const t = BIZ[key].tables;
   if (!t) return null;
-  return key === "shack" ? t.slice(0, 2 + UPS.table.lvl) : t;
+  return key === "shack" ? t.slice(0, TABLE_BASE + UPS.table.lvl) : t;
 }
 const spawnEvery = () => 7.5 / (0.7 + 0.01 * rep);   // word of mouth drives foot traffic
 
@@ -1557,7 +1588,8 @@ let manage = null;   // key of the player-owned business whose MANAGEMENT card i
 let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
   return { served: 0, revenue: 0, rage: 0, sick: [], died: [], recovered: [],
-    critical: [], walked: [], moved: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {} };
+    critical: [], walked: [], moved: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {},
+    tipsShared: 0, bused: 0 };
 }
 let screen = "title", hasSave = false, wiping = false;
 // SAVED TOWNS screen state (its own overlay, its own rect table)
@@ -2428,6 +2460,7 @@ function save() {
     musicOn, musNudges,
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
     mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
+    tipShare: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].tipShare || 0; return m; })(),
     hoursPol: hoursPolicyState,
     // THE WAGE: per-business rates here, per-crab deals (p.wage/p.wageOwner)
     // and grievance (p.gripe/p.wageJob/p.wageDay/p.walkout) inside the
@@ -2574,6 +2607,10 @@ function load(slot) {
     if (BIZ[b] && s.wage[b] != null) setBizWage(b, s.wage[b]);
   if (s.wagePol) for (const b in s.wagePol)
     if (BIZ[b] && s.wagePol[b]) wagePolicyState[b] = { cd: s.wagePol[b].cd || 0, lost: s.wagePol[b].lost || 0 };
+  // tip sharing: an old save has none, and 0 is the old behavior. Clamped and
+  // quantized on the way in, so a hand-edited 7.5 can't hand a crab 750%.
+  if (s.tipShare) for (const b in s.tipShare)
+    if (BIZ[b]) BIZ[b].tipShare = setTipShare(b, +s.tipShare[b] || 0);
   if (s.hoursPol) for (const b in s.hoursPol)
     if (BIZ[b] && s.hoursPol[b] && Array.isArray(s.hoursPol[b].hist))
       hoursPolicyState[b] = { hist: s.hoursPol[b].hist.slice(-4), cd: s.hoursPol[b].cd || 0 };
@@ -3705,7 +3742,11 @@ function abortErrand(c) {
   const k = c.errandCust;
   if (!k) return;
   if (k.stall) { k.stall.occupant = null; k.stall.dirty = true; k.stall = null; }
-  if (k.table) { k.table.occupant = null; k.table = null; }
+  // a table is now bused by staff, so it is released exactly like the stall:
+  // occupant off FIRST (busing requires !occupant), then flagged dirty so a
+  // crab is guaranteed to come and clear it. Leaving plates on an unflagged
+  // table would strand it - unseatable (dishes) and unbuseable (not dirty).
+  if (k.table) { k.table.occupant = null; k.table.dirty = true; k.table = null; }
   k.done = true; k.state = "leaving"; k.claimed = false;
   customers = customers.filter(q => q !== k);
   c.errandCust = null;
@@ -3804,6 +3845,10 @@ function abortChef(c) {
   // works again. Same shape as the stall-occupant leak abortErrand fixed.
   c.napT = 0; c.napFrom = null;
   c.wander = null; c.wanderT = 0; c.idleT = 0;
+  // ...and the table they were clearing: a table left flagged `cleaning` by a
+  // crab who died or got yanked mid-bus would stay dirty and unseatable for
+  // the rest of the run - the stall wedge, one furniture type over.
+  if (c.cleanTable) { c.cleanTable.cleaning = false; c.cleanTable = null; }
   c.kstate = "idle"; c.cust = null; c.carrying = null; c.stepIdx = 0;
 }
 
@@ -4078,7 +4123,8 @@ function tableShunned(t, skip) {
     Math.hypot(c.x + 8 - (t.x + 10), (c.y - (t.y + 12)) * 1.8) < SHUN_PX);
 }
 function pickSeat(tables, cust) {
-  const free = (tables || []).filter(t => !t.occupant && t.dishes === 0);
+  // a DIRTY table is not a table: it seats nobody until a crab has cleared it
+  const free = (tables || []).filter(t => !t.occupant && t.dishes === 0 && !t.dirty);
   if (!free.length) return null;
   if (cust && cust.isCrab) return free[0];
   // their OWN server is not "the crab at the next table": a filthy server is
@@ -4097,6 +4143,24 @@ function pickSeat(tables, cust) {
 function serverFilth(k) {
   const s = k.server;
   return s && s.p && !k.isCrab ? 1 + PATIENCE_FILTH * (crabBerth(s) / BERTH_PX) : 1;
+}
+// ------------------------------------------------- busing (the fancier tier)
+// A vacated table is DIRTY and seats nobody until a staff crab clears it -
+// the shower stalls' dirty/cleaning cycle, one furniture type over.
+// `|| t.dishes > 0` is a wedge guard rather than a second rule: it makes the
+// invariant "plates on an empty table ALWAYS get cleared" true by
+// construction, whatever route left them there.
+function messyTable(bizKey) {
+  const ts = bizTables(bizKey);
+  return ts && ts.find(t => (t.dirty || t.dishes > 0) && !t.cleaning && !t.occupant) || null;
+}
+function startBus(c, t) {
+  t.cleaning = true; c.cleanTable = t; c.kstate = "toTableClean";
+  // clampY: a front-row table sits at y=158, so its "at the table" spot is off
+  // the bottom of the walkable floor. Clamped it still lands inside collide()'s
+  // own exemption box for that table (|dy| < 8), so the busing crab is never
+  // shoved off the thing it came to clear.
+  setT(c, t.x + 2, clampY(t.y + 10));
 }
 function updateKitchen(c, dt) {
   if (c.cust && (c.cust.state === "leaving" || c.cust.served)) { abortChef(c); return; }
@@ -4148,7 +4212,25 @@ function updateKitchen(c, dt) {
         (k.state === "waiting" || k.state === "seatedWaiting") && !k.claimed && !k.served);
       const o = pending.find(k => k.isCrab && k.patience < k.maxPatience * 0.5)
         || pending.find(k => !k.isCrab) || pending[0];
-      if (o) {
+      // TURNING THE ROOM, when the room is what the queue is waiting for.
+      // Busing ONLY in the lull measured as a death spiral for table service:
+      // a shack with a queue is never idle, so the plates never got cleared,
+      // the dining room went permanently dirty and everybody ended up handed
+      // a plate at the counter (seed 99, 3 days: 47 guests seated -> 8).
+      // So a crab clears a table ahead of taking the next order - but only
+      // when there is genuinely nowhere clean left to seat that guest.
+      const bts0 = bizTables(bizKey);
+      // ...but NEVER ahead of a LOCAL. A neighbour in the line is a crab with
+      // a hunger meter and a death roll, and "the evening queue never reaches
+      // the local" is already a named trap in this town (see PLAN). Measured:
+      // letting a bus-run outrank a waiting local took the trudge's anti-spiral
+      // gate from 6 deaths / 12 towns to 15, because a slow crab arrived late
+      // AND then waited behind the plates. Tourists can wait; they only lose
+      // patience, and a tourist who has nowhere to sit is exactly the guest a
+      // cleared table is for.
+      const messyFirst = !c.pendingOff && bts0 && o && !o.isCrab && o.state === "waiting" &&
+        !bts0.some(t => !t.occupant && t.dishes === 0 && !t.dirty) && messyTable(bizKey);
+      if (o && !messyFirst) {
         // an order lands: the wander is over, wherever they got to. The walk
         // back to the crate is the entire cost of having drifted off.
         c.wander = null; c.wanderT = 0; c.idleT = 0; c.wanderCd = WANDER_CD;
@@ -4162,8 +4244,6 @@ function updateKitchen(c, dt) {
         const s0 = stationSpot(bizKey, biz.source, 0); setT(c, s0.x, s0.y);
         return;
       }
-      // (outdoor dining: guests bus their own tables - a staff-bused dining
-      //  room returns with a fancier restaurant later)
       const grubby = !c.pendingOff && biz.stalls && biz.stalls.find(t => t.dirty && !t.cleaning && !t.occupant);
       if (grubby) {
         c.wander = null; c.wanderT = 0; c.idleT = 0; c.wanderCd = WANDER_CD;
@@ -4171,6 +4251,10 @@ function updateKitchen(c, dt) {
         setT(c, grubby.x + 2, grubby.y + 7);
         return;
       }
+      // ...and otherwise busing is what a crab does in the lull, the same way
+      // it scrubs a stall. A shack with more tables than crabs runs behind.
+      const messy = messyFirst || (!c.pendingOff && messyTable(bizKey));
+      if (messy) { startBus(c, messy); return; }
     }
     // loiter by the door - but NOT inside the counter. The lower of the two
     // idle spots (y=156) sits squarely in the front-row solid band, which is
@@ -4249,6 +4333,20 @@ function updateKitchen(c, dt) {
       c.kstate = "idle";
       if (window._stats) window._stats.stallsCleaned = (window._stats.stallsCleaned || 0) + 1;
       popText("SPARKLING", c.x - 6, FLOOR_Y - 30, [140, 220, 255]);
+    }
+  } else if (c.kstate === "toTableClean") {
+    if (routedStep(c, spd, dt)) { c.workMax = c.workT = BUS_SECS / (crabWork(c) * crabEff(c)); c.kstate = "busingTable"; }
+  } else if (c.kstate === "busingTable") {
+    c.workT -= dt;
+    if (c.workT <= 0) {
+      if (c.cleanTable) {
+        c.cleanTable.dirty = false; c.cleanTable.cleaning = false; c.cleanTable.dishes = 0;
+        c.cleanTable = null;
+      }
+      c.kstate = "idle";
+      if (bizOwner(bizKey) === "player") today.bused = (today.bused || 0) + 1;
+      if (window._stats) window._stats.tablesBused = (window._stats.tablesBused || 0) + 1;
+      popText("CLEARED", c.x - 6, FLOOR_Y - 30, [140, 220, 255]);
     }
   } else if (c.kstate === "waitCash") {
     // step into the clear lane while waiting - squatting on the source spot
@@ -4361,6 +4459,72 @@ function creditAccomplishment(c, cust) {
     }
   }
 }
+// ---------------------------------------------------------------- tips
+// TIPS BELONG TO TABLE SERVICE (owner directive, 2026-08-19: "decrease or
+// eliminate tips on counter service it makes tables pointless").
+// A guest handed a plate over the pass drops the shrapnel in the jar; a guest
+// who was SAT DOWN, waited on, and had it brought out to them tips properly.
+// TIP_COUNTER is a TOKEN rather than zero on purpose: the jar by the till is
+// a real thing, a filthy or exhausted server should still be able to lose it,
+// and "the counter earns a little" keeps the comparison a curve instead of a
+// switch. The gap it opens IS the case for buying a table.
+const TIP_COUNTER = 0.15;
+// PAIRED-ARM PROBES (the `_noBerth` / `_noNeedDrag` idiom): `_fullCounterTip`
+// pays the counter the old full tip and `_selfBused` puts the outdoor rule
+// back, so any measurement in this pass can be reproduced against the build
+// it replaced without checking out another tree.
+// TIP SHARING is the owner's other lever: what fraction of a tip goes to the
+// crab who served it instead of the till. Their share lands in their WALLET -
+// the engine of the housing ladder - so a generous split costs the till and
+// buys you crew who can afford food, water and rent. Default 0 = how the game
+// has always paid, so an untouched town is untouched.
+const TIP_SHARE_STEP = 0.05;   // the slider's grain
+function bizTipShare(b) { return Math.max(0, Math.min(1, (BIZ[b] && BIZ[b].tipShare) || 0)); }
+// THE TABLE TIP - what a guest leaves on the table on their way out - is now
+// the headline difference between being waited on and being handed a plate.
+// It went $5 -> $9 with staff busing (2026-08-19), and it is the paid-for
+// half of that trade rather than a sweetener: clearing tables costs the crew
+// real hours, and the do-nothing town (which HAS tables) has to be able to
+// buy those hours out of the same guests. Measured: busing alone took the
+// baseline from a day-14 eviction to day 5; the raised table tip is what
+// brings it back, and it lands entirely on TABLE service, so it widens the
+// counter/table gap instead of papering over it.
+const TABLE_TIP = 9;
+function tableTipOf(b) { return TABLE_TIP; }
+// One tip, two pockets. `payTip` is the ONLY place a tip is split, so the
+// slider means exactly the same thing for the tip at the table and the tip in
+// the jar. The crab's cut lands in their WALLET - the housing ladder's fuel.
+function payTip(bizKey, server, amt, x, y) {
+  if (!(amt >= 0.5)) return;
+  const cut = amt * bizTipShare(bizKey), till = amt - cut;
+  // ONE POP PER TIP (owner report: "the tip popup appears twice, one with the
+  // word tip and once without"). creditBiz already pops the money going into
+  // the till, so the till's share is credited SILENTLY here and labelled once,
+  // in gold, as a tip. The crab's share gets its own pop over the crab, which
+  // is a different event in a different place - that one is not a duplicate.
+  if (till >= 0.5) {
+    creditBiz(bizKey, till, x, y, true);
+    popText("+$" + Math.round(till) + " TIP", x - 8, y - 8, [255, 216, 96]);
+  }
+  if (cut > 0 && server && server.p) {
+    server.p.wallet += cut;
+    if (bizOwner(bizKey) === "player") today.tipsShared = (today.tipsShared || 0) + cut;   // the day report is the PLAYER's books
+    if (cut >= 0.5) popText("+$" + Math.round(cut) + " TIP", server.x - 8, server.y - 26, [255, 216, 96]);
+  }
+  if (window._stats) {
+    window._stats.tipTill = (window._stats.tipTill || 0) + till;
+    window._stats.tipCrab = (window._stats.tipCrab || 0) + cut;
+  }
+}
+// the one write path: clamp to 0..1 and snap to the slider's grain, so the
+// number on the card is always the number the till is paying out
+function setTipShare(b, v) {
+  // round the product too: 7 x 0.05 is 0.35000000000000003 in binary floating
+  // point, and that number would go into the save file and onto the card
+  const q = Math.max(0, Math.min(1, Math.round(Math.round((+v || 0) / TIP_SHARE_STEP) * TIP_SHARE_STEP * 100) / 100));
+  if (BIZ[b]) BIZ[b].tipShare = q;
+  return q;
+}
 function payAndBenefit(c, cust) {
   today.served++;
   // trade ledger: tracked input flows (T1 bookkeeping - nothing charged here)
@@ -4401,14 +4565,23 @@ function payAndBenefit(c, cust) {
   } else {
     const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0))
       * (1 - ((c.p.tired || 0) >= 0.85 ? 0.15 : 0));   // an EXHAUSTED server fumbles the charm (0.85 = the mood line; evenings routinely reach the old 0.66)
-    const tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult;
+    // TABLE SERVICE KEEPS THE WHOLE TIP; the counter keeps a token of it.
+    // `seatedWaiting` is exactly "this plate is going out to a seated guest" -
+    // serve() calls us before it flips them to dining.
+    const seated = cust.state === "seatedWaiting";
+    const tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult
+      * (seated || window._fullCounterTip ? 1 : TIP_COUNTER);   // the flag is the paired-arm probe
     // one price on the menu, one price on the pop: the base. The tip is its
     // own little moment (Matt: 'are tacos 17 or 23? there are discrepancies')
     creditBiz(cust.biz, cust.recipe.pay, cust.x, 126);
-    if (tip >= 0.5) {
-      creditBiz(cust.biz, tip, cust.x, 108);   // credited separately, popped separately
-      popText("+$" + Math.round(tip) + " TIP", cust.x - 8, 100, [255, 216, 96]);
+    if (window._stats) window._stats.basePay = (window._stats.basePay || 0) + cust.recipe.pay;
+    if (window._stats) {
+      window._stats[seated ? "tipTableN" : "tipCounterN"] = (window._stats[seated ? "tipTableN" : "tipCounterN"] || 0) + 1;
+      window._stats.tipGross = (window._stats.tipGross || 0) + tip;
+      const gk = seated ? "tipGrossTable" : "tipGrossCounter";
+      window._stats[gk] = (window._stats[gk] || 0) + tip;
     }
+    payTip(cust.biz, c, tip, cust.x, 108);   // credited separately, popped separately
     popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
   }
 }
@@ -4427,6 +4600,14 @@ function serve(c) {
     if (window._stats && bizOwner(cust.biz) !== "player")
       window._stats.npcServes = (window._stats.npcServes || 0) + 1;
     c.cust = null; c.carrying = null; c.kstate = "idle"; c.stepIdx = 0;
+    // CLEAR THE NEXT TABLE ON THE WAY BACK. The server is standing IN the
+    // dining room with an empty tray - the one moment in the day when busing
+    // costs a few steps instead of a lap of the shack. Measured: with busing
+    // dispatched only from the idle loop the crab walked from the crate (x1232)
+    // to the tables (x1490) and back for every single plate, and the baseline
+    // town died on day 5 instead of day 14. Doing it here is the same labour,
+    // paid at the honest price.
+    if (!c.pendingOff) { const nxt = messyTable(cust.biz); if (nxt) startBus(c, nxt); }
     return;
   }
   if (cust && cust.state === "waiting") {
@@ -4538,11 +4719,25 @@ function updateCustomers(dt) {
     } else if (k.state === "dining") {
       k.dineT -= dt;
       if (k.dineT <= 0) {
-        k.table.dishes = 0;              // outdoor spot: everyone buses their own table
+        // THE FANCIER TIER ARRIVED (owner directive: "add table cleanup").
+        // Guests used to bus their own - the outdoor-casual rule. Now they
+        // leave the plates where they lie and a STAFF crab clears the table
+        // before it can seat again, exactly the shower stalls' dirty/cleaning
+        // cycle. Dirty tables idle your seating, so more tables means more
+        // busing, which means more staff or slower service: that labour cost
+        // is what makes a table a decision instead of a free upgrade.
+        // occupant is released FIRST and unconditionally - a table that stayed
+        // occupied could never be cleaned (busing requires !occupant), which
+        // is the exact shape of the old stall wedge.
         k.table.occupant = null;
+        if (window._selfBused) k.table.dishes = 0;        // paired-arm probe: the old outdoor rule
+        else { k.table.dishes = 1; k.table.dirty = true; }   // the plates stay on the table
         if (!k.isCrab) {
-          creditBiz(k.biz, 5, k.x, 130); // table tip on the way out (tourists)
-          popText("TABLE TIP", k.x - 10, 122, [140, 255, 160]);
+          const tt = tableTipOf(k.biz);
+          payTip(k.biz, k.server, tt, k.x, 130);   // table tip on the way out (tourists), split like any other
+          if (window._stats) window._stats.tableTip = (window._stats.tableTip || 0) + tt;
+          // (payTip pops the gold "+$N TIP" - a second label here was the
+          //  third pop on one tip)
         }
         k.state = "leaving";
       }
@@ -4628,6 +4823,7 @@ function crabStatus(c) {
     if (c.kstate === "work" && c.slotKind === "board") return "CHOPPING";
     if (c.kstate === "work" && c.slotKind === "grill") return "GRILLING";
     if (c.kstate === "toStallClean" || c.kstate === "cleaningStall") return "SCRUBBING A STALL";
+    if (c.kstate === "toTableClean" || c.kstate === "busingTable") return "BUSING A TABLE";
     if (c.kstate === "work") return "GRABBING FOOD";
     if (c.carrying) return "CARRYING " + ITEM_NAMES[c.carrying];
     if (c.kstate === "waitCash") return "SHORT ON CASH!";
@@ -4767,7 +4963,8 @@ function logShiftEnd(c) {
 }
 function logServe(c, cust) {
   if (!c || !c.p || !cust.recipe) return;
-  const who = cust.isCrab ? (cust.crab && cust.crab.p.name) || "A NEIGHBOUR" : cust.name.split(" ")[0];
+  const who = cust.isCrab ? (cust.crab && cust.crab.p.name) || "A NEIGHBOUR"
+    : (cust.name || "A TOURIST").split(" ")[0];   // a guest without a name is still a sale
   crabLogEvery(c, "serve", LOG_SERVE_GAP, "work",
     "SERVED A " + (ITEM_NAMES[cust.recipe.icon] || "PLATE") + " TO " + who);
 }
@@ -4854,26 +5051,46 @@ function tryBuy(key) {
   sfx.buy(); save();
 }
 
+// THE TIP SLIDER is a real slider: tap anywhere on the track to set it, or
+// hold and drag the thumb. One write path (setTipShare) does the clamping and
+// the 5% snap, so the number drawn is always the number being paid.
+let tipDrag = false;
+function tipSliderTo(bizKey, px) {
+  const tr = manageRects().tipTrack;
+  setTipShare(bizKey, (px - tr.x - 3) / (tr.w - 7));
+}
+function tipTrackHit(p) {
+  if (!manage || manageTab !== "SCHEDULE" || dossier || saveView) return false;
+  const tr = manageRects().tipTrack;
+  return p.x >= tr.x - 4 && p.x < tr.x + tr.w + 4 && p.y >= tr.y - 3 && p.y < tr.y + tr.h + 3;
+}
 let dragging = false, dragStartX = 0, dragCamX = 0, dragMoved = false;
 cv.addEventListener("mousedown", (ev) => {
   if (ev.button !== 0) return;   // right button is for orders - it must not pan or drop the follow
   const p = evPos(ev);
+  if (tipTrackHit(p)) { tipDrag = true; return; }   // grabbing the thumb must never pan the town behind the card
   if (p.y < PANEL_Y) { dragging = true; dragStartX = p.x; dragCamX = camX; dragMoved = false; }
 });
 addEventListener("mousemove", (ev) => {
+  if (tipDrag) { tipSliderTo(manage, evPos(ev).x); return; }
   if (!dragging) return;
   const p = evPos(ev);
   if (Math.abs(p.x - dragStartX) > 4) { dragMoved = true; followIdx = -1; followNpc = null; followCust = null; }   // camera only: sel survives the pan
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 });
-addEventListener("mouseup", () => { dragging = false; setTimeout(() => { dragMoved = false; }, 50); });
+addEventListener("mouseup", () => {
+  if (tipDrag) { tipDrag = false; sfx.buy(); save(); }
+  dragging = false; setTimeout(() => { dragMoved = false; }, 50);
+});
 cv.addEventListener("touchstart", (ev) => {
   const t = ev.touches[0];
   const p = evPos(t);
   if (window.MergeMode && MergeMode.touchStart(p)) return;
+  if (tipTrackHit(p)) { tipDrag = true; return; }
   if (p.y < PANEL_Y) { dragging = true; dragStartX = p.x; dragCamX = camX; dragMoved = false; }
 }, { passive: true });
 cv.addEventListener("touchmove", (ev) => {
+  if (tipDrag) { ev.preventDefault(); tipSliderTo(manage, evPos(ev.touches[0]).x); return; }
   if (window.MergeMode && MergeMode.touchMove(evPos(ev.touches[0]))) { ev.preventDefault(); return; }
   if (!dragging) return;
   ev.preventDefault();
@@ -4882,10 +5099,12 @@ cv.addEventListener("touchmove", (ev) => {
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 }, { passive: false });
 cv.addEventListener("touchcancel", () => {
+  tipDrag = false;
   dragging = false; dragMoved = false;
   if (window.MergeMode && MergeMode.touchCancel) MergeMode.touchCancel();
 }, { passive: true });
 cv.addEventListener("touchend", (ev) => {
+  if (tipDrag) { tipDrag = false; dragging = false; dragMoved = false; sfx.buy(); save(); return; }
   const t = ev.changedTouches && ev.changedTouches[0];
   if (window.MergeMode && MergeMode.touchEnd(t ? evPos(t) : null)) { dragging = false; dragMoved = false; return; }
   setTimeout(() => { dragging = false; dragMoved = false; }, 50);
@@ -4996,6 +5215,7 @@ cv.addEventListener("click", (ev) => {
           : BIZ[manage].short + ": YOU'RE CALLING THE SHIFTS", t: 5 };
         return;
       }
+      if (hit(R.tipTrack)) { tipSliderTo(manage, pt.x); sfx.buy(); save(); return; }
       if (hit(R.sickPol)) {
         b.sickPol = b.sickPol === "require" ? "grant" : "require"; sfx.buy(); save();
         toast = { text: BIZ[manage].short + " SICK DAYS: " + SICK_POL_LABEL[b.sickPol], t: 5 };
@@ -5584,13 +5804,13 @@ function drawCrab(c) {
     wblit(BUGGIES2[c.p.color], c.x - 16, ROAD_Y1 - BUGGIES2[0].h, c.flip);
     return;
   }
-  // THE MICROSLEEP wears the night-time sleep pose and the Z drift that were
-  // already in the game - eyes shut, shell breathing, a Z rising off it -
-  // except this crab is stood at a grill with a taco on it. Same for a crab
-  // who slept rough: they get the pose wherever they went down.
+  // (both features touched these three: the nap/chat/rough poses from the
+  //  needs work, and busing as a working pose from the table work)
   const napping = (c.napT || 0) > 0;
   const chatting = c.dayState === "chat";
-  const working = !napping && (c.kstate === "work" || c.kstate === "cleaningStall") && c.dayState === "working";
+  const working = !napping &&
+    (c.kstate === "work" || c.kstate === "cleaningStall" || c.kstate === "busingTable") &&
+    c.dayState === "working";
   const moving = !napping && !chatting &&
     (c.dayState !== "home" || Math.hypot((c.tx || c.x) - c.x, (c.ty || c.y) - c.y) > 2);
   const sleeping = napping || (!moving && c.dayState === "home" && (darkness() > 0.7 || c.p.rough));
@@ -6419,6 +6639,11 @@ function manageRects() {
     wm: { x: x + 40, y: y + 45, w: 16, h: 15 },
     wp: { x: x + 82, y: y + 45, w: 16, h: 15 },
     wall: { x: x + 102, y: y + 45, w: 46, h: 15 },
+    // ...and directly under it the PAY row group's tip-share track. The two
+    // features were built in parallel and both claimed this band; the wage
+    // steppers keep y+45 and the slider takes y+62, with the roster pushed
+    // down to y+78 to make room for both.
+    tipTrack: { x: x + 46, y: y + 62, w: 120, h: 12 },
     rows: [], cells: [],
     // ---- TOWN tab
     csort: { x: x + 6, y: y + 31, w: 62, h: 13 },
@@ -6430,7 +6655,7 @@ function manageRects() {
   };
   MANAGE_TABS.forEach((t, i) => R.tab[t] = { x: x + 6 + i * 52, y: y + 16, w: 50, h: 12 });
   for (let i = 0; i < 7; i++) {
-    const ry = y + 67 + i * 11;
+    const ry = y + 78 + i * 11;   // below the PAY row group (wage steppers + tip slider)
     R.rows.push({ x: x + 6, y: ry, w: w2 - 12, h: 11 });
     R.cells.push({                                     // one row, six tap targets (OFF is derived: display only)
       name:  { x: x + 6,   y: ry, w: 34, h: 11 },
@@ -6510,6 +6735,26 @@ function drawManage() {
     const auto = !!b.autoLabor;
     chip(R.auto, "AUTO-MANAGE " + (auto ? "ON" : "OFF"), null, auto);
     chip(R.sickPol, "SICK: " + (b.sickPol === "require" ? "MUST WORK" : "GRANT"), null, b.sickPol !== "require");
+
+    // ---- PAY: the tip-share slider (its own row group, above the roster)
+    const share = bizTipShare(key), pct = Math.round(share * 100), tr = R.tipTrack;
+    smallText(ctx, "TIPS", x + 8, tr.y + 4, [58, 42, 38]);
+    rect(ctx, tr.x, tr.y, tr.w, tr.h, [30, 20, 36]);
+    rect(ctx, tr.x + 1, tr.y + 1, tr.w - 2, tr.h - 2, [235, 225, 205]);
+    rect(ctx, tr.x + 1, tr.y + 1, Math.round((tr.w - 2) * share), tr.h - 2, [190, 140, 80]);   // the crew's share, filled
+    const th = tr.x + Math.round((tr.w - 7) * share);
+    rect(ctx, th, tr.y - 1, 7, tr.h + 2, [58, 42, 38]);                                        // the thumb
+    rect(ctx, th + 1, tr.y, 5, tr.h, [255, 250, 235]);
+    smallText(ctx, pct + "%", tr.x + tr.w + 5, tr.y + 4, pct ? [190, 110, 40] : [150, 140, 160]);
+    smallText(ctx, "CREW", tr.x + tr.w + 26, tr.y + 4, [110, 100, 110]);
+    // both hints share this line, so the long one has to leave room for
+    // "TAP A ROW" on the right at the 3x5 font's ~4px a character
+    const hint = pct === 0 ? "EVERY TIP GOES TO THE TILL"
+      : pct === 100 ? "THE TILL KEEPS NONE OF IT"
+      : "CREW POCKET " + pct + "% OF EVERY TIP";
+    smallText(ctx, hint, x + 6, y + 60, pct ? [190, 110, 40] : [150, 140, 160]);
+    const rowHint = auto ? "AUTO ROTA" : "TAP A ROW";
+    smallText(ctx, rowHint, x + w2 - 6 - smallTextWidth(rowHint), y + 60, [110, 100, 110]);
     const staff = allCrabs().filter(c => c.p.job === key);
     // ---- THE WAGE. Shop rate on the left with real steppers, APPLY TO ALL
     // beside it, and the consequences written out on the right: what tonight's
@@ -6972,7 +7217,8 @@ function jobBoardCensusRect() { return { x: 46, y: 22 + 158 - 16, w: 60, h: 13 }
 function drawReport() {
   if (!report || reportT <= 0) return;
   const creditLines = (report.drew ? 1 : 0) + (report.interest ? 1 : 0) +
-    (report.loanPaid ? 1 : 0) + (report.debt ? 1 : 0);
+    (report.loanPaid ? 1 : 0) + (report.debt ? 1 : 0)
+    + (report.tipsShared ? 1 : 0) + (report.bused ? 1 : 0);   // the table-service ledger
   const w2 = 176, x = ((W - w2) / 2) | 0, y = 24, h2 = 118 + creditLines * 8 + (report.off ? 8 : 0);
   ctx.fillStyle = "rgba(16,12,30,0.55)";
   ctx.fillRect(0, 0, W, PANEL_Y);
@@ -6988,6 +7234,8 @@ function drawReport() {
   };
   line("GUESTS SERVED", report.served, [40, 110, 60]);
   line("TAKINGS", "$" + fmt(report.revenue), [40, 110, 60]);
+  if (report.tipsShared) line("TIPS TO THE CREW", "$" + fmt(report.tipsShared), [190, 110, 40]);
+  if (report.bused) line("TABLES BUSED", report.bused, [70, 90, 130]);
   line("WALKED OUT ANGRY", report.rage, report.rage > 2 ? [180, 60, 60] : [110, 100, 110]);
   line("WAGES PAID", "-$" + fmt(report.wages), [150, 70, 60]);
   line("RENT", "-$" + fmt(report.rent), [150, 70, 60]);
@@ -7323,6 +7571,7 @@ function frame(now) {
         repStart: Math.round(today.repStart), repEnd: Math.round(rep),
         best: Object.keys(today.byCrab).sort((a, b) => today.byCrab[b] - today.byCrab[a])[0],
         bestN: 0, coins: Math.round(coins),
+        tipsShared: Math.round(today.tipsShared || 0), bused: today.bused || 0,
         drew: fin.drew, interest: fin.interest, loanPaid: fin.paid, debt: Math.round(credit.bal),
       };
       if (report.best) report.bestN = today.byCrab[report.best];
@@ -7403,7 +7652,9 @@ function frame(now) {
     const t = clampCam(followed.x - W / 2 + 8);
     camX += (t - camX) * Math.min(1, dt * 5);
   }
-  if (reportT > 0 && !ffSleep) reportT -= dt;   // the day report waits out a sun-skip
+  const reading = boardView || manage || saveView || dossier;
+  if (reportT > 0 && !ffSleep && !reading) reportT -= dt;   // waits out a sun-skip, and waits behind an open card
+  if (toast && reading) toast.t = Math.max(toast.t, 0.4);   // a toast holds while you read, then plays out
   if (newConfirmT > 0) newConfirmT -= dt;
   if (toast) { toast.t -= dt; if (toast.t <= 0) toast = null; }
   saveT += dt; if (saveT > 5) { saveT = 0; save(); }
@@ -7433,6 +7684,13 @@ function frame(now) {
     if (tables) for (const t of tables) paint.push({ base: t.y, f: () => {
       wblit(PICNIC_TABLE, t.x, t.y - PICNIC_TABLE.h);
       if (t.dishes > 0) wblit(DISHES[t.dishes - 1], t.x + 6, t.y - PICNIC_TABLE.h - DISHES[t.dishes - 1].h + 1);
+      // an abandoned table wears the stalls' crumb-flecks, so "waiting to be
+      // bused" reads at a glance from across the boardwalk
+      if (t.dirty) {
+        px(ctx, t.x + 3 - camX, t.y - 2, [200, 180, 120]);
+        px(ctx, t.x + 13 - camX, t.y - 1, [180, 160, 110]);
+        px(ctx, t.x + 9 - camX, t.y - 3, [200, 180, 120]);
+      }
     } });
     const stalls = BIZ[key].stalls;
     if (stalls) for (const t of stalls) paint.push({ base: t.y, f: () => {
@@ -7501,7 +7759,11 @@ function frame(now) {
   }
   drawNight();
   drawJobBoard();
-  drawReport();
+  // A READING SURFACE OWNS THE SCREEN (owner report: "events appear at same
+  // time as ledger and block it out"). The day report and toasts wait their
+  // turn - reportT is paused below rather than burned down behind the card,
+  // so nothing is missed, it just arrives when you close what you opened.
+  if (!boardView && !manage && !saveView && !dossier) drawReport();
   drawManage();
   drawDossier();   // above the management card: a census row opens a dossier ON TOP of it
   drawFollowCard();
@@ -7541,7 +7803,7 @@ function frame(now) {
     }
   }
   drawPanel();
-  drawToast();
+  if (!boardView && !manage && !saveView && !dossier) drawToast();   // reading surfaces own the screen
   if (gameOver) drawGameOver();
   drawSaveScreen();
   if (window.MergeMode) MergeMode.frame(dt);
