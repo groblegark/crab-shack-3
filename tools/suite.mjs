@@ -1377,9 +1377,21 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // walk home by midnight (seed 1337 DRIFT was stranded at x1549 mid-
   // promenade; he now sleeps at his cottage, x2136). See PLAN's routing
   // entry for the measured matrices.
+  // RE-BASELINED AGAIN at the public-taps merge. Receipt, and it is a small
+  // one: the town gained a place to drink, so the crab who could never reach
+  // a counter stopped walking the promenade at midnight. On seed 1337 EVERY
+  // number is byte-identical - coins, rep, serves, rage, till, all five
+  // wallets - and the ONLY thing that moved is SUDSY: (743.8, 167.6), still
+  // out on the boardwalk at midnight, becomes (388, 154), asleep at home.
+  // On seed 4242 the same move, plus the trade the tap makes explicit: she
+  // drinks free water instead of buying, so her wallet holds 40 instead of 18
+  // and the player's till is $19 lighter (233.0 -> 214.0, crabServes 3 -> 2).
+  // That is the juice-bar-vs-tap tension in a single seed, and it is the
+  // intended shape: the tap costs the shack a marginal local sale and buys
+  // the town a crab who is not dying of thirst.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":224.84,"rep":46.8523,"catch":1,"serves":32,"crabServes":3,"rage":4,"till":132.67,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",0],["DRIFT",0]],"pos":[[520,154],[108,154],[743.8,167.6],[2072,154],[2136,154]]}',
-    4242: '{"day":3,"tmin":0,"coins":233.006,"rep":53.3195,"catch":1,"serves":39,"crabServes":3,"rage":2,"till":200.042,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",18],["SALTY",1],["DRIFT",5]],"pos":[[520,154],[183.8,150],[783.9,167.5],[2072,154],[2136,154]]}',
+    1337: '{"day":3,"tmin":0,"coins":224.84,"rep":46.8523,"catch":1,"serves":32,"crabServes":3,"rage":4,"till":132.67,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",0],["DRIFT",0]],"pos":[[520,154],[108,154],[388,154],[2072,154],[2136,154]]}',
+    4242: '{"day":3,"tmin":0,"coins":214.006,"rep":53.3195,"catch":2,"serves":39,"crabServes":2,"rage":2,"till":200.042,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",1],["DRIFT",5]],"pos":[[520,154],[108,154],[388,154],[2072,154],[2136,154]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -1915,8 +1927,17 @@ scenario("auto-manage: grants a sick day and calls OT for the gap, without wedgi
     for (const c of crabs) { c.p.job = "shack"; c.p.sickPol = null; delete c.p.sickPol; c.p.ot = false; }
     crabs[0].p.shift = "M"; crabs[1].p.shift = "E";
     crabs[0].p.sick = { days: 1 }; }`);
-  // rule 1 (REST) fires at the next settlement: the manager sends them home
-  sim.runUntil("lastRentDay === day", { maxSteps: 400000,
+  // rule 1 (REST) fires at a settlement: the manager sends them home.
+  // RE-POINTED at the public-taps merge - the fixture, not the rule. It used
+  // to demand the grant at the FIRST settlement, which only worked while the
+  // crab reliably failed that night's cure roll: the illness block runs before
+  // runLaborPolicy in the same frame, so a crab who recovers is simply not
+  // there for the manager to send home (the onTick re-arms sickness between
+  // frames, not inside one). A hydrated town cures faster, so the first
+  // settlement now often cures them. The rule under test is "an ill crab under
+  // REQUIRE gets sent home", not "on night one", so we wait for the manager to
+  // do it - bounded, and still failing loudly if it never happens.
+  sim.runUntil(`crabs[0] && sickPolFor(crabs[0]) === "grant"`, { maxSteps: 900000,
     onTick: (G) => { if (G("coins") < 600) G("coins = 2000"); G('if (crabs[0]) crabs[0].p.sick = crabs[0].p.sick || { days: 1 };'); } });
   if (sim.G(`!crabs[0] || sickPolFor(crabs[0]) !== "grant"`))
     return "auto-manage never granted the sick day: " + sim.G("crabs[0] ? sickPolFor(crabs[0]) : 'gone'");

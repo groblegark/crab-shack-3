@@ -946,6 +946,46 @@ const MEMORIAL = parseArt([
   "KGGKGGKGGK",
 ], PAL);
 
+// ---------------------------------------------------------------- public tap
+// The town standpipe: a cast-iron post with a gooseneck spout and a stone
+// catch-basin, one on the promenade by the notice board and one at the foot
+// of the pier. Free water is a piece of TOWN INFRASTRUCTURE, so it is drawn
+// like infrastructure - same weight of outline as the shelter and the board.
+const STANDPIPE = parseArt([
+  "...KKKK....",
+  "..KMLLMK...",
+  "..KMMMMK...",
+  "..KMMMMKKK.",
+  "..KMMMMKMMK",
+  "..KMLMMKKKK",
+  "..KMMMMK...",
+  "..KMMMMK...",
+  "..KMMMMK...",
+  "..KMMMMK...",
+  ".KKMMMMKK..",
+  ".KMMMMMMK..",
+  "KKMMMMMMKK.",
+  "KUCCCCCCUK.",
+  "KUUUUUUUUK.",
+  "KKKKKKKKKK.",
+], PAL);
+// two frames of water falling from the spout into the basin - only drawn
+// while somebody is actually drinking, so a dry tap reads as a dry tap
+const TAP_FLOW = [
+  parseArt([
+    ".C.",
+    ".C.",
+    "C.C",
+    ".C.",
+  ], PAL),
+  parseArt([
+    ".C.",
+    "C.C",
+    ".C.",
+    "C.C",
+  ], PAL),
+];
+
 // ================================================================ fishing art
 // fishing rod held out over the water (two bob frames)
 const ROD = [

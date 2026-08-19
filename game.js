@@ -49,6 +49,40 @@ function freeBerth() {
   for (let i = 0; i < BOAT_BERTHS.length; i++) if (!used.has(i)) return i;
   return -1;
 }
+// ------------------------------------------------------------ the public tap
+// WATER IS NOT A LUXURY GOOD. Before this, the only way to quench a thirst was
+// to BUY a drink from a STAFFED counter - so a crab whose own shift covered
+// every hour the counters were staffed (SUDSY, the fishers, anyone on a long
+// day) could go a fortnight without a single drink, and townsfolk had no
+// self-serve fallback at all. That is an environment bug, not a crab bug, and
+// the fix is environmental: the town has taps. Two standpipes, free, always
+// on, no queue, no staff, no till - the floor under every crab's thirst.
+//
+// The JUICE BAR keeps its business by design, three ways:
+//   1. plain water only QUENCHES (TAP_QUENCH off the meter); a juice ZEROES it,
+//      so a bought drink buys about twice the runway,
+//   2. the tap is no treat - TAP_APPEAL halves its pull in the errand score, so
+//      a crab standing near a counter it can afford still buys the juice,
+//   3. it is slower: a real stop at the spout, not a plate handed over.
+// The taps also carry a COLD RINSE for a crab who is filthy and cannot get to
+// a shower - deliberately worse than a $5 rinse and pitched far above the
+// shower threshold, so it only ever catches crabs the showers were never
+// going to serve (see pickErrand).
+const WATER_TAPS = [
+  { x: 640, name: "THE TOWN TAP" },    // promenade, beside the notice board
+  { x: 1844, name: "THE PIER TAP" },   // foot of the pier, where the catch gets hosed down
+];
+const TAP_AT = 0.7;         // you'd BUY a drink at 0.45; you walk to the standpipe once
+                             // you're properly thirsty. That gap is deliberate: the juice
+                             // bar gets first refusal on every thirst, and free water only
+                             // ever picks up what the counters did not.
+const TAP_QUENCH = 0.6;      // plain water takes the edge off; a juice takes it all
+const TAP_SIP = 3.2;         // seconds at the spout - slower than a drink handed to you
+const TAP_APPEAL = 0.5;      // half the pull of a bought drink at the same distance
+const TAP_CD = 20;           // errand cooldown after a sip
+const TAP_RINSE = 0.35;      // a cold rinse under the spout: worse than a $5 shower
+const TAP_RINSE_AT = 0.85;   // ...and only when filthy - the showers own 0.66 upward
+const TAP_RINSE_SICK = 0.66; // an ill crab hoses down at the CARED bar, shower or no shower
 let townCatch = 6;   // the day's landed fish, crate-side
 let rep = 30;        // word of mouth (0-100): happy guests talk, rage-quits talk louder
 const HOME_BOTTOM = 160;   // house/shelter interiors reach the floor
@@ -346,9 +380,9 @@ function creditDueTonight() {   // cash the bank will auto-collect at 20:00
   const int2 = Math.ceil(credit.bal * CREDIT_CFG.RATE);
   return Math.min(credit.bal + int2, int2 + Math.ceil(credit.bal * CREDIT_CFG.MIN_FRAC) + CREDIT_CFG.MIN_BASE);
 }
-function bizDark(b) {   // an NPC shop shuttered by the bank after a bankruptcy
+function bizDark(b) {   // an NPC shop shuttered by the bank after a bankruptcy - or by a death
   const o = OWNERS[bizOwner(b)];
-  return !!(o && (o.darkT || 0) > 0);
+  return !!(o && ((o.darkT || 0) > 0 || o.gone));
 }
 // Bankruptcy prediction (design rule: the player is warned IN ADVANCE).
 // Seeded by the headless buyer's reserve math (cost + tonight's bill +
@@ -507,6 +541,10 @@ function sickPolFor(c) {
 // THE predicate: the commute gate, both wage loops, the BILL forecast, the
 // coverage math and the placard all read it.
 function onSickDay(c) { return !!c.p.sick && sickPolFor(c) === "grant"; }
+// far enough into an illness that tonight's settlement can take them. One
+// predicate, three surfaces: the status line, the follow card's tag and the
+// dossier's HEALTH row - the town SEES it coming.
+function gravelyIll(c) { return !!c.p.sick && (c.p.sick.days || 0) >= deathArmsAt(careLane(c)) - 1; }
 
 // ---- THE CARED SEAM (closed 2026-08-18) ------------------------------------
 // Recovery's care check read only hunger and dirt - it predated thirst and
@@ -815,7 +853,7 @@ let manage = null;   // key of the player-owned business whose MANAGEMENT card i
 let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
   return { served: 0, revenue: 0, rage: 0, sick: [], died: [], recovered: [],
-    moved: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {} };
+    critical: [], moved: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {} };
 }
 let screen = "title", hasSave = false, wiping = false;
 // SAVED TOWNS screen state (its own overlay, its own rect table)
@@ -889,6 +927,7 @@ const HOUSES2 = HOUSES.map(scale2);
 const HOUSE_EMPTY2 = scale2(HOUSE_EMPTY);
 const SHELTER2 = scale2(SHELTER);
 const NOTICE2 = scale2(NOTICE_BOARD);
+const STANDPIPE2 = scale2(STANDPIPE);
 const BUS2 = scale2(BUS);
 const BUGGIES2 = BUGGIES.map(scale2);
 
@@ -1250,7 +1289,8 @@ function save() {
     dayLog: (window.dayLog || []).slice(-6),   // keeps the forecaster warm across reloads
     personas: crabs.map(c => c.p),
     npc: { tills: { sudsy: OWNERS.sudsy.till },
-      credit: { sudsy: { bal: OWNERS.sudsy.credit || 0, darkT: OWNERS.sudsy.darkT || 0 } },
+      credit: { sudsy: { bal: OWNERS.sudsy.credit || 0, darkT: OWNERS.sudsy.darkT || 0,
+        gone: OWNERS.sudsy.gone || 0 } },
       personas: npcs.map(c => c.p) },
     board: jobBoard, hireDay, trade, sudsRefund: sudsRefunded, firstPour,
     musicOn, musNudges,
@@ -1306,6 +1346,7 @@ function load(slot) {
     if (s.npc.credit && s.npc.credit.sudsy) {
       OWNERS.sudsy.credit = s.npc.credit.sudsy.bal || 0;
       OWNERS.sudsy.darkT = s.npc.credit.sudsy.darkT || 0;
+      OWNERS.sudsy.gone = s.npc.credit.sudsy.gone || 0;   // a shop whose owner died stays shut
     }
     // every townsfolk persona comes back (wallet, homeless, house), matched by
     // name; unmatched ones are drifters who moved to town mid-save - rebuild them
@@ -1323,11 +1364,16 @@ function load(slot) {
         if (n.p.boat != null) n.fishSpot = boatSpot(n.p.boat);   // fish from their own deck
       } else {
         const c = newCrab(Object.assign({ npc: true }, sp));
-        if (c.p.fisher) c.fishSpot = c.p.boat != null ? boatSpot(c.p.boat)
-          : fishSpotFor(npcs.filter(k => k.p.fisher).length);
+        if (c.p.fisher) c.fishSpot = c.p.boat != null ? boatSpot(c.p.boat) : freeFishSpot();
         c.x = homeX(c); npcs.push(c);
       }
     }
+    // THE DEAD STAY DEAD. initNpcs() has already stood SUDSY and the founding
+    // fishers up before load() runs, so a townsfolk crab who died would walk
+    // back out of the sea on the next reload. The saved persona list IS the
+    // roll of the living: anybody missing from it is in the memorial row.
+    if (Array.isArray(s.npc.personas))
+      npcs = npcs.filter(n => s.npc.personas.some(sp => sp && sp.name === n.p.name));
   }
   jobBoard = Array.isArray(s.board) ? s.board : [];
   // pre-toggle saves had music on by default - keep their experience
@@ -1726,7 +1772,7 @@ function spawnDrifter() {
   p2.name = freeCrewName(p2.name);   // deduped across BOTH name pools (converted tourists live here too)
   Object.assign(p2, { npc: true, fisher: true, homeless: true, wallet: 12, job: "fishing", shift: "D", mode: "walk" });
   const c = newCrab(p2);
-  c.fishSpot = fishSpotFor(npcs.filter(k => k.p.fisher).length);
+  c.fishSpot = freeFishSpot();   // a hole on the rail (somebody died, somebody took a job) gets filled first
   c.x = BUS_STOPS[0]; c.y = 158;   // stepped off the morning bus with one bag
   npcs.push(c);
   today.moved.push(c.p.name + " NEW IN TOWN");
@@ -1859,9 +1905,7 @@ function updateSchedule(c, dt) {
     // walked home across town at 15:00 and back to the same dark kitchen at
     // 20:00 to cook it - they are STANDING at the counter, let them eat.
     const e = !c.p.sick && pickErrand(c);
-    if (e && e.selfCook) startSelfCook(c, e);
-    else if (e) startErrand(c, e);
-    else startCommute(c, false);
+    if (!beginErrand(c, e, false)) startCommute(c, false);
   }
   // self-employed: a fisher answers to nobody - break for ANY need, whenever
   // they like (the old lunch-and-thirst-only gate was a command-economy patch
@@ -1888,7 +1932,7 @@ function updateSchedule(c, dt) {
     } else if (e && !e.selfCook) {
       c.duty = false; c.errandCd = 6;
       c.dayState = "home";
-      startErrand(c, e);
+      beginErrand(c, e, false);   // a fisher's water stop is the pier tap, ten paces off the rail
     } else c.errandCd = 3;
   }
   // owner-operators top their pocket up from the till
@@ -1905,9 +1949,7 @@ function updateSchedule(c, dt) {
   const townAwake = townOpen() || (tmin >= 20 * 60 && tmin < 23 * 60) || (tmin >= 5.5 * 60 && tmin < 8 * 60);
   if (c.dayState === "home" && townAwake && c.errandCd <= 0 && errandWindow) {
     const e = pickErrand(c);
-    if (e && e.selfCook) startSelfCook(c, e);
-    else if (e && !e.selfCook && bizOpenNow(e.biz)) startErrand(c, e);
-    else c.errandCd = 2;
+    if (!beginErrand(c, e, true)) c.errandCd = 2;
   }
 }
 
@@ -1948,18 +1990,29 @@ function anchorX(c) {
     && !(c.restDay === day && c.restUntil > tmin);
   return bound ? jobDoor(c) : homeX(c);
 }
-function errandDetour(c, biz, selfCook) {
-  const stop = selfCook ? BIZ[biz].door : BIZ[biz].queueX, a = anchorX(c);
+// where a candidate stop physically is: a tap post, a shop's own door (staff
+// self-serve) or the public side of its counter
+function errandStopX(e) {
+  if (e.tap != null) return WATER_TAPS[e.tap].x;
+  const b = e.biz || "shack";
+  return e.selfCook ? BIZ[b].door : BIZ[b].queueX;
+}
+function errandDetour(c, e) {
+  const stop = errandStopX(e), a = anchorX(c);
   return Math.abs(c.x - stop) + Math.abs(stop - a) - Math.abs(c.x - a);
 }
 function errandScore(c, e) {
   const lvl = needLevel(c, e.need || "food");
-  if (lvl >= DIRE) return 99 + ERRAND_RANK[e.need];   // desperate: walk it, wherever it is
-  const d = errandDetour(c, e.biz || "shack", e.selfCook);
+  // APPEAL is what keeps free water from eating the juice bar: a tap scores at
+  // half a bought drink's pull, so the counter wins whenever the crab can
+  // reach and afford one. It never zeroes out, so the tap is always THERE.
+  const ap = e.appeal != null ? e.appeal : 1;
+  if (lvl >= DIRE) return ap * (99 + ERRAND_RANK[e.need]);   // desperate: walk it, wherever it is
+  const d = errandDetour(c, e);
   // the "don't backtrack the whole promenade before 9 AM" rule: on the way
   // out to a shift, a stop clear across town waits for the trip home
   if (d > DETOUR_MAX && c.dayState === "home" && anchorX(c) !== homeX(c)) return -1;
-  return (ERRAND_RANK[e.need] + lvl) / (1 + d / DETOUR_SCALE);
+  return ap * (ERRAND_RANK[e.need] + lvl) / (1 + d / DETOUR_SCALE);
 }
 function pickErrand(c) {
   const staffed = bizStaffed;
@@ -2010,16 +2063,39 @@ function pickErrand(c) {
         take({ selfCook: true, biz: c.p.job, recipe: drinks[0], need: "drink" });
       }
     }
+    // ...and THE TAP, for everyone: crew, townsfolk, owner-operators, fishers.
+    // No staffing gate, no wallet gate, no shop hours - the whole point is
+    // that this stop can never be unavailable. Both posts are offered and the
+    // detour score picks the near one.
+    if ((c.p.thirst || 0) >= TAP_AT)
+      for (let i = 0; i < WATER_TAPS.length; i++) take({ tap: i, need: "drink", appeal: TAP_APPEAL });
   }
   // dirt is serviced at the showers too (the laundromat is gone): a grubby
   // crab heads for the taps at the same 0.66 threshold that fed the sickness
   // "cared" check - a shower takes dirt down 0.5 (0.7 deluxe), well below it
   const needsBath = (c.p.dirt || 0) >= (off ? 0.5 : 0.66)
     || (c.p.sick && (c.p.dirt || 0) >= 0.4);   // the sick drag themselves to the taps - staying clean is the cure
-  if (needsBath && staffed("showers") && c.workBiz !== "showers") {
-    const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
-    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) take({ biz: "showers", recipe: r, need: "clean" });
-  }
+  // ON DUTY at the stalls, not "has ever worked a shift here": this gate used
+  // to read c.workBiz, which is set at clock-in and NEVER CLEARED, so the
+  // shower attendant was barred from her own stalls for life. SUDSY's dirt
+  // pinned at 1.00 every seed - a -6% crabEff, -30% on every tip and +0.06
+  // sickness a night, forever. The gate only ever meant "don't take a stall
+  // while you're the one handing out the kits".
+  const rinseR = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
+  const showerOpen = staffed("showers") && !(c.duty && c.workBiz === "showers");
+  const canShower = showerOpen && c.p.wallet >= Math.ceil(rinseR.pay * 1.25) + 2;
+  if (needsBath && canShower) take({ biz: "showers", recipe: rinseR, need: "clean" });
+  // THE STANDPIPE RINSE - the SAFETY NET, not a free shower. Cold water, no
+  // soap, no towel: -0.35 against a $5 rinse's -0.5, pitched far above the
+  // shower threshold (0.85 vs 0.66), and offered ONLY to a crab the market
+  // cannot serve right now - nobody on the stalls, no money in the pocket, or
+  // they ARE the attendant. A crab who could walk into a staffed shower with
+  // the fare in hand has no business hosing off in the street, and SUDSY's
+  // takings should not pay for this fix. What it does buy is fairness: no
+  // crab is pinned on the 0.95 sickness line by an environment that has no
+  // route to soap - which is the ground the death roll now stands on.
+  if (!canShower && (c.p.dirt || 0) >= (c.p.sick ? TAP_RINSE_SICK : TAP_RINSE_AT))
+    for (let i = 0; i < WATER_TAPS.length; i++) take({ tap: i, need: "clean", appeal: TAP_APPEAL });
   // bed rest otherwise: no arcade nights while ill
   if (!c.p.sick && (c.p.bored || 0) >= (off ? 0.35 : 0.6) && staffed("arcade")) {
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
@@ -2086,6 +2162,51 @@ function startErrand(c, e) {
   c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_ERRAND);   // errand legwork tires, a little
   setT(c, BIZ[e.biz].queueX + 4, 166);
 }
+// A STOP AT THE TAP. No queue entity, no till, no staff to wait on - walk up,
+// use it, walk on. Deliberately its own tiny state so nothing in the customer
+// pipeline has to learn about a stop that never pays anybody.
+function startTapStop(c, e) {
+  c.dayState = "atTap"; c.tapStop = e; c.tapT = 0;
+  c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_ERRAND);
+  setT(c, WATER_TAPS[e.tap].x + 6, 163);
+}
+function updateTap(c, dt) {
+  const e = c.tapStop;
+  if (!e) { c.dayState = "home"; return; }
+  if (c.tapT <= 0) {                      // still walking over
+    if (routedStep(c, crabMove(c), dt)) c.tapT = TAP_SIP;
+    return;
+  }
+  c.tapT -= dt;
+  if (c.tapT > 0) return;
+  if (e.need === "clean") {
+    c.p.dirt = Math.max(0, (c.p.dirt || 0) - TAP_RINSE);
+    popText("RINSED OFF", c.x - 12, FLOOR_Y - 30, [150, 210, 255]);
+    c.quip = { text: "COLD! BUT CLEANER", t: 2.4 };
+    if (window._stats) window._stats.tapRinses = (window._stats.tapRinses || 0) + 1;
+  } else {
+    c.p.thirst = Math.max(0, (c.p.thirst || 0) - TAP_QUENCH);
+    popText("FREE WATER", c.x - 12, FLOOR_Y - 30, [150, 210, 255]);
+    c.quip = { text: ["GLUG GLUG", "THAT'LL DO", "STRAIGHT FROM THE TAP"][(Math.random() * 3) | 0], t: 2.4 };
+    if (window._stats) window._stats.tapDrinks = (window._stats.tapDrinks || 0) + 1;
+  }
+  c.tapStop = null; c.tapT = 0; c.errandCd = TAP_CD;
+  c.dayState = "home";
+  afterErrand(c, true);   // free water is a stop like any other: chain on from it
+}
+// One door for every kind of stop pickErrand can hand back: a counter, your
+// own kitchen, or a tap. Returns false if the stop can't be started right now.
+// (requireOpen mirrors the old call sites exactly: the after-shift grab is
+// STAFFING-gated, not hours-gated - bit-identity depends on that - while the
+// at-home dispatch checks the shop's hours. A tap has neither.)
+function beginErrand(c, e, requireOpen) {
+  if (!e) return false;
+  if (e.tap != null) { startTapStop(c, e); return true; }
+  if (e.selfCook) { startSelfCook(c, e); return true; }
+  if (requireOpen && !bizOpenNow(e.biz)) return false;
+  startErrand(c, e);
+  return true;
+}
 // Where to head when an errand ends. Two rules, both about not walking the
 // promenade twice:
 //   1. CHAIN - if another stop worth making is right here (small detour off
@@ -2102,10 +2223,11 @@ function afterErrand(c, chain) {
   const sh = effShift(c);
   if (chain && !c.p.sick && (c.chainN || 0) < 2) {
     const e = pickErrand(c);
-    if (e && !e.selfCook && e.biz !== c.errandBiz && bizOpenNow(e.biz)
-        && errandDetour(c, e.biz) <= CHAIN_PX) {
+    const sameStop = e && (e.tap != null ? false : e.biz === c.errandBiz);
+    if (e && !e.selfCook && !sameStop && (e.tap != null || bizOpenNow(e.biz))
+        && errandDetour(c, e) <= CHAIN_PX) {
       c.chainN = (c.chainN || 0) + 1; c.errandCd = 0;
-      startErrand(c, e);
+      if (e.tap != null) startTapStop(c, e); else startErrand(c, e);
       return;
     }
   }
@@ -2278,6 +2400,89 @@ function abortErrand(c) {
   customers = customers.filter(q => q !== k);
   c.errandCust = null;
 }
+// ---------------------------------------------------------------- mortality
+// EVERY CRAB CAN DIE. Until now the settlement's death roll carried a
+// `!k.p.npc` guard, so a townsfolk crab could be parched, filthy and ill
+// forever - the zombie state the owner reacted to ("we do need to make death
+// an option in such cases"). The guard is gone; the odds are the SAME odds
+// the crew always rolled, straight off the care ladder, so looking after
+// somebody is worth exactly what it was worth before.
+//
+// It is only fair because the environment finally lets a crab meet the need:
+// the public taps ship in this same pass, and the shower attendant is no
+// longer barred from her own stalls. A crab dies of neglect they had a real
+// chance to fix - never of a shop rota they could not escape.
+// WHEN THE ROLL ARMS. Neglect kills on the third day; a crab the town is
+// actually looking after has to LINGER a week before the tide is even allowed
+// to take them - and then only at their lane's gentle odds. That gap is the
+// fairness rule, and it is why making death universal is not a coin flip: you
+// die of a neglect somebody could have fixed, and the pass that makes you
+// mortal is the same pass that hands you a tap to drink from and gives the
+// shower attendant her own stalls back. It is also what keeps the care ladder
+// worth climbing now that everyone can die - a fed, watered, clean crab in
+// their own bed is not dying on day three, ever.
+const DEATH_DAY = 4;     // ...neglected
+const LINGER_DAY = 7;    // ...cared for (any lane above NEGLECT)
+function deathArmsAt(lane) { return lane === "neglect" ? DEATH_DAY : LINGER_DAY; }
+// One removal path for crew and townsfolk alike. Releases everything the crab
+// held, files the memorial, and settles what their death does to the town.
+function killCrab(k) {
+  abortChef(k); abortErrand(k);
+  memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
+  today.died.push(k.p.name);
+  const followed = followIdx >= 0 ? crabs[followIdx] : null;
+  crabs = crabs.filter(c2 => c2 !== k);
+  npcs = npcs.filter(c2 => c2 !== k);
+  if (!k.p.npc) UPS.chef.lvl = Math.max(1, crabs.length);   // the crew roster shrinks; the town's does not
+  followIdx = followed ? crabs.indexOf(followed) : -1;   // keep following the same crab, not the same slot
+  if (followNpc === k) followNpc = null;
+  if (sel === k) sel = null;
+  if (dossier === k) dossier = null;   // no records for ghosts
+  toast = { text: k.p.name + " HAS PASSED AWAY. THE TOWN GRIEVES.", t: 8 };
+  if (window._stats) window._stats.deaths = (window._stats.deaths || 0) + 1;
+  sfx.angry();
+  townAfterDeath(k);
+}
+// What a death COSTS the town. Two cases the sim has to answer for:
+//   - a dead OWNER-OPERATOR: the shop has nobody. It shutters (bizDark reads
+//     `gone`), and the staff go back to the pier rather than draw wages from
+//     a till nobody keeps. SEAM: proper succession - a bankrupt or ownerless
+//     shop changing hands - belongs to the ownership-transfer work happening
+//     in parallel; this is deliberately the minimum that leaves the town in a
+//     sane state, and `gone` is the flag that work should hang succession on.
+//   - a dead FISHER: their place on the rail is simply free. fishSpotFor used
+//     to hand new arrivals a spot by COUNTING fishers, which after a death
+//     hands the newcomer a spot somebody else is already standing on -
+//     freeFishSpot() takes the lowest one nobody holds.
+function townAfterDeath(k) {
+  if (!k.p.owner) return;
+  const o = OWNERS[k.p.owner];
+  if (!o || o.gone) return;
+  o.gone = day;
+  const b = Object.keys(BIZ).find(b2 => bizOwner(b2) === k.p.owner);
+  if (b) {
+    today.moved.push(BIZ[b].short + " HAS NO OWNER - CLOSED");
+    toast = { text: BIZ[b].name + " IS CLOSED. " + k.p.name + " IS GONE.", t: 8 };
+    for (const w of allCrabs()) {
+      if (w.p.employer !== k.p.owner) continue;
+      w.p.job = "fishing"; w.p.employer = null; w.workBiz = null;
+      if (!w.fishSpot) w.fishSpot = freeFishSpot();
+      today.moved.push(w.p.name + " LOST THEIR JOB - BACK TO THE PIER");
+    }
+    jobBoard = jobBoard.filter(j => j.biz !== b);
+  }
+}
+// the lowest rail position nobody is standing on (deaths and departures leave
+// holes; counting heads would double-book them)
+function freeFishSpot() {
+  const held = new Set(allCrabs().filter(c => c.fishSpot && c.p.boat == null)
+    .map(c => c.fishSpot.x + "," + c.fishSpot.y));
+  for (let i = 0; i < 40; i++) {
+    const sp = fishSpotFor(i);
+    if (!held.has(sp.x + "," + sp.y)) return sp;
+  }
+  return fishSpotFor(0);
+}
 function abortChef(c) {
   release(c);   // covers kitchen work AND a selfCook grip on a grill (e.g. death mid-meal)
   if (c.cust && !c.cust.served) c.cust.claimed = false;   // let another chef pick the order up
@@ -2301,6 +2506,7 @@ function abortActivity(c) {
   abortChef(c);
   abortErrand(c);
   c.cookStep = 0; c.cookRecipe = null;
+  c.tapStop = null; c.tapT = 0;   // a tap holds nothing, but don't leave the stop armed
   c.duty = false; c.pendingOff = false;
   c.cstate = ""; c.busFrom = -1; c.busTo = -1;
   c.hidden = false; c.pauseT = 0;
@@ -2916,13 +3122,19 @@ function updateCustomers(dt) {
 }
 
 // ---------------------------------------------------------------- status text
+function tapStatus(c) {
+  const e = c.tapStop, nm = e ? WATER_TAPS[e.tap].name : "THE TAP";
+  if (!e || c.tapT <= 0) return "WALKING TO " + nm;
+  return e.need === "clean" ? "RINSING OFF AT " + nm : "DRINKING AT " + nm;
+}
 function crabStatus(c) {
-  if (c.p.sick) return "SICK - DAY " + ((c.p.sick.days || 0) + 1)
+  if (c.p.sick) return (gravelyIll(c) ? "GRAVELY ILL - DAY " : "SICK - DAY ") + ((c.p.sick.days || 0) + 1)
     + (onSickDay(c) ? " - RESTING UP" : " - WORKING THROUGH IT");
   if (offToday(c)) {   // sick beats off; off beats everything but the commute home
     if (c.dayState === "toErrand") return "DAY OFF - OFF TO " + BIZ[c.errandBiz].short;
     if (c.dayState === "errand") return "DAY OFF - AT " + BIZ[c.errandBiz].name;
     if (c.dayState === "selfCook") return "DAY OFF - RAIDING THE PANTRY";
+    if (c.dayState === "atTap") return "DAY OFF - " + tapStatus(c);
     if (c.dayState === "toHome") return "DAY OFF - STROLLING HOME";
     if (c.dayState === "home") {
       if (darkness() > 0.7) return c.p.homeless ? "SLEEPING AT THE SHELTER" : "SLEEPING";
@@ -2952,6 +3164,7 @@ function crabStatus(c) {
   }
   if (c.dayState === "toErrand") return "OFF TO " + BIZ[c.errandBiz].name;
   if (c.dayState === "errand") return "IN LINE AT " + BIZ[c.errandBiz].name;
+  if (c.dayState === "atTap") return tapStatus(c);
   const toWork = c.dayState === "toWork";
   if (c.cstate === "waitBus") return "WAITING FOR THE BUS";
   if (c.cstate === "onBus") return "RIDING THE BUS";
@@ -3448,6 +3661,18 @@ function drawTown() {
     if (jobBoard.length)
       smallText(ctx, "" + jobBoard.length, JOB_BOARD_X + 26 - camX, HOME_BOTTOM - NOTICE2.h - 8, [255, 150, 60]);
   }
+  // the public taps: town infrastructure, drawn like it. The spout runs only
+  // while somebody is actually stood there drinking, so a dry tap reads dry.
+  for (let i = 0; i < WATER_TAPS.length; i++) {
+    const t = WATER_TAPS[i];
+    wblit(STANDPIPE2, t.x, HOME_BOTTOM - STANDPIPE2.h);
+    if (t.x - camX > -60 && t.x - camX < W) {
+      smallText(ctx, "WATER", t.x - 3 - camX, HOME_BOTTOM - STANDPIPE2.h - 7, [30, 20, 36]);
+      smallText(ctx, "WATER", t.x - 4 - camX, HOME_BOTTOM - STANDPIPE2.h - 8, [150, 210, 255]);
+    }
+    if (allCrabs().some(c => c.dayState === "atTap" && c.tapStop && c.tapStop.tap === i && c.tapT > 0))
+      wblit(TAP_FLOW[((time * 6) | 0) % 2], t.x + 15, HOME_BOTTOM - STANDPIPE2.h + 12);
+  }
   // the crab shelter
   wblit(SHELTER2, SHELTER_X, HOME_BOTTOM - SHELTER2.h);
   if (SHELTER_X - camX > -80 && SHELTER_X - camX < W) {
@@ -3754,6 +3979,7 @@ function drawNight() {
 }
 
 function crabMood(c) {
+  if (gravelyIll(c)) return ["FADING", [220, 60, 60]];   // the town SEES it: the death roll is armed
   if (c.p.homeless) return ["DOWN", [190, 80, 80]];
   if (c.p.wallet < 10) return ["BROKE", [190, 80, 80]];
   if (c.p.wallet > 120) return ["FLUSH", [180, 140, 30]];
@@ -4189,8 +4415,9 @@ function drawDossier() {
   // HEALTH doubles as the SICK DAY control: grant the rest, or require the shift
   if (p.sick) {
     const granted = onSickDay(c);
-    row("HEALTH", "DAY " + ((p.sick.days || 0) + 1) + " - "
-      + (granted ? "RESTING, UNPAID" : "AT WORK, PAID"), granted ? [120, 150, 90] : [190, 80, 80], canOT ? "sick" : null);
+    row("HEALTH", (gravelyIll(c) ? "GRAVELY ILL, DAY " : "DAY ") + ((p.sick.days || 0) + 1) + " - "
+      + (granted ? "RESTING, UNPAID" : "AT WORK, PAID"),
+      gravelyIll(c) ? [220, 60, 60] : granted ? [120, 150, 90] : [190, 80, 80], canOT ? "sick" : null);
     if (canOT) smallText(ctx, granted ? "TAP: WORK" : "TAP: REST", x + w2 - 40, ly - 9, [96, 170, 220]);
     if (granted) smallText(ctx, "RESTED " + (p.restT || 0).toFixed(1) + "H/" + REST_HOURS
       + "H - " + CARE_LANES[careLane(c)].label, x + 56, ly, [110, 100, 110]), ly += 9;
@@ -4773,6 +5000,8 @@ function drawReport() {
   if (report.off) smallText(ctx, "DAY OFF: " + report.off, x + 6, ly, [70, 140, 200]), ly += 8;
   if (report.best) smallText(ctx, "BUSIEST CLAW: " + report.best + " x" + report.bestN, x + 6, ly, [70, 90, 130]), ly += 8;
   for (const n of report.died) smallText(ctx, n + " HAS PASSED AWAY", x + 6, ly, [180, 60, 60]), ly += 7;
+  // the warning line: named, the night BEFORE the death roll arms
+  for (const n of (report.critical || [])) smallText(ctx, n + " IS FADING - NEEDS CARE", x + 6, ly, [200, 90, 70]), ly += 7;
   for (const n of report.sick) smallText(ctx, n + " FELL ILL", x + 6, ly, [120, 150, 90]), ly += 7;
   for (const n of report.recovered) smallText(ctx, n + " IS BACK ON THEIR CLAWS", x + 6, ly, [40, 110, 60]), ly += 7;
   for (const m of report.moved) smallText(ctx, m, x + 6, ly, [110, 100, 110]), ly += 7;
@@ -4926,6 +5155,10 @@ function frame(now) {
       if (bizOwner(b) === "player") continue;
       const o = OWNERS[bizOwner(b)];
       if (!o || day <= 1) continue;
+      // an owner who died settles nothing: the shop is shut, not in arrears.
+      // (SEAM for the ownership-transfer work: this is where succession picks
+      // the shop up - clear `gone`, name a new owner, and trading resumes.)
+      if (o.gone) continue;
       if ((o.darkT || 0) > 0) {
         if (--o.darkT === 0) toast = { text: BIZ[b].name + " IS BACK IN BUSINESS", t: 6 };
         continue;
@@ -4991,22 +5224,22 @@ function frame(now) {
             (window._stats.illness = window._stats.illness || [])
               .push({ day, name: k.p.name, days: dur, lane, tier, out: "well" });
           }
-        } else if (!k.p.npc && k.p.sick.days >= 3 &&
+        } else if (k.p.sick.days >= deathArmsAt(lane) &&
             Math.random() < Math.min(0.75, care.die + 0.12 * Math.max(0, k.p.sick.days - 4))) {
           if (window._stats) (window._stats.illness = window._stats.illness || [])
-            .push({ day, name: k.p.name, days: k.p.sick.days, lane, tier, out: "died" });
-          // the tide takes them
-          abortChef(k); abortErrand(k);
-          memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
-          today.died.push(k.p.name);
-          const followed = followIdx >= 0 ? crabs[followIdx] : null;
-          crabs = crabs.filter(c2 => c2 !== k);
-          UPS.chef.lvl = Math.max(1, crabs.length);
-          followIdx = followed ? crabs.indexOf(followed) : -1;   // keep following the same crab, not the same slot
-          if (dossier === k) dossier = null;   // no records for ghosts
-          toast = { text: k.p.name + " HAS PASSED AWAY. THE TOWN GRIEVES.", t: 8 };
-          if (window._stats) window._stats.deaths = (window._stats.deaths || 0) + 1;
-          sfx.angry();
+            .push({ day, name: k.p.name, days: k.p.sick.days, lane, tier, out: "died", npc: !!k.p.npc });
+          killCrab(k);   // the tide takes them - crew and townsfolk alike
+        } else if (k.p.sick.days >= deathArmsAt(lane) - 1) {
+          // SEE IT COMING. The roll arms on deathArmsAt(lane); the town is told
+          // the night before, by name, so the player has a whole day to act
+          // (grant the sick day, get food and water into them, send them to
+          // their own bed - the care ladder is what this warning points at).
+          if (k.p.gravDay !== day) {
+            k.p.gravDay = day;
+            today.critical.push(k.p.name);
+            toast = { text: k.p.name + " IS FADING - THEY NEED REST AND CARE", t: 8 };
+            popText("GRAVELY ILL", k.x - 14, FLOOR_Y - 34, [255, 150, 130]);
+          }
         }
       }
       for (const k of allCrabs()) k.p.restT = 0;   // convalescence is banked one day at a time
@@ -5027,6 +5260,7 @@ function frame(now) {
       report = {
         day, served: today.served, revenue: Math.round(today.revenue), rage: today.rage,
         wages, rent, sick: today.sick.slice(0, 3), died: today.died.slice(0, 2),
+        critical: today.critical.slice(0, 2),
         recovered: today.recovered.slice(0, 2), moved: today.moved.slice(0, 2),
         off: offNames.slice(0, 4).join(", "),
         repStart: Math.round(today.repStart), repEnd: Math.round(rep),
@@ -5088,6 +5322,7 @@ function frame(now) {
     updateSchedule(c, dt);
     if (c.dayState === "toWork" || c.dayState === "toHome") updateCommute(c, dt);
     else if (c.dayState === "toErrand" || c.dayState === "errand") updateErrand(c, dt);
+    else if (c.dayState === "atTap") updateTap(c, dt);
     else if (c.dayState === "selfCook") updateSelfCook(c, dt);
     else if (c.dayState === "working" && c.p.job === "fishing") updateFishing(c, dt);
     else if (c.dayState === "working") updateKitchen(c, dt);
