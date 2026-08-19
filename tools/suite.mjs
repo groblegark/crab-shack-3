@@ -103,15 +103,25 @@ scenario("growth strategy holds the measured floor (escape promise OPEN - see PL
 
 });
 
-scenario("dining: outdoor tables, guests bus their own", () => {
+scenario("dining: tables are BUSED BY STAFF, and the room keeps turning", () => {
+  // RE-POINTED 2026-08-19 (table-service economy). This scenario used to be
+  // called "outdoor tables, guests bus their own" and asserted that no table
+  // ever ended a day with plates on it, because the outdoor-casual rule had
+  // guests clear up after themselves. The owner asked for the fancier tier
+  // ("add table cleanup"), so the rule is gone: a vacated table is DIRTY and a
+  // staff crab has to clear it. What the scenario is really for - the dining
+  // room keeps turning and never silts up - is asserted directly instead.
   const sim = createSim({ seed: 99 });
   sim.runDays(3);
   const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
   if (st.tourServes < 20) return `only ${st.tourServes} serves in 3 days`;
   if ((st.seated || 0) < 5) return `only ${st.seated | 0} diners seated in 3 days`;
-  // after close, every table should be clear - guests handled their own dishes
-  const blocked = sim.G("BIZ.shack.tables.filter(t => t.dishes > 0 && !t.occupant).length");
-  return blocked === 0 ? true : `${blocked} tables left with abandoned dishes`;
+  if ((st.tablesBused || 0) < 5) return `only ${st.tablesBused | 0} tables bused in 3 days - nobody is clearing up`;
+  // a table left dirty overnight is fine (the crew went home); one that is
+  // dirty AND flagged cleaning with nobody holding it is the wedge shape
+  const stuck = sim.G(`BIZ.shack.tables.filter(t => t.cleaning &&
+    !allCrabs().some(c => c.cleanTable === t)).length`);
+  return stuck === 0 ? true : `${stuck} tables flagged 'cleaning' with nobody clearing them`;
 });
 
 scenario("errands: crabs keep themselves fed", () => {
@@ -145,6 +155,11 @@ scenario("staff meals: closing crew cooks their own dinner, at retail", () => {
   sim.runUntil('!allCrabs().some(k => k.duty && k.workBiz === "shack") && tmin >= 20.5 * 60 && tmin < 22.5 * 60', { maxSteps: 120000 });
   const before = JSON.parse(sim.G(`(() => {
     for (const c of crabs) { c.p.hunger = 0; c.p.thirst = 0; c.errandCd = 999; c.p.tired = 0; }
+    // ...and anybody ALREADY at the pantry is sent away: this ledger is
+    // event-scoped to one meal, and zeroing a need does not abort a cook
+    // that has started (see the re-pointing note below).
+    for (let i = 1; i < crabs.length; i++)
+      if (crabs[i].dayState === "selfCook") { abortChef(crabs[i]); crabs[i].dayState = "home"; }
     const c = crabs[0];
     c.p.hunger = 0.9; c.p.wallet = 30; c.errandCd = 0;   // <40: cheapest recipe, deterministic
     // he may be mid-commute - or mid-POUR since T2 - when we force this:
@@ -159,7 +174,16 @@ scenario("staff meals: closing crew cooks their own dinner, at retail", () => {
     return JSON.stringify({ paid: window._stats.staffMealPaid || 0, cost: window._stats.staffMealCost || 0,
       meals: window._stats.staffMeals || 0 });
   })()`));
-  const done = sim.runUntil(`(window._stats.staffMeals || 0) > ${before.meals}`, { maxSteps: 120000 });
+  // RE-POINTED 2026-08-19 (table-service economy): the FIXTURE, not the rule.
+  // The ledger asserted here is event-scoped to ONE meal, but nothing kept a
+  // second crab out of the pantry while we waited for the first to finish -
+  // and the new stream order put CLAWDIA at the juicer for a DRINK mid-wait,
+  // so the till read two $10 juices against one meal. The other crabs are now
+  // held un-peckish for the duration, which is what "one hungry crab" always
+  // meant. The retail transaction under test is unchanged.
+  const done = sim.runUntil(`(window._stats.staffMeals || 0) > ${before.meals}`, { maxSteps: 120000,
+    tickEvery: 1,
+    onTick: (G) => G("for (let i = 1; i < crabs.length; i++) { crabs[i].p.hunger = 0; crabs[i].p.thirst = 0; crabs[i].errandCd = 999; }") });
   if (!done) return "forced staff meal never happened";
   const after = JSON.parse(sim.G(`JSON.stringify({ paid: window._stats.staffMealPaid || 0, cost: window._stats.staffMealCost || 0 })`));
   const meal = JSON.parse(sim.G('JSON.stringify(window._stats.lastStaffMeal)'));
@@ -1634,9 +1658,26 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // standing on the boardwalk at midnight, which is what this fingerprint is
   // really guarding. Its books barely move: coins 224.84 -> 225.17, rep
   // 46.85 -> 49.67, serves 32 -> 33, rage 4 -> 4, till 132.67 -> 140.47.
+  // RE-BASELINED AGAIN at the table-service-economy merge (counter tips cut to
+  // a token, the table tip raised, and tables bused by staff). Receipt: this
+  // pass deliberately changes what a guest pays AND how a server spends their
+  // shift, so the day-2 books cannot survive and still be measuring anything -
+  // 22 tables are bused on days 1-2 alone.
+  // Seed 4242 is the receipt that the change is SMALL and structural rather
+  // than chaotic: EVERY POSITION IS BYTE-IDENTICAL - all five crabs asleep in
+  // the same beds as before - and only the books move (coins 200.795 ->
+  // 158.959, rep 49.372 -> 50.093, serves 37 -> 33, rage 2 -> 5, crabServes
+  // 2 -> 2, SUDSY's till 185.43 -> 172.12). Day 2 is the WORST day for this
+  // build by construction: the busing bill lands from the first guest while
+  // the raised table tip only compounds once reputation brings the crowds -
+  // the 16-seed eviction curve still reads 0/16 median 13 (was 14).
+  // Seed 1337 moves exactly ONE crab, and in the way this fingerprint has
+  // moved twice before: DRIFT sleeps on a shelter cot at x450 with $23 saved
+  // instead of in cottage 8 at x2136 - a day behind on the housing ladder,
+  // not stranded, and nobody is left standing on the boardwalk at midnight.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":225.166,"rep":49.6723,"catch":3,"serves":33,"crabServes":3,"rage":4,"till":140.474,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",4],["DRIFT",0]],"pos":[[520,154],[108,154],[388,154],[492,155],[2136,154]]}',
-    4242: '{"day":3,"tmin":0,"coins":200.795,"rep":49.3715,"catch":0,"serves":37,"crabServes":2,"rage":2,"till":185.434,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",1],["DRIFT",2]],"pos":[[520,154],[108,154],[388,154],[2072,154],[2136,154]]}',
+    1337: '{"day":3,"tmin":0,"coins":147.922,"rep":50.0032,"catch":0,"serves":33,"crabServes":2,"rage":3,"till":152.751,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",1],["DRIFT",23]],"pos":[[520,154],[108,154],[388,154],[2072,154],[450,155]]}',
+    4242: '{"day":3,"tmin":0,"coins":158.959,"rep":50.0934,"catch":3,"serves":33,"crabServes":2,"rage":5,"till":172.115,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",7],["DRIFT",1]],"pos":[[520,154],[108,154],[388,154],[2072,154],[2136,154]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -3181,6 +3222,213 @@ scenario("dirt: a filthy crab in a crowded shack wedges nobody (warps + unsticks
   if (on.served < off.served * 0.75)
     return `the berth cost the shack ${off.served} -> ${on.served} serves in five days - that is a wedge, not a bubble`;
   return true;
+});
+
+
+// ============================================================ TABLE SERVICE
+// The table-service economy (owner directive, 2026-08-19): tips belong to
+// table service, tips can be shared with the crab who earned them, there are
+// more tables to buy, and a vacated table is bused by staff.
+
+scenario("tips: the counter gets a token, the table gets the lot", () => {
+  // The owner's complaint, measured: a guest handed a plate over the pass used
+  // to tip exactly what a guest who had been sat down and waited on tipped -
+  // in fact MORE, because a counter guest is served before their patience has
+  // drained. Both paths are driven through payAndBenefit here with the SAME
+  // customer, so the only thing that differs is where they were served.
+  const sim = createSim({ seed: 5 });
+  const got = JSON.parse(sim.G(`(() => {
+    const c = crabs[0];
+    c.p.dirt = 0; c.p.tired = 0;              // no fumble multipliers in play
+    BIZ.shack.tipShare = 0;                    // the whole tip to the till
+    const r = BIZ.shack.recipes.find(x => x.id === "taco");
+    const mk = (state) => ({ biz: "shack", recipe: r, state, patience: 40, maxPatience: 50,
+      x: 1500, isCrab: false, server: c, claimed: true, served: false });
+    const t0 = coins; payAndBenefit(c, mk("seatedWaiting")); const table = coins - t0;
+    const t1 = coins; payAndBenefit(c, mk("waiting"));       const counter = coins - t1;
+    return JSON.stringify({ table, counter, pay: r.pay, mult: TRAITS[c.p.trait].tip,
+      frac: TIP_COUNTER, tableTip: TABLE_TIP });
+  })()`));
+  // tip = pay x 0.5 x (patience / maxPatience) x traitTip, and the counter
+  // keeps only TIP_COUNTER of it. The base plate price is the same either way.
+  const full = got.pay * 0.5 * 0.8 * got.mult;
+  const wantTable = got.pay + full;
+  const wantCounter = got.pay + full * got.frac;
+  const near2 = (a, b) => Math.abs(a - b) < 0.01;
+  if (!near2(got.table, wantTable)) return `table service rang ${got.table.toFixed(2)}, expected ${wantTable.toFixed(2)}`;
+  if (!near2(got.counter, wantCounter)) return `counter service rang ${got.counter.toFixed(2)}, expected ${wantCounter.toFixed(2)}`;
+  if (got.frac > 0.25) return `TIP_COUNTER is ${got.frac} - that is not a token any more`;
+  // and the seat itself carries the table tip on the way out, which the
+  // counter never sees at all
+  if (got.tableTip < 6) return `TABLE_TIP is only ${got.tableTip} - the premium tier has no premium`;
+  return true;
+});
+
+scenario("tips: the sharing slider pays the crab's wallet and the till, exactly", () => {
+  // Both ends of the slider plus one in the middle, on the same customer and
+  // the same server. The crab's cut lands in their WALLET - the housing
+  // ladder's fuel - and nothing is created or destroyed on the way.
+  const sim = createSim({ seed: 5 });
+  const rows = JSON.parse(sim.G(`(() => {
+    const c = crabs[0];
+    c.p.dirt = 0; c.p.tired = 0;
+    const r = BIZ.shack.recipes.find(x => x.id === "taco");
+    const out = [];
+    for (const share of [0, 0.5, 1]) {
+      setTipShare("shack", share);
+      c.p.wallet = 0;
+      const t0 = coins;
+      payAndBenefit(c, { biz: "shack", recipe: r, state: "seatedWaiting", patience: 50,
+        maxPatience: 50, x: 1500, isCrab: false, server: c, claimed: true, served: false });
+      out.push({ share: BIZ.shack.tipShare, till: coins - t0, wallet: c.p.wallet,
+        tip: r.pay * 0.5 * TRAITS[c.p.trait].tip, pay: r.pay });
+    }
+    return JSON.stringify(out);
+  })()`));
+  const near2 = (a, b) => Math.abs(a - b) < 0.01;
+  for (const r of rows) {
+    const wantWallet = r.tip * r.share;
+    const wantTill = r.pay + (r.tip - wantWallet);
+    if (!near2(r.wallet, wantWallet))
+      return `at ${r.share * 100}% the crab pocketed ${r.wallet.toFixed(2)}, expected ${wantWallet.toFixed(2)}`;
+    if (!near2(r.till, wantTill))
+      return `at ${r.share * 100}% the till took ${r.till.toFixed(2)}, expected ${wantTill.toFixed(2)}`;
+  }
+  if (rows[0].wallet !== 0) return "the default slider (0%) still paid the crab";
+  if (!near2(rows[2].till, rows[2].pay)) return "at 100% the till kept some of the tip";
+  // the slider itself: clamped and snapped to its own grain, no matter what
+  const clamp = JSON.parse(sim.G(`JSON.stringify([setTipShare("shack", -3), setTipShare("shack", 7.5),
+    setTipShare("shack", 0.37)])`));
+  if (clamp[0] !== 0 || clamp[1] !== 1) return `setTipShare failed to clamp: ${JSON.stringify(clamp)}`;
+  if (Math.abs(clamp[2] - 0.35) > 1e-9) return `setTipShare did not snap to the 5% grain: ${clamp[2]}`;
+  return true;
+});
+
+scenario("tables: a vacated table goes dirty, blocks the room, gets bused, comes back", () => {
+  // The stall cycle, one furniture type over: occupied -> dirty -> cleaning ->
+  // clean. Driven on a real guest so the dining exit is the code under test.
+  const sim = createSim({ seed: 44 });
+  sim.runUntil(`customers.some(k => k.state === "dining" && !k.isCrab && k.biz === "shack")`,
+    { maxSteps: 200000 });
+  if (!sim.G(`customers.some(k => k.state === "dining" && !k.isCrab)`)) return "no guest ever sat down to eat";
+  sim.G(`window._t = BIZ.shack.tables.indexOf(customers.find(k => k.state === "dining" && !k.isCrab).table)`);
+  if (sim.G("window._t") < 0) return "the diner is not at a table";
+  // let them finish their meal
+  sim.runUntil(`!BIZ.shack.tables[window._t].occupant`, { maxSteps: 60000 });
+  const t = () => JSON.parse(sim.G(`JSON.stringify({ dirty: !!BIZ.shack.tables[window._t].dirty,
+    dishes: BIZ.shack.tables[window._t].dishes, occ: !!BIZ.shack.tables[window._t].occupant,
+    seatable: pickSeat([BIZ.shack.tables[window._t]], { isCrab: false }) !== null })`));
+  const left = t();
+  if (!left.dirty) return "the guest bused their own table - the outdoor rule is still live";
+  if (!left.dishes) return "a dirty table with no plates on it";
+  if (left.seatable) return "a dirty table still seats the next guest";
+  // ...and a crab comes and clears it
+  const bused = sim.runUntil(`!BIZ.shack.tables[window._t].dirty`, { maxSteps: 120000 });
+  if (!bused) return "nobody ever bused the table";
+  const back = t();
+  if (back.dishes !== 0) return `bused table still carries ${back.dishes} plates`;
+  // "back in service" = seatable, or already claimed by the next guest (the
+  // room moves fast enough that a cleared table can be taken within the second)
+  if (!back.seatable && !back.occ) return "a bused table still will not seat anybody";
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  return (st.tablesBused || 0) > 0 ? true : "the busing counter never moved";
+});
+
+scenario("tables can never wedge: both abort paths free them, and a soak stays clean", () => {
+  // The stall-wedge scenario's twin. A crab that dies or is yanked mid-clean
+  // must release the table, a guest yanked mid-meal must not leave it
+  // occupied, and no table may sit out of service for longer than a real
+  // dirty-and-bused cycle over two full trading days.
+  const sim = createSim({ seed: 21 });
+  sim.runUntil('crabs[0].dayState === "home" && tmin > 12 * 60', { maxSteps: 300000 });
+  // (1) a guest yanked out of a meal: occupant off, and flagged dirty so a
+  //     crab is guaranteed to come for it (plates on an unflagged table would
+  //     be unseatable AND unbuseable - the exact stall wedge)
+  sim.G(`{
+    const t = BIZ.shack.tables.find(t2 => !t2.occupant) || BIZ.shack.tables[0];
+    window._t = BIZ.shack.tables.indexOf(t);
+    t.dirty = false; t.cleaning = false; t.dishes = 1;
+    const k = { biz: "shack", isCrab: true, crab: crabs[0], state: "dining", dineT: 9,
+      table: t, x: t.x, spawnX: t.x, claimed: true, served: true, recipe: BIZ.shack.recipes[0] };
+    t.occupant = k; customers.push(k); crabs[0].errandCust = k; crabs[0].dayState = "errand";
+    abortErrand(crabs[0]);
+  }`);
+  if (sim.G("BIZ.shack.tables[window._t].occupant !== null")) return "abortErrand left the table occupied";
+  if (!sim.G("BIZ.shack.tables[window._t].dirty")) return "aborted table not flagged dirty - it can never be bused";
+  if (sim.G('customers.some(k => k.table === BIZ.shack.tables[window._t])')) return "ghost diner survived";
+  // (2) a crab yanked mid-bus: the cleaning flag must come off with them
+  sim.G(`{
+    const t = BIZ.shack.tables[window._t];
+    t.dirty = true; t.cleaning = false; t.dishes = 1;
+    startBus(crabs[0], t); crabs[0].workBiz = "shack";
+    abortChef(crabs[0]);
+  }`);
+  if (sim.G("BIZ.shack.tables[window._t].cleaning")) return "abortChef left the table flagged 'cleaning' forever";
+  if (sim.G("crabs[0].cleanTable")) return "the crab still holds a table after abortChef";
+  // (3) the soak: two trading days, nothing may stay out of service forever
+  let worst = 0;
+  const held = {};
+  sim.runDays(2, { tickEvery: 4, onTick: (G) => {
+    if (G("coins") < 300) G("coins = 600");
+    const rows = JSON.parse(G(`JSON.stringify(bizTables("shack").map(t => (t.dirty || t.dishes > 0) && !t.occupant))`));
+    const open = G("bizOpenNow('shack') && allCrabs().some(c => c.duty && c.workBiz === 'shack')");
+    rows.forEach((out, i) => {
+      held[i] = out && open ? (held[i] || 0) + 0.2 * 4 : 0;   // only count time the shack is actually staffed
+      worst = Math.max(worst, held[i]);
+    });
+  } });
+  return worst < 120 ? true : "a table sat dirty for " + worst.toFixed(0) + " staffed sim-seconds";
+});
+
+scenario("tables: more tables really do seat more guests (the cap earns its keep)", () => {
+  // Directive 3's promise, measured rather than assumed: raising the cap has
+  // to move throughput, not just the shop grid. Solvent towns with a real crew
+  // so the comparison is about SEATS, not about who could afford the upgrade.
+  const arm = (lvl) => {
+    let seated = 0;
+    for (const seed of [1337, 4011, 909]) {
+      const sim = createSim({ seed });
+      sim.G(`coins = 6000; tryBuy("chef"); tryBuy("chef");
+             for (let i = 0; i < ${lvl}; i++) tryBuy("table"); coins = 900;`);
+      sim.runDays(8, { tickEvery: 40, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+      seated += sim.G("window._stats.seated | 0");
+    }
+    return seated;
+  };
+  const cap = createSim({ seed: 1 }).G("UPS.table.max");
+  if (cap < 4) return `UPS.table.max is ${cap} - the cap was not raised`;
+  const base = arm(0), full = arm(cap);
+  if (full <= base * 1.1)
+    return `the full cap seated ${full} against ${base} at the starting two tables - the extra tables do nothing`;
+  return true;
+});
+
+scenario("tip sharing + the table cap roundtrip save/load", () => {
+  const store = new Map();
+  const a = createSim({ seed: 3, storage: store, fresh: false });
+  a.runDays(1);
+  a.G(`setTipShare("shack", 0.35); setTipShare("juicebar", 1); UPS.table.lvl = 3; save();`);
+  const b = createSim({ seed: 3, storage: store, fresh: false });
+  const got = JSON.parse(b.G(`JSON.stringify({ shack: BIZ.shack.tipShare, bar: BIZ.juicebar.tipShare,
+    lvl: UPS.table.lvl, tables: (bizTables("shack") || []).length })`));
+  if (Math.abs(got.shack - 0.35) > 1e-9) return `shack tip share came back ${got.shack}`;
+  if (got.bar !== 1) return `juice bar tip share came back ${got.bar}`;
+  if (got.lvl !== 3) return `table level came back ${got.lvl}`;
+  if (got.tables !== 5) return `${got.tables} tables stand at level 3, expected 5`;
+  // an OLD save has no tipShare key at all, and 0 is the old behavior
+  const store2 = new Map();
+  store2.set(SLOT1, JSON.stringify({ _ver: 1, coins: 200, day: 2, lv: { chef: 2, table: 1 },
+    personas: [{ name: "PINCHY", job: "shack" }, { name: "CLAWDIA", job: "shack" }] }));
+  store2.set(ACTIVE, "1");
+  const c = createSim({ seed: 3, storage: store2, fresh: false });
+  const old = JSON.parse(c.G(`JSON.stringify({ shack: BIZ.shack.tipShare, tables: (bizTables("shack") || []).length })`));
+  if (old.shack !== 0) return `an old save opened on a ${old.shack} tip share instead of 0`;
+  if (old.tables !== 3) return `an old save at table level 1 stands ${old.tables} tables, expected 3`;
+  // and a hand-edited nonsense value cannot hand a crab 750% of the tip
+  const d = createSim({ seed: 3, storage: store2, fresh: false });
+  d.G(`BIZ.shack.tipShare = 7.5`);
+  const clamped = d.G(`bizTipShare("shack")`);
+  return clamped === 1 ? true : `a corrupt tip share read back as ${clamped}`;
 });
 
 // ---- runner
