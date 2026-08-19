@@ -478,6 +478,20 @@ unit economics.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Route optimization / trip-chaining** (Matt: "folks are taking weird
+  routes, like waking up, going to work, then going to the crab shack;
+  folks should optimize their routes a bit!"). Crabs pick errands by
+  need-priority alone and ignore geography — classic symptom: wake →
+  commute to work → walk BACK past home to the shack for breakfast →
+  return to work. Direction: trip-chaining, not TSP — next stop = best
+  urgency/detour-cost ratio, eat en route when the shack lies along the
+  commute, don't cross the town twice for chainable stops. Imperfection is
+  charming; backtracking the full promenade before 9 AM is not. Behavior
+  change only, but re-run the matrix: commute time is work time under the
+  performance system, so saved claw-miles are recovered crab-hours —
+  expect median drift like the unstick fix; document, don't tune away.
+  AGENT SPAWNS after price-discovery lands (both touch errand dispatch;
+  builds serialized).
 - **Fish price discovery** (Matt, on the fishers-break-for-anything collapse:
   "we can't force folks to work like that! This is a sign that the price of
   fish is artificially low"). Directive: replace the lunch-and-thirst-only
