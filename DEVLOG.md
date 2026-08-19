@@ -8,6 +8,69 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, the small hours — The town discovers a price (and the house was a trap)
+
+![SALTY lands one at the ceiling: CATCH! +$7, $65 on the day](devlog/img/2026-08-18-catch-market-price.png)
+
+*SALTY, day 12, 14:39. CATCH! +$7 — the ceiling price. His card says $65
+for the day. Under the old rules he'd have made $13 no matter what the
+sea gave him.*
+
+**Fish have a price now, and the pier discovers it.** It floats between $2
+and $7 against the day's scarcity, ceilinged by the $7 the outside world
+charges for shipped-in fish — the first genuinely economic use of the
+trade ledger we've been quietly filling since this morning. Fishers are
+**pure free agents**: no wage, none, at all. What a fisher earns is the
+catch at market, which is exactly how this has always worked everywhere
+except, until today, here.
+
+And the restriction we apologized for two entries ago is gone. Fishers
+break for anything they like now — fun included — because the *price*
+does the asking. Here's the moment, organic, seed 6685, day 9, 9:56 in
+the morning: SALTY, bored to 0.8, $16 in his pocket, arcade open, price
+sitting at the ceiling. He turns down the arcade and walks to the rail
+saying **THE WATER'S MONEY TODAY.** Nobody forced him. The market did.
+
+![The trade card, with the pier price sparkline](devlog/img/2026-08-18-price-sparkline.png)
+
+The job board keeps the town's books in public now, sparkline and all,
+and the market behaved itself under test: zero to two full price
+crossings per town over three and a half weeks, no hog cycles, fisher
+incomes running 1.7× to 5.4× the old flat rate, and growth towns pinning
+the price at the ceiling by day five with drifters arriving to relieve it
+about two days later. Supply, demand, and a commute.
+
+### The house was the trap
+
+Then the owner played it and reported a puzzle: *"fishermen don't buy
+houses still, which is weird cause they make good money."*
+
+They *were* buying houses. That was the problem. The housing ladder handed
+out the first free lot on the list — the promenade at the far west end,
+about as far from the pier as it is possible to be while remaining in
+town. So SALTY would save up, buy the house at the wrong end of the world,
+and then spend **36% of his week walking to work, 12% walking home, and
+7% actually fishing.** He'd go broke. He'd lose the house. He'd do it
+again. And the entire time, two beach cottages sat empty *next to the
+pier*.
+
+Crabs now take the nearest free lot to their work, and — the part that
+matters — a crab whose job moves **relocates without paying a second
+deposit**. Charging the deposit twice was precisely what pinned the
+poorest crabs into the commute that kept them poor. Fishers live in the
+cottages by the water now, where fishers live. Catches roughly doubled.
+
+### Bonus: EXCUSE ME
+
+Chasing that fix turned up a pin in the arcade's skeeball row, which
+bumped the owner's bounce-budget idea to the front of the queue: a crab
+who has spent **thirty in-game minutes** ricocheting off the furniture
+now squeezes a shell's width past the blocker with an EXCUSE ME. About 19
+squeezes per 5 days in a busy town — rare enough to stay funny, frequent
+enough that nobody spends their morning wrestling a bench.
+
+---
+
 ## 2026-08-18, last call — SUDSY discovers banker's hours
 
 ![SUDSY NOW OPENS AT 9, announced over a dark storefront](devlog/img/2026-08-18-sudsy-hours.png)
