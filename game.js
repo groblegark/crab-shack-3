@@ -5340,6 +5340,8 @@ cv.addEventListener("click", (ev) => {
     if (ffSleep) ffSleepDay = tmin < 6.5 * 60 ? day : day + 1;
     sfx.ding(); return;
   }
+  // ...and directly under it, the crab cycler: < crab >
+  if (tapCycler(p)) return;
   const wx = p.x + camX;
   // the job board is readable
   if (wx >= JOB_BOARD_X - 2 && wx < JOB_BOARD_X + 28 && p.y >= HOME_BOTTOM - 40 && p.y < HOME_BOTTOM + 4) {
@@ -5402,6 +5404,10 @@ addEventListener("keydown", (e) => {
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
+  // [ and ] step the selection through the town, exactly what the little crab
+  // cycler's chevrons do - the camera comes along, unlike an arrow-key pan
+  if (e.key === "[" && cyclerShown()) { cycleSel(-1); sfx.ding(); return; }
+  if (e.key === "]" && cyclerShown()) { cycleSel(1); sfx.ding(); return; }
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "Escape") { if (saveView) { closeSaveView(); return; } if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } sel = null; followIdx = -1; followNpc = null; followCust = null; }
@@ -6356,6 +6362,90 @@ function followCrab(c) {
   if (!c.p) { followCust = c; followIdx = -1; followNpc = null; }
   else if (c.p.npc) { followNpc = c; followIdx = -1; followCust = null; }
   else { followIdx = crabs.indexOf(c); followNpc = null; followCust = null; }
+}
+
+// ---------------------------------------------------------------- CYCLE THE FOCUS
+// A pictorial next/prev: a little crab between two chevrons, no words, so it
+// reads the same in any language and at any canvas height. It steps the
+// SELECTION through the town and takes the CAMERA with it (followCrab sets
+// both), which is the whole point - you flick from crab to crab and watch each
+// one work.
+//
+// WHAT IT CYCLES: every resident crab, crew first then townsfolk - literally
+// allCrabs(), the town's own roster order. Visiting TOURISTS are deliberately
+// out: they are customer objects that arrive and go home mid-cycle, so a list
+// containing them has no stable length and "wrap around" stops meaning
+// anything. You can still click a tourist to follow one; the cycler then treats
+// them as "nothing selected" and steps to the first (or last) crab in town.
+//
+// WHERE IT LIVES: top-right, directly under the little sun, in the world area
+// rows 0..PANEL_Y that BOTH canvas modes share - so it is pixel-identical on
+// 240 and 288 and never fights the follow card (top-left) or the BILL/DEBT
+// chips (bottom-right). It hides behind any full-screen reading surface on
+// exactly the same terms the follow card does: the ledger, the management
+// card, the census, the save screen and the day report own the screen.
+function cycleList() { return allCrabs(); }
+const CYCLE_W = 48, CYCLE_H = 17;
+function cyclerRects() {
+  const x = W - CYCLE_W - 2, y = 29;
+  return { x, y, w: CYCLE_W, h: CYCLE_H,
+    prev:  { x, y, w: 14, h: CYCLE_H },
+    glyph: { x: x + 14, y, w: 20, h: CYCLE_H },
+    next:  { x: x + 34, y, w: 14, h: CYCLE_H } };
+}
+function cyclerShown() {
+  return screen === "play" && !gameOver
+    && !(dossier || manage || boardView || saveView || reportT > 0) && tab !== "menu"
+    && cycleList().length > 0;
+}
+// step the selection (and the camera with it) by dir, wrapping at both ends.
+// With nothing selected - or with a tourist selected, who is not in the list -
+// `>` takes the first crab in town and `<` takes the last.
+function cycleSel(dir) {
+  const list = cycleList();
+  if (!list.length) return null;
+  const i = list.indexOf(sel);
+  const next = i < 0 ? (dir > 0 ? list[0] : list[list.length - 1])
+    : list[((i + dir) % list.length + list.length) % list.length];
+  followCrab(next);
+  return next;
+}
+function tapCycler(p) {
+  if (!cyclerShown()) return false;
+  const R = cyclerRects();
+  const hit = (r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+  if (hit(R.prev)) { cycleSel(-1); sfx.ding(); return true; }
+  if (hit(R.next)) { cycleSel(1); sfx.ding(); return true; }
+  // the crab in the middle is a target too: it re-engages the camera on the
+  // crab you already picked, the same job the follow card's portrait does
+  if (hit(R.glyph)) { if (sel) followCrab(sel); else cycleSel(1); sfx.ding(); return true; }
+  return false;
+}
+function drawCycler() {
+  if (!cyclerShown()) return;
+  const R = cyclerRects();
+  rect(ctx, R.x, R.y, R.w, R.h, [30, 20, 36]);
+  rect(ctx, R.x + 1, R.y + 1, R.w - 2, R.h - 2, [255, 250, 235]);
+  // the two chevrons, drawn as pixels rather than typed: no words anywhere
+  const chev = (cx, cy, dir) => {
+    for (let i = 0; i < 4; i++) {
+      px(ctx, cx + i * dir, cy - i, [90, 60, 40]);
+      px(ctx, cx + i * dir, cy + i, [90, 60, 40]);
+      px(ctx, cx + i * dir + dir, cy - i, [90, 60, 40]);
+      px(ctx, cx + i * dir + dir, cy + i, [90, 60, 40]);
+    }
+  };
+  chev(R.prev.x + 9, R.y + 8, -1);
+  chev(R.next.x + 4, R.y + 8, 1);
+  // ...and the crab itself, wearing the selected shell so you can see whose
+  // it is. Nothing selected: the first crab in town, which is exactly who a
+  // tap is about to give you.
+  const who = cycleList().indexOf(sel) >= 0 ? sel : cycleList()[0];
+  const col = who && who.p ? who.p.color : 0;
+  rect(ctx, R.glyph.x, R.y + 1, R.glyph.w, R.h - 2, [200, 230, 245]);
+  blit(ctx, CRAB_ARTS[col].a, R.glyph.x + 2, R.y + 3);   // 16x12 art, centred in the 20x17 chip
+  const acc = who && who.p ? ACCESSORIES[crabHat(who)] : null;
+  if (acc) blit(ctx, acc.art, R.glyph.x + 2 + acc.dx, R.y + 3 + acc.dy);
 }
 function dossierBar(R, c, diary) {
   const chip = (r, label, hot, dim) => {
@@ -7767,6 +7857,7 @@ function frame(now) {
   drawManage();
   drawDossier();   // above the management card: a census row opens a dossier ON TOP of it
   drawFollowCard();
+  drawCycler();   // < crab > : step the selection (and the camera) through the town
   {  // town reputation chip, top-right of the world
     const rTxt = "REP " + Math.round(rep);
     const rw = smallTextWidth(rTxt) + 8;

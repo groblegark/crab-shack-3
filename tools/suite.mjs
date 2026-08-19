@@ -3934,6 +3934,79 @@ scenario("tip sharing + the table cap roundtrip save/load", () => {
   return clamped === 1 ? true : `a corrupt tip share read back as ${clamped}`;
 });
 
+scenario("cycler: < crab > steps the selection AND the camera, and wraps", () => {
+  // THE CONTROL: a pictorial next/prev under the little sun. Selection and
+  // camera are deliberately separate in this game, so the thing under test is
+  // that this control moves BOTH - a player flicking through the town has to
+  // actually see each crab, not just have them highlighted off-screen.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(2);
+  const roster = JSON.parse(sim.G(`JSON.stringify(cycleList().map(c => c.p.name))`));
+  if (roster.length < 4) return `only ${roster.length} crabs in town to cycle`;
+  // crew first, then townsfolk: the town's own roster order
+  const crew = JSON.parse(sim.G(`JSON.stringify(crabs.map(c => c.p.name))`));
+  if (roster.slice(0, crew.length).join() !== crew.join())
+    return `cycle order does not start with the crew (${roster})`;
+  // nothing selected: a forward step takes the first crab in town
+  sim.G(`sel = null; followIdx = -1; followNpc = null; followCust = null;`);
+  if (sim.G(`cycleSel(1).p.name`) !== roster[0]) return `an empty selection did not step to ${roster[0]}`;
+  // ...and every step lands the selection AND the camera on the same crab
+  const seen = [];
+  for (let i = 0; i < roster.length; i++) {
+    const got = JSON.parse(sim.G(`(() => { const c = cycleSel(1);
+      return JSON.stringify({ name: c.p.name, sel: sel === c, cam: isFollowing(c) }); })()`));
+    if (!got.sel) return `${got.name} was stepped to but is not selected`;
+    if (!got.cam) return `${got.name} was stepped to but the camera did not follow`;
+    seen.push(got.name);
+  }
+  // one lap from roster[0] visits everybody exactly once and WRAPS home
+  const lap = seen.slice(0, roster.length);
+  const want = roster.slice(1).concat(roster[0]);
+  if (lap.join() !== want.join()) return `a lap read ${lap} instead of ${want}`;
+  // and backwards, from the same place, wraps the other way
+  sim.G(`followCrab(cycleList()[0])`);
+  if (sim.G(`cycleSel(-1).p.name`) !== roster[roster.length - 1])
+    return `stepping back off the first crab did not wrap to ${roster[roster.length - 1]}`;
+  // A TOURIST IS NOT IN THE LIST (they go home mid-cycle, so wrap would mean
+  // nothing) - but selecting one must not jam the control: it steps to the top.
+  sim.runUntil(`customers.some(k => !k.isCrab)`, { maxSteps: 40000 });
+  if (sim.G(`customers.some(k => !k.isCrab)`)) {
+    sim.G(`{ const t = customers.find(k => !k.isCrab); followCrab(t); }`);
+    if (sim.G(`cycleList().indexOf(sel)`) !== -1) return `a tourist turned up in the cycle list`;
+    if (sim.G(`cycleSel(1).p.name`) !== roster[0]) return `cycling off a tourist did not step to ${roster[0]}`;
+  }
+  // THE CAMERA REALLY MOVES: the follow cam converges on the crab it was given
+  // pan the camera away first (exactly what a drag does: it drops the camera
+  // and keeps the selection), then cycle and watch the camera come back
+  sim.G(`sel = null; followIdx = -1; followNpc = null; followCust = null; camX = clampCam(0);`);
+  sim.G(`cycleSel(-1)`);
+  const far0 = Math.round(sim.G(`Math.abs(camX - clampCam(sel.x - W / 2 + 8))`));
+  sim.runUntil(`false`, { maxSteps: 80 });   // ~4 sim-seconds of the real camera lerp
+  const dx = Math.round(sim.G(`Math.abs(camX - clampCam(sel.x - W / 2 + 8))`));
+  if (far0 < 200) return `the camera was already on that crab - the convergence arm proves nothing`;
+  if (dx > 12) return `the camera never converged on the cycled crab (${far0}px -> ${dx}px)`;
+  // GEOMETRY: one rect table feeds the draw and the hit-test, it sits in the
+  // world rows both canvas modes share, and it clears the sun above it
+  const R = JSON.parse(sim.G(`JSON.stringify(cyclerRects())`));
+  if (R.y < 28) return `the cycler at y=${R.y} overlaps the little sun (ends at y=28)`;
+  if (R.y + R.h > 176) return `the cycler runs into the panel (y=${R.y}+${R.h})`;
+  if (R.x + R.w > 256) return `the cycler runs off the right edge`;
+  for (const part of ["prev", "glyph", "next"])
+    if (R[part].w < 12 || R[part].h < 12) return `${part} is ${R[part].w}x${R[part].h} - too small for a thumb`;
+  // ...and a tap on the chevrons drives exactly what a click drives
+  sim.G(`followCrab(cycleList()[0])`);
+  const before = sim.G(`sel.p.name`);
+  sim.G(`tapCycler({ x: cyclerRects().next.x + 4, y: cyclerRects().next.y + 6 })`);
+  if (sim.G(`sel.p.name`) === before) return `tapping the > chevron moved nothing`;
+  sim.G(`tapCycler({ x: cyclerRects().prev.x + 4, y: cyclerRects().prev.y + 6 })`);
+  if (sim.G(`sel.p.name`) !== before) return `tapping < did not come back to ${before}`;
+  // a full-screen reading surface owns the screen: the cycler gets out of the way
+  sim.G(`manage = "shack"`);
+  const hidden = sim.G(`cyclerShown()`);
+  sim.G(`manage = null`);
+  return hidden ? `the cycler still draws over the management card` : true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
