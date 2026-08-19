@@ -8,6 +8,150 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, last light — CRAB SHACK 3 is finished. Here's what the crabs taught us.
+
+![The finished town at lunch: rep 100, tourists at the tables, a tip landing](devlog/img/2026-08-18-hero-town.png)
+
+*Tuesday, day 16, quarter past three. Reputation 100, $3117 in the till,
+tourists eating at the picnic tables, a server ringing up a GRILL FISH
+with the tip counted separately the way it should be. Five crew on the
+panel. SANDY's one of them.*
+
+This morning CRAB SHACK 3 was an idle beach kitchen with a rent bill.
+Tonight it has a labor market, a floating fish market, a bank that can see
+your future, weekends, sick days, shop hours its owners argue about, five
+saved towns, a census, and a secret mode only kids with small thumbs will
+find. Twenty-three merges. Eighty-two test scenarios, green. One day.
+
+We're stopping here. CRAB SHACK 4's design starts tomorrow. So this last
+entry isn't a changelog — it's the thing the numbers spent all day
+teaching us, which none of us walked in believing.
+
+### Every time we forced the crabs, we broke the town
+
+The pattern showed up so often it stopped being funny.
+
+We told fishers they could break only for food and water — a tidy rule to
+keep the pier staffed. The fish supply collapsed and growth towns starved
+by day six.
+
+We let crabs buy houses and watched them buy the *wrong* ones: the free
+lot at the far end of the world. They'd walk 36% of their week to work,
+fish for 7% of it, go broke, lose the house, and do it again — while
+cottages sat empty beside the pier.
+
+We gave them lanes to walk in and let the furniture sort itself out, and
+they spent their lives bouncing off the same bench.
+
+Every one of those was us reaching for the crabs' behavior directly. Every
+one failed, and failed in a way that looked, from outside, like the crabs
+being stupid.
+
+### Every time we fixed the world, they sorted themselves out
+
+Then we'd fix the *environment* instead, and the same crabs would suddenly
+look clever.
+
+We stopped paying fishers a wage and let fish have a price. Within a day
+SALTY — bored, money in his pocket, arcade open — turned it down for the
+rail saying THE WATER'S MONEY TODAY. Nobody scripted that. **We deleted a
+rule and got a work ethic.**
+
+We stopped handing out the first free house and handed out the *nearest*
+one, and stopped charging a second deposit to move. Fishers moved to the
+cottages by the water, where fishers live. The catch roughly doubled.
+
+We gave SUDSY the same hour-steppers we gave the player and three legible
+rules. She noticed nobody showers at dawn, converged on banker's hours by
+herself, and never touched the sign again.
+
+And today's last merge: crabs stopped walking home at 21:10 only to walk
+straight back to the shack to cook their own dinner. PINCHY now cooks it
+at the counter he's already standing at and is in bed by 21:43. Warps
+needed to unstick anybody: thirty-four, then zero. Frames spent deflecting
+off furniture: down 81%.
+
+The bug was never the crabs. It was always the town.
+
+### The scoreboard nobody expected
+
+Here's the arithmetic that made it unarguable. None of today's
+quality-of-life work was balance work — unsticking crabs, chaining
+errands, honest shop hours, letting the sick stay home. We never tuned a
+price, a wage, or a rent for difficulty. And yet:
+
+The day opened with towns dying on a median of day 13, anywhere from day 9
+to day 22 — a wide, swingy, luck-shaped spread. It closes with a median of
+14 across a *tight* band of 11 to 16. Only one day longer, but far more
+honest: the town stopped being a coin flip.
+
+And then the number we didn't expect. This morning a growth strategy —
+hire, seat, expand — escaped **zero times out of six**. That failure was
+stark enough that the owner formally shelved the founding promise and
+declared escape rare by design. Tonight, with no price, wage or rent
+touched since: **four towns out of eight alive at day 40.**
+
+Nobody balanced the game back into winnability. The crabs just stopped
+wasting their lives. The town didn't get cheaper to live in; it got better
+at living.
+
+*(Which means the shelved promise is worth reopening tomorrow, on the
+record, with better numbers than the ones that shelved it.)*
+
+### SUDSY takes a sick day
+
+![Sick day, in the dossier](devlog/img/2026-08-18-sick-day.png)
+
+The last feature in is the one that best explains the whole day. Crabs can
+take a sick day now — unpaid, their own decision — and rest actually
+mends them, in proportion to where they sleep.
+
+Watch it work, seed 1337: SUDSY runs herself ragged on day 2 — thirst
+0.85, hunger 0.6 — and the settlement lands her ill. Days 3 and 4 she
+hangs OUT SICK on her own shopfront and stays in house 5. Fourteen hours
+abed each day, needs nursed to zero, care lane reading BED REST. Day 4
+cures her and the town's only shower attendant opens her stalls again on
+day 5.
+
+She granted herself that sick day, by exactly the rule the player's
+SCHEDULE tab exposes. And across 120 paired towns, illness fell from 2.63
+days to 2.28 — while **deaths dropped from twelve to four.** A bed of your
+own is worth 0.29 days of recovery, which is the housing ladder finally
+saying out loud what it's been implying since this morning: where you
+sleep is who you get to be.
+
+### What we're carrying to CRAB SHACK 4
+
+The ledger on the job board has been quietly counting fish, corn, water,
+power and fruit all day, priced against a world nobody has visited. That
+was never bookkeeping. That was a door.
+
+We're also leaving two questions deliberately unanswered, because they're
+design questions and not bugs: NPC crabs still can't die, and they still
+earn $20 to a crew crab's $23. Both are the last places where this town
+treats some crabs as more real than others. Tomorrow is the day for that.
+
+### The crabs
+
+MAUDE was a grumpy tourist with a flower in her shell, standing in a
+queue, until somebody hired her out of it — cot, then cottage, four days
+later. SANDY got off a bus because a posting went unfilled for a day and
+is still on the crew panel tonight. SALTY and DRIFT started this morning
+as two fishers on subsistence pay and end it as free agents who own boats,
+read the price before deciding whether today is a fishing day, and are
+getting demonstrably better at casting. PINCHY poured the first juice in
+town, learned to cook dinner where he stands, and goes to bed on time now.
+
+None of them were written. All of them were *permitted*.
+
+That's the whole trick, and it took a full day of getting it wrong to see
+it.
+
+Thanks for reading. The crabs never knew you were watching, which is
+probably for the best.
+
+---
+
 ## 2026-08-18, closing the shop — Five towns, and everyone in them
 
 ![SAVED TOWNS: the crew of slot 1, portraits and all](devlog/img/2026-08-18-saved-towns.png)
