@@ -2928,6 +2928,279 @@ scenario("mortality: a dead townsfolk crab leaves the town in a sane state", () 
   return true;
 });
 
+// ===========================================================================
+// NEEDS THAT FAIL IN THEIR OWN CHARACTER - boredom drifts, tiredness stalls
+// ===========================================================================
+
+// A solvent town with a real kitchen and nowhere to spend boredom: NO ARCADE,
+// which is the owner's ruling made concrete. The only two cures in the game
+// are the arcade (money) and a conversation (time), and this town has one of
+// them.
+function idleTown(sim, crew = 3) {
+  sim.G(`coins = 4000; tryBuy("table"); while (crabs.length < ${crew}) hireCrew(); coins = 4000;`);
+}
+function statusOf(sim) { return sim.G(`crabStatus(allCrabs().find(c => c.p.name === window._w))`); }
+const CHAT_RELIEF_MAX = 0.061;
+
+scenario("idle hands: a bored crab leaves its post - and an order brings it back", () => {
+  const sim = createSim({ seed: 21 });
+  idleTown(sim, 2);
+  // mid-shift, dead counter, one restless crab and nothing else wrong with
+  // them - boredom YIELDS to every other need (Rule 3), so the fixture has to
+  // be a crab whose life is otherwise fine. That IS the pattern, not a
+  // convenience: a starving crab never wanders off to watch the sea.
+  if (!sim.runUntil(`crabs.some(c => c.dayState === "working" && c.kstate === "idle")`, { maxSteps: 300000 }))
+    return "no crab ever reached a kitchen shift";
+  sim.G(`{ customers = [];
+    const c = crabs.find(x => x.dayState === "working" && x.kstate === "idle");
+    window._w = c.p.name; c.wanderCd = 0; c.idleT = 0; }`);
+  const post = sim.G(`BIZ.shack.door + 4`);
+  const keepBored = (G) => G(`{ customers = customers.filter(k => k.biz !== "shack");
+    const c0 = crabs.find(x => x.p.name === window._w);
+    if (c0) { c0.p.bored = 0.9; c0.p.hunger = 0; c0.p.thirst = 0; c0.p.tired = 0; c0.p.dirt = 0; c0.p.sick = null; } }`);
+  if (!sim.runUntil(`crabs.some(c => c.p.name === window._w && c.wander)`,
+      { maxSteps: 120000, onTick: keepBored, tickEvery: 4 }))
+    return "a bored crab on a dead counter never left its post";
+  const label = sim.G(`crabs.find(c => c.p.name === window._w).wander.label`);
+  // ...and it actually GOES somewhere: a wander is a trip, not a fidget
+  if (!sim.runUntil(`crabs.some(c => c.p.name === window._w && c.wanderT > 0)`,
+      { maxSteps: 200000, onTick: keepBored, tickEvery: 4 }))
+    return "the wanderer never arrived anywhere (" + label + ")";
+  const away = sim.G(`Math.abs(crabs.find(c => c.p.name === window._w).x - ${post})`);
+  if (!(away > 40)) return `"wandered off" only got ${Math.round(away)}px from the post (${label})`;
+  if (sim.G(`crabs.find(c => c.p.name === window._w).duty`) !== true)
+    return "the wanderer clocked OFF - idle hands must stay on the payroll";
+  const st = statusOf(sim);
+  if (st.indexOf("WATCHING") < 0 && st.indexOf("WANDERED") < 0)
+    return "the follow card does not say where they went: " + st;
+  // AN ORDER LANDS. The claim scan runs every frame whether they are at the
+  // post or at the pier rail, so the whole cost of having drifted off is the
+  // walk back - and it has to actually happen.
+  sim.G(`{ const k = newCustomer("shack"); k.state = "waiting"; k.x = BIZ.shack.queueX; customers.push(k); }`);
+  if (!sim.runUntil(`crabs.some(c => c.p.name === window._w && c.cust)`, { maxSteps: 120000 }))
+    return "a guest arrived and the wanderer never claimed the order";
+  if (sim.G(`crabs.find(c => c.p.name === window._w).wander`) !== null)
+    return "the wander outlived the order that ended it";
+  if (!sim.runUntil(`crabs.some(c => c.p.name === window._w && Math.abs(c.x - ${post}) < 80)`, { maxSteps: 300000 }))
+    return "the wanderer never walked back to the kitchen";
+  return true;
+});
+
+scenario("idle hands: the WALK-OUT costs the wage, and coverage stays honest", () => {
+  const sim = createSim({ seed: 33 });
+  idleTown(sim, 2);
+  // three settlements of pinned boredom already behind them: tonight is the
+  // one where they've had enough. Boredom really does pin in an arcade-less
+  // town (see the "no free cure" scenario) - this just gets there in a line
+  // instead of five days.
+  sim.G(`{ const c = crabs[0]; window._w = c.p.name;
+    c.p.bored = 1; c.p.boredDays = WALKOUT_DAYS - 1; c.p.sick = null; }`);
+  const startDay = sim.G("day");
+  const pin = (G) => G(`{ coins = Math.max(coins, 1200);
+    const c0 = crabs.find(x => x.p.name === window._w); if (c0) { c0.p.bored = 1; c0.p.sick = null; } }`);
+  if (!sim.runUntil(`day > ${startDay}`, { maxSteps: 900000, onTick: pin, tickEvery: 20 }))
+    return "the fixture never reached the next day";
+  const wDay = sim.G(`crabs.find(c => c.p.name === window._w).p.walkout`);
+  if (wDay !== sim.G("day")) return `no walk-out was called for today (p.walkout=${wDay}, day ${sim.G("day")})`;
+  if (!sim.G(`walkoutToday(crabs.find(c => c.p.name === window._w))`)) return "walkoutToday() disagrees with p.walkout";
+  // THE WAGE. Nothing is owed for a day nobody worked - and the BILL chip, the
+  // MENU breakdown and the settlement all read the one function, so the column
+  // adds up wherever you look at it.
+  if (sim.G(`crabDueTonight(crabs.find(c => c.p.name === window._w))`) !== 0)
+    return "a walk-out still billed the player a full day's wage";
+  const roster0 = sim.G(`allCrabs().filter(k => k.p.job === "shack").length`);
+  let everWorked = false;
+  sim.runUntil(`tmin >= 19 * 60`, { maxSteps: 900000, tickEvery: 8, onTick: (G) => {
+    pin(G);
+    if (G(`(() => { const c = crabs.find(x => x.p.name === window._w);
+      return !!c && (c.dayState === "working" || c.dayState === "toWork"); })()`)) everWorked = true;
+  } });
+  if (everWorked) return "the crab who walked out turned up for work anyway";
+  // COVERAGE. Nobody covers a walk-out - that is what makes it cost - but the
+  // roster must not LOOK like a vacancy either: the job board's emergency
+  // HELP WANTED gate counts HEADCOUNT, and the headcount has not moved.
+  if (sim.G(`allCrabs().filter(k => k.p.job === "shack").length`) !== roster0)
+    return "a walk-out changed the roster headcount - the job board would read it as a vacancy";
+  if (sim.G(`jobBoard.some(j => j.biz === "shack")`)) return "a walk-out posted an emergency vacancy";
+  // ...and the settlement itself pays them nothing. Sampled either side of
+  // 20:00 rather than across the whole day, because a crab on an unauthorised
+  // day off SPENDS - which is half the joke.
+  sim.runUntil(`tmin >= 19 * 60 + 55`, { maxSteps: 400000, tickEvery: 20, onTick: pin });
+  const wallet0 = sim.G(`crabs.find(c => c.p.name === window._w).p.wallet`);
+  sim.runUntil(`tmin >= 20 * 60 + 20`, { maxSteps: 400000, tickEvery: 20, onTick: pin });
+  if (sim.G(`crabs.find(c => c.p.name === window._w).p.wallet`) > wallet0)
+    return "the walked-out crab drew a wage at settlement anyway";
+  if (!sim.G(`(report && (report.walked || []).length) || today.moved.some(m => m.indexOf("NEVER CAME IN") >= 0)`))
+    return "the day report never mentioned the walk-out";
+  return true;
+});
+
+scenario("microsleep: the nod holds the station slot, then gives it back", () => {
+  // TI1. The whole point is that the slot is NOT released - it costs the
+  // kitchen, not just the sleeper. What it must never do is DEADLOCK, and it
+  // must never be mistaken for a pinned crab by the unstick watchdog.
+  const sim = createSim({ seed: 3 });
+  idleTown(sim, 3);
+  let sawNap = 0, sawHeld = 0, sawDetour = 0, workRan = 0, maxNap = 0, maxWait = 0;
+  const waitRun = {}, workPrev = {};
+  sim.runDays(4, { tickEvery: 1, onTick: (G) => {
+    // a town run into the ground: everybody pinned at exhaustion. Baseline
+    // crews peak at ~0.5 and never see any of this - by design (see NOD_AT).
+    G(`coins = Math.max(coins, 1500); for (const c of crabs) c.p.tired = 1;`);
+    for (const r of JSON.parse(G(`JSON.stringify(crabs.map(c => [c.p.name, c.kstate, c.napFrom, c.napT || 0,
+        c.slot, c.slotKind, c.workT, !!c.detour,
+        (c.slot >= 0 && c.slotKind) ? !!busy[c.workBiz][c.slotKind][c.slot] : false]))`))) {
+      const [n, ks, from, napT, slot, kind, workT, detour, held] = r;
+      if (napT > 0) {
+        sawNap++; maxNap = Math.max(maxNap, napT);
+        if (slot >= 0 && held) sawHeld++;   // ...and the station is still theirs
+        if (detour) sawDetour++;            // the watchdog must never sidestep a sleeper
+        if (from === "work" && workPrev[n] != null && workT < workPrev[n] - 1e-9) workRan++;
+      }
+      workPrev[n] = workT;
+      waitRun[n] = ks === "waitSlot" ? (waitRun[n] || 0) + 1 : 0;
+      maxWait = Math.max(maxWait, waitRun[n]);
+    }
+  } });
+  if (!sawNap) return "an exhausted kitchen never nodded off once in four days";
+  if (!sawHeld) return "a nodding crab never held a station slot - the cost landed on nobody";
+  if (sawDetour) return `the auto-unstick watchdog sidestepped a sleeping crab ${sawDetour} times`;
+  if (workRan) return `the prep timer kept running through a microsleep ${workRan} times`;
+  if (maxNap > 6) return `a nod ran ${maxNap.toFixed(1)}s - it must be capped at NOD_MIN + NOD_SPAN`;
+  // DEADLOCK TRIPWIRE. waitSlot is where a coworker sits while somebody else
+  // holds the grill. A nod DELAYS them; a jam would park them there forever.
+  // Each tick is one ~50ms frame, so 600 is half a sim-minute of solid waiting.
+  if (maxWait > 600) return `a crab sat in waitSlot for ${maxWait} frames - the kitchen jammed`;
+  if (!(sim.G(`(window._stats.tourServes || 0)`) > 0)) return "the exhausted kitchen served nobody at all";
+  if (sim.G(`crabs.some(c => (c.napT || 0) > 0 && c.dayState !== "working")`))
+    return "a nap survived outside the kitchen";
+  // ...AND IT RELEASES CLEANLY WHEN THE CRAB IS YANKED OUT MID-NAP. Without
+  // this, abortChef forces kstate to "idle" while napT keeps the guard
+  // returning early forever: a station released and a crab that never works
+  // again. Exactly the shape of the stall-occupant leak abortErrand exists for.
+  const b = createSim({ seed: 7 });
+  idleTown(b, 2);
+  if (!b.runUntil(`crabs.some(c => c.kstate === "work" && c.slot >= 0 && c.slotKind)`,
+      { maxSteps: 400000, onTick: (G) => G(`coins = Math.max(coins, 1500);`), tickEvery: 20 }))
+    return "the abort arm never got a crab onto a station";
+  b.G(`{ const c = crabs.find(x => x.kstate === "work" && x.slot >= 0 && x.slotKind);
+    window._t = { n: c.p.name, k: c.slotKind, s: c.slot, b: c.workBiz };
+    c.p.tired = 1; c.napFrom = c.kstate; c.kstate = "nap"; c.napT = 4; }`);
+  if (!b.G(`busy[window._t.b][window._t.k][window._t.s]`)) return "the slot was let go the moment the crab nodded off";
+  b.G(`abortChef(crabs.find(c => c.p.name === window._t.n))`);
+  if (b.G(`busy[window._t.b][window._t.k][window._t.s]`)) return "abortChef left the station locked by a sleeping crab";
+  const after = JSON.parse(b.G(`JSON.stringify(((c) => [c.napT || 0, c.kstate, c.napFrom])(crabs.find(x => x.p.name === window._t.n)))`));
+  if (after[0] !== 0 || after[1] !== "idle" || after[2] !== null)
+    return "a crab yanked out mid-nap stayed asleep: " + JSON.stringify(after);
+  b.runDays(b.G("day") + 1, { tickEvery: 20, onTick: (G) => G(`coins = Math.max(coins, 1500);`) });
+  if (b.G(`crabs.some(c => (c.napT || 0) > 0 && c.kstate !== "nap")`)) return "a nap timer outlived its state";
+  return true;
+});
+
+scenario("shortcut home: sleeping rough banks nothing - and the player can break it", () => {
+  // TI4, the honest and frightening one: exhaustion prevents its own cure,
+  // because the street is not a bed and not even a cot. Nothing punished the
+  // crab - they just didn't make it home.
+  //
+  // Bedding down is a per-second ROLL, not a cliff (see ROUGH_RATE): a crab
+  // most of the way home usually makes it and the same crab leaving the shack
+  // usually does not. So the fixture walks seeds until one drops, then runs
+  // the CONTROL on the same seed with only the rough-sleep gate switched off -
+  // identical RNG stream, identical crab, one behaviour different.
+  const arm = (seed, off) => {
+    const sim = createSim({ seed });
+    idleTown(sim, 2);
+    sim.G(`window._failOff = ${JSON.stringify(off)};`);
+    if (!sim.runUntil(`darkness() >= 0.6`, { maxSteps: 900000, tickEvery: 20,
+        onTick: (G) => G(`coins = Math.max(coins, 1200);`) })) return null;
+    // knocked off at the shack, the whole promenade between them and their
+    // bed, and completely spent
+    sim.G(`{ const c = crabs[0]; window._w = c.p.name;
+      abortActivity(c); c.p.sick = null; c.p.tired = 1; c.p.mode = "walk";
+      c.p.homeless = false; if (c.p.house == null) c.p.house = 0;
+      c.x = BIZ.shack.door; c.y = 167; setT(c, c.x, c.y); startCommute(c, false); }`);
+    sim.runUntil(`darkness() < 0.3 && tmin > 8 * 60`, { maxSteps: 900000, tickEvery: 4,
+      onTick: (G) => G(`{ coins = Math.max(coins, 1200);
+        const c0 = crabs.find(x => x.p.name === window._w);
+        if (c0 && c0.p.rough && !window._roughSt) window._roughSt = crabStatus(c0); }`) });
+    return sim;
+  };
+  let rough = null, seed = 0;
+  for (const s2 of [5, 9, 17, 23, 31, 42]) {
+    const a = arm(s2, {});
+    if (a && a.G(`crabs.find(c => c.p.name === window._w).p.roughLast`)) { rough = a; seed = s2; break; }
+  }
+  if (!rough) return "an exhausted crab walking the whole promenade home ALWAYS made it - TI4 never fired";
+  const bed = arm(seed, { rough: 1 });
+  if (!bed) return "the control arm never ran";
+  const tR = rough.G(`crabs.find(c => c.p.name === window._w).p.tired`);
+  const tB = bed.G(`crabs.find(c => c.p.name === window._w).p.tired`);
+  // THE SPIRAL, stated: a rough night banks nothing, so they wake as spent as
+  // they lay down, while the same crab in a real bed wakes clear.
+  if (!(tR > 0.9)) return `a rough sleeper woke at tired ${tR.toFixed(2)} - the street repaired them`;
+  if (!(tB < 0.3)) return `the control arm woke at tired ${tB.toFixed(2)} - the fixture is not comparing a real bed`;
+  const rst = rough.G(`window._roughSt || ""`);
+  if (rst.indexOf("ASLEEP") < 0) return "the follow card never said where they went down: " + JSON.stringify(rst);
+  // ...AND IT IS ESCAPABLE BY THE PLAYER. Right-click their own front door is
+  // the "HEADING HOME" knock-off order; a day at home naps it off at TIRED_NAP.
+  // The spiral is a spiral, not a wall.
+  const before = rough.G(`crabs.find(c => c.p.name === window._w).p.tired`);
+  rough.G(`{ const c = crabs.find(x => x.p.name === window._w);
+    orderCrab(c, c.p.homeless ? SHELTER_X + 10 : HOUSE_XS[c.p.house] + 10, 155); }`);
+  if (rough.G(`crabs.find(c => c.p.name === window._w).p.rough`))
+    return "a player order left the crab asleep in the street";
+  rough.runUntil(`tmin >= 17 * 60`, { maxSteps: 900000, tickEvery: 20, onTick: (G) => G(`{ coins = Math.max(coins, 1200);
+    const c0 = crabs.find(x => x.p.name === window._w); if (c0) { c0.restDay = day; c0.restUntil = 20 * 60; } }`) });
+  const after = rough.G(`crabs.find(c => c.p.name === window._w).p.tired`);
+  if (!(after < before - 0.3))
+    return `sending them home only moved tiredness ${before.toFixed(2)} -> ${after.toFixed(2)} - the spiral has no exit`;
+  return true;
+});
+
+scenario("boredom has NO free cure: only a conversation, and it never pays for itself", () => {
+  // THE CURE LEDGER, asserted. In a town with no arcade the ONLY thing in the
+  // whole game that lowers a boredom bar is two crabs standing still talking
+  // to each other, and it costs them exactly the time it takes. A crab with
+  // nobody to talk to has no way down at all - boredom as a loneliness need.
+  const sim = createSim({ seed: 41 });
+  idleTown(sim, 4);
+  if (sim.G(`bizUnlocked("arcade")`)) return "the fixture town has an arcade - it cannot prove anything";
+  const start = {}, last = {}, chatSamples = {}, drops = [];
+  const prev = {}, wasChat = {};
+  let chatting = 0;
+  sim.runDays(8, { tickEvery: 2, onTick: (G) => {
+    G(`coins = Math.max(coins, 1500);`);
+    for (const r of JSON.parse(G(`JSON.stringify(allCrabs().map(c => [c.p.name, c.p.bored || 0, c.dayState === "chat"]))`))) {
+      const [n, bored, inChat] = r;
+      if (start[n] == null) start[n] = bored;
+      last[n] = bored;
+      if (inChat) { chatting++; chatSamples[n] = (chatSamples[n] || 0) + 1; }
+      if (prev[n] != null && bored < prev[n] - 1e-6) drops.push({ n, by: prev[n] - bored, chat: !!wasChat[n] });
+      prev[n] = bored; wasChat[n] = inChat;
+    }
+  } });
+  if (!drops.length) return "boredom never moved down at all - the chatter cure is not firing";
+  const rogue = drops.filter(d => !d.chat || d.by > CHAT_RELIEF_MAX);
+  if (rogue.length)
+    return `${rogue.length} boredom drop(s) came from something other than a finished conversation, e.g. ${JSON.stringify(rogue[0])}`;
+  if (!(chatting > 0)) return "nobody in a bored town ever stopped to talk";
+  // IT CANNOT SELF-SUSTAIN. Across a working week every crab - the chattiest
+  // included - still ends MORE bored than they started, or the $650 arcade
+  // rung stops mattering. (0.06 of relief, at most twice a day against a
+  // shift's +0.20, is the arithmetic this asserts.)
+  const names = Object.keys(start).filter((n) => start[n] < 0.9);   // a crab already pinned at 1.0 cannot rise
+  const held = names.filter((n) => last[n] <= start[n] + 0.05);
+  if (held.length)
+    return "a talkative crew kept itself topped up over a working week: "
+      + held.map((n) => `${n} ${start[n].toFixed(2)}->${last[n].toFixed(2)} (${chatSamples[n] || 0} chat samples)`).join(", ");
+  // THE LONELY CRAB. Somebody in this town never found company, and their bar
+  // never took a single step down: no solo cure exists.
+  const talkers = new Set(drops.map((d) => d.n));
+  const alone = Object.keys(start).filter((n) => !talkers.has(n));
+  if (!alone.length) return "every crab in the fixture found company - the lonely case went untested";
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
