@@ -891,6 +891,30 @@ const SICK_MARK = parseArt([
   "G..G.G",
   ".GG.G.",
 ], swap(PAL, { G: [130, 220, 110] }));
+// OVERTIME POWERUP: a chunky little coffee cup that floats over a crab working
+// past their contracted hours - same read-at-a-glance family as merge mode's
+// thought bubble. Two frames: the steam curls. Derived from live state, so it
+// clears itself the moment overtime ends.
+const OT_MARK = [
+  parseArt([
+    "..Y....",
+    ".Y.....",
+    "KKKKKK.",
+    "KWWWWKK",
+    "KWWWWKW",
+    "KWWWWKK",
+    ".KKKK..",
+  ], swap(PAL, { Y: [255, 235, 180], W: [180, 110, 60], K: [40, 26, 20] })),
+  parseArt([
+    "....Y..",
+    "...Y...",
+    "KKKKKK.",
+    "KWWWWKK",
+    "KWWWWKW",
+    "KWWWWKK",
+    ".KKKK..",
+  ], swap(PAL, { Y: [255, 235, 180], W: [180, 110, 60], K: [40, 26, 20] })),
+];
 const NOTICE_BOARD = parseArt([
   "KKKKKKKKKKKK",
   "KEEEEEEEEEEK",

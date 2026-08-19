@@ -157,6 +157,12 @@ const MEAL_POL_LABEL = { retail: "RETAIL", atcost: "AT COST", free: "FREE" };
 for (const k in BIZ) {   // one migration point: defaults = today's behavior
   BIZ[k].hours = { open: 8 * 60, close: 20 * 60 };
   BIZ[k].mealPol = "retail";
+  // labor policy (see the LABOR POLICY block below). GRANT is what the game
+  // already did - a sick crab stayed home unpaid - so the default is inert.
+  BIZ[k].sickPol = "grant";
+  // auto-manage: OFF for the player (you're the manager), ON for peer owners
+  // (SUDSY has always run herself; the same rule table now does it out loud).
+  BIZ[k].autoLabor = !!BIZ[k].owner && BIZ[k].owner !== "player";
 }
 function setBizHours(b, open, close) {
   const h = BIZ[b].hours;
@@ -471,10 +477,218 @@ function bizShiftWindow(b, kind) {
   return w;
 }
 function baseShift(c) { return c.p.job === "fishing" ? SHIFTS[c.p.shift] : bizShiftWindow(c.p.job, c.p.shift); }
-function effShift(c) { return coveringToday(c) ? bizShiftWindow(c.p.job, "cover") : baseShift(c); }
-function bizRestingToday(b) {   // every worker on the roster is off today
+// the shift they're CONTRACTED to work today: their own, or the cover double.
+// effShift (below) adds overtime on top - it's "the hours they actually work".
+function dutyShift(c) { return coveringToday(c) ? bizShiftWindow(c.p.job, "cover") : baseShift(c); }
+
+// ================================================================ LABOR POLICY
+// Sick days, overtime, and the rules a manager - player or CPU - applies to
+// both. Everything is DERIVED from persona state plus per-business policy: no
+// parallel scheduler, and only three new persona fields (sickPol, ot, restT).
+//
+// ---- SICK DAYS -------------------------------------------------------------
+// A sick crab stays home, UNPAID, and cares for themselves. That was already
+// the behavior; what's new is that it is a POLICY, so it can be taken away:
+//   GRANT   (default = the old behavior) the crab rests and earns nothing
+//   REQUIRE the crab drags themselves in at half speed, earns the full wage,
+//           and coughs on the coworkers. (The contagion term in the settlement
+//           epidemiology has always keyed on standing at work beside a sick
+//           colleague - until sick days were a policy, no crab could ever be
+//           there to trigger it.)
+// Per-business default plus a per-crab override (dossier row / SCHEDULE tab).
+// Self-employed fishers and owner-operators always grant: no boss, no policy.
+const SICK_POLS = ["grant", "require"];
+const SICK_POL_LABEL = { grant: "GRANT SICK DAYS", require: "REQUIRE WORK" };
+function sickPolFor(c) {
+  if (c.p.sickPol && SICK_POLS.includes(c.p.sickPol)) return c.p.sickPol;
+  if (c.p.owner || c.p.job === "fishing" || !BIZ[c.p.job]) return "grant";
+  return BIZ[c.p.job].sickPol || "grant";
+}
+// THE predicate: the commute gate, both wage loops, the BILL forecast, the
+// coverage math and the placard all read it.
+function onSickDay(c) { return !!c.p.sick && sickPolFor(c) === "grant"; }
+
+// ---- THE CARED SEAM (closed 2026-08-18) ------------------------------------
+// Recovery's care check read only hunger and dirt - it predated thirst and
+// tiredness, so a crab who spent the whole day in bed got nothing for it and
+// "take a sick day" was theater. Convalescence is now a graded ladder, keyed
+// to the same housing quality the sleep ladder uses (own bed 0.5/h, cot 0.25/h):
+//
+//   lane       cure  die   what it takes
+//   NEGLECT    0.12  0.25  fails fed-and-clean                    (unchanged)
+//   CARED      0.40  0.08  hunger < 0.5 AND dirt < 0.66           (unchanged:
+//                          the old bar still pays exactly what it always did)
+//   COT REST   0.48  0.06  CARED + thirst < 0.5 + a day's rest on a cot
+//   BED REST   0.55  0.04  CARED + thirst < 0.5 + a day's rest in their OWN
+//                          bed (house or boat)
+// Nobody's odds got worse - rest is a NEW, better lane, reachable only by
+// actually staying home on a granted sick day. That is what makes it real.
+const REST_HOURS = 9;   // daylight game-hours at home, ill and excused, to count as a day's rest
+const CARE_LANES = {
+  neglect: { cure: 0.12, die: 0.25, label: "NEGLECTED" },
+  cared:   { cure: 0.40, die: 0.08, label: "CARED FOR" },
+  cot:     { cure: 0.48, die: 0.06, label: "COT REST" },
+  bed:     { cure: 0.55, die: 0.04, label: "BED REST" },
+};
+function careLane(k) {
+  if ((k.p.hunger || 0) >= 0.5 || (k.p.dirt || 0) >= 0.66) return "neglect";
+  if ((k.p.restT || 0) < REST_HOURS || (k.p.thirst || 0) >= 0.5 || !onSickDay(k)) return "cared";
+  return k.p.homeless ? "cot" : "bed";
+}
+
+// ---- OVERTIME --------------------------------------------------------------
+// A standing per-crab request (p.ot) that lengthens TODAY'S shift by up to
+// OT_SPAN minutes, paid at OT_RATE x the crab's normal hourly rate on top of
+// the flat daily wage, at a proportional needs cost.
+//
+// SHOP-HOURS COUPLING (the choice, documented): overtime lives strictly INSIDE
+// the shop's open hours. Hours gate tourist admission, errand dispatch and the
+// CLOSED sign, so an hour past close is an hour with the doors shut - premium
+// pay for nothing. The extension takes whatever room is left at the END of the
+// shift first, then borrows from the START: an E-shift crab whose shift already
+// ends at close comes in EARLY instead, which is exactly the shape that plugs a
+// missing morning. Want more OT room? Extend the shop's hours - one tab away.
+// A crab already covering a full-open double has no room at all, by
+// construction - you cannot work overtime on a day you work open to close.
+const OT_SPAN = 120;      // up to two extra hours
+const OT_RATE = 1.5;      // premium multiplier on the hourly rate
+const OT_FATIGUE = 1.5;   // tiredness accrues at 1.5x the proportional share (the health cost)
+function otEligible(c) {
+  return !!c.p.ot && !c.p.sick && !offToday(c)
+    && c.p.job !== "fishing" && !!BIZ[c.p.job] && !c.p.owner;   // wage-earners only: fishers sell fish, owners draw from the till
+}
+function otWindow(c) {
+  if (!otEligible(c)) return null;
+  const sh = dutyShift(c), h = BIZ[c.p.job].hours;
+  const after = Math.min(OT_SPAN, Math.max(0, h.close - sh.end));
+  const before = Math.min(OT_SPAN - after, Math.max(0, sh.start - h.open));
+  if (after + before <= 0) return null;
+  return { start: sh.start - before, end: sh.end + after, mins: after + before };
+}
+function otMinutes(c) { const w = otWindow(c); return w ? w.mins : 0; }
+// the hours they actually work today = contracted shift + overtime
+function effShift(c) {
+  const w = otWindow(c);
+  if (!w) return dutyShift(c);
+  return { start: w.start, end: w.end, label: fmtHr(w.start) + "-" + fmtHr(w.end), ot: w.mins };
+}
+// on the clock, right now, in overtime? (the powerup marker + the OT tags read
+// this, so they clear the instant OT ends - nothing to reset)
+function onOvertimeNow(c) {
+  if (!c.duty || c.dayState !== "working") return false;
+  const w = otWindow(c);
+  if (!w) return false;
+  const sh = dutyShift(c);
+  return tmin < sh.start || tmin >= sh.end;
+}
+function wageRate(c) { return c.p.npc ? NPC_WAGE : CRAB_WAGE; }
+// OT minutes at OT_RATE x the normal hourly rate. The hourly rate comes from
+// the crab's OWN contracted shift (baseShift), never the cover double - a
+// cover day is a separate, pre-existing generosity and must not dilute the
+// premium. Exact by construction: the suite pins the RATIO, not a magic number.
+function otPremium(c, mins) {
+  const b = baseShift(c);
+  return wageRate(c) * OT_RATE * mins / Math.max(60, b.end - b.start);
+}
+function otPayToday(c) { return otPremium(c, c.otMin || 0); }        // truthful: minutes actually worked
+// tonight's forecast: scheduled while they're still on OT, else what they worked
+function otPayForecast(c) { return otEligible(c) ? otPremium(c, otMinutes(c)) : otPayToday(c); }
+
+function bizRestingToday(b) {   // nobody on the roster works today (rest day or sick day)
   const staff = allCrabs().filter(k => k.p.job === b);
-  return staff.length > 0 && staff.every(k => offToday(k));
+  return staff.length > 0 && staff.every(k => offToday(k) || onSickDay(k));
+}
+function restingLabel(b) {   // what the placard says - illness reads differently from a rota day
+  const staff = allCrabs().filter(k => k.p.job === b);
+  return staff.some(k => onSickDay(k)) && staff.every(k => onSickDay(k) || offToday(k))
+    && staff.some(k => !offToday(k)) ? "OUT SICK" : "DAY OFF";
+}
+
+// ---- AUTO-MANAGE -----------------------------------------------------------
+// Built on the exact pattern SUDSY's hours policy uses: a small state machine
+// read once per settlement, AT MOST ONE MOVE PER DAY, a cooldown day after a
+// move, and a named toast for every move so the player can watch the manager
+// think. Peer owners run it by default; the player can delegate with the
+// AUTO-MANAGE toggle on the SCHEDULE tab (default OFF - you're the manager).
+//
+//   rule        move                       fires when
+//   REST        sickPol -> grant           a staffer is ill under a REQUIRE
+//                                          policy: send them home
+//   OT OFF      p.ot = false               a crab on OT is over the tiredness
+//                                          budget, sick, or no longer needed
+//   OT ON       p.ot = true                tomorrow leaves a shift uncovered
+//                                          AND a rested candidate exists
+//
+// CONVERGENCE. OT ON needs (gap tomorrow AND tired < OT_ON_TIRED); OT OFF needs
+// (tired >= OT_OFF_TIRED) OR (no gap). The tiredness triggers are a HYSTERESIS
+// BAND (0.55 / 0.75), never a knife edge, and overtime itself pushes tiredness
+// UP at OT_FATIGUE - so every ON move weakens its own trigger. On the coverage
+// axis the two regimes are disjoint by construction. With one move a day, a
+// cooldown after each, and a roster-sized cap on how many crabs can be on OT,
+// the machine settles into a duty cycle instead of thrashing (suite-proved
+// over 21 days).
+const LABOR_CFG = { OT_ON_TIRED: 0.55, OT_OFF_TIRED: 0.75, OT_ON_HUNGER: 0.5 };
+let laborPolicyState = {};   // biz -> { cd } (persisted)
+// does tomorrow leave a shift with nobody on it? Days off already promote a
+// coworker to a full-open double (revenue-neutral, free), so the honest gap is
+// SICKNESS - an excused crab's window simply goes dark. That is the hole
+// overtime is for, and it is why the OT extension borrows from the START when
+// there is no room at the end: an E crab coming in early plugs a lost morning.
+function coverGapTomorrow(b) {
+  const roster = allCrabs().filter(k => k.p.job === b && !k.p.owner);
+  if (roster.length < 2) return null;   // a one-crab shop honestly closes - that's the placard, not an OT problem
+  const wd = weekdayIdx(day + 1);
+  const out = roster.filter(k => dayOffIdx(k) === wd || onSickDay(k));
+  const on = roster.filter(k => !out.includes(k));
+  if (!on.length || !out.length) return null;
+  const hole = out.find(o => !on.some(w => w.p.shift === o.p.shift || w.p.shift === "D"));
+  return hole || null;
+}
+function runLaborPolicy(b) {
+  if (!BIZ[b] || !BIZ[b].autoLabor || window._noLaborPolicy) return;
+  if (b === "fishing") return;
+  const st = laborPolicyState[b] = laborPolicyState[b] || { cd: 0 };
+  if (st.cd > 0) { st.cd--; return; }
+  const roster = allCrabs().filter(k => k.p.job === b);
+  const who = bizOwner(b) === "player" ? "THE ROTA" : OWNERS[bizOwner(b)].name;
+  const move = (line) => {
+    st.cd = 1;
+    toast = { text: line, t: 6 };
+    today.moved.push(line);
+    if (window._stats) (window._stats.laborMoves = window._stats.laborMoves || [])
+      .push({ day, biz: b, line });
+  };
+  // 1. REST: nobody works a shift ill if the manager can help it
+  const forced = roster.find(k => k.p.sick && sickPolFor(k) === "require");
+  if (forced) {
+    forced.p.sickPol = "grant";
+    return move(who + " SENDS " + forced.p.name + " HOME TO REST");
+  }
+  // 2. OT OFF: over budget, ill, or the gap has closed
+  const gap = coverGapTomorrow(b);
+  const stop = roster.find(k => k.p.ot &&
+    ((k.p.tired || 0) >= LABOR_CFG.OT_OFF_TIRED || k.p.sick || !gap));
+  if (stop) {
+    stop.p.ot = false;
+    const why = (stop.p.tired || 0) >= LABOR_CFG.OT_OFF_TIRED || stop.p.sick
+      ? " OFF OVERTIME - THEY'RE SPENT" : " OFF OVERTIME - COVERED AGAIN";
+    return move(who + " TAKES " + stop.p.name + why);
+  }
+  // 3. OT ON: a real gap tomorrow and a crab healthy enough to fill it
+  if (gap) {
+    const cand = roster.filter(k => !k.p.ot && k !== gap && otEligibleTomorrow(k)
+      && (k.p.tired || 0) < LABOR_CFG.OT_ON_TIRED && (k.p.hunger || 0) < LABOR_CFG.OT_ON_HUNGER)
+      .sort((a, c2) => (a.p.tired || 0) - (c2.p.tired || 0))[0];
+    if (cand) {
+      cand.p.ot = true;
+      return move(who + " ASKS " + cand.p.name + " TO WORK OVERTIME");
+    }
+  }
+}
+// the eligibility test without today's transient state (tomorrow's roster)
+function otEligibleTomorrow(c) {
+  return !c.p.sick && c.p.job !== "fishing" && !!BIZ[c.p.job] && !c.p.owner
+    && dayOffIdx(c) !== weekdayIdx(day + 1);
 }
 function darkness() { // 0 = day, 1 = full night
   const t = tmin;
@@ -596,7 +810,7 @@ let ffSleep = false, ffSleepDay = 0, ffChain = 0;   // the little sun: skip to m
 let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
 let today = newDayLog();
-let report = null, reportT = 0, dossier = null, boardView = false;
+let report = null, reportT = 0, dossier = null, boardView = false, dossierHit = {};
 let manage = null;   // key of the player-owned business whose MANAGEMENT card is open
 let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
@@ -636,11 +850,16 @@ function totalRent() {   // the PLAYER's nightly property bill, due from night o
   return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player")
     .reduce((s, b) => s + BIZ[b].rent, 0);
 }
-// tonight's actual wage bill: sick crabs and crabs on their day off skip pay
-// (exactly the settlement loop's rule, so the BILL chip and MENU math match)
-function wagesOwedTonight() {
-  return crabs.reduce((s, c) => s + (c.p.sick || (offToday(c) && !c.workedToday) ? 0 : CRAB_WAGE), 0);
+// tonight's actual wage bill: crabs on a granted sick day and crabs on their
+// day off skip pay, and anyone on overtime adds their premium (exactly the
+// settlement loop's rule, so the BILL chip and MENU math match). A crab
+// REQUIRED to work while sick is on the bill like anyone else.
+function crabDueTonight(c) {
+  if (onSickDay(c) && !c.workedToday) return 0;
+  if (offToday(c) && !c.workedToday) return 0;
+  return wageRate(c) + Math.round(otPayForecast(c));
 }
+function wagesOwedTonight() { return crabs.reduce((s, c) => s + crabDueTonight(c), 0); }
 function nightlyDue() { return totalRent() + wagesOwedTonight(); }
 const busy = {
   shack: { board: [false, false, false], grill: [false, false, false] },
@@ -739,6 +958,11 @@ function updateHome(c, dt) {
     return;
   }
   c._offWt = null;
+  // convalescence: DAYLIGHT hours spent at home while ill are what the care
+  // ladder reads (night sleep is everyone's, so it would prove nothing). A
+  // crab who commuted in and worked banks a couple of hours either side of
+  // their shift and never reaches REST_HOURS; a crab who stayed home does.
+  if (c.p.sick && darkness() < 0.7) c.p.restT = (c.p.restT || 0) + dt * TS / 60;
   const s = homeSpot(c);
   // SLEEP repairs TIRED: bedded down for the night, exhaustion drains away -
   // full rate in your own bed (house/boat), half on a shelter cot
@@ -774,6 +998,11 @@ function newCrab(persona) {
   if (persona.tired == null) persona.tired = persona.sandy || 0;
   delete persona.sandy;
   if (persona.thirst == null) persona.thirst = 0;
+  // labor policy state: no overtime standing, no per-crab sick override, no
+  // convalescence banked. Old saves land here and behave exactly as before.
+  if (persona.ot == null) persona.ot = false;
+  if (persona.restT == null) persona.restT = 0;
+  if (persona.sickPol != null && !SICK_POLS.includes(persona.sickPol)) delete persona.sickPol;
   return {
     p: persona,
     x: homeX({ p: persona }), y: 160, tx: 0, ty: 160,
@@ -938,9 +1167,29 @@ function slotMeta(s) {
   });
   const npcN = s.npc && Array.isArray(s.npc.personas) ? s.npc.personas.length : 0;
   const d = s.day || 1;
+  // the money + ownership picture (Matt): what you own, what you owe, what the
+  // town's worth. Derived from the envelope, so slots saved before this exist
+  // get it too the moment they're read.
+  const lv = s.lv || {};
+  const owned = Object.keys(BIZ).filter(b => BIZ[b].owner === "player" &&
+    (b === "shack" || (lv[b] || 0) > 0));
+  const rentDue = owned.reduce((n, b) => n + BIZ[b].rent, 0);
+  const crewWages = (Array.isArray(s.personas) ? s.personas.length : 0) * CRAB_WAGE;
+  const purse = (Array.isArray(s.personas) ? s.personas : [])
+    .reduce((n, p) => n + Math.max(0, (p && p.wallet) || 0), 0);
+  const boats = (Array.isArray(s.personas) ? s.personas : [])
+    .concat(s.npc && Array.isArray(s.npc.personas) ? s.npc.personas : [])
+    .filter(p => p && p.boat != null).length;
+  const housed = (Array.isArray(s.personas) ? s.personas : [])
+    .filter(p => p && !p.homeless).length;
   return { ver: SAVE_VER, day: d, weekday: WEEKDAYS[weekdayIdx(d)],
     coins: Math.round(s.coins || 0), rep: Math.round(s.rep != null ? s.rep : 30),
-    pop: crew.length + npcN, crew, t: s.t || 0 };
+    pop: crew.length + npcN, crew, t: s.t || 0,
+    debt: Math.round((s.credit && s.credit.bal) || 0),
+    owned: owned.map(b => BIZ[b].short), nightly: rentDue + crewWages,
+    purse: Math.round(purse), boats, housed,
+    ups: Object.keys(lv).filter(k => (lv[k] || 0) > 0 && UPS[k] && UPS[k].max > 1)
+      .map(k => UPS[k].name.split(" ")[0] + " x" + lv[k]) };
 }
 function readSlotEnv(i) {   // parsed + validated, or null - never a half-read
   let s = null;
@@ -1002,6 +1251,12 @@ function save() {
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
     mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
     hoursPol: hoursPolicyState,
+    // labor policy: per-biz sick-day setting + auto-manage delegation, and the
+    // auto-manager's cooldown ledger (per-crab ot/sickPol/restT ride along
+    // inside the personas above)
+    sickPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].sickPol; return m; })(),
+    autoLabor: (() => { const m = {}; for (const k in BIZ) m[k] = !!BIZ[k].autoLabor; return m; })(),
+    laborPol: laborPolicyState,
   };
   env._ver = SAVE_VER;
   env._meta = slotMeta(env);   // written at save time; re-derivable if it ever goes missing
@@ -1095,6 +1350,14 @@ function load(slot) {
   if (s.hoursPol) for (const b in s.hoursPol)
     if (BIZ[b] && s.hoursPol[b] && Array.isArray(s.hoursPol[b].hist))
       hoursPolicyState[b] = { hist: s.hoursPol[b].hist.slice(-4), cd: s.hoursPol[b].cd || 0 };
+  // labor policy. Old saves have none: the defaults above ARE the old
+  // behavior (grant sick days, auto-manage off for the player / on for peers).
+  if (s.sickPol) for (const b in s.sickPol)
+    if (BIZ[b] && SICK_POLS.includes(s.sickPol[b])) BIZ[b].sickPol = s.sickPol[b];
+  if (s.autoLabor) for (const b in s.autoLabor)
+    if (BIZ[b]) BIZ[b].autoLabor = !!s.autoLabor[b];
+  if (s.laborPol) for (const b in s.laborPol)
+    if (BIZ[b] && s.laborPol[b]) laborPolicyState[b] = { cd: s.laborPol[b].cd || 0 };
   const away = (nowMs() - (s.t || nowMs())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
@@ -1400,10 +1663,11 @@ function runJobBoard() {
     if (bizOwner(b) === "player") continue;
     const o = OWNERS[bizOwner(b)];
     if (!o || (o.darkT || 0) > 0 || jobBoard.some(j => j.biz === b)) continue;
-    // day-off staff still count here: a rest day is not a dark shop, so a
-    // weekly closure never triggers the emergency HELP WANTED posting
-    // (that gate is for broke/sick darkness only)
-    const staff = allCrabs().filter(k => k.p.job === b && !k.p.sick).length;
+    // day-off AND sick-day staff still count here: neither a rest day nor a
+    // bout of flu is a vacancy, so a weekly closure or a granted sick day
+    // never triggers the emergency HELP WANTED posting (that gate is for a
+    // shop that has genuinely lost its people)
+    const staff = allCrabs().filter(k => k.p.job === b).length;
     if ((o.till >= 260 && staff < 2) || (staff === 0 && o.till >= NPC_WAGE * 2))
       jobBoard.push({ biz: b, wage: NPC_WAGE, day });
   }
@@ -1544,11 +1808,27 @@ function updateSchedule(c, dt) {
   if (c.p.job !== "fishing" && !bizUnlocked(c.p.job)) c.p.job = "shack";
   if (!c.p.npc && c.p.job !== "fishing" && bizOwner(c.p.job) !== "player") c.p.job = "shack";   // crew can't staff NPC shops
   const off = offToday(c);   // one weekday in seven: no commute, no duty, no pay
-  if (c.dayState === "home" && !off && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !c.p.sick
+  // a granted sick day takes effect the MOMENT it is granted - a crab already
+  // walking in (or already on the clock, because the boss just relented) turns
+  // around and goes home. Without this the dossier's TAP: REST would only
+  // work at dawn, and the day the illness lands mid-commute would be a
+  // full shift worked while ill.
+  if (onSickDay(c) && (c.dayState === "toWork" || c.dayState === "working")) {
+    if (c.dayState === "working") { c.duty = false; c.pendingOff = false; abortChef(c); }
+    startCommute(c, false);
+  }
+  if (c.dayState === "home" && !off && tmin >= leaveGmin(c) && tmin < sh.end - 30 && !onSickDay(c)
       && !(c.restDay === day && c.restUntil > tmin)) {   // ordered home: a real break before the schedule re-dispatches
     startCommute(c, true);
   }
-  if (c.dayState === "working") c.workedToday = true;   // fisher or shopkeep alike: tonight's tired bump is earned, not blanket
+  if (c.dayState === "working") {
+    c.workedToday = true;   // fisher or shopkeep alike: tonight's tired bump is earned, not blanket
+    // overtime is measured, not assumed: minutes clocked in OUTSIDE the
+    // contracted window are the ones that earn the premium, so a crab who
+    // knocks off early is paid for what they actually did
+    const ds = dutyShift(c);
+    if (otEligible(c) && (tmin < ds.start || tmin >= ds.end)) c.otMin = (c.otMin || 0) + dt * TS;
+  }
   if (c.dayState === "working" && tmin >= sh.end) c.pendingOff = true;
   if (c.dayState === "working" && c.pendingOff && c.kstate === "idle") {
     // last call: stick around while anyone's still waiting in the grace window
@@ -1557,9 +1837,14 @@ function updateSchedule(c, dt) {
     if (lingering) return;
     c.duty = false; c.pendingOff = false;
     if (c.carrying) c.carrying = null;
-    c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25);  // a shift works up an appetite
+    // OVERTIME'S HEALTH COST: no parallel system - the existing end-of-shift
+    // accrual just scales with the extra hours. Hunger rises in proportion to
+    // the longer day; tiredness rises at OT_FATIGUE x that share, because the
+    // last two hours are the ones that break you.
+    const otF = (c.otMin || 0) / Math.max(60, baseShift(c).end - baseShift(c).start);
+    c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.25 * (1 + otF));  // a shift works up an appetite
     c.p.thirst = Math.min(1, (c.p.thirst || 0) + 0.35 * ((c.p.tired || 0) > 0.5 ? 1.5 : 1));  // working a whole shift ALREADY tired makes you thirsty (checked pre-bump: same firing rate the sandy coupling had)
-    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT);   // a full shift takes it out of you
+    c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT * (1 + OT_FATIGUE * otF));   // a full shift takes it out of you - overtime more so
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and grubbies up the shell
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
     // grab dinner on the way home instead of trekking back later (gated on
@@ -2432,7 +2717,8 @@ function updateCustomers(dt) {
 
 // ---------------------------------------------------------------- status text
 function crabStatus(c) {
-  if (c.p.sick) return "SICK - DAY " + ((c.p.sick.days || 0) + 1) + " - NEEDS FOOD + REST";
+  if (c.p.sick) return "SICK - DAY " + ((c.p.sick.days || 0) + 1)
+    + (onSickDay(c) ? " - RESTING UP" : " - WORKING THROUGH IT");
   if (offToday(c)) {   // sick beats off; off beats everything but the commute home
     if (c.dayState === "toErrand") return "DAY OFF - OFF TO " + BIZ[c.errandBiz].short;
     if (c.dayState === "errand") return "DAY OFF - AT " + BIZ[c.errandBiz].name;
@@ -2579,29 +2865,89 @@ cv.addEventListener("click", (ev) => {
   }
   if (gameOver) { newGame(); return; }
   if (dossier) {
-    // the DOES row doubles as the reassignment control for crew crabs
+    // the DOES row doubles as the reassignment control for crew crabs; the
+    // SHIFT and HEALTH rows are the labor-policy controls (OT / sick day)
     const pt = evPos(ev);
     const owned = Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player");
-    if (dossier.p && !dossier.p.npc && owned.length > 1 && pt.y >= 47 && pt.y < 57 && pt.x >= 24 && pt.x < 232) {
-      const c = dossier;
+    const c = dossier;
+    const inRow = (r) => r && pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h;
+    if (c.p && !c.p.npc && owned.length > 1 && pt.y >= 47 && pt.y < 57 && pt.x >= 24 && pt.x < 232) {
       c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
       sfx.buy();
       popText("NEW JOB: " + BIZ[c.p.job].name, c.x - 20, FLOOR_Y - 34, [140, 255, 160]);
       return;
     }
-    dossier = null; return;
+    if (c.p && inRow(dossierHit.ot)) {
+      c.p.ot = !c.p.ot; sfx.buy(); save();
+      popText(c.p.ot ? "OVERTIME REQUESTED" : "OFF OVERTIME", c.x - 22, FLOOR_Y - 34,
+        c.p.ot ? [255, 216, 96] : [180, 170, 190]);
+      return;
+    }
+    if (c.p && inRow(dossierHit.sick)) {
+      c.p.sickPol = onSickDay(c) ? "require" : "grant"; sfx.buy(); save();
+      popText(onSickDay(c) ? "GO HOME AND REST" : "WE NEED YOU IN", c.x - 22, FLOOR_Y - 34,
+        onSickDay(c) ? [140, 255, 160] : [255, 150, 130]);
+      return;
+    }
+    dossier = null;
+    if (manage) sfx.ding();   // opened from the census: fall back to the card underneath
+    return;
   }
   if (manage) {
     // the management card swallows every click; only its controls act
-    const pt = evPos(ev), R = manageRects(), h = BIZ[manage].hours;
+    const pt = evPos(ev), R = manageRects(), b = BIZ[manage], h = b.hours;
     const hit = (r) => pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h;
-    if (hit(R.om)) { setBizHours(manage, h.open - 30, h.close); sfx.buy(); save(); return; }
-    if (hit(R.op)) { setBizHours(manage, Math.min(h.open + 30, h.close - HOURS_SPAN_MIN), h.close); sfx.buy(); save(); return; }
-    if (hit(R.cm)) { setBizHours(manage, h.open, Math.max(h.close - 30, h.open + HOURS_SPAN_MIN)); sfx.buy(); save(); return; }
-    if (hit(R.cp)) { setBizHours(manage, h.open, h.close + 30); sfx.buy(); save(); return; }
-    if ((manage === "shack" || manage === "juicebar") && hit(R.meal)) {
-      BIZ[manage].mealPol = MEAL_POLS[(MEAL_POLS.indexOf(BIZ[manage].mealPol) + 1) % MEAL_POLS.length];
-      sfx.ding(); save(); return;
+    for (const t of MANAGE_TABS) if (hit(R.tab[t])) { manageTab = t; sfx.ding(); return; }
+    if (manageTab === "HOURS") {
+      if (hit(R.om)) { setBizHours(manage, h.open - 30, h.close); sfx.buy(); save(); return; }
+      if (hit(R.op)) { setBizHours(manage, Math.min(h.open + 30, h.close - HOURS_SPAN_MIN), h.close); sfx.buy(); save(); return; }
+      if (hit(R.cm)) { setBizHours(manage, h.open, Math.max(h.close - 30, h.open + HOURS_SPAN_MIN)); sfx.buy(); save(); return; }
+      if (hit(R.cp)) { setBizHours(manage, h.open, h.close + 30); sfx.buy(); save(); return; }
+      if ((manage === "shack" || manage === "juicebar") && hit(R.meal)) {
+        b.mealPol = MEAL_POLS[(MEAL_POLS.indexOf(b.mealPol) + 1) % MEAL_POLS.length];
+        sfx.ding(); save(); return;
+      }
+    } else if (manageTab === "SCHEDULE") {
+      if (hit(R.auto)) {
+        b.autoLabor = !b.autoLabor; sfx.buy(); save();
+        toast = { text: b.autoLabor ? BIZ[manage].short + ": THE ROTA MANAGES ITSELF NOW"
+          : BIZ[manage].short + ": YOU'RE CALLING THE SHIFTS", t: 5 };
+        return;
+      }
+      if (hit(R.sickPol)) {
+        b.sickPol = b.sickPol === "require" ? "grant" : "require"; sfx.buy(); save();
+        toast = { text: BIZ[manage].short + " SICK DAYS: " + SICK_POL_LABEL[b.sickPol], t: 5 };
+        return;
+      }
+      const staff = allCrabs().filter(c => c.p.job === manage);
+      for (let i = 0; i < Math.min(staff.length, R.rows.length); i++) {
+        const c = staff[i], cell = R.cells[i];
+        if (hit(cell.name)) { dossier = c; sfx.ding(); return; }
+        if (hit(cell.shift)) {   // M -> E -> D -> M: the roster's one real assignment
+          const order = ["M", "E", "D"];
+          c.p.shift = order[(order.indexOf(c.p.shift) + 1) % order.length];
+          sfx.buy(); save(); return;
+        }
+        if (hit(cell.ot)) {
+          if (c.p.owner || c.p.job === "fishing") { toast = { text: c.p.name + " WORKS FOR THEMSELVES", t: 4 }; sfx.angry(); return; }
+          c.p.ot = !c.p.ot; sfx.buy(); save(); return;
+        }
+        if (hit(cell.sick)) {   // per-crab override cycles: shop rule -> always grant -> must work
+          c.p.sickPol = c.p.sickPol == null ? "grant" : c.p.sickPol === "grant" ? "require" : null;
+          if (c.p.sickPol == null) delete c.p.sickPol;
+          sfx.buy(); save(); return;
+        }
+      }
+    } else {   // TOWN census
+      if (hit(R.csort)) { censusSort = (censusSort + 1) % CENSUS_SORTS.length; censusPage = 0; sfx.ding(); return; }
+      if (hit(R.cfilt)) { censusFilter = (censusFilter + 1) % CENSUS_FILTERS.length; censusPage = 0; sfx.ding(); return; }
+      if (hit(R.cprev)) { censusPage = (censusPage + censusPages() - 1) % censusPages(); sfx.ding(); return; }
+      if (hit(R.cnext)) { censusPage = (censusPage + 1) % censusPages(); sfx.ding(); return; }
+      const list = censusList();
+      for (let i = 0; i < CENSUS_ROWS; i++) {
+        const c = list[censusPage * CENSUS_ROWS + i];
+        if (c && hit(R.crows[i])) { dossier = c; sfx.ding(); return; }
+      }
     }
     const owned = ownedBizList();
     if (owned.length > 1 && hit(R.next)) { manage = owned[(owned.indexOf(manage) + 1) % owned.length]; sfx.ding(); return; }
@@ -2609,7 +2955,13 @@ cv.addEventListener("click", (ev) => {
     if (hit(R.done) || !onCard) manage = null;
     return;
   }
-  if (boardView) { boardView = false; return; }
+  if (boardView) {
+    const pt = evPos(ev), r = jobBoardCensusRect();
+    if (pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h) {
+      boardView = false; manage = ownedBizList()[0] || null; manageTab = "TOWN"; sfx.ding(); return;
+    }
+    boardView = false; return;
+  }
   if (reportT > 0) { reportT = 0; return; }
   startMusic();
   const p = evPos(ev);
@@ -2998,11 +3350,13 @@ function drawBusiness(key) {
     wrect(signX + signW / 2 - 23, 118, 46, 11, [30, 20, 36]);
     text(ctx, "CLOSED", signX + signW / 2 - 18 - camX, 120, [255, 120, 120]);
   } else if (bizRestingToday(key)) {
-    // the whole roster is off today: an honest smalltown closed-sign day,
-    // hung over the roofline where the stalls can't hide it
+    // the whole roster is out today: an honest smalltown closed-sign day, hung
+    // over the roofline where the stalls can't hide it. A sick day reads
+    // differently from a rota day, but hangs the same placard.
+    const lbl = restingLabel(key), sick = lbl === "OUT SICK";
     wrect(signX + signW / 2 - 25, 79, 50, 12, [30, 20, 36]);
     wrect(signX + signW / 2 - 24, 80, 48, 10, [255, 250, 235]);
-    text(ctx, "DAY OFF", signX + signW / 2 - 21 - camX, 82, [40, 110, 190]);
+    text(ctx, lbl, signX + signW / 2 - textWidth(lbl) / 2 - camX, 82, sick ? [120, 150, 90] : [40, 110, 190]);
   }
 }
 
@@ -3097,6 +3451,13 @@ function drawCrab(c) {
     }
   }
   if (c.p.sick && ((c.animT * 2) | 0) % 2) wblit(SICK_MARK, c.x + 10, y - 8);
+  // the OVERTIME POWERUP: readable at a glance to everyone, from live state,
+  // so it appears the minute they clock past their shift and clears itself the
+  // minute overtime ends. Bobs so it reads as a marker, not a hat.
+  if (onOvertimeNow(c)) {
+    const bobb = Math.sin(time * 3 + c.animT) > 0 ? 0 : 1;
+    wblit(OT_MARK[((time * 2.2) | 0) % 2], c.x + 5, y - 18 - bobb);   // clear of the toque AND the work-progress bar
+  }
   if (c.p.job === "fishing" && c.dayState === "working") wblit(ROD[((c.animT * 2) | 0) % 2], c.x + 12, y - 3, c.flip);
   if (c.carrying) wblit(ITEMS[c.carrying], c.x + 4, y - 7);
   if (working && c.workMax > 0.7) {
@@ -3255,14 +3616,18 @@ function drawFollowCard() {
   smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
   smallText(ctx, TRAITS[p.trait].label + " " + MODES[p.mode].label, 29, 13, [120, 90, 60]);
   smallText(ctx, crabStatus(c).slice(0, 26), 29, 21, [30, 110, 60]);
-  const shiftTxt = "SHIFT " + baseShift(c).label;
-  smallText(ctx, shiftTxt, 29, 28, [110, 110, 130]);
+  // SHIFT reads the hours they ACTUALLY work today, so an OT day shows the
+  // longer window with the OT tag right beside it
+  const ot = otMinutes(c) > 0;
+  const shiftTxt = "SHIFT " + (ot ? effShift(c).label : baseShift(c).label);
+  smallText(ctx, shiftTxt, 29, 28, ot ? [200, 110, 40] : [110, 110, 130]);
   const wTxt = "$" + fmt(Math.max(0, p.wallet));
   const wx3 = 126 - textWidth(wTxt, 5);
-  {   // the weekly day off, when the row has room for it
-    const offTxt = "OFF " + WEEKDAYS[dayOffIdx(c)];
+  {   // the OT tag, else the weekly day off, when the row has room for it
+    const tag = ot ? "OT +" + Math.round(otMinutes(c) / 60) + "H" : "OFF " + WEEKDAYS[dayOffIdx(c)];
     const ox = 29 + smallTextWidth(shiftTxt) + 5;
-    if (ox + smallTextWidth(offTxt) < wx3 - 2) smallText(ctx, offTxt, ox, 28, [70, 140, 200]);
+    if (ox + smallTextWidth(tag) < wx3 - 2)
+      smallText(ctx, tag, ox, 28, ot ? [255, 190, 90] : [70, 140, 200]);
   }
   text(ctx, wTxt, wx3, 28, p.homeless ? [190, 80, 80] : [140, 110, 40], 5);
   const trend = p.walletPrev == null ? 0 : p.wallet - p.walletPrev;
@@ -3345,9 +3710,18 @@ function drawPanel() {
     smallText(ctx, "LOCALS PAY +25%", 4, my + 1, [170, 150, 135]);   // under the last menu row
     smallText(ctx, "TONIGHT AT 20:00", 132, ROW_Y, [230, 215, 195]);
     let by = ROW_Y + MROW + 1;
-    const owedN = crabs.filter(c => !c.p.sick && !(offToday(c) && !c.workedToday)).length;
+    // one predicate, three surfaces: this list, the BILL chip and the
+    // settlement loop all read crabDueTonight, so the column always adds up
+    const owed = crabs.filter(c => crabDueTonight(c) > 0);
+    const owedN = owed.length;
     smallText(ctx, "WAGES " + owedN + "X$" + CRAB_WAGE + (owedN < crabs.length ? " (" + (crabs.length - owedN) + " OUT)" : ""), 132, by, [190, 175, 160]);
     smallText(ctx, "$" + CRAB_WAGE * owedN, 224, by, [235, 160, 130]); by += MROW;
+    const otBill = owed.reduce((s, c) => s + Math.round(otPayForecast(c)), 0);
+    if (otBill > 0) {
+      const otN = owed.filter(c => otPayForecast(c) > 0).length;
+      smallText(ctx, "OVERTIME " + otN + "X AT " + OT_RATE + "X", 132, by, [190, 175, 160]);
+      smallText(ctx, "$" + otBill, 224, by, [235, 160, 130]); by += MROW;
+    }
     for (const key of Object.keys(BIZ)) {
       if (!bizUnlocked(key) || bizOwner(key) !== "player") continue;   // only rents YOU pay tonight
       smallText(ctx, BIZ[key].short + " RENT", 132, by, [190, 175, 160]);
@@ -3585,9 +3959,11 @@ function drawDossier() {
     if (line) smallText(ctx, "'" + line + "'", x + 48, y + 24, [255, 215, 150]);
   }
   let ly = y + 42;
-  const row = (label, val, col) => {
+  dossierHit = {};   // draw and hit-test share one geometry table (see manageRects)
+  const row = (label, val, col, key) => {
     smallText(ctx, label, x + 8, ly, [120, 110, 125]);
     smallText(ctx, val, x + 56, ly, col || [40, 30, 40]);
+    if (key) dossierHit[key] = { x: x, y: ly - 1, w: w2, h: 9 };
     ly += 9;
   };
   const doesTxt = p.npc
@@ -3598,13 +3974,27 @@ function drawDossier() {
   row("DOES", doesTxt, [70, 90, 130]);
   if (!p.npc && Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1)
     smallText(ctx, "TAP: REASSIGN", x + w2 - 58, ly - 9, [96, 170, 220]);
-  row("SHIFT", baseShift(c).label);
+  // SHIFT doubles as the OVERTIME control - the other half of the labor suite,
+  // sitting right beside TAP: REASSIGN exactly as the backlog asked
+  const otM = otMinutes(c), canOT = !p.owner && p.job !== "fishing" && !!BIZ[p.job] && !p.npc;
+  row("SHIFT", (otM ? effShift(c).label + "  OT +" + Math.round(otM / 60) + "H"
+    : baseShift(c).label + (p.ot ? "  OT (NO ROOM TODAY)" : "")),
+    otM ? [200, 110, 40] : [40, 30, 40], canOT ? "ot" : null);
+  if (canOT) smallText(ctx, p.ot ? "TAP: NO OT" : "TAP: OT", x + w2 - (p.ot ? 44 : 36), ly - 9, [96, 170, 220]);
   row("OFF", WEEKDAY_FULL[dayOffIdx(c)] + (offToday(c) ? " - THAT'S TODAY!" : ""), [70, 140, 200]);
   row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
   const [hl, hcol] = homeLabel(p);
   row("HOME", hl, hcol);
   row("NOW", crabStatus(c).slice(0, 34));
-  if (p.sick) row("HEALTH", "SICK - DAY " + ((p.sick.days || 0) + 1), [190, 80, 80]);
+  // HEALTH doubles as the SICK DAY control: grant the rest, or require the shift
+  if (p.sick) {
+    const granted = onSickDay(c);
+    row("HEALTH", "DAY " + ((p.sick.days || 0) + 1) + " - "
+      + (granted ? "RESTING, UNPAID" : "AT WORK, PAID"), granted ? [120, 150, 90] : [190, 80, 80], canOT ? "sick" : null);
+    if (canOT) smallText(ctx, granted ? "TAP: WORK" : "TAP: REST", x + w2 - 40, ly - 9, [96, 170, 220]);
+    if (granted) smallText(ctx, "RESTED " + (p.restT || 0).toFixed(1) + "H/" + REST_HOURS
+      + "H - " + CARE_LANES[careLane(c)].label, x + 56, ly, [110, 100, 110]), ly += 9;
+  }
   const eff = crabEff(c) * (p.sick ? 0.5 : 1);
   if (eff < 0.995) {
     const why = [];
@@ -3649,19 +4039,75 @@ function drawDossier() {
 // shifts + days off, and the staff-meal pricing policy. Same overlay-card
 // idiom as the dossier; one geometry table feeds both draw and hit-testing
 // so the tap targets stay honest on phones.
+// Three tabs now: HOURS (the original), SCHEDULE (the labor policy suite -
+// shift assignments, days off, OT toggles, sick-day policy and AUTO-MANAGE)
+// and TOWN (the census). Census reviews, scheduling acts: they sit one tap
+// apart on purpose.
 function ownedBizList() { return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player"); }
+const MANAGE_TABS = ["HOURS", "SCHEDULE", "TOWN"];
+let manageTab = "HOURS";
+// census view state (transient: a review surface, not a save concern)
+const CENSUS_SORTS = ["NAME", "JOB", "HOME", "HEALTH", "WALLET"];
+const CENSUS_FILTERS = ["ALL", "CREW", "TOWN", "SICK", "OT"];
+let censusSort = 0, censusFilter = 0, censusPage = 0;
+const CENSUS_ROWS = 6;   // 17px two-line rows: phone-thumb targets, ~2-3 pages for a 12+ crab town
+function censusList() {
+  let all = allCrabs().slice();
+  const f = CENSUS_FILTERS[censusFilter];
+  if (f === "CREW") all = all.filter(c => !c.p.npc);
+  else if (f === "TOWN") all = all.filter(c => c.p.npc);
+  else if (f === "SICK") all = all.filter(c => c.p.sick);
+  else if (f === "OT") all = all.filter(c => otMinutes(c) > 0 || c.p.ot);
+  const homeRank = (c) => c.p.boat != null ? 0 : c.p.homeless ? 2 : 1;
+  const s = CENSUS_SORTS[censusSort];
+  all.sort((a, b) =>
+    s === "JOB" ? (a.p.job < b.p.job ? -1 : a.p.job > b.p.job ? 1 : a.p.name < b.p.name ? -1 : 1)
+    : s === "HOME" ? (homeRank(a) - homeRank(b) || (a.p.name < b.p.name ? -1 : 1))
+    : s === "HEALTH" ? ((b.p.sick ? (b.p.sick.days || 0) + 1 : 0) - (a.p.sick ? (a.p.sick.days || 0) + 1 : 0)
+        || (a.p.name < b.p.name ? -1 : 1))
+    : s === "WALLET" ? (b.p.wallet - a.p.wallet)
+    : (a.p.name < b.p.name ? -1 : 1));
+  return all;
+}
+function censusPages() { return Math.max(1, Math.ceil(censusList().length / CENSUS_ROWS)); }
 function manageRects() {
   const x = 16, y = 6, w2 = 224, h2 = 164;
-  return {
+  const R = {
     x, y, w: w2, h: h2,
     next: { x: x + w2 - 40, y: y + 2, w: 38, h: 11 },
-    om: { x: x + 34, y: y + 28, w: 16, h: 16 },   // open -30
-    op: { x: x + 88, y: y + 28, w: 16, h: 16 },   // open +30
-    cm: { x: x + 146, y: y + 28, w: 16, h: 16 },  // close -30
-    cp: { x: x + 200, y: y + 28, w: 16, h: 16 },  // close +30
-    meal: { x: x + 6, y: y + h2 - 30, w: 156, h: 14 },
+    tab: {},
+    // ---- HOURS tab (shifted down by the tab strip)
+    om: { x: x + 34, y: y + 44, w: 16, h: 16 },   // open -30
+    op: { x: x + 88, y: y + 44, w: 16, h: 16 },   // open +30
+    cm: { x: x + 146, y: y + 44, w: 16, h: 16 },  // close -30
+    cp: { x: x + 200, y: y + 44, w: 16, h: 16 },  // close +30
+    meal: { x: x + 6, y: y + 108, w: 156, h: 14 },
+    // ---- SCHEDULE tab
+    auto: { x: x + 6, y: y + 32, w: 104, h: 13 },
+    sickPol: { x: x + 114, y: y + 32, w: 104, h: 13 },
+    rows: [], cells: [],
+    // ---- TOWN tab
+    csort: { x: x + 6, y: y + 31, w: 62, h: 13 },
+    cfilt: { x: x + 72, y: y + 31, w: 58, h: 13 },
+    cprev: { x: x + 170, y: y + 31, w: 14, h: 13 },
+    cnext: { x: x + 202, y: y + 31, w: 14, h: 13 },
+    crows: [],
     done: { x: x + w2 - 46, y: y + h2 - 15, w: 42, h: 13 },
   };
+  MANAGE_TABS.forEach((t, i) => R.tab[t] = { x: x + 6 + i * 52, y: y + 16, w: 50, h: 12 });
+  for (let i = 0; i < 7; i++) {
+    const ry = y + 66 + i * 12;
+    R.rows.push({ x: x + 6, y: ry, w: w2 - 12, h: 11 });
+    R.cells.push({                                     // one row, four tap targets (OFF is derived: display only)
+      name:  { x: x + 6,   y: ry, w: 42, h: 11 },
+      shift: { x: x + 50,  y: ry, w: 44, h: 11 },
+      off:   { x: x + 96,  y: ry, w: 28, h: 11 },
+      ot:    { x: x + 126, y: ry, w: 40, h: 11 },
+      sick:  { x: x + 168, y: ry, w: 50, h: 11 },
+    });
+  }
+  for (let i = 0; i < CENSUS_ROWS; i++) R.crows.push({ x: x + 4, y: y + 47 + i * 16, w: w2 - 8, h: 15 });
+  return R;
 }
 function drawManage() {
   if (!manage) return;
@@ -3682,40 +4128,71 @@ function drawManage() {
     rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [190, 140, 80]);
     text(ctx, label, r.x + ((r.w - textWidth(label)) >> 1), r.y + 5, [40, 24, 16]);
   };
-  smallText(ctx, "HOURS", x + 8, y + 19, [58, 42, 38]);
-  smallText(ctx, "6:00-24:00, AT LEAST 4H OPEN", x + 44, y + 19, [150, 140, 160]);
-  smallText(ctx, "OPEN", x + 8, y + 33, [110, 110, 130]);
-  btn(R.om, "-"); btn(R.op, "+");
-  text(ctx, fmtClock(h.open), x + 54 + ((32 - textWidth(fmtClock(h.open))) >> 1), y + 33, [40, 30, 40]);
-  smallText(ctx, "CLOSE", x + 118, y + 33, [110, 110, 130]);
-  btn(R.cm, "-"); btn(R.cp, "+");
-  text(ctx, fmtClock(h.close), x + 164 + ((34 - textWidth(fmtClock(h.close))) >> 1), y + 33, [40, 30, 40]);
-  smallText(ctx, "SHIFTS  M " + bizShiftWindow(key, "M").label + "   E " + bizShiftWindow(key, "E").label
-    + "   COVER " + bizShiftWindow(key, "cover").label, x + 8, y + 49, [70, 90, 130]);
-  const bk = today.biz[key] || { take: 0, cost: 0 };
-  smallText(ctx, "TODAY", x + 8, y + 61, [58, 42, 38]);
-  smallText(ctx, "TOOK $" + fmt(bk.take), x + 44, y + 61, [40, 150, 70]);
-  smallText(ctx, "COSTS $" + fmt(bk.cost), x + 104, y + 61, [190, 80, 80]);
-  smallText(ctx, "RENT TONIGHT $" + b.rent, x + 158, y + 61, [140, 110, 40]);
-  smallText(ctx, "STAFF", x + 8, y + 73, [58, 42, 38]);
-  const staff = crabs.filter(c => c.p.job === key);
-  if (!staff.length) smallText(ctx, "NOBODY ASSIGNED - REASSIGN FROM A DOSSIER", x + 8, y + 81, [190, 80, 80]);
-  for (let i = 0; i < Math.min(staff.length, 6); i++) {
-    const c = staff[i];
-    smallText(ctx, c.p.name, x + 8, y + 81 + i * 8, [40, 30, 40]);
-    smallText(ctx, "SHIFT " + baseShift(c).label + (coveringToday(c) ? " (COVERING " + bizShiftWindow(key, "cover").label + ")" : ""),
-      x + 62, y + 81 + i * 8, [110, 110, 130]);
-    smallText(ctx, "OFF " + WEEKDAYS[dayOffIdx(c)] + (offToday(c) ? " (TODAY)" : ""), x + 158, y + 81 + i * 8, [70, 140, 200]);
+  // tab strip
+  for (const t of MANAGE_TABS) {
+    const r = R.tab[t], on = manageTab === t;
+    rect(ctx, r.x, r.y, r.w, r.h, on ? [190, 140, 80] : [222, 212, 196]);
+    smallText(ctx, t, r.x + ((r.w - smallTextWidth(t)) >> 1), r.y + 4, on ? [40, 24, 16] : [130, 118, 112]);
   }
-  if (staff.length > 6) smallText(ctx, "+" + (staff.length - 6) + " MORE", x + 8, y + 129, [150, 140, 160]);
-  if (key === "shack" || key === "juicebar") {
-    rect(ctx, R.meal.x, R.meal.y, R.meal.w, R.meal.h, [30, 20, 36]);
-    rect(ctx, R.meal.x + 1, R.meal.y + 1, R.meal.w - 2, R.meal.h - 2, [235, 225, 205]);
-    smallText(ctx, "STAFF MEALS: " + MEAL_POL_LABEL[b.mealPol], R.meal.x + 4, R.meal.y + 4, [90, 60, 40]);
-    smallText(ctx, "TAP TO CHANGE", R.meal.x + R.meal.w - 56, R.meal.y + 4, [96, 170, 220]);
-    smallText(ctx, b.mealPol === "retail" ? "CREW PAY MENU PRICE AT THE PANTRY"
-      : b.mealPol === "atcost" ? "CREW PAY ONLY THE INGREDIENTS"
-      : "ON THE HOUSE - THE TILL EATS THE COST", R.meal.x + 4, R.meal.y + R.meal.h + 2, [110, 100, 110]);
+  const chip = (r, label, hint, hot) => {   // a wide tap target with its state written on it
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, hot ? [190, 140, 80] : [235, 225, 205]);
+    smallText(ctx, label, r.x + 4, r.y + 4, hot ? [40, 24, 16] : [90, 60, 40]);
+    if (hint) smallText(ctx, hint, r.x + r.w - smallTextWidth(hint) - 4, r.y + 4, [110, 100, 110]);
+  };
+  if (manageTab === "HOURS") {
+    smallText(ctx, "HOURS", x + 8, y + 33, [58, 42, 38]);
+    smallText(ctx, "6:00-24:00, AT LEAST 4H OPEN", x + 44, y + 33, [150, 140, 160]);
+    smallText(ctx, "OPEN", x + 8, y + 49, [110, 110, 130]);
+    btn(R.om, "-"); btn(R.op, "+");
+    text(ctx, fmtClock(h.open), x + 54 + ((32 - textWidth(fmtClock(h.open))) >> 1), y + 49, [40, 30, 40]);
+    smallText(ctx, "CLOSE", x + 118, y + 49, [110, 110, 130]);
+    btn(R.cm, "-"); btn(R.cp, "+");
+    text(ctx, fmtClock(h.close), x + 164 + ((34 - textWidth(fmtClock(h.close))) >> 1), y + 49, [40, 30, 40]);
+    smallText(ctx, "SHIFTS  M " + bizShiftWindow(key, "M").label + "   E " + bizShiftWindow(key, "E").label
+      + "   COVER " + bizShiftWindow(key, "cover").label, x + 8, y + 65, [70, 90, 130]);
+    smallText(ctx, "OVERTIME RUNS INSIDE THESE HOURS", x + 8, y + 74, [150, 140, 160]);
+    const bk = today.biz[key] || { take: 0, cost: 0 };
+    smallText(ctx, "TODAY", x + 8, y + 88, [58, 42, 38]);
+    smallText(ctx, "TOOK $" + fmt(bk.take), x + 44, y + 88, [40, 150, 70]);
+    smallText(ctx, "COSTS $" + fmt(bk.cost), x + 104, y + 88, [190, 80, 80]);
+    smallText(ctx, "RENT $" + b.rent, x + 166, y + 88, [140, 110, 40]);
+    if (key === "shack" || key === "juicebar") {
+      chip(R.meal, "STAFF MEALS: " + MEAL_POL_LABEL[b.mealPol], "TAP", false);
+      smallText(ctx, b.mealPol === "retail" ? "CREW PAY MENU PRICE AT THE PANTRY"
+        : b.mealPol === "atcost" ? "CREW PAY ONLY THE INGREDIENTS"
+        : "ON THE HOUSE - THE TILL EATS THE COST", R.meal.x + 4, R.meal.y + R.meal.h + 2, [110, 100, 110]);
+    }
+    smallText(ctx, "ROSTER + OT + SICK DAYS: SEE THE SCHEDULE TAB", x + 8, y + h2 - 26, [150, 140, 160]);
+  } else if (manageTab === "SCHEDULE") {
+    const auto = !!b.autoLabor;
+    chip(R.auto, "AUTO-MANAGE " + (auto ? "ON" : "OFF"), null, auto);
+    chip(R.sickPol, "SICK: " + (b.sickPol === "require" ? "MUST WORK" : "GRANT"), null, b.sickPol !== "require");
+    smallText(ctx, auto ? "AUTO: SICK DAYS GRANTED, OT CALLED WHEN COVER IS SHORT"
+      : "YOU CALL IT: TAP A ROW'S SHIFT, OT OR SICK CELL", x + 6, y + 48, [110, 100, 110]);
+    smallText(ctx, "OT: " + (OT_SPAN / 60) + "H AT " + OT_RATE + "X PAY, INSIDE OPEN HOURS",
+      x + 6, y + 57, [150, 140, 160]);
+    const staff = allCrabs().filter(c => c.p.job === key);
+    if (!staff.length) smallText(ctx, "NOBODY ASSIGNED - REASSIGN FROM A DOSSIER", x + 8, y + 70, [190, 80, 80]);
+    for (let i = 0; i < Math.min(staff.length, R.rows.length); i++) {
+      const c = staff[i], cell = R.cells[i], ry = R.rows[i].y;
+      if (i % 2 === 0) rect(ctx, R.rows[i].x, ry - 1, R.rows[i].w, 11, [244, 238, 224]);
+      smallText(ctx, c.p.name.slice(0, 9), cell.name.x + 2, ry + 2, [40, 30, 40]);
+      const otM = otMinutes(c), cov = coveringToday(c);
+      smallText(ctx, (cov ? "CVR " : c.p.shift + " ") + (otM ? effShift(c).label : baseShift(c).label),
+        cell.shift.x, ry + 2, cov ? [140, 90, 160] : otM ? [200, 110, 40] : [70, 90, 130]);
+      smallText(ctx, WEEKDAYS[dayOffIdx(c)] + (offToday(c) ? "!" : ""), cell.off.x, ry + 2, [70, 140, 200]);
+      smallText(ctx, c.p.ot ? (otM ? "OT +" + Math.round(otM / 60) + "H" : "OT LATER") : "NO OT",
+        cell.ot.x, ry + 2, c.p.ot ? (otM ? [200, 110, 40] : [170, 150, 130]) : [150, 140, 160]);
+      const sp = sickPolFor(c);
+      smallText(ctx, c.p.sick ? (onSickDay(c) ? "SICK: REST" : "SICK: WORKS")
+        : sp === "require" ? "MUST WORK" : c.p.sickPol ? "SICK DAY OK" : "SHOP RULE",
+        cell.sick.x, ry + 2, c.p.sick ? [190, 80, 80] : sp === "require" ? [200, 110, 40] : [110, 100, 110]);
+    }
+    if (staff.length > R.rows.length)
+      smallText(ctx, "+" + (staff.length - R.rows.length) + " MORE - SEE THE TOWN TAB", x + 8, y + h2 - 26, [150, 140, 160]);
+  } else {
+    drawCensus(R);
   }
   rect(ctx, R.done.x, R.done.y, R.done.w, R.done.h, [190, 140, 80]);
   text(ctx, "DONE", R.done.x + 9, R.done.y + 3, [40, 24, 16]);
@@ -3828,8 +4305,25 @@ function drawSaveScreen() {
     smallText(ctx, "THE CREW OF SLOT " + saveSel, x + 6, dy, [58, 42, 38]);
     smallText(ctx, "DAY " + card.day + " " + card.weekday + " - " + card.crew.length + " CREW, " + card.pop + " IN TOWN",
       x + 92, dy, [110, 100, 110]);
+    // the money + ownership line (Matt): what this town owns, owes and holds
+    {
+      const own = (card.owned && card.owned.length ? card.owned.join(" ") : "SHACK")
+        + (card.ups && card.ups.length ? " - " + card.ups.join(" ") : "");
+      smallText(ctx, "OWNS", x + 6, dy + 7, [110, 100, 110]);
+      smallText(ctx, own.slice(0, 38), x + 30, dy + 7, [70, 90, 130]);
+      const till = "TILL $" + fmt(card.coins);
+      smallText(ctx, till, x + 6, dy + 14, card.coins > 0 ? [140, 110, 40] : [190, 80, 80]);
+      const due = "NIGHTLY $" + fmt(card.nightly || 0);
+      smallText(ctx, due, x + 56, dy + 14, [190, 80, 80]);
+      if (card.debt > 0) smallText(ctx, "DEBT $" + fmt(card.debt), x + 118, dy + 14, [235, 90, 90]);
+      const crewMoney = "CREW PURSES $" + fmt(card.purse || 0);
+      smallText(ctx, crewMoney, x + (card.debt > 0 ? 168 : 118), dy + 14, [90, 130, 90]);
+      const homes = (card.housed || 0) + "/" + card.crew.length + " HOUSED"
+        + (card.boats ? " - " + card.boats + " ABOARD" : "");
+      smallText(ctx, homes, x + 6, dy + 21, [90, 130, 90]);
+    }
     // +13, not +9: hats and flowers overhang the portrait box upward
-    const top = dy + 13, shown = Math.min(card.crew.length, 6);
+    const top = dy + 34, shown = Math.min(card.crew.length, 6);   // below the money block
     for (let i = 0; i < shown; i++) {
       const c = card.crew[i], bx = x + 6 + i * 38;
       rect(ctx, bx, top, 36, 30, [30, 20, 36]);
@@ -3918,6 +4412,70 @@ function handleSaveClick(pt) {
   if (!onCard) closeSaveView();
 }
 
+// ---------------------------------------------------------------- town census
+// Matt: "need an all-crab character menu to review basic stats of whole pop."
+// Every crab in town - crew, townsfolk, peer owners - one two-line row, all of
+// it DERIVED live (job, employer, housing, health, OT), never a cached copy.
+// Rows are 17px so a thumb can hit them; six to a page with < > paging, which
+// is how the card idiom scales past a dozen crabs without a scrollbar.
+// Tapping a row opens that crab's dossier ON TOP of this card, so closing it
+// drops you back into the census: review here, act there (or on SCHEDULE).
+function homeTag(p) { return p.boat != null ? "BOAT" : p.homeless ? "COT" : "HOUSE"; }
+function drawCensus(R) {
+  const { x, y } = R, w2 = R.w, h2 = R.h;
+  const list = censusList(), pages = censusPages();
+  if (censusPage >= pages) censusPage = pages - 1;
+  const chip = (r, label, hot) => {
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, hot ? [190, 140, 80] : [235, 225, 205]);
+    smallText(ctx, label, r.x + ((r.w - smallTextWidth(label)) >> 1), r.y + 4, hot ? [40, 24, 16] : [90, 60, 40]);
+  };
+  chip(R.csort, "SORT " + CENSUS_SORTS[censusSort], censusSort > 0);
+  chip(R.cfilt, CENSUS_FILTERS[censusFilter], censusFilter > 0);
+  chip(R.cprev, "<", false); chip(R.cnext, ">", false);
+  smallText(ctx, list.length + " CRABS", x + 134, y + 35, [110, 100, 110]);
+  smallText(ctx, (censusPage + 1) + "/" + pages, x + 187, y + 35, [90, 60, 40]);
+  for (let i = 0; i < CENSUS_ROWS; i++) {
+    const c = list[censusPage * CENSUS_ROWS + i];
+    if (!c) break;
+    const p = c.p, r = R.crows[i], ry = r.y;
+    if (i % 2 === 0) rect(ctx, r.x, ry, r.w, 15, [244, 238, 224]);
+    // a chunky little shell in their own colors: the row's portrait
+    const pal = CRAB_COLORS[p.color] || CRAB_COLORS[0];
+    rect(ctx, r.x + 2, ry + 4, 8, 7, pal[1]);
+    rect(ctx, r.x + 3, ry + 5, 6, 5, pal[0]);
+    px(ctx, r.x + 4, ry + 6, [255, 255, 255]); px(ctx, r.x + 7, ry + 6, [255, 255, 255]);
+    px(ctx, r.x + 4, ry + 7, [30, 20, 36]); px(ctx, r.x + 7, ry + 7, [30, 20, 36]);
+    // line 1: who they are, who they work for, what they're worth, how they are
+    smallText(ctx, p.name.slice(0, 9), r.x + 12, ry + 1, [40, 30, 40]);
+    const jobTag = p.job === "fishing" ? "PIER" : BIZ[p.job].short;
+    const boss = p.owner ? "OWNER" : p.job === "fishing" ? "SELF"
+      : p.employer ? OWNERS[p.employer].name : "YOU";
+    smallText(ctx, jobTag + "/" + boss, r.x + 52, ry + 1, [70, 90, 130]);
+    const wTxt = "$" + fmt(Math.max(0, Math.round(p.wallet)));
+    smallText(ctx, wTxt, r.x + 136 - smallTextWidth(wTxt), ry + 1, p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
+    smallText(ctx, homeTag(p), r.x + 140, ry + 1, p.homeless ? [190, 80, 80] : p.boat != null ? [70, 140, 200] : [40, 150, 70]);
+    const hp = p.sick ? "SICK D" + ((p.sick.days || 0) + 1) : offToday(c) ? "DAY OFF" : "WELL";
+    smallText(ctx, hp, r.x + 164, ry + 1, p.sick ? [190, 80, 80] : offToday(c) ? [70, 140, 200] : [40, 150, 70]);
+    // line 2: when they work, how hard, and the five needs at a glance
+    const otM = otMinutes(c);
+    smallText(ctx, (coveringToday(c) ? "CVR " : "") + (p.job === "fishing" ? baseShift(c).label : effShift(c).label),
+      r.x + 12, ry + 8, otM ? [200, 110, 40] : [110, 100, 110]);
+    smallText(ctx, WEEKDAYS[dayOffIdx(c)], r.x + 50, ry + 8, [70, 140, 200]);
+    if (otM) smallText(ctx, "OT", r.x + 66, ry + 8, [255, 150, 40]);
+    const eff = crabEff(c) * (p.sick ? 0.5 : 1);
+    smallText(ctx, Math.round(eff * 100) + "%", r.x + 78, ry + 8, eff < 0.8 ? [190, 80, 80] : eff < 0.995 ? [200, 110, 40] : [110, 100, 110]);
+    const bars = [1 - (p.hunger || 0), 1 - (p.thirst || 0), 1 - (p.dirt || 0), 1 - (p.bored || 0), 1 - (p.tired || 0)];
+    for (let bi = 0; bi < bars.length; bi++) {
+      const bx = r.x + 156 + bi * 10, f = Math.max(0, Math.min(1, bars[bi]));
+      rect(ctx, bx, ry + 8, 9, 4, [30, 20, 36]);
+      rect(ctx, bx + 1, ry + 9, Math.round(7 * f), 2, f > 0.5 ? [96, 200, 120] : f > 0.25 ? [235, 200, 90] : [235, 90, 90]);
+    }
+  }
+  smallText(ctx, "TAP A ROW", x + 6, y + h2 - 11, [150, 140, 160]);
+  smallText(ctx, "FED SIP CLN FUN ZZZ", x + 52, y + h2 - 11, [150, 140, 160]);
+}
+
 function drawJobBoard() {
   if (!boardView) return;
   const x = 40, y = 22, w2 = 176, h2 = 158;
@@ -3969,8 +4527,16 @@ function drawJobBoard() {
       smallText(ctx, c.p.name + " - " + BIZ[c.p.job].name + ", PAID BY " + OWNERS[c.p.employer].name, x + 6, ly, [90, 90, 105]); ly += 7;
     }
   }
+  {   // the board advertises the labor the town WANTS; the census reads the
+      // labor it already has. One tap between them.
+      const r = jobBoardCensusRect();
+      rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+      rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [96, 170, 220]);
+      smallText(ctx, "TOWN CENSUS >", r.x + 4, r.y + 4, [255, 255, 255]);
+  }
   smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
 }
+function jobBoardCensusRect() { return { x: 46, y: 22 + 158 - 16, w: 60, h: 13 }; }
 
 function drawReport() {
   if (!report || reportT <= 0) return;
@@ -4033,7 +4599,7 @@ function frame(now) {
     tmin -= 1440; day++;
     settleFishMarket();   // the day's landings vs the day's appetite set tomorrow's pier price
     townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
-    for (const c of allCrabs()) c.workedToday = false;   // a new day's ledger
+    for (const c of allCrabs()) { c.workedToday = false; c.otMin = 0; }   // a new day's ledger
     trade.day = { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }; trade.landedDay = 0;
     today = newDayLog(); today.repStart = rep;
   }
@@ -4047,10 +4613,20 @@ function frame(now) {
     // 1. wages: pay every crab you can afford
     let wages = 0;
     for (const c of crabs) {
-      if (c.p.sick) continue;                        // no work, no pay
+      if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay (a REQUIRED crab who worked is paid in full)
       if (offToday(c) && !c.workedToday) continue;   // day off: same rule - the bill dips, the wallet doesn't
-      if (coins >= CRAB_WAGE) { coins -= CRAB_WAGE; c.p.wallet += CRAB_WAGE; wages += CRAB_WAGE; }
-      else popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]);
+      const prem = Math.round(otPayToday(c));        // overtime premium on top of the flat day
+      const due = CRAB_WAGE + prem;
+      if (coins >= due) {
+        coins -= due; c.p.wallet += due; wages += due;
+        if (prem > 0) {
+          popText("OT +$" + prem, c.x - 4, FLOOR_Y - 40, [255, 216, 96]);
+          if (window._stats) {
+            window._stats.otPay = (window._stats.otPay || 0) + prem;
+            window._stats.otMin = (window._stats.otMin || 0) + Math.round(c.otMin || 0);
+          }
+        }
+      } else popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]);
     }
     if (wages > 0) earnHist.push({ t: time, amt: -wages });
     // 2. house rent from each crab's own wallet; broke crabs move to the shelter
@@ -4131,9 +4707,10 @@ function frame(now) {
       const emp = c.p.employer;
       if (!emp) continue;
       const o = OWNERS[emp];
-      if (c.p.sick) continue;                        // no work, no pay - same deal as the crew
+      if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay - same deal as the crew
       if (offToday(c) && !c.workedToday) continue;   // day off: unpaid, but the job is safe
-      if (o && o.till >= NPC_WAGE) { o.till -= NPC_WAGE; c.p.wallet += NPC_WAGE; }
+      const npcDue = NPC_WAGE + Math.round(otPayToday(c));   // peer owners pay the same overtime premium
+      if (o && o.till >= npcDue) { o.till -= npcDue; c.p.wallet += npcDue; }
       else {
         c.p.job = "fishing"; c.p.employer = null;
         today.moved.push(c.p.name + " QUIT - BACK TO THE PIER");
@@ -4199,13 +4776,24 @@ function frame(now) {
       for (const k of everyone) {
         if (!k.p.sick) continue;
         k.p.sick.days++;
-        const cared = (k.p.hunger || 0) < 0.5 && (k.p.dirt || 0) < 0.66;
-        if (Math.random() < (cared ? 0.4 : 0.12)) {
+        // THE CARED SEAM: a graded ladder, not a coin flip (see CARE_LANES).
+        // A crab who spent the day resting at home, fed and hydrated, does
+        // measurably better - and their own bed beats a shelter cot.
+        const lane = careLane(k), care = CARE_LANES[lane];
+        const tier = k.p.homeless ? "cot" : k.p.boat != null ? "boat" : "house";
+        if (Math.random() < care.cure) {
+          const dur = k.p.sick.days;
           k.p.sick = null; today.recovered.push(k.p.name);
           popText(k.p.name + " RECOVERED!", k.x - 12, FLOOR_Y - 34, [140, 255, 160]);
-          if (window._stats) window._stats.recoveries = (window._stats.recoveries || 0) + 1;
+          if (window._stats) {
+            window._stats.recoveries = (window._stats.recoveries || 0) + 1;
+            (window._stats.illness = window._stats.illness || [])
+              .push({ day, name: k.p.name, days: dur, lane, tier, out: "well" });
+          }
         } else if (!k.p.npc && k.p.sick.days >= 3 &&
-            Math.random() < Math.min(0.75, (cared ? 0.08 : 0.25) + 0.12 * Math.max(0, k.p.sick.days - 4))) {
+            Math.random() < Math.min(0.75, care.die + 0.12 * Math.max(0, k.p.sick.days - 4))) {
+          if (window._stats) (window._stats.illness = window._stats.illness || [])
+            .push({ day, name: k.p.name, days: k.p.sick.days, lane, tier, out: "died" });
           // the tide takes them
           abortChef(k); abortErrand(k);
           memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
@@ -4220,7 +4808,11 @@ function frame(now) {
           sfx.angry();
         }
       }
+      for (const k of allCrabs()) k.p.restT = 0;   // convalescence is banked one day at a time
     }
+    // the day's labor policy: peer owners (and delegating players) make at
+    // most one move each, on the same convergent-rules pattern as SUDSY's hours
+    for (const b of Object.keys(BIZ)) if (bizUnlocked(b)) runLaborPolicy(b);
     // 3. property rents + loan service (THE credit hook): a shortfall draws
     // on the line of credit instead of instant eviction; interest compounds
     // and the minimum payment auto-collects inside settleCreditLine.
@@ -4408,10 +5000,10 @@ function frame(now) {
     }
   }
   drawNight();
-  drawDossier();
   drawJobBoard();
   drawReport();
   drawManage();
+  drawDossier();   // above the management card: a census row opens a dossier ON TOP of it
   drawFollowCard();
   {  // town reputation chip, top-right of the world
     const rTxt = "REP " + Math.round(rep);

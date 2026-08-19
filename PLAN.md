@@ -81,13 +81,21 @@ compounds or collapses → the landlord collects at 20:00 either way.
   staff quit back to the pier. Crew reassignment now lives in the dossier
   ("TAP: REASSIGN" on the DOES row) plus a labeled JOB> chip on the follow
   card — the old 13px unlabeled chip was the "can't assign staff" bug.
+- **Labor policy** (`SICK_POLS` / `CARE_LANES` / `OT_*` / `LABOR_CFG` in
+  game.js): per-business sick-day policy + per-crab override, a graded
+  convalescence ladder where resting in your own bed genuinely cures faster,
+  a 1.5x overtime premium bounded by the shop's open hours, and an
+  auto-manage rule table that peer owners run by default and the player can
+  delegate to. Surfaced on the management screen's SCHEDULE tab, the TOWN
+  census, and the dossier's SHIFT/HEALTH rows.
 - **Sick crabs can move**: bed rest no longer bars essential errands — the
   sick still buy food and drag themselves to the showers (half
   speed), which feeds the `cared` check that improves cure and death odds.
   Arcade nights stay off-limits. This closed the calibration-flagged spiral
   where the sick couldn't re-clean.
 - **UI**: title → lease-signing intro (Mr. Pincherton) → play. CREW / SHOP /
-  MENU tabs, BILL chip (itemized nightly bill), follow-cam on ANY crab
+  MENU tabs, a three-tab management card (HOURS / SCHEDULE / TOWN census),
+  BILL chip (itemized nightly bill), follow-cam on ANY crab
   including NPCs, fast-forward >>/>>>/>>>> = 2/3/6x (F), master mute (M).
 - **Right-click orders** (crew only): with a crew crab followed, right-click
   redirects them — open ground = walk there (breaks cleanly from any activity
@@ -179,6 +187,13 @@ compounds or collapses → the landlord collects at 20:00 either way.
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
 - `node tools/suite.mjs` — **69 scenarios, must stay green before any push.**
+- `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
+  distributions per housing tier. Paired arms per seed: the care ladder live
+  vs collapsed back onto the pre-seam CARED odds *inside the same build*, plus
+  a RUNG arm (a housed crab rolled at cot odds) that isolates the housing rung
+  on an identical RNG stream. This is where the cared-seam numbers in the
+  labor-policy bullet come from.
+- `node tools/suite.mjs` — **73 scenarios, must stay green before any push.**
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
   NPC housing ladder, boat rung + catch boost, sick-crab mobility,
@@ -204,6 +219,12 @@ vm — never fork game logic into tools/) and perf expectations live there.
   extend rule + tiredness budget, sun-skip across an hours change,
   AT COST/FREE staff-meal accounting, hours/mealPol/policy save roundtrip
   with degenerate-save clamping).
+  Plus the labor policy suite: sick-day GRANT/REQUIRE, the bed-vs-cot
+  recovery shift, OT's exact 1.5x rate + geometry + needs acceleration, the
+  OT marker rendering and clearing, auto-manage convergence (one move a day,
+  a real cooldown, no thrash over a fortnight), SUDSY running the same
+  policy with an OUT SICK placard and no panic posting, census derivation +
+  every sort and filter, and the labor-settings save/load roundtrip.
 
 - `node tools/headless.mjs --days N --seeds K [--buy list] [--quiet]
   [--jobs J]` — CLI; `--jobs` fans seeds out across worker processes
@@ -220,6 +241,137 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- **Labor policy suite: sick days + overtime + scheduling + town census**
+  (shipped 2026-08-18, worktree — realizes the "Labor policy suite" and
+  "Town census" feature requests and the parked **Overtime** backlog entry):
+  - **SICK DAYS are a policy now.** A sick crab always stayed home unpaid;
+    what was missing was that it *meant* anything. `BIZ[k].sickPol` is
+    GRANT (default = the old behavior, inert) or REQUIRE WORK, with a
+    per-crab override `p.sickPol`. A required crab drags themselves in at
+    half speed, earns full wage, and finally makes the settlement block's
+    long-dormant coworker-contagion term fire (until sick days were a
+    policy, no crab could ever be at work to trigger it). Fishers and
+    owner-operators always grant themselves. A granted sick day takes
+    effect the moment it's granted — a crab mid-commute turns around.
+    Coverage behaves exactly like the weekends placard: `bizRestingToday`
+    counts sick-day crabs, the sign reads **OUT SICK**, and the job board's
+    emergency posting deliberately does NOT fire (a bout of flu is not a
+    vacancy — the same reasoning that spared rest days).
+  - **THE CARED SEAM IS CLOSED.** Recovery's `cared` check read only hunger
+    and dirt — it predated thirst and tiredness, so a day in bed bought
+    nothing. Recovery is now a graded ladder (`CARE_LANES`), keyed to the
+    same housing quality the sleep ladder uses:
+    NEGLECT 0.12/0.25 and CARED 0.40/0.08 are **byte-for-byte the old
+    odds** (nobody got worse), and two new lanes sit above them, reachable
+    only by actually staying home on a granted sick day, fed AND hydrated
+    (thirst < 0.5) for `REST_HOURS` 9 daylight hours: **COT REST 0.48/0.06,
+    BED REST 0.55/0.04**. `p.restT` banks daylight hours at home while ill
+    and resets at each settlement.
+    **Measured** (`node tools/illness.mjs --seeds 120`, paired arms — the
+    care table is collapsed back onto the old odds *inside the same build*,
+    so the comparison can only differ on the seam):
+    | arm | mean | median | p90 | deaths |
+    |---|---|---|---|---|
+    | own bed, before | 2.63d | 2d | 5d | 12 |
+    | own bed, after | **2.28d** | 2d | **4d** | **4** |
+    | shelter cot, before | 2.43d | 2d | 4d | 7 |
+    | shelter cot, after | **2.18d** | 2d | 4d | **4** |
+    | bed lot rolled at COT odds (rung, paired) | 2.57d | 2d | 5d | 5 |
+    Bed rest cuts 0.35 days off an illness, cot rest 0.25, and the housing
+    RUNG itself is worth **0.29 days** on identical seeds. 74 of 120
+    convalescents reach a rest lane; the other 46 never clear the
+    fed/clean/hydrated bar and sit on the untouched CARED odds.
+    Organically (6 solvent towns x 24d) most illness is still NEGLECT —
+    the rest lanes are what a *managed* town gets.
+  - **OVERTIME.** `p.ot` lengthens today's shift by up to `OT_SPAN` 120min
+    at `OT_RATE` 1.5x the crab's normal hourly rate (= wage / their own
+    contracted shift, never the cover double), paid on top of the flat day
+    at settlement. **Shop-hours coupling (the documented choice):** OT
+    lives strictly INSIDE the shop's open hours — hours gate admission and
+    the CLOSED sign, so an hour past close is premium pay for nothing. The
+    window takes room at the END first, then borrows from the START, so an
+    E-shift crab whose shift already ends at close comes in EARLY — exactly
+    the shape that plugs a missing morning. A crab covering a full-open
+    double has no room at all, by construction. Health cost: no parallel
+    system — the existing end-of-shift accrual scales with the longer day
+    (hunger proportional, tiredness at `OT_FATIGUE` 1.5x that share).
+    Minutes are MEASURED (`c.otMin`), not assumed, so knocking off early
+    pays less. BILL chip + MENU breakdown both read `crabDueTonight`, so
+    the column adds up; the bankruptcy forecaster deliberately keeps
+    billing BASE wages as steady state (same rationale as the day-off
+    skips — episodic, and noise over a 10-settlement horizon).
+  - **VISIBLE OT POWERUP.** A chunky coffee cup with curling steam
+    (`OT_MARK`, two frames) bobs over any crab clocked in past their
+    contracted hours, plus an OT tag on the follow card and an OT row on
+    the dossier. All of it reads `onOvertimeNow` / `otMinutes` — derived
+    from live state, so it clears itself with nothing to reset.
+  - **SCHEDULE + TOWN tabs on the management screen.** The manage card
+    grew a tab strip: HOURS (as it was), SCHEDULE (AUTO-MANAGE and SICK
+    DAYS chips, then one row per staffer with four tap targets — name opens
+    the dossier, SHIFT cycles M/E/D, OT toggles, SICK cycles shop-rule ->
+    grant -> require) and TOWN (the census). Days off stay derived and are
+    shown, not set. The dossier's SHIFT row is the OT control and its
+    HEALTH row the sick-day control, beside TAP: REASSIGN as specced.
+  - **AUTO-MANAGE** (`LABOR_CFG` + `runLaborPolicy`, the SUDSY hours
+    pattern): one move per settlement, a cooldown day after each, a named
+    toast every time. Rules in order — **REST** (an ill crab under a
+    REQUIRE policy is sent home), **OT OFF** (a crab on OT who is over the
+    tiredness budget, ill, or no longer needed), **OT ON** (tomorrow leaves
+    a shift uncovered AND a rested candidate exists). Converges because the
+    tiredness triggers are a HYSTERESIS BAND (0.55 on / 0.75 off), never a
+    knife edge, and OT itself pushes tiredness up — every ON move weakens
+    its own trigger; on the coverage axis the regimes are disjoint.
+    `coverGapTomorrow` keys on SICKNESS, not days off, because the day-off
+    cover double already fills those for free. Default OFF for the player,
+    ON for peer owners — SUDSY grants herself sick days by this table.
+    Suite-proved over a fortnight: never two moves in a day, never two
+    consecutive days.
+  - **TOWN CENSUS.** Every crab in town, one 16px two-line row: shell
+    portrait, name, job/employer, wallet, housing, health, then shift, day
+    off, OT, PACE and five mini need bars — all derived live. Sort
+    NAME/JOB/HOME/HEALTH/WALLET, filter ALL/CREW/TOWN/SICK/OT, six rows a
+    page with `<` `>` paging (the card idiom's answer to a 12+ crab town —
+    no scrollbar). Tap a row for that crab's dossier, which now draws ON
+    TOP of the management card so closing it drops you back in the census.
+    Reachable from the job board's TOWN CENSUS chip too: the board
+    advertises the labor the town wants, the census reads the labor it has.
+  - **Measured balance** (30d x 8 seeds): baseline 0/8 evictions
+    7,8,10,10,11,11,12,14 **median 11** (before: 7,8,10,11,11,11,12,14,
+    median 11 — one seed moved one day); growth `--buy chef,table` 0/8
+    6,7,8,9,10,10,10,16 **median 10** (before: 6,7,7,9,10,10,11,16, median
+    10). Both medians UNCHANGED, no price or policy lever touched. The
+    player-facing defaults are near-inert by construction: sick days GRANT
+    (the old behavior), auto-manage OFF, `p.ot` false.
+    OT uptake, 6 solvent towns x 24d: **auto-manage OFF measures literally
+    zero** OT minutes and zero moves; delegated it runs 29 crew-hours of
+    overtime town-wide for $166 of premium ($5.77/OT-hour = exactly 1.5x
+    the $3.83 base hourly), 2.8 moves per town, and evening crew tiredness
+    moves 0.20 -> 0.21 — the fatigue cost is real but bounded, because the
+    rota pulls crabs off at 0.75. SUDSY's till is a wash (mean $38 -> $27,
+    driven entirely by one seed; five of six seeds sit at $0-1 either way,
+    exactly as the fixed-hours control does).
+  - **Suite 65 -> 73, with ZERO re-pointing.** Every existing sickness pin
+    ("disease: care cures, neglect can kill", "sick crabs can still wash")
+    held unchanged, because the seam was built additively — the NEGLECT and
+    CARED lanes keep their exact old odds. Eight new scenarios cover the
+    bed-vs-cot duration shift, GRANT vs REQUIRE, the exact 1.5x rate + OT
+    geometry + needs acceleration, marker render/clear, auto-manage
+    convergence, SUDSY running the same policy, census derivation +
+    sort/filter, and save/load roundtrip with clamping.
+  - Fixed en route: `font.js` was missing `%`, `<`, `(`, `)`, `=` and `*`
+    from the 3x5 small font — all six fell back to `?`, which means every
+    PACE chip in the game has been reading "100?" since the needs-drag
+    build. Added.
+  - **Devlog beat (organic, seed 1337, no buys):** SUDSY runs herself
+    ragged on day 2 — thirst 0.85, hunger 0.6 — and the settlement lands
+    her ill. Days 3 and 4 she hangs OUT SICK on her own shopfront and stays
+    in house 5: 14 game-hours abed each day, needs nursed back to zero,
+    care lane BED REST. The day-4 roll cures her at the 0.55 lane and the
+    town's only shower attendant is back on her stalls on day 5. She
+    granted herself that sick day by exactly the rule the player's SCHEDULE
+    tab exposes. Shots: `census-town-tab`, `schedule-tab`, `ot-powerup`,
+    `sick-day-placard`, `dossier-sick-day`, `dossier-overtime`, plus
+    `census-portrait` / `schedule-portrait` under shots/.
 - **Shop hours + management screen + CPU owner policy** (shipped 2026-08-18,
   realizes backlog "Business settings"): every business carries real OPEN
   HOURS (`BIZ[k].hours`, default 8-20 = the old hard-coded day; bounds
@@ -518,6 +670,9 @@ unit economics.
   master land the BIG ONE wouldn't hurt either. Natural build slot: the
   price-discovery agent (fishing economics, same code) or immediately
   after it.
+- ~~**Town census — all-crab character menu**~~ — **shipped 2026-08-18**
+  as the TOWN tab of the management screen (see the labor policy suite
+  bullet). Original request preserved:
 - **Town census — all-crab character menu** (Matt: "need an all-crab
   character menu to review basic stats of whole pop"). A population
   screen: every crab in town — crew, townsfolk, NPC owners — one row
@@ -542,6 +697,9 @@ unit economics.
   Follow-cam can be re-engaged from the selected card. UI-layer only, no
   matrix; touches the same input layer as right-click orders and merge-mode
   hold — mind the 6px drag threshold lessons.
+- ~~**Labor policy suite: sick days + overtime + scheduling menu**~~ —
+  **shipped 2026-08-18** (see the systems bullet above for what landed and
+  what it measured). Original request preserved:
 - **Labor policy suite: sick days + overtime + scheduling menu** (Matt).
   Three pieces, one family, built on the management screen:
   - **Sick days** — a sick crab can take the day off, UNPAID, to care for
@@ -781,6 +939,9 @@ unit economics.
   11) — dirt accrues in 0.25 steps and showers subtract 0.5/0.7, so no
   crab ever organically landed in the old 0.66-0.75 gap; the fold is a
   safety net, not a curve change. Suite 35/35.
+- ~~**Overtime**~~ — **shipped 2026-08-18** inside the labor policy suite
+  (1.5x premium, needs cost via the existing accrual, dossier + SCHEDULE
+  controls, coffee-cup powerup + follow-card/dossier tags). Original spec:
 - **Overtime**: the player can request a crew crab work overtime for extra
   pay. Design seams: shifts already exist (shift D/N on personas), wage is a
   constant (22) paid at settlement — overtime = staying past shift end at a
