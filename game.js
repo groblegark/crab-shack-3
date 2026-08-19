@@ -475,6 +475,7 @@ function scale2(art) {
   return { cv: c, fv: c, w: art.w * 2, h: art.h * 2 };
 }
 const HOUSES2 = HOUSES.map(scale2);
+const HOUSE_EMPTY2 = scale2(HOUSE_EMPTY);
 const SHELTER2 = scale2(SHELTER);
 const NOTICE2 = scale2(NOTICE_BOARD);
 const BUS2 = scale2(BUS);
@@ -511,6 +512,12 @@ function initNpcs() {
 const TIRED_SHIFT = 0.45, TIRED_ERRAND = 0.03, TIRED_NIGHT = 0.05;
 const TIRED_DRAIN = { bed: 0.5, cot: 0.25 };   // fraction drained per game hour, asleep
 
+// who lives at lot h (boat owners have house === null and match nothing).
+// This is THE draw-side derivation too: drawTown renders every lot and asks
+// here whether it's occupied - houses exist first, occupants second.
+function houseOccupant(h) {
+  return allCrabs().find(c => !c.p.homeless && c.p.boat == null && c.p.house === h) || null;
+}
 function homeX(c) { return homeSpot(c).x; }
 function homeSpot(c) {
   if (c.p.boat != null) return boatSpot(c.p.boat);   // on deck, rain or shine
@@ -2320,9 +2327,14 @@ function drawTown() {
   wrect(0, ROAD_Y1, WORLD_W, 3, [214, 196, 156]);   // shoulder
   drawPier();
   drawBoats();
-  // houses face the promenade (owned ones get the owner's roof color)
-  for (const c of allCrabs())
-    if (!c.p.homeless) wblit(HOUSES2[c.p.color % HOUSES2.length], HOUSE_XS[c.p.house], HOME_BOTTOM - HOUSES2[0].h);
+  // houses face the promenade - ALL nine lots stand, always: an occupied
+  // house wears its tenant's roof color, an empty one sits weathered-grey
+  // with dark windows and a TO LET card. Draw derives from the lots, not
+  // from the occupants (the directive: houses exist first, hires move in)
+  for (let h = 0; h < HOUSE_XS.length; h++) {
+    const o = houseOccupant(h);
+    wblit(o ? HOUSES2[o.p.color % HOUSES2.length] : HOUSE_EMPTY2, HOUSE_XS[h], HOME_BOTTOM - HOUSES2[0].h);
+  }
   // the town job board
   wblit(NOTICE2, JOB_BOARD_X, HOME_BOTTOM - NOTICE2.h);
   if (JOB_BOARD_X - camX > -60 && JOB_BOARD_X - camX < W) {
@@ -2586,8 +2598,11 @@ function drawNight() {
   ctx.fillStyle = `rgba(16,20,64,${0.45 * dark})`;
   ctx.fillRect(0, 0, W, PANEL_Y);
   if (dark > 0.5) {
-    for (const c of crabs) {
-      if (c.dayState !== "home" || c.hidden) continue;
+    // windows glow only where somebody is actually home: an empty lot's
+    // house stays dark all night (crew and townsfolk light up alike; boat
+    // dwellers get their cabin lamp below instead)
+    for (const c of allCrabs()) {
+      if (c.dayState !== "home" || c.hidden || c.p.boat != null) continue;
       if (c.p.homeless) { wrect(SHELTER_X + 8, 130, 8, 6, [255, 216, 96]); wrect(SHELTER_X + 50, 130, 8, 6, [255, 216, 96]); }
       else wrect(HOUSE_XS[c.p.house] + 38, 132, 10, 8, [255, 216, 96]);
     }
