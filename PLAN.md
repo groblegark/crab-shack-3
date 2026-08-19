@@ -478,6 +478,19 @@ unit economics.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Fishing experience** (Matt: "fish-catching should give experience").
+  Fold into the existing accomplishments framework (dishes: knack at 25 /
+  famous at 100 / master at 250, toast + follow-card line) — count each
+  crab's lifetime catches (catchesBy already tracks per-name in stats;
+  make it per-crab persona state so it saves) and grant fishing tiers at
+  the same milestone shape: e.g. knack = a touch faster casts, famous =
+  +double-haul odds, master = the rare BIG ONE (bonus fish / bonus price).
+  Under floating fish prices an experienced fisher earns visibly more —
+  which feeds the housing ladder and the boat, and gives SALTY vs DRIFT
+  a career arc the devlog can follow. Tourists at the pier watching a
+  master land the BIG ONE wouldn't hurt either. Natural build slot: the
+  price-discovery agent (fishing economics, same code) or immediately
+  after it.
 - **Town census — all-crab character menu** (Matt: "need an all-crab
   character menu to review basic stats of whole pop"). A population
   screen: every crab in town — crew, townsfolk, NPC owners — one row
