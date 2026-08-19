@@ -972,12 +972,19 @@ function otPayToday(c) { return otPremium(c, c.otMin || 0); }        // truthful
 // tonight's forecast: scheduled while they're still on OT, else what they worked
 function otPayForecast(c) { return otEligible(c) ? otPremium(c, otMinutes(c)) : otPayToday(c); }
 
-function bizRestingToday(b) {   // nobody on the roster works today (rest day or sick day)
+function bizRestingToday(b) {   // nobody on the roster works today (rest day, sick day, or a walk-out)
   const staff = allCrabs().filter(k => k.p.job === b);
-  return staff.length > 0 && staff.every(k => offToday(k) || onSickDay(k));
+  return staff.length > 0 && staff.every(k => awayToday(k) || onSickDay(k));
 }
-function restingLabel(b) {   // what the placard says - illness reads differently from a rota day
+// What the placard says. A rota day, a bout of flu and a crab who simply did
+// not turn up are three different stories, and the shopfront tells them apart.
+// NOTE the job board is untouched by all three: its emergency HELP WANTED gate
+// counts HEADCOUNT on the roster, not who clocked in, so a walk-out can never
+// masquerade as a vacancy.
+function restingLabel(b) {
   const staff = allCrabs().filter(k => k.p.job === b);
+  if (staff.some(k => walkoutToday(k)) && staff.every(k => walkoutToday(k) || offToday(k)))
+    return "NOBODY CAME IN";
   return staff.some(k => onSickDay(k)) && staff.every(k => onSickDay(k) || offToday(k))
     && staff.some(k => !offToday(k)) ? "OUT SICK" : "DAY OFF";
 }
@@ -1193,7 +1200,7 @@ let manage = null;   // key of the player-owned business whose MANAGEMENT card i
 let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
   return { served: 0, revenue: 0, rage: 0, sick: [], died: [], recovered: [],
-    critical: [], moved: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {} };
+    critical: [], walked: [], moved: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {} };
 }
 let screen = "title", hasSave = false, wiping = false;
 // SAVED TOWNS screen state (its own overlay, its own rect table)
@@ -1234,7 +1241,7 @@ function totalRent() {   // the PLAYER's nightly property bill, due from night o
 // REQUIRED to work while sick is on the bill like anyone else.
 function crabDueTonight(c) {
   if (onSickDay(c) && !c.workedToday) return 0;
-  if (offToday(c) && !c.workedToday) return 0;
+  if (awayToday(c) && !c.workedToday) return 0;   // rota day off, or an unauthorised one
   return Math.round(basePayToday(c)) + Math.round(otPayForecast(c));
 }
 function wagesOwedTonight() { return crabs.reduce((s, c) => s + crabDueTonight(c), 0); }
@@ -1313,6 +1320,243 @@ const TIRED_DRAIN = { bed: 0.5, cot: 0.25 };   // fraction drained per game hour
 // untouched by it (10.40% -> 9.39%), so tiredness keeps its teeth.
 const TIRED_NAP = { bed: 0.4, cot: 0.2 };
 
+// ===========================================================================
+// NEEDS THAT FAIL IN THEIR OWN CHARACTER - boredom "drifts", tiredness "stalls"
+// (design/needs-failure-patterns.md, the owner's picks: B1 + B3, TI1 + TI4)
+//
+// Until now every need failed the same way: the bar filled, crabEff shaved a
+// few percent and a flat number joined a sickness roll. Parched and bored
+// looked identical from the boardwalk. These two get a VERB instead.
+//
+//   BOREDOM -> DRIFT.  IDLE HANDS: a restless crab on shift with no order to
+//     claim stops loitering by the door and takes itself somewhere better -
+//     the foot of the pier to watch the fishers, the tide line, the arcade
+//     window it cannot afford. STILL CLOCKED IN: the claim scan runs every
+//     frame, so a guest arriving costs exactly the walk back, and nothing
+//     else. Past WALKOUT_AT for WALKOUT_DAYS running they take an
+//     unauthorised day (B3, the late stage): no commute, no shift, NO WAGE.
+//     Real stakes, no death.
+//   TIREDNESS -> STALL.  THE MICROSLEEP: past NOD_AT, timed work has a
+//     per-second chance to stop dead - eyes shut, a Z drifting up, 2-5
+//     seconds, then a jolt awake. The crab KEEPS THE STATION SLOT while it
+//     sleeps, so the cost lands on the whole kitchen and not just the
+//     sleeper. Past ROUGH_AT a crab walking home doesn't make it: they bed
+//     down where they stand, and sleeping rough banks NO repair (TI4), so
+//     exhaustion prevents its own cure. Nothing punished the crab.
+//
+// ---------------------------------------------------------------------------
+// THE CURE LEDGER FOR BOREDOM - the owner's ruling, and it is load-bearing.
+// Boredom has exactly TWO cures in this game and NEITHER of them is free:
+//
+//   THE ARCADE - MONEY.  $650 to unlock, $13 a go, and it zeroes the bar on
+//     the spot. Fast and total.
+//   A CONVERSATION - TIME.  Two bored crabs who pass close enough stop and
+//     talk for CHAT_SECS and come away CHAT_RELIEF less bored each. Two crabs
+//     stood chatting are two crabs not working: that is PLAN's SELF-HEALING
+//     RULE read exactly as written - "the way out costs TIME and never money.
+//     It stops a death spiral; it never pays the rent."
+//
+// There is deliberately NO free-fun venue, NO ambient decay, and NO solo
+// cure. A crab with nobody to talk to - the lone shower attendant, the fisher
+// alone on the far rail - has no way out at all except the arcade. Boredom is
+// therefore also a LONELINESS need, which is the shape the design doc wanted.
+//
+// AND A CHATTING PAIR CANNOT KEEP ITSELF TOPPED UP. A worked shift adds +0.2
+// boredom. CHAT_CD lets a crab talk at most twice in a trading day, for
+// CHAT_RELIEF 0.06 each: 0.12 of relief against 0.20 of accrual, so even a
+// crew that does nothing but gossip still drifts UPWARD across a working
+// week. Talking buys you days. Only the arcade buys the bar back.
+// ---------------------------------------------------------------------------
+
+// MEASUREMENT HATCH. Every one of these five behaviours moves the balance
+// curve, so the build has to be able to attribute the movement to each of them
+// separately - and one suite scenario needs a control arm with the chatter
+// switched off to prove boredom has no OTHER way down. `window._failOff` is
+// read through one helper at five gates; the game never sets it.
+const patOff = (k) => !!(window._failOff && window._failOff[k]);
+
+// ---- IDLE HANDS (the wander-off) -----------------------------------------
+const WANDER_AT = 0.6;        // restless enough to leave the post
+const WANDER_PX = 340;        // how far off post a wander may take them
+const WANDER_QUIET = 3;       // real seconds the counter must be DEAD first - a
+                              // crab doesn't bolt the instant the queue empties
+const WANDER_DWELL = 14;      // ...then 14-24s stood there watching
+const WANDER_CD = 20;         // real seconds back at the post before the next one
+                              // (a six-hour shift is only 90 REAL seconds, so these
+                              //  three numbers are what set the share of a dead
+                              //  spell a crab spends off post: about half)
+// Landmarks worth drifting to. Absolute x's, so the same table serves every
+// shop; each crab takes whichever ones lie within WANDER_PX of their post, and
+// the nearest-is-likeliest weighting keeps them roughly in their own quarter.
+const WANDER_SPOTS = [
+  { x: 640,  label: "THE TOWN TAP" },        // beside the notice board
+  { x: 716,  label: "THE NOTICE BOARD" },    // reading postings they'd never take
+  { x: 908,  label: "THE TIDE LINE" },       // the sand between the bar and the showers
+  { x: 1145, label: "THE SEA WALL" },
+  { x: 1180, label: "THE TIDE LINE" },       // the gap between the showers and the shack
+  { x: 1578, label: "THE ARCADE WINDOW" },   // nose to the glass, no token in pocket
+  { x: 1858, label: "THE PIER RAIL" },       // watching the fishers cast (clear of FISHING_SPOTS)
+];
+// RULE 3 from the design doc: BOREDOM YIELDS TO EVERYBODY. Boredom is the need
+// of a crab whose life is otherwise fine. A crab who is starving, parched or
+// dead on their feet has no business wandering off to watch the sea, and this
+// is what stops idle hands firing on a crab who is dying. Dirt is deliberately
+// NOT in the list: dirt is passive and always-on (Rule 2), it never competes
+// for the crab's behaviour - and the town sits near 0.7 dirt permanently, so
+// including it would switch the whole pattern off.
+const BORED_YIELD = 0.8;
+function boredYields(c) {
+  return (c.p.hunger || 0) >= BORED_YIELD || (c.p.thirst || 0) >= BORED_YIELD
+    || (c.p.tired || 0) >= BORED_YIELD;
+}
+function wanderSpot(c, post) {
+  const near = WANDER_SPOTS.filter(s => Math.abs(s.x - post) <= WANDER_PX);
+  if (!near.length) return null;
+  const s = near[(Math.random() * near.length) | 0];
+  return { x: s.x, y: clearSpotY(s.x, 150 + ((Math.random() * 3) | 0) * 6), label: s.label };
+}
+const WANDER_QUIPS = ["NOTHING DOING", "JUST STRETCHING MY LEGS",
+  "WONDER IF THEY'RE BITING", "BACK IN A TICK"];
+
+// ---- IDLE HANDS, late stage: THE WALK-OUT ---------------------------------
+const WALKOUT_AT = 0.95;      // pinned this bored...
+// ...at this many settlements running, and they've had enough. The design doc
+// wrote 2, but it wrote it assuming a FREE FUN venue would exist to bring the
+// bar down. It doesn't: in an arcade-less town boredom PINS at 1.00 by about
+// day 5 and never falls, so a threshold of 2 makes the late stage the steady
+// state - every crab losing every third day, forever, which is a paywall
+// rather than pressure. MEASURED, 8 seeds x 30d baseline: at 2 the town takes
+// 48 walk-outs and the eviction median falls 17 -> 11; at 4 it takes 20 and
+// lands at 14. Four means a bored crew loses roughly one extra day a week -
+// visible, expensive, survivable, and it stops the moment you buy the arcade.
+const WALKOUT_DAYS = 4;
+function walkoutToday(c) { return c.p.walkout === day; }
+// "not working today", for every rule that has to agree about it: the rota's
+// day off OR an unauthorised one. offToday() stays the ROTA and nothing else -
+// the cover-shift promotion keys on it, and nobody covers a walk-out.
+function awayToday(c) { return offToday(c) || walkoutToday(c); }
+
+// ---- CHATTER (the time-priced cure) ---------------------------------------
+const CHAT_AT = 0.55;         // both parties have to actually want the company
+const CHAT_PX = 26;           // close enough to fall into step
+const CHAT_SECS = 10;         // 10-16 real seconds = 40-64 GAME-MINUTES of the day
+const CHAT_RELIEF = 0.06;     // modest, and deliberately under half a shift's +0.2
+const CHAT_CD = 360;          // game minutes: at most twice in a trading day
+const CHAT_LINES = ["YOU'LL NEVER GUESS", "SHE DIDN'T!", "...ANYWAY",
+  "NO, GO ON", "THAT'S THE THIRD TIME", "BETTER GET BACK"];
+// Who is free to stop and talk. Anyone holding something the town depends on -
+// a claimed order, a station slot, a place in a queue, a player's order - is
+// not, so a chat can never strand a resource.
+function chatReady(c) {
+  if (patOff("chat")) return false;
+  if (c.p.sick || c.hidden || c.carrying || c.errandCust || c.cust) return false;
+  if (c.slot >= 0 || c.order || (c.napT || 0) > 0 || (c.chatCd || 0) > 0) return false;
+  if ((c.p.bored || 0) < CHAT_AT || boredYields(c)) return false;
+  const ds = c.dayState;
+  if (ds === "working") return !c.pendingOff && (c.p.job === "fishing" || c.kstate === "idle" || c.kstate === "wander");
+  return ds === "home" || ds === "toWork" || ds === "toHome";
+}
+function startChat(a, b) {
+  for (const [c, o] of [[a, b], [b, a]]) {
+    c.chatFrom = c.dayState; c.dayState = "chat";
+    c.chatWith = o; c.chatT = CHAT_SECS + Math.random() * 6;
+    c.chatCd = CHAT_CD; c.chatLine = 0;
+    c.wander = null; c.wanderT = 0;   // the conversation IS the wander now
+    c.stuckT = 0; c.stuckRef = null; c.stuckN = 0;
+    setT(c, c.x, c.y);
+  }
+  a.quip = { text: CHAT_LINES[(Math.random() * CHAT_LINES.length) | 0], t: 2.6 };
+  if (window._stats) window._stats.chats = (window._stats.chats || 0) + 1;
+}
+function endChat(c, paid) {
+  if (c.dayState !== "chat") return;
+  if (paid) {
+    c.p.bored = Math.max(0, (c.p.bored || 0) - CHAT_RELIEF);
+    if (window._stats) window._stats.chatRelief = (window._stats.chatRelief || 0) + CHAT_RELIEF;
+  }
+  c.dayState = c.chatFrom || "home";
+  c.chatFrom = null; c.chatWith = null; c.chatT = 0;
+  setT(c, c.x, c.y);
+}
+// A chat holds POSITION and nothing else: no stepTo runs, so the auto-unstick
+// watchdog never sees it (it only looks at crabs that genuinely stepped), and
+// dayState "chat" is not one of the moving states the suite's freeze detector
+// samples. Both exemptions are by construction rather than by special case.
+function updateChat(c, dt) {
+  const o = c.chatWith;
+  if (!o || o.dayState !== "chat" || o.chatWith !== c) { endChat(c, false); return; }
+  c.chatT -= dt;
+  // alternate the bubbles so it reads as a conversation, not two monologues
+  const beat = Math.floor((CHAT_SECS + 6 - c.chatT) / 3.5);
+  if (beat > c.chatLine && !c.quip && !o.quip) {
+    c.chatLine = beat;
+    c.quip = { text: CHAT_LINES[(beat + (c.p.name.length % 3)) % CHAT_LINES.length], t: 2.4 };
+  }
+  if (c.chatT <= 0) endChat(c, true);
+}
+// One O(n^2) sweep over a dozen crabs, in its own pass - deliberately NOT
+// folded into collide(), which belongs to the locomotion layer.
+function runChatter(dt) {
+  const all = allCrabs();
+  for (const c of all) if ((c.chatCd || 0) > 0) c.chatCd -= dt * TS;
+  for (let i = 0; i < all.length; i++) {
+    const a = all[i];
+    if (!chatReady(a)) continue;
+    for (let j = i + 1; j < all.length; j++) {
+      const b = all[j];
+      if (!chatReady(b)) continue;
+      if (Math.abs(a.x - b.x) > CHAT_PX || Math.abs(a.y - b.y) > 14) continue;
+      startChat(a, b);
+      break;
+    }
+  }
+}
+
+// ---- THE MICROSLEEP -------------------------------------------------------
+const NOD_AT = 0.85;          // the nod line. Baseline crews peak ~0.5 and fishers
+                              // 0.78, so this is a GROWTH-TOWN pressure by
+                              // construction - and auto-manage already pulls a crab
+                              // off overtime at 0.75, BELOW the line, so a delegated
+                              // town should almost never see one. That is the
+                              // feature: the hands-off town pays for being hands-off.
+// per second of timed work past NOD_AT. MEASURED (6 seeds x 15d, 4 crew all on
+// overtime, auto-manage OFF): 0.02 gave 0.16 nods/crew-day and 0.7% of station
+// time lost, which is a pattern nobody would ever see; 0.05 gives ~0.4/crew-day
+// and ~2%, against the design brief's ~5% ceiling. The rate is not what makes
+// nods rare - being past 0.85 while actually mid-task is.
+const NOD_RATE = 0.05;
+const NOD_MIN = 2, NOD_SPAN = 3;   // 2-5 seconds, hard-capped: a stall, never a jam
+// the states where a nod actually COSTS something - mid-task, mid-carry, or
+// holding a station. Never "idle" (a nod on a dead counter costs nobody
+// anything) and never waitSlot/waitCash (they hold nothing).
+const NOD_STATES = ["walk", "toSlot", "work", "toStallClean", "cleaningStall"];
+const NOD_WAKE = ["WHAT? I'M UP", "JUST RESTING MY EYES", "WHERE WAS I"];
+
+// ---- THE SHORTCUT HOME ----------------------------------------------------
+const ROUGH_AT = 0.97;        // this far gone and the walk home is too far
+const ROUGH_PX = 250;         // ...if there's still this much of it left
+// ...and then it is a CHANCE per second, not a cliff. A flat rule dropped every
+// exhausted crab the instant they left the shack (home is always further than
+// 250px from a counter), which made rough sleeping a one-way ratchet with no
+// exit but the weekly rota day. As a per-second roll, a crab three-quarters of
+// the way home usually makes it and the same crab leaving the pier usually
+// does not - which is the difference between a spiral and a wall.
+const ROUGH_RATE = 0.03;
+// Bed down where they stand. dayState "home" with p.rough set: updateHome
+// skips BOTH repair branches, so the night banks nothing at all (bed 0.4-0.5
+// an hour, cot 0.2-0.25, street 0). Exhaustion prevents its own cure, which is
+// the honest spiral - and the player can break it with a day off, a rest
+// order, or simply a shorter shift.
+function sleepRough(c) {
+  c.p.rough = true; c.p.roughLast = day;
+  c.hidden = false; c.cstate = ""; c.busFrom = -1; c.busTo = -1;
+  c.dayState = "home"; c.duty = false; c.pendingOff = false;
+  c.y = clampY(c.y); setT(c, c.x, c.y);
+  c.quip = { text: "JUST... FIVE MINUTES", t: 3.2 };
+  popText("TOO TIRED TO GET HOME", c.x - 22, c.y - 26, [190, 160, 230]);
+  if (window._stats) window._stats.roughNights = (window._stats.roughNights || 0) + 1;
+}
+
 // who lives at lot h (boat owners have house === null and match nothing).
 // This is THE draw-side derivation too: drawTown renders every lot and asks
 // here whether it's occupied - houses exist first, occupants second.
@@ -1333,9 +1577,20 @@ function homeSpot(c) {
 }
 // once a commute drops them at the lot, home crabs wander in and settle
 function updateHome(c, dt) {
+  // SLEEPING ROUGH (TI4). They are already down, wherever "here" turned out
+  // to be - a bench, the sand, the shack floor. No walk home, and NO REPAIR
+  // on either ladder: the street is not a bed and it is not even a cot. Come
+  // morning they get up exactly as tired as they lay down and start the day
+  // that way, which is how exhaustion prevents its own cure.
+  if (c.p.rough) {
+    if (darkness() >= 0.5) { setT(c, c.x, c.y); return; }
+    c.p.rough = false;   // up with the light, stiff, and none the better for it
+    c.quip = { text: ["SLEPT WHERE I FELL", "MY SHELL ACHES", "THAT WAS NO BED"][(Math.random() * 3) | 0], t: 3 };
+  }
   // a day off is for the beach: after the lie-in, amble the sand near home
-  // between errands instead of pacing the porch
-  if (offToday(c) && !c.p.sick && tmin >= OFF_WAKE && darkness() < 0.5) {
+  // between errands instead of pacing the porch. A WALK-OUT spends the day
+  // exactly the same way - that is the whole point of taking one.
+  if (awayToday(c) && !c.p.sick && tmin >= OFF_WAKE && darkness() < 0.5) {
     if (c._offPause > 0) { c._offPause -= dt; return; }
     if (c._offWt == null) {
       c._offWt = Math.max(24, Math.min(WORLD_W - 40, homeX(c) + Math.random() * 240 - 120));
@@ -1402,6 +1657,12 @@ function newCrab(persona) {
   if (persona.ot == null) persona.ot = false;
   if (persona.restT == null) persona.restT = 0;
   if (persona.sickPol != null && !SICK_POLS.includes(persona.sickPol)) delete persona.sickPol;
+  // needs-failure state: settlements at WALKOUT_AT boredom, the day an
+  // unauthorised one is being taken, and whether they slept rough. Old saves
+  // land on zeroes and behave exactly as before.
+  if (persona.boredDays == null) persona.boredDays = 0;
+  if (persona.walkout == null) persona.walkout = 0;
+  if (persona.rough == null) persona.rough = false;
   return {
     p: persona,
     x: homeX({ p: persona }), y: 160, tx: 0, ty: 160,
@@ -1412,6 +1673,10 @@ function newCrab(persona) {
     // kitchen fields
     kstate: "idle", cust: null, carrying: null, stepIdx: 0,
     workT: 0, workMax: 0, slot: -1, slotKind: null,
+    // needs-failure fields (all transient - derived behaviour, nothing to save)
+    idleT: 0, wander: null, wanderT: 0, wanderCd: 0,
+    chatT: 0, chatCd: 0, chatWith: null, chatFrom: null, chatLine: 0,
+    napT: 0, napFrom: null,
     quip: null, quipT: 8 + Math.random() * 15,
   };
 }
@@ -1908,6 +2173,10 @@ function maybeQuip(c, dt) {
       lines = ["SAVING FOR A PLACE", "SHELTER SOUP AGAIN", "I'LL BOUNCE BACK"];
     if (offToday(c) && !c.p.sick && quipContext(c) === "home" && !isNight && tmin >= OFF_WAKE)
       lines = ["DAY OFF!", "BEACH DAY", "THE SAND'S ALL MINE", "NOT COOKING TODAY"];
+    if (walkoutToday(c) && !c.p.sick && !isNight && tmin >= OFF_WAKE)
+      lines = ["THEY'LL COPE", "I NEEDED THIS", "NOT TODAY", "SOMEONE ELSE'S TURN"];
+    if ((c.p.bored || 0) >= WANDER_AT && !isNight && !walkoutToday(c))
+      lines = ["SAME OLD SAME OLD", "IS IT HOME TIME", "NOTHING EVER HAPPENS", "I'D KILL FOR AN ARCADE"];
     if ((c.p.tired || 0) >= 0.8 && !isNight)
       lines = ["DEAD ON MY FEET", "SO... SLEEPY", "NEED MY BED"];
     if ((c.p.thirst || 0) >= 0.8 && !isNight)
@@ -2042,8 +2311,18 @@ function updateCommute(c, dt) {
   // a commute that straddles midnight into a day off turns around - long walk
   // commutes (a fisher's is ~3 game-hours) can legally start before the day
   // flips and must not deliver anyone to work on their Sunday
-  if (toWork && offToday(c) && !coveringToday(c)) { startCommute(c, false); return; }
+  if (toWork && ((offToday(c) && !coveringToday(c)) || walkoutToday(c))) { startCommute(c, false); return; }
   const dest = toWork ? jobDoor(c) : homeX(c);
+  // THE SHORTCUT HOME. Past ROUGH_AT, a crab with a real walk still ahead of
+  // them simply does not make it. They stop where they are and sleep there -
+  // and bank nothing for it (see updateHome). Only on the way HOME and only
+  // after dark: nobody keels over on the morning commute.
+  if (!toWork && !c.p.rough && !patOff("rough") && (c.p.tired || 0) >= ROUGH_AT
+      && darkness() >= 0.5 && Math.abs(c.x - dest) > ROUGH_PX && !c.hidden
+      && Math.random() < ROUGH_RATE * dt) {
+    sleepRough(c);
+    return;
+  }
   const m = c.p.mode, tr = TRAITS[c.p.trait];
   const wspd = crabMove(c), vspd = MODES[m].speed * tr.move;
 
@@ -2265,7 +2544,10 @@ function updateSchedule(c, dt) {
   const sh = effShift(c);   // own shift, or the long cover shift on a coworker's day off
   if (c.p.job !== "fishing" && !bizUnlocked(c.p.job)) c.p.job = "shack";
   if (!c.p.npc && c.p.job !== "fishing" && bizOwner(c.p.job) !== "player") c.p.job = "shack";   // crew can't staff NPC shops
-  const off = offToday(c);   // one weekday in seven: no commute, no duty, no pay
+  // one weekday in seven: no commute, no duty, no pay - and the same for a
+  // crab who has walked out (B3). The rota's day off is scheduled and covered;
+  // an unauthorised one is neither, which is exactly what makes it cost.
+  const off = awayToday(c);
   // a granted sick day takes effect the MOMENT it is granted - a crab already
   // walking in (or already on the clock, because the boss just relented) turns
   // around and goes home. Without this the dossier's TAP: REST would only
@@ -2439,7 +2721,10 @@ function pickErrand(c) {
   // a day off is for spending: lower need thresholds, so the off crab eats
   // out, soaks, and finally gets that arcade morning their shift always ate.
   // Full retail, full queue rules - off crabs are customers, not staff.
-  const off = offToday(c) && !c.p.sick;
+  // ...and a WALK-OUT is a day off the crab granted themselves, so it spends
+  // like one: the crab who walked out because they were bored out of their
+  // shell will absolutely spend it at the arcade, if the town has one.
+  const off = awayToday(c) && !c.p.sick;
   const wantFood = (c.p.hunger || 0) >= (off ? 0.4 : 0.5);
   // restaurant staff privilege: cook your own meal when the kitchen is
   // unstaffed. Charged per the shop's staff-meal POLICY (management screen):
@@ -2845,7 +3130,7 @@ function deathArmsAt(lane) { return lane === "neglect" ? DEATH_DAY : LINGER_DAY;
 // One removal path for crew and townsfolk alike. Releases everything the crab
 // held, files the memorial, and settles what their death does to the town.
 function killCrab(k) {
-  abortChef(k); abortErrand(k);
+  abortChef(k); abortErrand(k); endChat(k, false);   // the conversation ends here too
   memorials.push({ x: SHELTER_X - 40 - memorials.length * 16, name: k.p.name });
   today.died.push(k.p.name);
   const followed = followIdx >= 0 ? crabs[followIdx] : null;
@@ -2905,6 +3190,12 @@ function abortChef(c) {
   release(c);   // covers kitchen work AND a selfCook grip on a grill (e.g. death mid-meal)
   if (c.cust && !c.cust.served) c.cust.claimed = false;   // let another chef pick the order up
   if (c.cleanStall) { c.cleanStall.cleaning = false; c.cleanStall = null; }
+  // ...and a crab yanked out MID-NAP or MID-WANDER wakes up here. Without
+  // this, kstate would be forced to "idle" while napT kept the microsleep
+  // guard returning early forever - a station released but a crab that never
+  // works again. Same shape as the stall-occupant leak abortErrand fixed.
+  c.napT = 0; c.napFrom = null;
+  c.wander = null; c.wanderT = 0; c.idleT = 0;
   c.kstate = "idle"; c.cust = null; c.carrying = null; c.stepIdx = 0;
 }
 
@@ -2923,6 +3214,8 @@ const ORDER_IDLE = 2.5;   // seconds a directed crab lingers before the schedule
 function abortActivity(c) {
   abortChef(c);
   abortErrand(c);
+  endChat(c, false);   // mid-sentence: the conversation is off, and unpaid
+  c.p.rough = false;   // a directed crab is on their feet again
   c.cookStep = 0; c.cookRecipe = null;
   c.tapStop = null; c.tapT = 0;   // a tap holds nothing, but don't leave the stop armed
   c.duty = false; c.pendingOff = false;
@@ -3048,6 +3341,15 @@ const DETOUR_T = 1.0;       // seconds each sidestep waypoint lives
 const BOUNCE_BUDGET = 30;   // game minutes of obstruction per trip
 const WARP_PX = 14;         // a shell's width past the blocker, no more
 function updateStuck(c, dt) {
+  // A crab who is ASLEEP, NAPPING AT A STATION or STOOD TALKING is not stuck -
+  // it is standing still on purpose. All three are already exempt by
+  // construction (no stepTo runs, so `walking` below is false), but say it out
+  // loud: a microsleep is exactly the shape this watchdog was built to break,
+  // and a sidestep mid-nap would shove a crab off the station it is holding.
+  if ((c.napT || 0) > 0 || c.dayState === "chat" || c.p.rough || c.wanderT > 0) {
+    c.stuckT = 0; c.stuckRef = null; c.stuckN = 0; c.bounceT = 0;
+    return;
+  }
   if (c.detour) {   // sidestep in progress: steer for the waypoint, then resume
     c.detour.t -= dt;
     const done = stepTo(c, c.detour.x, crabMove(c) * 1.2, dt, c.detour.y);
@@ -3146,6 +3448,37 @@ function updateFishing(c, dt) {
 function updateKitchen(c, dt) {
   if (c.cust && (c.cust.state === "leaving" || c.cust.served)) { abortChef(c); return; }
   const bizKey = c.workBiz, biz = BIZ[bizKey];
+  // ---- THE MICROSLEEP -----------------------------------------------------
+  // Runs BEFORE anything else in the kitchen, and AFTER the raged-guest abort
+  // above so a nap can never outlive the order it was holding.
+  //
+  // The whole point is the slot: release() is not called, workT does not tick,
+  // and the crab is still standing on the station. A coworker who wants that
+  // grill waits in the clear lane and polls tryAcquire (the hold-and-wait fix
+  // this project already made) - so it is a DELAY, hard-capped at NOD_SPAN+
+  // NOD_MIN seconds, and never a jam. And because no stepTo runs while the
+  // crab naps, the auto-unstick watchdog and the 30-game-minute furniture
+  // bounce budget both look straight past it: they only ever consider a crab
+  // that genuinely stepped this frame. kstate "nap" is likewise not one of the
+  // moving kstates the suite's freeze detector samples.
+  if ((c.napT || 0) > 0) {
+    c.napT -= dt;
+    if (c.napT <= 0) {
+      c.kstate = c.napFrom || "idle"; c.napFrom = null;
+      c.quip = { text: NOD_WAKE[(Math.random() * NOD_WAKE.length) | 0], t: 2.2 };
+    }
+    return;
+  }
+  if ((c.p.tired || 0) >= NOD_AT && !patOff("nod") && NOD_STATES.includes(c.kstate)
+      && Math.random() < NOD_RATE * dt) {
+    c.napFrom = c.kstate; c.kstate = "nap";
+    c.napT = NOD_MIN + Math.random() * NOD_SPAN;
+    if (window._stats) {
+      window._stats.nods = (window._stats.nods || 0) + 1;
+      window._stats.nodSecs = (window._stats.nodSecs || 0) + c.napT;
+    }
+    return;
+  }
   // hustle: kitchens move quick - but a run-down crab loses the spring in
   // their step: a gentle slope, plus a kicker once seriously neglected
   // (eff < 0.85), totalling ~-18% at rock bottom
@@ -3163,6 +3496,9 @@ function updateKitchen(c, dt) {
       const o = pending.find(k => k.isCrab && k.patience < k.maxPatience * 0.5)
         || pending.find(k => !k.isCrab) || pending[0];
       if (o) {
+        // an order lands: the wander is over, wherever they got to. The walk
+        // back to the crate is the entire cost of having drifted off.
+        c.wander = null; c.wanderT = 0; c.idleT = 0; c.wanderCd = WANDER_CD;
         o.claimed = true; c.cust = o; c.stepIdx = -1; c.kstate = "walk";
         // send dine-in guests to a table right away - the server brings it out
         const bts = bizTables(bizKey);
@@ -3177,6 +3513,7 @@ function updateKitchen(c, dt) {
       //  room returns with a fancier restaurant later)
       const grubby = !c.pendingOff && biz.stalls && biz.stalls.find(t => t.dirty && !t.cleaning && !t.occupant);
       if (grubby) {
+        c.wander = null; c.wanderT = 0; c.idleT = 0; c.wanderCd = WANDER_CD;
         grubby.cleaning = true; c.cleanStall = grubby; c.kstate = "toStallClean";
         setT(c, grubby.x + 2, grubby.y + 7);
         return;
@@ -3186,6 +3523,47 @@ function updateKitchen(c, dt) {
     // idle spots (y=156) sits squarely in the front-row solid band, which is
     // why SUDSY spent her whole shift being shoved off her own towel counter.
     const ix = biz.door + 4 + (Math.max(0, crabs.indexOf(c)) % 3) * 10;
+    // ---- IDLE HANDS: the wander-off ---------------------------------------
+    // Nothing to claim and nothing to scrub. A restless crab does not stand
+    // by that door for six hours. Three things keep it CHARMING rather than
+    // crippling in an arcade-less town where boredom sits at 0.8 town-wide
+    // and everybody touches 1.0:
+    //   1. the counter has to be DEAD for WANDER_QUIET first - they don't
+    //      bolt the second the queue empties;
+    //   2. a wander is a TRIP, not a posting: WANDER_DWELL seconds at the
+    //      spot, then back to the post, then WANDER_CD before the next one -
+    //      so they're at their post a good half of every dead spell;
+    //   3. RULE 3 - boredom yields to everybody (boredYields), so a crab who
+    //      is starving or dead on their feet never wanders at all.
+    // The cost is ONLY ever the walk back, and it lands hardest exactly when
+    // the shop is quiet, which is when it costs the town least.
+    if (c.wanderT > 0) {                    // stood there, watching the sea
+      c.wanderT -= dt;
+      if (c.wanderT <= 0) { c.wander = null; c.wanderCd = WANDER_CD; }
+      return;                               // holds position: no stepTo, so the
+                                            // unstick watchdog never considers them
+    }
+    if (c.wander) {                         // walking out to it (kstate stays
+      setT(c, c.wander.x, c.wander.y);      // "idle": the claim scan above runs
+      if (routedStep(c, spd, dt)) {         // every frame, wander or no wander)
+        c.wanderT = WANDER_DWELL + Math.random() * 10;
+        c.quip = { text: WANDER_QUIPS[(Math.random() * WANDER_QUIPS.length) | 0], t: 2.6 };
+      }
+      return;
+    }
+    if (c.wanderCd > 0) c.wanderCd -= dt;
+    c.idleT = (c.idleT || 0) + dt;
+    if (!c.pendingOff && !c.p.sick && !patOff("wander")
+        && (c.p.bored || 0) >= WANDER_AT && !boredYields(c)
+        && c.idleT >= WANDER_QUIET && c.wanderCd <= 0) {
+      const w = wanderSpot(c, ix);
+      if (w) {
+        c.wander = w; setT(c, w.x, w.y);
+        if (window._stats) window._stats.wanders = (window._stats.wanders || 0) + 1;
+        return;
+      }
+      c.wanderCd = WANDER_CD;   // nowhere within reach: don't re-roll every frame
+    }
     setT(c, ix, clearSpotY(ix, 146 + (Math.max(0, crabs.indexOf(c)) % 2) * 10));
     routedStep(c, spd, dt);
   } else if (c.kstate === "walk") {
@@ -3545,9 +3923,25 @@ function tapStatus(c) {
   if (!e || c.tapT <= 0) return "WALKING TO " + nm;
   return e.need === "clean" ? "RINSING OFF AT " + nm : "DRINKING AT " + nm;
 }
+const NAP_WHERE = { grill: "AT THE GRILL", board: "AT THE BOARD", juicer: "AT THE JUICER",
+  crate: "AT THE CRATE", pass: "AT THE PASS" };
 function crabStatus(c) {
+  // THE TEN-SECOND TELLS come first: what the eyes just saw has to be what the
+  // card says (design doc Rule 4). A nodding crab is not "ON SHIFT".
+  if ((c.napT || 0) > 0)
+    return "NODDED OFF " + (c.napFrom === "cleaningStall" || c.napFrom === "toStallClean"
+      ? "OVER A STALL" : NAP_WHERE[c.slotKind] || "ON THE JOB");
+  if (c.dayState === "chat")
+    return "CHEWING THE FAT" + (c.chatWith ? " WITH " + c.chatWith.p.name : "");
+  if (c.p.rough) return darkness() > 0.6 ? "ASLEEP WHERE THEY DROPPED" : "SLEPT ROUGH LAST NIGHT";
   if (c.p.sick) return (gravelyIll(c) ? "GRAVELY ILL - DAY " : "SICK - DAY ") + ((c.p.sick.days || 0) + 1)
     + (onSickDay(c) ? " - RESTING UP" : " - WORKING THROUGH IT");
+  if (walkoutToday(c)) {   // an unauthorised day: same beach, no wage, nobody covering
+    if (c.dayState === "toErrand") return "WALKED OUT - OFF TO " + BIZ[c.errandBiz].short;
+    if (c.dayState === "errand") return "WALKED OUT - AT " + BIZ[c.errandBiz].name;
+    if (c.dayState === "home" && darkness() > 0.7) return c.p.homeless ? "SLEEPING AT THE SHELTER" : "SLEEPING";
+    if (c.dayState === "home") return tmin < OFF_WAKE ? "WALKED OUT - LYING IN" : "WALKED OUT - ON THE BEACH";
+  }
   if (offToday(c)) {   // sick beats off; off beats everything but the commute home
     if (c.dayState === "toErrand") return "DAY OFF - OFF TO " + BIZ[c.errandBiz].short;
     if (c.dayState === "errand") return "DAY OFF - AT " + BIZ[c.errandBiz].name;
@@ -3566,6 +3960,9 @@ function crabStatus(c) {
     return c.p.homeless ? "AT THE SHELTER" : "CHILLING AT HOME";
   }
   if (c.dayState === "working") {
+    // IDLE HANDS: still clocked in, just not standing where you left them
+    if (c.wanderT > 0 && c.wander) return "WATCHING " + c.wander.label;
+    if (c.wander) return "WANDERED OFF TO " + c.wander.label;
     if (c.kstate === "work" && c.slotKind === "board") return "CHOPPING";
     if (c.kstate === "work" && c.slotKind === "grill") return "GRILLING";
     if (c.kstate === "toStallClean" || c.kstate === "cleaningStall") return "SCRUBBING A STALL";
@@ -4225,10 +4622,12 @@ function drawBusiness(key) {
     // the whole roster is out today: an honest smalltown closed-sign day, hung
     // over the roofline where the stalls can't hide it. A sick day reads
     // differently from a rota day, but hangs the same placard.
-    const lbl = restingLabel(key), sick = lbl === "OUT SICK";
-    wrect(signX + signW / 2 - 25, 79, 50, 12, [30, 20, 36]);
-    wrect(signX + signW / 2 - 24, 80, 48, 10, [255, 250, 235]);
-    text(ctx, lbl, signX + signW / 2 - textWidth(lbl) / 2 - camX, 82, sick ? [120, 150, 90] : [40, 110, 190]);
+    const lbl = restingLabel(key), sick = lbl === "OUT SICK", awol = lbl === "NOBODY CAME IN";
+    const lw = Math.max(50, textWidth(lbl) + 6);
+    wrect(signX + signW / 2 - lw / 2 - 1, 79, lw + 2, 12, [30, 20, 36]);
+    wrect(signX + signW / 2 - lw / 2, 80, lw, 10, [255, 250, 235]);
+    text(ctx, lbl, signX + signW / 2 - textWidth(lbl) / 2 - camX, 82,
+      sick ? [120, 150, 90] : awol ? [180, 70, 70] : [40, 110, 190]);
   }
 }
 
@@ -4317,9 +4716,16 @@ function drawCrab(c) {
     wblit(BUGGIES2[c.p.color], c.x - 16, ROAD_Y1 - BUGGIES2[0].h, c.flip);
     return;
   }
-  const working = (c.kstate === "work" || c.kstate === "cleaningStall") && c.dayState === "working";
-  const moving = c.dayState !== "home" || Math.hypot((c.tx || c.x) - c.x, (c.ty || c.y) - c.y) > 2;
-  const sleeping = !moving && c.dayState === "home" && darkness() > 0.7;
+  // THE MICROSLEEP wears the night-time sleep pose and the Z drift that were
+  // already in the game - eyes shut, shell breathing, a Z rising off it -
+  // except this crab is stood at a grill with a taco on it. Same for a crab
+  // who slept rough: they get the pose wherever they went down.
+  const napping = (c.napT || 0) > 0;
+  const chatting = c.dayState === "chat";
+  const working = !napping && (c.kstate === "work" || c.kstate === "cleaningStall") && c.dayState === "working";
+  const moving = !napping && !chatting &&
+    (c.dayState !== "home" || Math.hypot((c.tx || c.x) - c.x, (c.ty || c.y) - c.y) > 2);
+  const sleeping = napping || (!moving && c.dayState === "home" && (darkness() > 0.7 || c.p.rough));
   let art;
   if (sleeping) art = arts.s;
   else if (working) art = ((c.animT * 6) | 0) % 2 ? arts.w : arts.a;
@@ -4360,7 +4766,7 @@ function drawCrab(c) {
   }
   if (c.p.job === "fishing" && c.dayState === "working") wblit(ROD[((c.animT * 2) | 0) % 2], c.x + 12, y - 3, c.flip);
   if (c.carrying) wblit(ITEMS[c.carrying], c.x + 4, y - 7);
-  if (working && c.workMax > 0.7) {
+  if ((working || (napping && (c.napFrom === "work" || c.napFrom === "cleaningStall"))) && c.workMax > 0.7) {
     const frac = 1 - c.workT / c.workMax;
     wrect(c.x, y - 10, 16, 3, [30, 20, 36]);
     wrect(c.x + 1, y - 9, Math.round(14 * frac), 1, [96, 232, 120]);
@@ -4461,9 +4867,14 @@ function crabMood(c) {
   if ((c.p.hunger || 0) > 0.7) return ["HUNGRY", [200, 110, 40]];
   if ((c.p.thirst || 0) > 0.8) return ["PARCHED", [200, 110, 40]];
   if ((c.p.tired || 0) > 0.85) return ["EXHAUSTED", [190, 80, 80]];
+  // boredom's two moods, slotted to match the design doc's ranking: the crab
+  // who has genuinely had enough outranks the clock, the merely restless one
+  // does not outrank actually being mid-task
+  if ((c.p.bored || 0) >= WALKOUT_AT) return ["AT A LOOSE END", [110, 120, 175]];
   if (darkness() > 0.7 && c.dayState !== "home") return ["UP LATE", [120, 120, 140]];
   if (darkness() > 0.7 && c.dayState === "home") return ["COZY", [180, 120, 60]];
   if (c.dayState === "working" && c.kstate === "work") return ["BUSY", [40, 110, 190]];
+  if ((c.p.bored || 0) >= WANDER_AT) return ["RESTLESS", [125, 135, 180]];
   return ["SUNNY", [40, 150, 70]];
 }
 function custStatus(k) {
@@ -4893,6 +5304,13 @@ function drawDossier() {
   const [hl, hcol] = homeLabel(p);
   row("HOME", hl, hcol);
   row("NOW", crabStatus(c).slice(0, 34));
+  // the two needs-failure lines: what boredom and exhaustion are costing this
+  // crab TODAY, in words, beside the bars that only show a level
+  if (walkoutToday(c)) row("TODAY", "WALKED OUT - UNPAID, NOBODY COVERING", [190, 80, 80]);
+  else if ((p.boredDays || 0) >= 1)
+    row("TODAY", "AT A LOOSE END - " + p.boredDays + " NIGHT" + (p.boredDays > 1 ? "S" : "") + " OF IT", [110, 120, 180]);
+  if (p.rough || p.roughLast >= day - 1)
+    row("LAST NIGHT", p.rough ? "ASLEEP ROUGH - BANKING NOTHING" : "SLEPT ROUGH - NO REST BANKED", [150, 110, 200]);
   // HEALTH doubles as the SICK DAY control: grant the rest, or require the shift
   if (p.sick) {
     const granted = onSickDay(c);
@@ -5503,6 +5921,9 @@ function drawReport() {
   for (const n of report.died) smallText(ctx, n + " HAS PASSED AWAY", x + 6, ly, [180, 60, 60]), ly += 7;
   // the warning line: named, the night BEFORE the death roll arms
   for (const n of (report.critical || [])) smallText(ctx, n + " IS FADING - NEEDS CARE", x + 6, ly, [200, 90, 70]), ly += 7;
+  // IDLE HANDS' late stage, announced the night BEFORE it costs anything
+  for (const n of (report.walked || []))
+    smallText(ctx, n + " HAS HAD ENOUGH - TAKING TOMORROW OFF", x + 6, ly, [110, 120, 180]), ly += 7;
   for (const n of report.sick) smallText(ctx, n + " FELL ILL", x + 6, ly, [120, 150, 90]), ly += 7;
   for (const n of report.recovered) smallText(ctx, n + " IS BACK ON THEIR CLAWS", x + 6, ly, [40, 110, 60]), ly += 7;
   for (const m of report.moved) smallText(ctx, m, x + 6, ly, [110, 100, 110]), ly += 7;
@@ -5546,7 +5967,9 @@ function frame(now) {
     let wages = 0;
     for (const c of crabs) {
       if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay (a REQUIRED crab who worked is paid in full)
-      if (offToday(c) && !c.workedToday) continue;   // day off: same rule - the bill dips, the wallet doesn't
+      // day off OR a walk-out: same rule - the bill dips, the wallet doesn't.
+      // The walk-out is the one that stings, because nobody covered it either.
+      if (awayToday(c) && !c.workedToday) continue;
       const prem = Math.round(otPayToday(c));        // overtime premium on top of the flat day
       const due = Math.round(basePayToday(c)) + prem;   // the day, priced by the hours contracted
       if (coins >= due) {
@@ -5640,7 +6063,7 @@ function frame(now) {
       if (!emp) continue;
       const o = OWNERS[emp];
       if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay - same deal as the crew
-      if (offToday(c) && !c.workedToday) continue;   // day off: unpaid, but the job is safe
+      if (awayToday(c) && !c.workedToday) continue;  // day off (or a walk-out): unpaid, but the job is safe
       const npcDue = Math.round(basePayToday(c)) + Math.round(otPayToday(c));   // peer owners buy hours at the same rate, premium included
       if (o && o.till >= npcDue) { o.till -= npcDue; c.p.wallet += npcDue; }
       else {
@@ -5748,6 +6171,31 @@ function frame(now) {
       }
       for (const k of allCrabs()) k.p.restT = 0;   // convalescence is banked one day at a time
     }
+    // 2.6 IDLE HANDS, THE LATE STAGE: THE WALK-OUT (B3).
+    // Boredom is the one need with no free cure and no death roll. What it has
+    // instead is this: a crab pinned past WALKOUT_AT at WALKOUT_DAYS
+    // settlements running has simply had enough, and takes tomorrow off. No
+    // commute, no shift, NO WAGE - and nobody covers it, because nobody was
+    // told. Real stakes, no death, and the player gets a full day's warning by
+    // name, so it is a thing they could have fixed (an arcade, an errand, a
+    // rota change) rather than a thing that happened to them.
+    for (const k of allCrabs()) {
+      // a rough night bridges midnight, so it is reported at the NEXT
+      // settlement - and cleared, so it is reported exactly once
+      if (k.p.roughLast && k.p.roughLast >= day - 1) {
+        today.moved.push(k.p.name + " SLEPT ROUGH - NO REST BANKED");
+        k.p.roughLast = 0;
+      }
+      if (walkoutToday(k)) today.moved.push(k.p.name + " NEVER CAME IN - NO WAGE");
+      k.p.boredDays = (k.p.bored || 0) >= WALKOUT_AT ? (k.p.boredDays || 0) + 1 : 0;
+      if ((k.p.boredDays || 0) < WALKOUT_DAYS || k.p.walkout === day + 1 || patOff("walkout")) continue;
+      if (k.p.sick || dayOffIdx(k) === weekdayIdx(day + 1)) continue;   // already off - it'd prove nothing
+      k.p.walkout = day + 1; k.p.boredDays = 0;
+      today.walked.push(k.p.name);
+      toast = { text: k.p.name + " HAS HAD ENOUGH - TAKING TOMORROW OFF", t: 8 };
+      popText("I NEED A DAY", k.x - 14, FLOOR_Y - 34, [150, 150, 210]);
+      if (window._stats) window._stats.walkouts = (window._stats.walkouts || 0) + 1;
+    }
     // the day's labor policy: peer owners (and delegating players) make at
     // most one move each, on the same convergent-rules pattern as SUDSY's hours
     for (const b of Object.keys(BIZ)) if (bizUnlocked(b)) runLaborPolicy(b);
@@ -5764,7 +6212,7 @@ function frame(now) {
       report = {
         day, served: today.served, revenue: Math.round(today.revenue), rage: today.rage,
         wages, rent, sick: today.sick.slice(0, 3), died: today.died.slice(0, 2),
-        critical: today.critical.slice(0, 2),
+        critical: today.critical.slice(0, 2), walked: today.walked.slice(0, 3),
         recovered: today.recovered.slice(0, 2), moved: today.moved.slice(0, 2),
         off: offNames.slice(0, 4).join(", "),
         repStart: Math.round(today.repStart), repEnd: Math.round(rep),
@@ -5820,9 +6268,15 @@ function frame(now) {
   updateBus(dt);
   if (tmin >= 7.5 * 60 && hireDay !== day) { hireDay = day; runJobBoard(); }
   updateCustomers(dt);
+  runChatter(dt);   // its own pass over the crab list - NOT folded into collide()
   for (const c of allCrabs()) {
     c.animT += dt;
     c._stepped = false;
+    // A CONVERSATION STOPS THE DAY. Nothing else runs while two crabs talk -
+    // not the schedule, not the kitchen, not the commute. That is the price of
+    // boredom's only free cure, and it is the whole reason the cure is allowed
+    // to exist at all (PLAN, THE SELF-HEALING RULE: it costs time, never money).
+    if (c.dayState === "chat") { updateChat(c, dt); maybeQuip(c, dt); continue; }
     updateSchedule(c, dt);
     if (c.dayState === "toWork" || c.dayState === "toHome") updateCommute(c, dt);
     else if (c.dayState === "toErrand" || c.dayState === "errand") updateErrand(c, dt);
