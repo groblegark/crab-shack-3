@@ -408,6 +408,13 @@ first, connect later. Don't build the network before the node is beautiful.
   everyone else. All 9 house lots render permanently - vacant ones look
   vacant. Another brick in the all-crabs-equal wall.
 
+- **Save management** (Matt 2026-08-18): agent building. Multiple save slots
+  (5, migrating today's single key into slot 1), IMPORT/EXPORT of save files
+  (upload a town, download a town), and a save screen whose slot preview
+  shows the CREW in detail — portraits, names, jobs, housing, health — "for
+  easy remembering" which town is which. Validate-before-mutate on import;
+  a bad file must never touch the running game.
+
 ## DECIDED — growth escape is RARE for now (Matt, 2026-08-18)
 Matt's call on the open question: **option 2 — escape-as-rare stands as the
 design for the moment.** "We'll choose (2) for the moment, we can calibrate
