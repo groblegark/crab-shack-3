@@ -8,6 +8,14 @@ const results = [];
 function scenario(name, fn) { results.push({ name, fn }); }
 const near = (v, lo, hi) => v >= lo && v <= hi;
 
+// Saves live in NUMBERED SLOTS. LEGACY is the old single key - still written by
+// the migration scenarios, since a stored save from an older build arrives
+// there; SLOT1..SLOT5 are where the game reads and writes today.
+const LEGACY = "crabshack3_v1";
+const SLOT = (i) => "crabshack3_v1_s" + i;
+const SLOT1 = SLOT(1), SLOT2 = SLOT(2);
+const ACTIVE = "crabshack3_v1_active";
+
 // ---- movement health helper: detect crabs frozen while in a moving state
 function stuckDetector(sim) {
   const last = {}; let worst = 0;
@@ -655,9 +663,9 @@ scenario("boat: ownership and berth roundtrip through save/load", () => {
   if (st[3].x !== spot.x || st[3].y !== spot.y) return "fishSpot not re-aimed at the boat: " + JSON.stringify(st[3]);
   if (!/ABOARD THE/.test(st[4])) return "homeLabel wrong after load: " + st[4];
   // a save with a garbage berth index must sanitize, not crash
-  const raw = JSON.parse(store.get("crabshack3_v1"));
+  const raw = JSON.parse(store.get(SLOT1));
   raw.npc.personas.find(p => p.name === "SALTY").boat = 9;
-  store.set("crabshack3_v1", JSON.stringify(raw));
+  store.set(SLOT1, JSON.stringify(raw));
   const c2 = createSim({ seed: 7, storage: store, fresh: false });
   const st2 = JSON.parse(c2.G('JSON.stringify((() => { const c = npcs.find(k => k.p.name === "SALTY"); return [c.p.boat == null, !!c.p.homeless]; })())'));
   return st2[0] && st2[1] ? true : "garbage berth 9 not sanitized to homeless: " + JSON.stringify(st2);
@@ -700,7 +708,7 @@ scenario("laundromat removal: old save migrates, refund fires exactly once", () 
   if (!sim.G("sudsRefunded")) return "refund flag not set";
   // reload: the persisted flag (and the dropped lv keys) block a second payout
   sim.G("save()");
-  if (!JSON.parse(store.get("crabshack3_v1")).sudsRefund) return "sudsRefund flag not persisted";
+  if (!JSON.parse(store.get(SLOT1)).sudsRefund) return "sudsRefund flag not persisted";
   const sim2 = createSim({ seed: 4, storage: store, fresh: false });
   const c1 = sim2.G("Math.round(coins)");
   if (c1 !== 1050) return "refund fired again on reload: $" + c1;
@@ -764,9 +772,9 @@ scenario("credit: balance, flags and NPC lines roundtrip save/load", () => {
   if (st[0] !== 77 || st[1] !== true) return "player credit lost: " + JSON.stringify(st);
   if (st[2] !== 33 || st[3] !== 2 || st[4] !== true) return "npc credit/dark lost: " + JSON.stringify(st);
   // an old save (pre-credit keys) must load with a zero balance, no flags
-  const raw = JSON.parse(store.get("crabshack3_v1"));
+  const raw = JSON.parse(store.get(SLOT1));
   delete raw.credit; delete raw.bankrupt; delete raw.dayLog; delete raw.npc.credit;
-  store.set("crabshack3_v1", JSON.stringify(raw));
+  store.set(SLOT1, JSON.stringify(raw));
   const c = createSim({ seed: 46, storage: store, fresh: false });
   const st2 = JSON.parse(c.G("JSON.stringify([credit.bal, OWNERS.sudsy.credit || 0, bankrupt])"));
   return st2[0] === 0 && st2[1] === 0 && st2[2] === false ? true : "old save defaults wrong: " + JSON.stringify(st2);
@@ -945,7 +953,7 @@ scenario("tired: save migration seeds it from old sandy, strands nothing", () =>
   if (st[2] !== 0.55 || st[3]) return "an existing tired value must win: " + JSON.stringify(st);
   if (st[4] !== 0.4 || st[5]) return "npc sandy did not migrate: " + JSON.stringify(st);
   sim.G("save()");
-  const raw = JSON.parse(store.get("crabshack3_v1"));
+  const raw = JSON.parse(store.get(SLOT1));
   const stranded = raw.personas.concat(raw.npc.personas).filter(p => p && "sandy" in p);
   return stranded.length === 0 ? true : "sandy stranded in the new save: " + stranded.map(p => p.name).join(",");
 });
@@ -1385,9 +1393,9 @@ scenario("hours + meal policy + cpu policy state roundtrip save/load", () => {
   if (!got.pol || got.pol.cd !== 1 || got.pol.hist.length !== 2 || got.pol.hist[0].l !== 2)
     return "policy state came back " + JSON.stringify(got.pol);
   // degenerate hours in a tampered save clamp instead of wedging a shop shut
-  const s = JSON.parse(store.get("crabshack3_v1"));
+  const s = JSON.parse(store.get(SLOT1));
   s.hours.shack = [23 * 60, 23.5 * 60]; s.hours.arcade = [0, 900]; s.mealPol.shack = "bogus";
-  store.set("crabshack3_v1", JSON.stringify(s));
+  store.set(SLOT1, JSON.stringify(s));
   const c = createSim({ seed: 33, storage: store, fresh: false });
   const clamped = JSON.parse(c.G("JSON.stringify([BIZ.shack.hours.open, BIZ.shack.hours.close, BIZ.arcade.hours.open, BIZ.arcade.hours.close, BIZ.shack.mealPol])"));
   if (clamped[1] - clamped[0] < 4 * 60 || clamped[0] < 6 * 60 || clamped[1] > 24 * 60)
@@ -1494,10 +1502,10 @@ scenario("fish market: price + series roundtrip save/load", () => {
     return "demand windows did not roundtrip";
   if (b.G("trade.useDay") !== 3) return "day-use counter did not roundtrip";
   // an old save (pre-market trade keys) opens at the classic $4, blank chart
-  const raw = JSON.parse(store.get("crabshack3_v1"));
+  const raw = JSON.parse(store.get(SLOT1));
   delete raw.trade.price; delete raw.trade.series; delete raw.trade.useH;
   delete raw.trade.landH; delete raw.trade.useDay; delete raw.trade.ceilDays;
-  store.set("crabshack3_v1", JSON.stringify(raw));
+  store.set(SLOT1, JSON.stringify(raw));
   const c = createSim({ seed: 11, storage: store, fresh: false });
   return c.G("trade.price") === 4 && c.G("trade.series.length") === 0
     ? true : "old save defaults wrong: $" + c.G("trade.price");
