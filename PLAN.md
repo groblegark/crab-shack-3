@@ -325,6 +325,19 @@ first, connect later. Don't build the network before the node is beautiful.
   sickness. Baseline settled at 0/8, evictions 8-12, median 10 (roasts +
   break-time trim fish supply slightly).
 
+- **Shop hours + management screen** (Matt 2026-08-18): agent building.
+  Per-biz open hours as real data (defaults behavior-identical), a
+  management overlay for player bizes (hours steppers, per-biz takings,
+  staff list, staff-meal pricing policy RETAIL/AT COST/FREE finally wired),
+  and CPU owners adjusting their own hours via a small convergent policy
+  with named toasts ("SUDSY NOW OPENS AT 9").
+- **Tourists become recruits; houses stand empty** (Matt 2026-08-18): agent
+  building. Hiring no longer mints a persona + house from thin air: hires
+  convert from the visiting tourist pool (name preserved) or arrive on the
+  morning bus, start homeless at the shelter, and climb the ladder like
+  everyone else. All 9 house lots render permanently - vacant ones look
+  vacant. Another brick in the all-crabs-equal wall.
+
 ## DECIDED — growth escape is RARE for now (Matt, 2026-08-18)
 Matt's call on the open question: **option 2 — escape-as-rare stands as the
 design for the moment.** "We'll choose (2) for the moment, we can calibrate
