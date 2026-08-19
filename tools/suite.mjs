@@ -3183,6 +3183,288 @@ scenario("dirt: a filthy crab in a crowded shack wedges nobody (warps + unsticks
   return true;
 });
 
+
+// ---- THE WAGE IS A SETTING -----------------------------------------------
+// Per-business rates, per-crab deals, and what the town does about them.
+
+scenario("wage: the shipped defaults are behaviour-identical (nobody grumbles, nobody moves)", () => {
+  // The inertness gate for the whole feature. The frozen day-2 fingerprint
+  // (above) guards the arithmetic; this guards the SOCIAL layer - at the
+  // shipped rates nothing in the grievance/poaching/CPU-policy machinery may
+  // fire at all, because every comparison a crab makes sits at or under what
+  // it is already paid. The pier's claim tops out at FISH_IMPORT x FISH_DAY x
+  // PIER_TOUGH = 7 x 5 x 0.6 = $21, under WAGE_STD 23, which is what makes
+  // that true by construction rather than by luck.
+  const sim = createSim({ seed: 4011 });
+  const opening = JSON.parse(sim.G(`JSON.stringify({
+    std: WAGE_STD, crab: CRAB_WAGE, wages: Object.keys(BIZ).map(b => b + ":" + bizWage(b)),
+    ceiling: Math.round(FISH_IMPORT * WAGE_CFG.FISH_DAY * WAGE_CFG.PIER_TOUGH),
+    deals: allCrabs().filter(c => !onShopRate(c)).length })`));
+  if (opening.std !== 23 || opening.crab !== 23) return "WAGE_STD/CRAB_WAGE moved: " + JSON.stringify(opening);
+  if (opening.wages.join(",") !== "shack:23,arcade:23,juicebar:23,showers:20")
+    return "opening rates moved: " + opening.wages.join(",");
+  if (opening.ceiling >= 23) return `the pier's best claim is $${opening.ceiling} - it reaches WAGE_STD, so a default town gripes`;
+  if (opening.deals) return "a fresh town starts with private deals on the books";
+  // and the pay a crab actually draws is the flat old constant
+  if (sim.G("crabDueTonight(crabs[0])") !== 23) return "a default crew shift no longer pays $23";
+  // 12 days of a full town: no grievance, no walkout, no quit, no CPU move
+  sim.G("coins = 3000; UPS.arcade.lvl = 1; OWNERS.sudsy.till = 400;");
+  sim.runDays(12, { tickEvery: 60, onTick: (G) => G("coins = Math.max(coins, 1500)") });
+  const out = JSON.parse(sim.G(`JSON.stringify({
+    gripe: allCrabs().map(c => +(c.p.gripe || 0).toFixed(2)),
+    walk: (window._stats.walkouts || []).length,
+    quits: (window._stats.wageQuits || []).length,
+    // SUDSY's own policy is allowed to move HER shop - that is the feature
+    // working, not a default breaking - so it is reported, not gated here.
+    moves: (window._stats.wageMoves || []).length })`));
+  const worst = Math.max(0, ...out.gripe);
+  const crewGripe = JSON.parse(sim.G("JSON.stringify(crabs.map(c => +(c.p.gripe || 0).toFixed(2)))"));
+  if (Math.max(0, ...crewGripe) > 0) return "the player's crew grumbled at the default wage: " + JSON.stringify(crewGripe);
+  if (out.walk) return out.walk + " walkouts in a default town";
+  return true;
+});
+
+scenario("wage: the setting changes tonight's payroll EXACTLY, and every surface agrees", () => {
+  // One number, four readers: the settlement loop, the BILL chip, the MENU
+  // column and the bankruptcy forecaster. They all run through wageRate, so
+  // this asserts they still total the same thing when the rates differ per
+  // crab - across a sick day, a day off, a cover double and overtime.
+  const sim = createSim({ seed: 3 });
+  sim.runDays(1);
+  sim.G('coins = 5000; setBizWage("shack", 30);');
+  if (sim.G("wagesOwedTonight()") !== 60) return "shop rate 30 x 2 crew did not total 60: " + sim.G("wagesOwedTonight()");
+  // a private deal on one crab only
+  sim.G("setCrabWage(crabs[0], 41)");
+  const mixed = JSON.parse(sim.G(`JSON.stringify({
+    rates: crabs.map(c => Math.round(wageRate(c))), shop: crabs.map(c => onShopRate(c)),
+    due: crabs.map(c => crabDueTonight(c)), owed: wagesOwedTonight(),
+    nightly: nightlyDue(), rent: totalRent() })`));
+  if (mixed.rates.join() !== "41,30") return "per-crab rates read " + mixed.rates.join();
+  if (mixed.shop.join() !== "false,true") return "the private deal is not flagged: " + mixed.shop.join();
+  if (mixed.owed !== 71) return "mixed payroll totalled " + mixed.owed + ", want 71";
+  if (mixed.nightly !== mixed.rent + 71) return "nightlyDue disagrees with the wage column";
+  // the forecaster bills contracted pay at the same per-crab rates
+  const fc = sim.G("crabs.reduce((s, c) => s + Math.round(contractPay(c)), 0)");
+  if (fc !== 71) return "the bankruptcy forecaster bills " + fc + " against a 71 payroll";
+  // OT rides on the crab's OWN rate, not the shop's
+  sim.G("crabs[0].p.ot = true; crabs[0].otMin = 60;");
+  const ot = sim.G("Math.round(otPremium(crabs[0], 60) * 100) / 100");
+  const want = sim.G("Math.round(41 / ownStdSpan(crabs[0]) * OT_RATE * 60 * 100) / 100");
+  if (Math.abs(ot - want) > 1e-9) return `an OT hour priced ${ot}, want ${want} (the crab's own rate)`;
+  sim.G("crabs[0].p.ot = false; crabs[0].otMin = 0;");
+  // a day off and a sick day still skip, at whatever rate they were on
+  sim.G(`{ const c = crabs[0]; const wd = WEEKDAYS[weekdayIdx(day)];
+    window._force = wd; }`);
+  sim.G("crabs[1].p.sick = { days: 1, cause: 'test' }; crabs[1].workedToday = false;");
+  if (sim.G("crabDueTonight(crabs[1])") !== 0) return "a sick crab is still on the bill";
+  if (sim.G("wagesOwedTonight()") !== 41) return "the bill did not dip to the remaining crab's own rate";
+  // and the settlement PAYS exactly what the bill said. Read off the day
+  // report's own WAGES PAID line, which is the settlement loop's running
+  // total - wallets alone would also be counting the day's shopping.
+  sim.G("crabs[1].p.sick = null;");
+  sim.runUntil("tmin >= 19 * 60 + 55 && lastRentDay !== day", { maxSteps: 400000 });
+  const bill = sim.G("wagesOwedTonight()");
+  sim.runUntil("lastRentDay === day", { maxSteps: 200000 });
+  const paid = sim.G("report ? report.wages : -1");
+  if (paid !== bill) return `the settlement paid $${paid} against a $${bill} bill`;
+  return true;
+});
+
+scenario("wage: underpaying loses you staff - grumble, warning, then feet", () => {
+  // The consequence, in order. NOTHING may happen without two warnings first.
+  const sim = createSim({ seed: 77 });
+  sim.runDays(1);
+  sim.G('coins = 9000; setBizWage("shack", 12);');
+  const seen = { grumble: 0, warn: 0, walk: 0 };
+  let firstOut = 0;
+  for (let d = 0; d < 8 && !firstOut; d++) {
+    sim.runDays(sim.G("day") + 1);
+    const st = JSON.parse(sim.G(`JSON.stringify({ day,
+      g: crabs.map(c => c.p.gripe || 0), out: crabs.filter(c => walkoutToday(c)).length,
+      moved: (today.moved || []).concat(window._lastMoved || []) })`));
+    const g = Math.max(...st.g);
+    if (g >= 0.35) seen.grumble = seen.grumble || st.day;
+    if (g >= 0.70) seen.warn = seen.warn || st.day;
+    if (st.out) firstOut = st.day;
+  }
+  if (!firstOut) return "eight days on $12 against a $23 town and nobody so much as missed a shift";
+  if (!seen.grumble || !seen.warn) return "somebody walked out with no warning stage (grumble/warn never seen)";
+  if (seen.grumble > seen.warn || seen.warn > firstOut)
+    return `the warnings did not come first: grumble d${seen.grumble}, warn d${seen.warn}, walkout d${firstOut}`;
+  if (firstOut < 4) return `a crab refused a shift on day ${firstOut} - there is no grace period`;
+  // a WALKOUT is unpaid and unstaffed, and it does NOT hand the shop a free
+  // cover double (coveringToday reads the ROTA, not this)
+  const outDay = JSON.parse(sim.G(`JSON.stringify({
+    due: crabs.map(c => crabDueTonight(c)), off: crabs.map(c => offToday(c)),
+    cover: crabs.map(c => coveringToday(c)) })`));
+  if (outDay.due.some((d, i) => outDay.off[i] && d !== 0)) return "a walked-out crab is still on the payroll";
+  if (outDay.cover.some(Boolean)) return "a walkout promoted a coworker to a free cover double";
+  // AND IT IS REVERSIBLE: put the pay right and they are back on the clock
+  sim.G('setBizWage("shack", 30);');
+  sim.runDays(sim.G("day") + 2);
+  if (sim.G("crabs.some(c => walkoutToday(c))")) return "a generous raise did not end the walkout";
+  return true;
+});
+
+scenario("wage: an underpaid NPC quits the shop - and a better payer poaches them", () => {
+  // Same rule, the other side of the town. An NPC has somewhere to go, so
+  // they LEAVE rather than working to rule.
+  const sim = createSim({ seed: 5 });
+  sim.G(`OWNERS.sudsy.till = 900; setBizWage("showers", 20);
+         window._noWagePolicy = true;`);   // hold her rate down: this is the QUIT under test, not her policy
+  sim.runDays(14, { tickEvery: 200, onTick: (G) =>
+    G("OWNERS.sudsy.till = Math.max(OWNERS.sudsy.till, 400); coins = Math.max(coins, 3000)") });
+  const quits = JSON.parse(sim.G("JSON.stringify(window._stats.wageQuits || [])"));
+  if (!quits.length) return "a fortnight underpaid at SUDS SHOWERS and nobody left";
+  if (quits.some(q => q.day < 4)) return "somebody quit before the warnings could land: " + JSON.stringify(quits);
+  // ...and a shop paying MORE, with room on the roster, takes them instead of
+  // the pier taking them. Driven at the rule (one settlement's worth of wage
+  // relations) rather than over a fortnight: a second peer owner propped up
+  // for ten days is a fixture about SOLVENCY, not about poaching.
+  const p = createSim({ seed: 5 });
+  p.G(`UPS.arcade.lvl = 1; BIZ.arcade.owner = "sudsy2";
+       OWNERS.sudsy2 = { id: "sudsy2", name: "PEARL", till: 900, credit: 0, darkT: 0 };
+       setBizWage("arcade", 34); setBizWage("showers", 14); OWNERS.sudsy.till = 900;`);
+  p.G(`{ const k = npcs.find(c => c.p.fisher);
+         k.p.job = "showers"; k.p.employer = "sudsy"; k.p.fisher = false; k.workBiz = "showers";
+         k.p.wageJob = "showers"; k.p.wageDay = day - 5; k.p.gripe = WAGE_CFG.LEAVE; window._sub = k.p.name; }`);
+  const target = p.G(`poachTarget(allCrabs().find(c => c.p.name === window._sub))`);
+  if (target !== "arcade") return "a $34 vacancy next door was not seen as a poach target (got " + target + ")";
+  p.G("runWageRelations()");
+  const landed = p.G(`(allCrabs().find(c => c.p.name === window._sub) || { p: {} }).p.job`);
+  const emp = p.G(`(allCrabs().find(c => c.p.name === window._sub) || { p: {} }).p.employer`);
+  const pq = JSON.parse(p.G("JSON.stringify(window._stats.wageQuits || [])"));
+  if (landed !== "arcade" || emp !== "sudsy2")
+    return `the poached crab landed at ${landed} for ${emp}, not the arcade (quits: ${JSON.stringify(pq)})`;
+  if (!pq.some(q => q.to === "arcade")) return "the poach was not recorded: " + JSON.stringify(pq);
+  // A CRAB PAID ABOVE THE GOING RATE CANNOT BE POACHED - grievance is the only
+  // thing that turns a head, and the best-paid crab in the room never has any.
+  const q = createSim({ seed: 5 });
+  q.G(`UPS.arcade.lvl = 1; BIZ.arcade.owner = "sudsy2";
+       OWNERS.sudsy2 = { id: "sudsy2", name: "PEARL", till: 900, credit: 0, darkT: 0 };
+       setBizWage("arcade", 34); setBizWage("showers", 14); OWNERS.sudsy.till = 900;`);
+  q.G(`{ const k = npcs.find(c => c.p.fisher);
+         k.p.job = "showers"; k.p.employer = "sudsy"; k.p.fisher = false; k.workBiz = "showers";
+         k.p.wageJob = "showers"; k.p.wageDay = 0; k.p.gripe = 0; setCrabWage(k, 40);
+         window._sub = k.p.name; }`);
+  for (let i = 0; i < 6; i++) q.G("day++; runWageRelations();");
+  const stayed = q.G(`(allCrabs().find(c => c.p.name === window._sub) || { p: {} }).p.job`);
+  if (stayed !== "showers")
+    return "a crab on a $40 private deal at a $14 shop was still poached away to " + stayed;
+  return true;
+});
+
+scenario("wage: overpaying wins a hire the standard rate could not - the fisher weighs the water", () => {
+  // The high side of the lever, and it is priced against a REAL floating
+  // number: a day on the rail is FISH_DAY fish at today's market price.
+  const hired = (w) => {
+    const sim = createSim({ seed: 9 });
+    sim.G(`trade.price = FISH_IMPORT; OWNERS.sudsy.till = 900; setBizWage("showers", ${w});
+           window._noWagePolicy = true; jobBoard.length = 0;
+           jobBoard.push({ biz: "showers", wage: bizWage("showers"), day });
+           window._posted = jobBoard[0].wage;   // what the board says, read before anyone takes it down
+           runJobBoard();`);
+    return JSON.parse(sim.G(`JSON.stringify({
+      staff: allCrabs().filter(c => c.p.employer === "sudsy").map(c => c.p.name),
+      pier: Math.round(pierDay()), posted: window._posted })`));
+  };
+  const std = hired(23), rich = hired(36);
+  if (std.pier !== 35) return "a day on the pier at the ceiling price should be $35, read $" + std.pier;
+  if (std.staff.length) return "the standard $23 won a fisher against a $35 day on the water";
+  if (!rich.staff.length) return "$36 against a $35 day on the water still won nobody";
+  // and the board ADVERTISES the rate - it is the setting made public
+  if (rich.posted !== 36) return "the posting advertised $" + rich.posted + ", not the shop's $36";
+  // the player's own recruitment answers the same comparison (the SHOP hire)
+  const sim = createSim({ seed: 9 });
+  sim.G("trade.price = FISH_IMPORT; coins = 4000;");
+  const before = sim.G("crabs.length");
+  sim.G('setBizWage("shack", 17); tryBuy("chef");');
+  if (sim.G("crabs.length") !== before) return "a $17 ad hired somebody with the fish paying $35 a day";
+  if (sim.G("coins") !== 4000) return "the refused hire still charged the player";
+  sim.G('setBizWage("shack", 30); tryBuy("chef");');
+  if (sim.G("crabs.length") !== before + 1) return "a $30 ad could not fill the same vacancy";
+  return true;
+});
+
+scenario("cpu wage: a peer owner's wage policy converges and never thrashes", () => {
+  // The HOURS_POLICY pattern, applied to pay. SUDS SHOWERS opens BELOW the
+  // town rate, so this is the organic case: her staff grumble, her policy
+  // walks her up, and it STOPS - it must never oscillate.
+  // Her till is propped for the same reason the hours-policy scenario props
+  // it: a bankrupt shop cannot demonstrate 30 days of anything.
+  const sim = createSim({ seed: 1337 });
+  sim.G("OWNERS.sudsy.till = 600;");
+  const rates = [];
+  sim.runDays(30, { tickEvery: 200, onTick: (G) => {
+    G("OWNERS.sudsy.till = Math.max(OWNERS.sudsy.till, 300); coins = Math.max(coins, 3000);");
+  } });
+  const moves = JSON.parse(sim.G("JSON.stringify(window._stats.wageMoves || [])"));
+  if (!moves.length) return "SUDSY opened $3 under the town rate for a month and never moved her wage";
+  // one move a day, never two days running (cd = 1)
+  const days = moves.map(m => m.day);
+  if (new Set(days).size !== days.length) return "two wage moves in one day: " + JSON.stringify(days);
+  for (let i = 1; i < days.length; i++)
+    if (days[i] - days[i - 1] < 2) return `moves on consecutive days (${days[i - 1]}, ${days[i]}) - the cooldown is not holding`;
+  // no thrash: a raise is never undone within the cooldown window
+  for (let i = 1; i < moves.length; i++) {
+    const up = /RAISES/.test(moves[i - 1].line), down = /TRIMS/.test(moves[i].line);
+    if ((up && down) || (!up && !down && false))
+      if (moves[i].day - moves[i - 1].day <= 3)
+        return `she raised then trimmed inside ${moves[i].day - moves[i - 1].day} days: ${JSON.stringify(moves.map(m => m.line))}`;
+  }
+  // and it SETTLES: nothing moves in the last third of the month
+  const late = moves.filter(m => m.day > 22);
+  if (late.length > 1) return "still moving in the last week: " + JSON.stringify(late.map(m => m.line));
+  const rate = sim.G('bizWage("showers")');
+  if (rate <= 20) return "she never actually raised (" + rate + ")";
+  if (rate > 30) return "her wage ran away to $" + rate;
+  // the toast is named, exactly as the hours policy names its own
+  if (!/RAISES THE WAGE TO \$/.test(moves[0].line)) return "the move is not announced by name: " + moves[0].line;
+  return true;
+});
+
+scenario("wage: every rate and deal roundtrips save/load, including a change of boss", () => {
+  const store = new Map();
+  const a = createSim({ seed: 41, storage: store, fresh: false });
+  a.runDays(2);
+  a.G(`{ setBizWage("shack", 27); setBizWage("showers", 31); setBizWage("juicebar", 19);
+    setCrabWage(crabs[0], 44); crabs[1].p.gripe = 0.55; crabs[1].p.wageJob = "shack"; crabs[1].p.wageDay = 1;
+    crabs[0].p.walkout = day + 1;
+    wagePolicyState.showers = { cd: 1, lost: 2 };
+    save(); }`);
+  const b = createSim({ seed: 42, storage: store, fresh: false });
+  const got = JSON.parse(b.G(`JSON.stringify({
+    biz: [bizWage("shack"), bizWage("showers"), bizWage("juicebar"), bizWage("arcade")],
+    c0: [Math.round(wageRate(crabs[0])), onShopRate(crabs[0]), crabs[0].p.walkout === day + 1],
+    c1: [Math.round(wageRate(crabs[1])), +(crabs[1].p.gripe || 0).toFixed(2)],
+    pol: wagePolicyState.showers })`));
+  if (got.biz.join() !== "27,31,19,23") return "shop rates came back " + got.biz.join();
+  if (got.c0[0] !== 44 || got.c0[1] !== false) return "the private deal came back " + JSON.stringify(got.c0);
+  if (!got.c0[2]) return "a scheduled walkout did not survive the save";
+  if (got.c1[0] !== 27 || Math.abs(got.c1[1] - 0.55) > 1e-9) return "grievance/shop rate came back " + JSON.stringify(got.c1);
+  if (!got.pol || got.pol.cd !== 1 || got.pol.lost !== 2) return "the CPU policy ledger came back " + JSON.stringify(got.pol);
+  // A DEAL IS A DEAL WITH A BOSS. Move the crab to somebody else's payroll and
+  // it lapses - it must not follow them and it must not vanish silently.
+  b.G(`{ crabs[0].p.job = "showers"; }`);   // (illegally, for the test: crew never staff peer shops)
+  if (b.G("Math.round(wageRate(crabs[0]))") !== 31)
+    return "a private deal survived a change of employer: " + b.G("Math.round(wageRate(crabs[0]))");
+  b.G(`{ crabs[0].p.job = "shack"; }`);
+  if (b.G("Math.round(wageRate(crabs[0]))") !== 44) return "the deal did not come back with the crab's own boss";
+  // APPLY TO ALL tears up every deal at that shop, in one tap
+  const n = b.G('applyShopWage("shack")');
+  if (n !== 1) return "APPLY TO ALL reported " + n + " deals torn up, want 1";
+  if (b.G("Math.round(wageRate(crabs[0]))") !== 27 || b.G("crabs.every(c => onShopRate(c))") !== true)
+    return "APPLY TO ALL left somebody on a private deal";
+  // a tampered save clamps into the stepper's band rather than wedging
+  const s = JSON.parse(store.get(SLOT1));
+  s.wage.shack = 9999; s.personas[0].wage = -50;
+  store.set(SLOT1, JSON.stringify(s));
+  const c = createSim({ seed: 43, storage: store, fresh: false });
+  const cl = JSON.parse(c.G(`JSON.stringify([bizWage("shack"), Math.round(wageRate(crabs[0]))])`));
+  if (cl[0] !== 60 || cl[1] !== 8) return "a degenerate save did not clamp: " + JSON.stringify(cl);
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

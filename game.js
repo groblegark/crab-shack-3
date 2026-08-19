@@ -1069,6 +1069,8 @@ const WAGE_CFG = {
   GRACE: 2,           // nights on a new job before anybody starts counting
   GAIN: 1.0,          // grievance per night, per full unit of shortfall
   CALM: 0.34,         // grievance shed per night when the pay is fair (3 good nights clears a bad week)
+  MAKEUP: 3,          // ...and much faster when the fix is generous: a real raise buys peace overnight
+  CAP: 1.3,           // grievance never banks more than a third of a night past LEAVE, so a fixed wage is FELT
   GRUMBLE: 0.35,      // a quip, a mood, a line on the dossier
   WARN: 0.70,         // a named toast and a day-report line: they are asking around
   LEAVE: 1.0,         // NPC staff walk; crew refuse the shift
@@ -1279,8 +1281,11 @@ function runWageRelations() {
     }
     if (day - (c.p.wageDay || 0) < WAGE_CFG.GRACE) continue;
     const r = payRatio(c), was = c.p.gripe || 0, rate = Math.round(wageRate(c));
-    c.p.gripe = Math.max(0, Math.min(2, r < 1 ? was + (1 - r) * WAGE_CFG.GAIN
-      : was - WAGE_CFG.CALM - (r - 1)));
+    // fair pay sheds grievance; a GENEROUS fix sheds it fast, so a player who
+    // puts it right sees the crab back on the clock the next morning rather
+    // than sulking through a week they already paid for
+    c.p.gripe = Math.max(0, Math.min(WAGE_CFG.CAP, r < 1 ? was + (1 - r) * WAGE_CFG.GAIN
+      : was - WAGE_CFG.CALM - (r - 1) * WAGE_CFG.MAKEUP));
     const g = c.p.gripe;
     // ---- the warnings, in order, each fired once on the way up
     if (was < WAGE_CFG.GRUMBLE && g >= WAGE_CFG.GRUMBLE) {
