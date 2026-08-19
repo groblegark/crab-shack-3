@@ -1085,6 +1085,214 @@ scenario("fishers feed themselves: breaks + the beach roast", () => {
   return sim.G("(window._stats.roasts || 0) >= 1") ? true : "hunger fell without a roast counted";
 });
 
+scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", () => {
+  // Fingerprints captured on the PRE-hours build (commit 6612b19): exact
+  // coins/rep/positions after 2 days. The hours machinery must not move a
+  // single crab a single pixel until somebody changes a setting. (The full
+  // 8-seed 30-day byte-identity run lives in the landing notes; this is the
+  // fast tripwire.)
+  const want = {
+    1337: '{"day":3,"tmin":0,"coins":137.304,"rep":50.6913,"catch":0,"serves":38,"crabServes":2,"rage":4,"till":205.846,"wallets":[["PINCHY",16],["CLAWDIA",26],["SUDSY",40],["SALTY",23],["DRIFT",21]],"pos":[[38,154],[752,148.3],[178,154],[492,155],[1139.9,130.3]]}',
+    4242: '{"day":3,"tmin":0,"coins":206.491,"rep":52.6352,"catch":0,"serves":37,"crabServes":2,"rage":3,"till":162.341,"wallets":[["PINCHY",16],["CLAWDIA",26],["SUDSY",40],["SALTY",25],["DRIFT",25]],"pos":[[38,154],[1078,147.4],[1470.8,165.1],[492,155],[450,155]]}',
+  };
+  for (const seed of [1337, 4242]) {
+    const sim = createSim({ seed });
+    sim.runDays(2);
+    const got = sim.G(`JSON.stringify({
+      day, tmin: Math.round(tmin), coins: Math.round(coins*1000)/1000, rep: Math.round(rep*10000)/10000,
+      catch: townCatch, serves: window._stats.tourServes, crabServes: window._stats.crabServes,
+      rage: window._stats.tourRage, till: Math.round(OWNERS.sudsy.till*1000)/1000,
+      wallets: allCrabs().map(c => [c.p.name, Math.round(c.p.wallet*100)/100]),
+      pos: allCrabs().map(c => [Math.round(c.x*10)/10, Math.round(c.y*10)/10])
+    })`);
+    if (got !== want[seed]) return `seed ${seed} drifted:\n        want ${want[seed]}\n        got  ${got}`;
+  }
+  return true;
+});
+
+scenario("hours: shortened hours really close the shop", () => {
+  const sim = createSim({ seed: 21 });
+  sim.G('setBizHours("shack", 9 * 60, 17 * 60)');
+  // derived shifts must clamp to the new frame
+  const m = sim.G('bizShiftWindow("shack", "M").label'), e = sim.G('bizShiftWindow("shack", "E").label');
+  if (m !== "9-13" || e !== "13-17") return `derived shifts ${m}/${e}, expected 9-13/13-17`;
+  // watch the whole first evening: after close+grace nobody works the shack,
+  // no shack customer exists, while the showers (still 8-20) keep serving
+  let lateDuty = 0, lateCust = 0, shwSeen = 0, preOpenCust = 0;
+  sim.runUntil("day === 1 && tmin >= 18 * 60", {});
+  if (sim.G('bizOpenNow("shack")')) return "shack claims open at 18:00 with close 17:00";
+  sim.runUntil("tmin >= 19.5 * 60", { tickEvery: 4, onTick: (G) => {
+    lateDuty += G('allCrabs().filter(k => k.duty && k.workBiz === "shack").length');
+    // admissions only: a last-call diner finishing his plate and strolling
+    // off is honest business, a NEW crab in the line is not
+    lateCust += G('customers.filter(k => k.biz === "shack" && (k.state === "arriving" || k.state === "waiting")).length');
+    shwSeen += G('customers.filter(k => k.biz === "showers").length');
+  } });
+  if (lateDuty > 0) return `staff still on shack duty after close (+grace): ${lateDuty} samples`;
+  if (lateCust > 0) return `shack customers admitted after close: ${lateCust} samples`;
+  if (shwSeen === 0) return "control failed: no shower traffic 18:00-19:30 (town died?)";
+  // and the morning side: nobody in the shack line before 9:00 next day
+  sim.runUntil("day === 2 && tmin >= 8 * 60", {});
+  sim.runUntil("tmin >= 8.9 * 60", { tickEvery: 4, onTick: (G) => {
+    preOpenCust += G('customers.filter(k => k.biz === "shack" && !k.isCrab).length');
+  } });
+  if (preOpenCust > 0) return `tourists queued at the shack before 9:00 open: ${preOpenCust} samples`;
+  // the sign predicate the CLOSED placard draws from
+  return sim.G('bizOpenNow("shack")') === false ? true : "8:59 and bizOpenNow already true";
+});
+
+scenario("cpu hours: SUDSY's policy converges within 20 days, never thrashes", () => {
+  // player kept solvent so the town runs long enough to watch her settle
+  const sim = createSim({ seed: 1337 });
+  const rows = [];
+  let lastDay = 0;
+  sim.runDays(24, { tickEvery: 20, onTick: (G) => {
+    if (G("coins") < 300) G("coins = 800");
+    const d = G("day");
+    if (d !== lastDay && G("tmin") >= 6 * 60) {
+      lastDay = d;
+      rows.push(JSON.parse(G("JSON.stringify([day, BIZ.showers.hours.open, BIZ.showers.hours.close])")));
+    }
+  } });
+  if (rows.length < 20) return `only ${rows.length} daily samples`;
+  const cfg = JSON.parse(sim.G("JSON.stringify(HOURS_POLICY.showers)"));
+  let flipsO = 0, flipsC = 0, lastDO = 0, lastDC = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const dO = rows[i][1] - rows[i - 1][1], dC = rows[i][2] - rows[i - 1][2];
+    if (Math.abs(dO) > 60 || Math.abs(dC) > 60)
+      return `day ${rows[i][0]}: moved more than 1h in a day (${dO},${dC})`;
+    if (dO && lastDO && Math.sign(dO) !== Math.sign(lastDO)) flipsO++;
+    if (dC && lastDC && Math.sign(dC) !== Math.sign(lastDC)) flipsC++;
+    if (dO) lastDO = dO;
+    if (dC) lastDC = dC;
+    const span = rows[i][2] - rows[i][1];
+    if (span < cfg.minSpan) return `span shrank below the policy floor: ${span / 60}h on day ${rows[i][0]}`;
+    if (rows[i][1] < 6 * 60 || rows[i][2] > 24 * 60) return "hours left the sanity bounds";
+  }
+  if (flipsO > 1 || flipsC > 1) return `oscillation: ${flipsO} open flips, ${flipsC} close flips`;
+  const tail = rows.slice(-5);
+  if (!tail.every(r => r[1] === tail[0][1] && r[2] === tail[0][2]))
+    return "not converged: hours still moving in the last 5 days " + JSON.stringify(tail);
+  const moves = JSON.parse(sim.G("JSON.stringify(window._stats.hoursMoves || [])"));
+  if (!moves.length) return "policy never moved - nothing was exercised";
+  // the EXTEND rule, deterministically (organic shower demand is too sparse
+  // to queue at close): sustained close-queue pressure + rested staff = +1h,
+  // the same pressure with an exhausted roster = no move (tiredness budget)
+  sim.G(`setBizHours("showers", 9 * 60, 18 * 60);
+    hoursPolicyState.showers = { hist: [{ f: 1, l: 1, q: 3 }], cd: 0 };
+    hoursObs.showers = { first: 1, last: 1, closeQ: 3 };
+    for (const k of allCrabs()) if (k.p.job === "showers") k.p.tired = 0.2;
+    runHoursPolicy("showers")`);
+  if (sim.G("BIZ.showers.hours.close") !== 19 * 60)
+    return "close-queue pressure did not extend closing: " + sim.G("BIZ.showers.hours.close");
+  sim.G(`hoursPolicyState.showers = { hist: [{ f: 1, l: 1, q: 3 }], cd: 0 };
+    hoursObs.showers = { first: 1, last: 1, closeQ: 3 };
+    for (const k of allCrabs()) if (k.p.job === "showers") k.p.tired = 0.9;
+    runHoursPolicy("showers")`);
+  if (sim.G("BIZ.showers.hours.close") !== 19 * 60)
+    return "an exhausted roster still got its hours extended";
+  return true;
+});
+
+scenario("hours: a sun-skip across a SUDSY hours change doesn't wedge", () => {
+  // the settlement that moves her hours can land mid sun-skip (6x dt); the
+  // morning after, everyone must still be walking their (re-derived) schedule
+  const sim = createSim({ seed: 8 });
+  sim.runUntil("day === 2 && tmin >= 19.8 * 60", {});
+  sim.G(`coins = 900;
+    hoursPolicyState.showers = { hist: [{ f: 0, l: 1, q: 0 }, { f: 0, l: 1, q: 0 }], cd: 0 };
+    hoursObs.showers = { first: 0, last: 1, closeQ: 0 };
+    ffSleep = true; ffSleepDay = day + 1;`);
+  const before = sim.G("BIZ.showers.hours.open");
+  const det = stuckDetector(sim);
+  sim.runUntil("day === 3 && tmin >= 12 * 60", { onTick: det.tick, tickEvery: 20,
+    maxSteps: 200000 });
+  if (sim.G("BIZ.showers.hours.open") !== before + 60)
+    return "the forced quiet-morning history did not move her open hour";
+  if (sim.G("ffSleep")) return "sun-skip never released";
+  if (det.worstSeconds >= 18) return `a crab froze ~${det.worstSeconds}s across the skip`;
+  // her new day 3 shift derives from the new hours and she still clocks in
+  const w = JSON.parse(sim.G('JSON.stringify(bizShiftWindow("showers", "D"))'));
+  if (w.start !== before + 60 + 30) return "her D shift did not re-anchor: " + JSON.stringify(w);
+  return sim.G('npcs.find(k => k.p.name === "SUDSY").dayState') !== "home" || sim.G('offToday(npcs.find(k => k.p.name === "SUDSY"))')
+    ? true : "SUDSY idle at home at noon on a workday after the change";
+});
+
+scenario("staff meals: AT COST and FREE charge exactly what they say", () => {
+  const sim = createSim({ seed: 17 });
+  sim.runUntil("tmin >= 20.6 * 60 && lastRentDay === day", {});
+  sim.runUntil("customers.length === 0", { maxSteps: 60000 });
+  sim.runUntil('!allCrabs().some(k => k.duty && k.workBiz === "shack") && tmin >= 20.5 * 60 && tmin < 22.5 * 60', { maxSteps: 120000 });
+  const force = (pol) => {
+    const before = JSON.parse(sim.G(`(() => {
+      BIZ.shack.mealPol = ${JSON.stringify(pol)};
+      for (const c of crabs) { c.p.hunger = 0; c.p.thirst = 0; c.errandCd = 999; c.p.tired = 0; }
+      const c = crabs[0];
+      c.p.hunger = 0.9; c.p.wallet = 30; c.errandCd = 0;
+      if (c.dayState !== "working") { abortChef(c); c.dayState = "home"; }
+      return JSON.stringify({ paid: window._stats.staffMealPaid || 0, meals: window._stats.staffMeals || 0,
+        coins: Math.round(coins * 100) / 100 });
+    })()`));
+    const done = sim.runUntil(`(window._stats.staffMeals || 0) > ${before.meals}`, { maxSteps: 120000 });
+    if (!done) return { err: `forced ${pol} staff meal never happened` };
+    const after = JSON.parse(sim.G(`JSON.stringify({ paid: window._stats.staffMealPaid || 0,
+      coins: Math.round(coins * 100) / 100, wallet: crabs[0].p.wallet,
+      meal: window._stats.lastStaffMeal })`));
+    return { before, after };
+  };
+  // AT COST: the crab pays exactly the ingredients; the till nets zero
+  let r = force("atcost");
+  if (r.err) return r.err;
+  let charged = r.after.paid - r.before.paid;
+  if (charged !== r.after.meal.cost)
+    return `AT COST rang $${charged}, expected the $${r.after.meal.cost} ingredient bill (${r.after.meal.id})`;
+  if (r.after.wallet !== 30 - charged) return `AT COST wallet ${r.after.wallet}, expected ${30 - charged}`;
+  if (Math.abs((r.after.coins - r.before.coins)) > 0.001)
+    return `AT COST till moved ${(r.after.coins - r.before.coins).toFixed(2)}, expected net zero`;
+  // FREE: nothing charged; the till eats the ingredient cost
+  r = force("free");
+  if (r.err) return r.err;
+  charged = r.after.paid - r.before.paid;
+  if (charged !== 0) return `FREE rang $${charged}`;
+  if (r.after.wallet !== 30) return `FREE meal touched the wallet: ${r.after.wallet}`;
+  const tillDelta = r.after.coins - r.before.coins;
+  if (Math.abs(tillDelta + r.after.meal.cost) > 0.001)
+    return `FREE till delta ${tillDelta.toFixed(2)}, expected -${r.after.meal.cost}`;
+  return true;
+});
+
+scenario("hours + meal policy + cpu policy state roundtrip save/load", () => {
+  const store = new Map();
+  const a = createSim({ seed: 31, storage: store, fresh: false });
+  a.runDays(1);
+  a.G(`setBizHours("shack", 9 * 60, 18.5 * 60);
+    BIZ.shack.mealPol = "free"; BIZ.juicebar.mealPol = "atcost";
+    hoursPolicyState.showers = { hist: [{ f: 0, l: 2, q: 1 }, { f: 0, l: 0, q: 0 }], cd: 1 };
+    setBizHours("showers", 10 * 60, 19 * 60);
+    save()`);
+  const b = createSim({ seed: 32, storage: store, fresh: false });
+  const got = JSON.parse(b.G(`JSON.stringify({
+    sh: [BIZ.shack.hours.open, BIZ.shack.hours.close], sw: [BIZ.showers.hours.open, BIZ.showers.hours.close],
+    mp: [BIZ.shack.mealPol, BIZ.juicebar.mealPol, BIZ.arcade.mealPol],
+    pol: hoursPolicyState.showers })`));
+  if (got.sh[0] !== 540 || got.sh[1] !== 1110) return "shack hours came back " + got.sh;
+  if (got.sw[0] !== 600 || got.sw[1] !== 1140) return "shower hours came back " + got.sw;
+  if (got.mp[0] !== "free" || got.mp[1] !== "atcost" || got.mp[2] !== "retail")
+    return "meal policies came back " + got.mp;
+  if (!got.pol || got.pol.cd !== 1 || got.pol.hist.length !== 2 || got.pol.hist[0].l !== 2)
+    return "policy state came back " + JSON.stringify(got.pol);
+  // degenerate hours in a tampered save clamp instead of wedging a shop shut
+  const s = JSON.parse(store.get("crabshack3_v1"));
+  s.hours.shack = [23 * 60, 23.5 * 60]; s.hours.arcade = [0, 900]; s.mealPol.shack = "bogus";
+  store.set("crabshack3_v1", JSON.stringify(s));
+  const c = createSim({ seed: 33, storage: store, fresh: false });
+  const clamped = JSON.parse(c.G("JSON.stringify([BIZ.shack.hours.open, BIZ.shack.hours.close, BIZ.arcade.hours.open, BIZ.arcade.hours.close, BIZ.shack.mealPol])"));
+  if (clamped[1] - clamped[0] < 4 * 60 || clamped[0] < 6 * 60 || clamped[1] > 24 * 60)
+    return "degenerate shack hours survived the clamp: " + clamped;
+  if (clamped[2] < 6 * 60) return "arcade open clamped wrong: " + clamped;
+  return clamped[4] === "retail" ? true : "bogus meal policy accepted: " + clamped[4];
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
