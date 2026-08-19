@@ -4663,7 +4663,10 @@ function drawCustCard(k) {
   smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
 }
 function drawFollowCard() {
-  if (dossier || manage) return;   // a full-screen card is open - don't double up
+  // any full-screen card owns the view: the little crab card must never sit on
+  // top of the ledger, the census, the save screen or the day report
+  if (dossier || manage || boardView || saveView || reportT > 0) return;
+  if (tab === "menu") return;      // the MENU tab is a reading surface too
   if (sel && !sel.p) { drawCustCard(sel); return; }
   const c = sel;
   if (!c || !c.p) return;
