@@ -32,6 +32,12 @@ const SHELTER_X = 444, MOVE_IN_COST = 35;
 const JOB_BOARD_X = 716, NPC_WAGE = 20;   // the town labor market
 const PIER_X0 = 1870, PIER_X1 = 2040, PIER_Y = 96;   // planks over the east break
 const FISHING_SPOTS = [{ x: 1900, y: PIER_Y }, { x: 1956, y: PIER_Y }, { x: 2012, y: PIER_Y }];
+// the rail holds more than three: late arrivals shoulder in beside the
+// regulars (14px per wrap keeps the last spot at the pier's end post)
+function fishSpotFor(i) {
+  const b = FISHING_SPOTS[i % FISHING_SPOTS.length];
+  return { x: b.x + 14 * Math.floor(i / FISHING_SPOTS.length), y: b.y };
+}
 // live-aboard boats moor off the seaward rail - a fisher's top housing rung
 const BOAT_BERTHS = [{ x: 1862 }, { x: 1910 }, { x: 1958 }];
 const BOAT_Y = 62;                          // hull rides the surf band above the pier
@@ -350,7 +356,12 @@ function darkness() { // 0 = day, 1 = full night
 
 // ---------------------------------------------------------------- recipes
 const INGREDIENT_COST = { fish_raw: 5, fruit: 3, token: 1, soap: 1 };
-const FISH_LOCAL = 4, FISH_IMPORT = 7;   // fresh off the pier vs shipped in
+// ---- fish price discovery: the pier price FLOATS with scarcity. The $7
+// world price is the natural ceiling (at $7 imports supply the gap, so the
+// local price can never exceed it); a glut sags toward the $2 floor. The
+// binary FISH_LOCAL(4)/FISH_IMPORT(7) switch is gone - trade.price is the
+// one pier price, cleared once a day at midnight (settleFishMarket).
+const FISH_FLOOR = 2, FISH_IMPORT = 7, FISH_START = 4;
 // ---- T1 trade ledger: the town is a NODE. Imports tracked at fixed prices;
 // only fish actually charges money today (it always did, via ingredientCost) -
 // corn/water/power are tracked flows awaiting T2/T3. Bookkeeping ONLY.
@@ -363,13 +374,33 @@ const IMPORTS = {
 };
 let trade = { total: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 },
   day: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, spent: 0,
-  landedDay: 0, landed: 0 };   // pier production - NOT an import
+  landedDay: 0, landed: 0,   // pier production - NOT an import
+  // the fish market: today's price, fish eaten today (demand), 3-day
+  // supply/demand windows, days pinned at the ceiling, and the price series
+  // (one entry per clearing, last 60) for the notice-board sparkline
+  price: FISH_START, useDay: 0, landH: [], useH: [], ceilDays: 0, series: [] };
 function tradeImport(kind, qty, dollars) {
   trade.total[kind] += qty; trade.day[kind] += qty;
   if (dollars) trade.spent += dollars;
 }
+// One clearing a day, at midnight: the last 3 days' landings vs the fish the
+// town actually ate (local, shipped-in, and beach roasts alike - an import IS
+// unmet local demand). $1 steps inside a deadband, so the price walks rather
+// than sawtooths; hog-cycle damping is the window + the small step.
+function settleFishMarket() {
+  trade.landH.push(trade.landedDay); if (trade.landH.length > 3) trade.landH.shift();
+  trade.useH.push(trade.useDay); if (trade.useH.length > 3) trade.useH.shift();
+  const avg = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+  const S = avg(trade.landH), D = avg(trade.useH);
+  if (D > S + 1) trade.price = Math.min(FISH_IMPORT, trade.price + 1);        // fish ran short: the pier price firms
+  else if (S > D + 2) trade.price = Math.max(FISH_FLOOR, trade.price - 1);    // fish piled up: the pier price sags
+  trade.ceilDays = trade.price >= FISH_IMPORT ? (trade.ceilDays || 0) + 1 : 0;
+  trade.series.push(trade.price);
+  if (trade.series.length > 60) trade.series.shift();
+  trade.useDay = 0;
+}
 function ingredientCost(raw) {
-  if (raw === "fish_raw") return townCatch > 0 ? FISH_LOCAL : FISH_IMPORT;
+  if (raw === "fish_raw") return townCatch > 0 ? trade.price : FISH_IMPORT;
   return INGREDIENT_COST[raw];
 }
 function consumeIngredient(raw, recipe) {
@@ -379,6 +410,7 @@ function consumeIngredient(raw, recipe) {
     if (window._stats) window._stats.coolersMade = (window._stats.coolersMade || 0) + 1;
   }
   if (raw !== "fish_raw") return;
+  trade.useDay++;   // every fish eaten is the market's demand signal
   if (townCatch > 0) townCatch--;
   else tradeImport("fish", 1, FISH_IMPORT);   // shipped in - the $7 was already charged upstream
 }
@@ -497,7 +529,7 @@ function initNpcs() {
       acc: f.acc, color: f.color, shift: "D", house: 0, homeless: true,
       wallet: 18, job: "fishing", hunger: 0.3, dirt: 0.2, bored: 0, tired: 0.3 };
     const fc = newCrab(fp);
-    fc.fishSpot = FISHING_SPOTS[f.spot];
+    fc.fishSpot = fishSpotFor(f.spot);
     fc.x = f.x0; fc.y = 158;
     return fc;
   });
@@ -770,7 +802,7 @@ function load() {
       } else {
         const c = newCrab(Object.assign({ npc: true }, sp));
         if (c.p.fisher) c.fishSpot = c.p.boat != null ? boatSpot(c.p.boat)
-          : FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
+          : fishSpotFor(npcs.filter(k => k.p.fisher).length);
         c.x = homeX(c); npcs.push(c);
       }
     }
@@ -779,7 +811,15 @@ function load() {
   hireDay = s.hireDay || 0;
   if (s.trade && s.trade.total) trade = { total: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, s.trade.total),
     day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, s.trade.day), spent: s.trade.spent || 0,
-    landed: s.trade.landed || 0, landedDay: s.trade.landedDay || 0 };
+    landed: s.trade.landed || 0, landedDay: s.trade.landedDay || 0,
+    // fish market state; pre-market saves open at the old $4 with a blank chart
+    price: typeof s.trade.price === "number"
+      ? Math.max(FISH_FLOOR, Math.min(FISH_IMPORT, Math.round(s.trade.price))) : FISH_START,
+    useDay: s.trade.useDay || 0,
+    landH: Array.isArray(s.trade.landH) ? s.trade.landH.slice(-3) : [],
+    useH: Array.isArray(s.trade.useH) ? s.trade.useH.slice(-3) : [],
+    ceilDays: s.trade.ceilDays || 0,
+    series: Array.isArray(s.trade.series) ? s.trade.series.slice(-60) : [] };
   firstPour = !!s.firstPour;
   const away = (Date.now() - (s.t || Date.now())) / 1000;
   if (away > 60 && s.rate > 0) {
@@ -1020,8 +1060,29 @@ function runJobBoard() {
     if ((o.till >= 260 && staff < 2) || (staff === 0 && o.till >= NPC_WAGE * 2))
       jobBoard.push({ biz: b, wage: NPC_WAGE, day });
   }
+  // the macro response: a fish price pinned at the ceiling for a full day is
+  // the town asking for more fishers - the pier posts on the same board
+  if ((trade.ceilDays || 0) >= 1 && !jobBoard.some(j => j.biz === "fishing") && npcs.length < 8)
+    jobBoard.push({ biz: "fishing", wage: 0, day });
   for (const j of jobBoard.slice()) {
-    const cands = npcs.filter(k => k.p.fisher && k.p.job === "fishing" && !k.p.sick && !k.p.employer);
+    if (j.biz === "fishing") {
+      // nobody in town is free to take it (the jobless already fish), so the
+      // posting reaches a drifter after a day on the board - who fishes for
+      // themselves at market price, like every fisher
+      if (trade.price < FISH_IMPORT) {
+        jobBoard.splice(jobBoard.indexOf(j), 1);   // price came back down; so does the posting
+      } else if (j.day < day && npcs.length < 8) {
+        const hire = spawnDrifter();
+        hire.quip = { text: "HEARD THE FISH ARE PAYING", t: 4 };
+        jobBoard.splice(jobBoard.indexOf(j), 1);
+      }
+      continue;
+    }
+    // a free agent weighs the posting against the pier: a day's casting is
+    // about five fish, so when that strictly beats the wage, nobody signs
+    // (ties go to the steady paycheck - pier luck is still luck)
+    const cands = trade.price * 5 > j.wage ? [] :
+      npcs.filter(k => k.p.fisher && k.p.job === "fishing" && !k.p.sick && !k.p.employer);
     let hire = null;
     if (cands.length) {
       cands.sort((a, b2) => a.p.wallet - b2.p.wallet);   // the broke sign up first
@@ -1048,7 +1109,7 @@ function spawnDrifter() {
   p2.name = freeCrewName(p2.name);   // deduped across BOTH name pools (converted tourists live here too)
   Object.assign(p2, { npc: true, fisher: true, homeless: true, wallet: 12, job: "fishing", shift: "D", mode: "walk" });
   const c = newCrab(p2);
-  c.fishSpot = FISHING_SPOTS[npcs.filter(k => k.p.fisher).length % FISHING_SPOTS.length];
+  c.fishSpot = fishSpotFor(npcs.filter(k => k.p.fisher).length);
   c.x = BUS_STOPS[0]; c.y = 158;   // stepped off the morning bus with one bag
   npcs.push(c);
   today.moved.push(c.p.name + " NEW IN TOWN");
@@ -1159,16 +1220,25 @@ function updateSchedule(c, dt) {
     if (e && !e.selfCook) startErrand(c, e);
     else startCommute(c, false);
   }
-  // self-employed: a fisher answers to nobody - break whenever a need presses.
-  // The errand machinery handles the trip; the home branch re-commutes them to
-  // the pier afterward (shift window permitting), so it's a real lunch break.
+  // self-employed: a fisher answers to nobody - break for ANY need, whenever
+  // they like (the old lunch-and-thirst-only gate was a command-economy patch
+  // on a price problem). What pulls them back to the pier is the PRICE: at a
+  // near-ceiling fish price a rational fisher lets the arcade wait - one
+  // comparison, not a utility function. Hunger and thirst always walk;
+  // crabs aren't robots. The errand machinery handles the trip; the home
+  // branch re-commutes them to the pier afterward.
   if (c.p.job === "fishing" && c.dayState === "working" && !c.p.employer && c.errandCd <= 0) {
-    // pressing needs only: lunch and real thirst pull a fisher off the pier;
-    // fun and a grubby shell wait for the evening (unbounded breaks collapsed
-    // the town's fish supply - measured, not guessed)
-    const pressing = (c.p.hunger || 0) >= 0.5 || (c.p.thirst || 0) >= 0.6;
-    const e = pressing && pickErrand(c);
-    if (e && !e.selfCook && (e.need === "food" || e.need === "drink")) {
+    const e = pickErrand(c);
+    if (e && e.need === "food" && townCatch > 2) {
+      c.errandCd = 3;   // lunch is in the crate - updateFishing roasts it at 0.55
+    } else if (e && e.need === "fun" && trade.price >= FISH_IMPORT - 1) {
+      // opportunity cost: skip the fun break while the water's paying
+      if (c.priceQuipDay !== day) {
+        c.priceQuipDay = day;
+        c.quip = { text: "THE WATER'S MONEY TODAY", t: 3 };
+      }
+      c.errandCd = 8;
+    } else if (e && !e.selfCook) {
       c.duty = false; c.errandCd = 6;
       c.dayState = "home";
       startErrand(c, e);
@@ -1313,6 +1383,16 @@ function startErrand(c, e) {
   c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_ERRAND);   // errand legwork tires, a little
   setT(c, BIZ[e.biz].queueX + 4, 166);
 }
+// where to head when an errand ends: a mid-shift self-employed fisher goes
+// straight back to the rail - the pier pays, and the old home-then-pier
+// round trip measured at hours of lost casting (the real supply collapse)
+function afterErrand(c) {
+  const sh = effShift(c);
+  if (c.p.job === "fishing" && !c.p.employer && !offToday(c) && !c.p.sick &&
+      tmin >= leaveGmin(c) && tmin < sh.end - 30 &&
+      !(c.restDay === day && c.restUntil > tmin)) startCommute(c, true);
+  else startCommute(c, false);
+}
 function updateErrand(c, dt) {
   if (c.dayState === "toErrand") {
     if (routedStep(c, crabMove(c), dt)) {
@@ -1321,7 +1401,7 @@ function updateErrand(c, dt) {
       if (q >= QUEUE_MAX) {
         c.quip = { text: "LINE'S TOO LONG", t: 2.4 };
         c.errandCd = 12; c.dayState = "home";
-        startCommute(c, false);
+        afterErrand(c);
         return;
       }
       const cust = { biz: c.errandBiz, recipe: c.errand.recipe, isCrab: true, crab: c,
@@ -1332,7 +1412,7 @@ function updateErrand(c, dt) {
     }
   } else if (c.dayState === "errand") {
     const k = c.errandCust;
-    if (!k) { c.dayState = "home"; startCommute(c, false); return; }
+    if (!k) { c.dayState = "home"; afterErrand(c); return; }
     const open = allCrabs().some(w => w.duty && w.workBiz === k.biz &&
       (!w.pendingOff || tmin < effShift(w).end + 45));
     if (!open && k.state === "waiting" && !k.claimed) {
@@ -1355,7 +1435,7 @@ function finishErrand(k) {
     c.errandCust = null; c.errandCd = 25;
     if (!k.served) c.quip = { text: "LINE WAS TOO LONG", t: 2.4 };
     c.dayState = "home";
-    startCommute(c, false);
+    afterErrand(c);
   }
 }
 
@@ -1585,11 +1665,13 @@ function updateFishing(c, dt) {
     }
     return;
   }
-  // hungry with no affordable lunch in town? eat the catch: one fish off the
-  // day's landings, no money changes claws - the town's oldest lunch, too
-  if ((c.p.hunger || 0) >= 0.55 && townCatch > 2 &&   // never the town's last fish
-      (c.p.wallet < 15 || !bizStaffed("shack"))) {
+  // a working fisher's lunch is the catch: eating a $2-7 fish on the spot
+  // beats a $15 town lunch plus hours of walking, at any price - and for a
+  // penniless fisher in a glut it's the safety valve that makes zero-wage
+  // survivable. One fish off the day's landings, no money changes claws.
+  if ((c.p.hunger || 0) >= 0.55 && townCatch > 2) {   // never the town's last fish
     townCatch--; c.roastT = 5;
+    trade.useDay++;   // a roast eats a fish too - the market feels it
     if (window._stats) window._stats.roastStarts = (window._stats.roastStarts || 0) + 1;
     return;
   }
@@ -1601,15 +1683,21 @@ function updateFishing(c, dt) {
     c.castT = aboard ? 9 + Math.random() * 13 : 14 + Math.random() * 18;
     const haul = aboard && Math.random() < 0.2 ? 2 : 1;
     townCatch += haul; trade.landed += haul; trade.landedDay += haul;
-    c.p.wallet += 2 * haul;   // the market pays small money for each landed fish
-    popText(haul > 1 ? "DOUBLE HAUL!" : "CATCH!", c.x - 4, c.y - 24, [140, 220, 255]);
+    // free agents: no wage anywhere - the catch sold at the pier's market
+    // price IS the income. A scarce-fish day is a lucrative day.
+    c.p.wallet += trade.price * haul;
+    popText((haul > 1 ? "DOUBLE HAUL! +$" : "CATCH! +$") + trade.price * haul, c.x - 8, c.y - 24, [140, 220, 255]);
     sfx.splash();
     if (window._stats) {
       window._stats.catches = (window._stats.catches || 0) + haul;
+      window._stats.fishPay = (window._stats.fishPay || 0) + trade.price * haul;
       const by = window._stats.catchesBy = window._stats.catchesBy || {};
       by[c.p.name] = (by[c.p.name] || 0) + haul;
     }
-    if (Math.random() < 0.25) c.quip = { text: ["BIG ONE!", "THEY'RE BITING", "SEA PROVIDES"][(Math.random() * 3) | 0], t: 2.2 };
+    if (Math.random() < 0.25) c.quip = {
+      text: trade.price >= FISH_IMPORT
+        ? ["THE WATER'S MONEY TODAY", "EVERY CAST PAYS", "TOP DOLLAR TODAY"][(Math.random() * 3) | 0]
+        : ["BIG ONE!", "THEY'RE BITING", "SEA PROVIDES"][(Math.random() * 3) | 0], t: 2.2 };
   }
 }
 function updateKitchen(c, dt) {
@@ -3127,6 +3215,11 @@ function drawJobBoard() {
   let ly = y + 20;
   if (!jobBoard.length) { smallText(ctx, "NO OPENINGS - THE TOWN'S ALL BUSY", x + 6, ly, [110, 110, 130]); ly += 9; }
   for (const j of jobBoard) {
+    if (j.biz === "fishing") {
+      smallText(ctx, "HELP WANTED: THE PIER", x + 6, ly, [40, 30, 40]); ly += 7;
+      smallText(ctx, "FISH AT $" + trade.price + " - SELL WHAT YOU CATCH" + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 9;
+      continue;
+    }
     smallText(ctx, "HELP WANTED: " + BIZ[j.biz].name, x + 6, ly, [40, 30, 40]); ly += 7;
     smallText(ctx, "$" + j.wage + "/DAY - SEE " + OWNERS[bizOwner(j.biz)].name + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 9;
   }
@@ -3134,6 +3227,19 @@ function drawJobBoard() {
     ly += 2; smallText(ctx, "TRADE LEDGER, TODAY / ALL TIME", x + 6, ly, [58, 42, 38]); ly += 8;
     smallText(ctx, "FISH LANDED OFF THE PIER", x + 6, ly, [40, 150, 70]);
     smallText(ctx, trade.landedDay + " / " + trade.landed, x + 126, ly, [40, 150, 70]); ly += 7;
+    // the pier price + its history: a tiny sparkline, floor $2 to ceiling $7
+    smallText(ctx, "PIER FISH PRICE", x + 6, ly, [140, 110, 40]);
+    smallText(ctx, "$" + trade.price + (trade.price >= FISH_IMPORT ? " AT CEILING" : ""), x + 126, ly,
+      trade.price >= FISH_IMPORT ? [200, 110, 40] : [140, 110, 40]); ly += 7;
+    {
+      const s = trade.series.slice(-30), sh = 8, sx = x + 6;
+      rect(ctx, sx - 1, ly - 1, 30 * 3 + 2, sh + 2, [235, 225, 205]);
+      for (let i = 0; i < s.length; i++) {
+        const hh = 2 + Math.round((s[i] - FISH_FLOOR) / (FISH_IMPORT - FISH_FLOOR) * (sh - 2));
+        rect(ctx, sx + i * 3, ly + sh - hh, 2, hh, s[i] >= FISH_IMPORT ? [200, 110, 40] : [40, 150, 70]);
+      }
+      ly += sh + 3;
+    }
     for (const kind of Object.keys(IMPORTS)) {
       const im = IMPORTS[kind];
       smallText(ctx, im.name + (kind === "fish" ? " SHIPPED IN" : ""), x + 6, ly, [90, 90, 105]);
@@ -3146,6 +3252,7 @@ function drawJobBoard() {
   if (staff.length) {
     ly += 2; smallText(ctx, "WHO WORKS FOR WHOM", x + 6, ly, [58, 42, 38]); ly += 8;
     for (const c of staff.slice(0, 4)) {
+      if (ly > y + h2 - 16) break;   // the sparkline ate a row or two - keep inside the card
       smallText(ctx, c.p.name + " - " + BIZ[c.p.job].name + ", PAID BY " + OWNERS[c.p.employer].name, x + 6, ly, [90, 90, 105]); ly += 7;
     }
   }
@@ -3208,7 +3315,9 @@ function frame(now) {
   last = now; time += dt;
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
-    tmin -= 1440; day++; townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
+    tmin -= 1440; day++;
+    settleFishMarket();   // the day's landings vs the day's appetite set tomorrow's pier price
+    townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
     for (const c of allCrabs()) c.workedToday = false;   // a new day's ledger
     trade.day = { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }; trade.landedDay = 0;
     today = newDayLog(); today.repStart = rep;
