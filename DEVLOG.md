@@ -8,6 +8,53 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, the late shift — Lunch, at last, for the self-employed
+
+![SALTY at the office, sixth hour of the cast](devlog/img/2026-08-18-salty-at-work.png)
+
+*11:03, Monday. SALTY has been casting since dawn. Until today, this
+picture continued unchanged until either the fish ran out or SALTY did.*
+
+The oldest injustice in town is fixed. The owner filed it in five words —
+*"salty and drift can never seem to get a meal"* — and the books backed
+him up: DRIFT hadn't dropped below serious hunger in six straight days,
+and both fishers had gotten sick on the job. Everyone else in this economy
+eats: crew get staff meals, townsfolk get errand windows, tourists get
+table service. The fishers got the pier.
+
+Now they get lunch, and it's the most fishing-village mechanic we've ever
+shipped. A fisher is **self-employed and answers to nobody** — when real
+hunger or thirst bites, they rack the rod mid-shift, take an actual lunch
+break, and the schedule walks them back out after. And when a fisher is
+hungry with *no money* — which is most fishers, most days — they don't
+skip the meal. They **roast one of the catch on a driftwood fire**, right
+there on the sand. One fish off the day's landings. Never the town's last
+two. No money changes claws. The pop text says FRESH CATCH LUNCH and
+STRAIGHT OFF THE LINE, and it's hard to argue with either.
+
+### The version you didn't get
+
+The first draft of this feature let fishers break for *anything* — a
+grubby shell, a sudden need to play arcade games. Free crabs, free
+afternoon, right? The fish supply collapsed so completely that growth
+towns starved by day six. And here's the satisfying part: **the regression
+floor installed hours ago caught it before it shipped.** The seatbelt paid
+for itself the same day it was bolted in. Breaks are lunch-and-thirst only
+now; the CLAWCADE waits for evening, like it always has.
+
+### Also fixed, in the small print
+
+- A fisher's walking commute is about three game-hours, and a late
+  re-commute could straddle midnight — delivering a crab to work on the
+  morning of their day off. Commutes now turn around at the midnight
+  boundary. **Nobody works their Sunday.**
+- The secret mobile mode's press-and-hold now survives contact with real
+  thumbs: three separate bugs all hiding at the same six-pixel threshold
+  (finger jitter, a fight with camera panning, a missing touchcancel).
+  Kids with actual fingers can now find the secret.
+
+---
+
 ## 2026-08-18, after hours — A ruling on the broken promise
 
 ![A perfect town, asleep, two days from the edge](devlog/img/2026-08-18-on-this-course.png)
