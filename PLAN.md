@@ -478,6 +478,19 @@ unit economics.
    too. Headless sim never sets SCREEN_H, so the suite runs on classic 240.
 
 ## Feature requests (Matt, 2026-08-18, unscheduled)
+- **Stop the table-bumping** (Matt: "crabs keep running into tables...
+  too much. It's cute if it's just for like 10 minutes but all day? that's
+  terrible"). Root cause is structural: routedStep travels exactly two
+  lanes (y=147/168) chosen with NO furniture awareness, and solids are
+  resolved REACTIVELY (walk into table → get pushed out) rather than
+  avoided — so any table on/near a lane makes every passing trip a visible
+  bounce, forever. Direction: proactive avoidance — make lane travel
+  furniture-aware (pick the lane, or a brief detour-y within the lane
+  band, that clears the solids ahead), or carve stable gap waypoints
+  through the picnic area. Keep the occasional bump (charm), kill the
+  constant plowing (terrible). Coordinates with the trip-chaining agent
+  (same locomotion layer) — likely same worktree or immediately adjacent
+  in the queue.
 - **Route optimization / trip-chaining** (Matt: "folks are taking weird
   routes, like waking up, going to work, then going to the crab shack;
   folks should optimize their routes a bit!"). Crabs pick errands by
