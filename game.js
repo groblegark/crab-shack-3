@@ -3630,7 +3630,9 @@ function payTip(bizKey, server, amt, x, y) {
 // the one write path: clamp to 0..1 and snap to the slider's grain, so the
 // number on the card is always the number the till is paying out
 function setTipShare(b, v) {
-  const q = Math.max(0, Math.min(1, Math.round((+v || 0) / TIP_SHARE_STEP) * TIP_SHARE_STEP));
+  // round the product too: 7 x 0.05 is 0.35000000000000003 in binary floating
+  // point, and that number would go into the save file and onto the card
+  const q = Math.max(0, Math.min(1, Math.round(Math.round((+v || 0) / TIP_SHARE_STEP) * TIP_SHARE_STEP * 100) / 100));
   if (BIZ[b]) BIZ[b].tipShare = q;
   return q;
 }
@@ -5475,9 +5477,11 @@ function drawManage() {
     rect(ctx, th + 1, tr.y, 5, tr.h, [255, 250, 235]);
     smallText(ctx, pct + "%", tr.x + tr.w + 5, tr.y + 4, pct ? [190, 110, 40] : [150, 140, 160]);
     smallText(ctx, "CREW", tr.x + tr.w + 26, tr.y + 4, [110, 100, 110]);
+    // both hints share this line, so the long one has to leave room for
+    // "TAP A ROW" on the right at the 3x5 font's ~4px a character
     const hint = pct === 0 ? "EVERY TIP GOES TO THE TILL"
-      : pct === 100 ? "THE TILL KEEPS NOTHING - THE CREW GET IT ALL"
-      : "CREW POCKET " + pct + "% OF EVERY TIP - IT BUYS THEM HOUSES";
+      : pct === 100 ? "THE TILL KEEPS NONE OF IT"
+      : "CREW POCKET " + pct + "% OF EVERY TIP";
     smallText(ctx, hint, x + 6, y + 60, pct ? [190, 110, 40] : [150, 140, 160]);
     const rowHint = auto ? "AUTO ROTA" : "TAP A ROW";
     smallText(ctx, rowHint, x + w2 - 6 - smallTextWidth(rowHint), y + 60, [110, 100, 110]);
