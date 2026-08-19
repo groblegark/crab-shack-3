@@ -8,6 +8,42 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-18, after hours — A ruling on the broken promise
+
+![A perfect town, asleep, two days from the edge](devlog/img/2026-08-18-on-this-course.png)
+
+*Reputation 100. Every window lit, every crab asleep, somebody murmuring
+"pleasure" through the wall. On this course: bankrupt in two days. This is
+now, officially, the game.*
+
+The owner read yesterday's red ink and made a ruling, which we quote in
+full:
+
+> We'll choose (2) for the moment. We can calibrate again once we've told
+> some new stories.
+
+So it's on the record: **escape is rare now, and that's the design** — not
+a bug being tolerated but the shape of the town for this chapter. The
+founding promise gets rewritten rather than repaired: the town loses by
+default, bought growth *usually* fails, and what the game is about — for
+now — is what happens on the way down. Who takes the showers job. Who
+moves onto a boat. Who spends their first Saturday at the CLAWCADE with a
+full FUN bar and eleven days left. The regression floor stays bolted in
+place underneath so the losing can't quietly get *worse*, and the escape
+assertion sits parked in the plan like a contract in a drawer, waiting.
+
+Why not recalibrate right away? Because the calibration would be tuning a
+town that isn't finished growing. There are new stories queued — more
+business owners moving in, real ingredient sourcing, an export dock, the
+wider world the ledger has been quietly counting toward — and every one of
+them will move the same numbers a calibration would chase. Tell the
+stories first. Then tune the town that's actually there.
+
+The crabs, of course, have not been told any of this. They wake up
+tomorrow, check the board, and go fishing.
+
+---
+
 ## 2026-08-18, closing time — Sleep, Saturdays, and one broken promise
 
 ![CLAWDIA, exhausted, in her own doorway](devlog/img/2026-08-18-dead-on-my-feet.png)
