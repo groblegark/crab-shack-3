@@ -136,6 +136,38 @@ const BIZ = {
   },
 };
 
+// ---------------------------------------------------------------- open hours
+// Every business keeps real OPEN HOURS (default 8:00-20:00 - exactly the old
+// hard-coded trading day, so a fresh or migrated save behaves identically
+// until somebody changes something). Hours gate tourist admission, errand
+// patronage, the CLOSED sign, and anchor the staff shifts (shift windows
+// DERIVE from hours - see bizShiftWindow). Sanity bounds keep schedules
+// non-degenerate: 6:00-24:00, at least 4h open. Player-owned shops are tuned
+// on the MANAGEMENT screen (tap a shop's sign); NPC owners tune their own
+// via HOURS_POLICY below.
+const HOURS_MIN = 6 * 60, HOURS_MAX = 24 * 60, HOURS_SPAN_MIN = 4 * 60;
+const MEAL_POLS = ["retail", "atcost", "free"];   // staff-meal pricing, per biz
+const MEAL_POL_LABEL = { retail: "RETAIL", atcost: "AT COST", free: "FREE" };
+for (const k in BIZ) {   // one migration point: defaults = today's behavior
+  BIZ[k].hours = { open: 8 * 60, close: 20 * 60 };
+  BIZ[k].mealPol = "retail";
+}
+function setBizHours(b, open, close) {
+  const h = BIZ[b].hours;
+  open = Math.round(open / 30) * 30; close = Math.round(close / 30) * 30;
+  open = Math.max(HOURS_MIN, Math.min(open, HOURS_MAX - HOURS_SPAN_MIN));
+  close = Math.max(open + HOURS_SPAN_MIN, Math.min(close, HOURS_MAX));
+  h.open = open; h.close = close;
+}
+function bizOpenNow(b) { const h = BIZ[b].hours; return tmin >= h.open && tmin < h.close; }
+function anyBizOpenNow() { return Object.keys(BIZ).some(b => bizUnlocked(b) && bizOpenNow(b)); }
+function fmtHr(m) { const h = (m / 60) | 0, mm = m % 60; return h + (mm ? (mm < 10 ? "0" + mm : "" + mm) : ""); }   // 480 -> "8", 510 -> "830" (shift-label style)
+function fmtClock(m) { const h = (m / 60) | 0, mm = m % 60 | 0; return h + ":" + (mm < 10 ? "0" : "") + mm; }
+function staffMealCharge(b, r) {   // what a selfCooking staffer rings up
+  const pol = BIZ[b].mealPol || "retail";
+  return pol === "free" ? 0 : pol === "atcost" ? ingredientCost(r.raw) : r.pay;
+}
+
 // ---------------------------------------------------------------- owners
 // The simulation layer: every business has an owner with their own till.
 // The player's till IS `coins`; peer owners (NPCs) keep theirs here.
@@ -155,7 +187,11 @@ const BIZ = {
 const OWNERS = { sudsy: { id: "sudsy", name: "SUDSY", till: 200, credit: 0, darkT: 0 } };
 const bizOwner = (b) => BIZ[b].owner || "player";
 function ownerFunds(b) { return bizOwner(b) === "player" ? coins : OWNERS[bizOwner(b)].till; }
+function bizDayBook(b) {   // today's per-business takings/costs (management screen + CPU policy signals)
+  return today.biz[b] = today.biz[b] || { take: 0, cost: 0 };
+}
 function creditBiz(b, amt, x, y) {
+  bizDayBook(b).take += amt;
   if (bizOwner(b) === "player") { today.revenue += amt; earn(amt, x, y); }
   else {
     OWNERS[bizOwner(b)].till += amt;
@@ -164,11 +200,80 @@ function creditBiz(b, amt, x, y) {
   }
 }
 function debitBiz(b, amt, x, y, label) {
+  bizDayBook(b).cost += amt;
   if (bizOwner(b) === "player") expense(amt, x, y, label);
   else OWNERS[bizOwner(b)].till -= amt;
 }
 const bizUnlocked = (b) => b === "shack" || bizOwner(b) !== "player"
   || !!(UPS[b] && UPS[b].lvl > 0);
+
+// ---------------------------------------------------------------- cpu owner hours policy
+// NPC owners tune their own OPEN HOURS with a small, legible state machine,
+// evaluated once per settlement. Table-driven: a future peer owner gets the
+// same instincts by adding a row to HOURS_POLICY. Signals observed per day:
+// customers who ARRIVED in the first/last open hour, and the queue left
+// standing when the doors shut (turned away at close).
+//   EXTEND   close +1h  after `pressureDays` straight days of a real queue at
+//                       close (>= extendQ) - only within the staff-tiredness
+//                       budget (nobody on the roster past tiredCap)
+//   LATER    open  +1h  after `quietDays` straight DEAD first hours
+//   EARLIER  close -1h  after `quietDays` straight dead last hours + clean closes
+// At most one move per settlement, the observation history resets after a
+// move and a cooldown day follows - the schedule walks, it never thrashes.
+// Converges because the shrink rules need sustained ZERO demand at a boundary
+// while extend needs sustained queue pressure: the regimes are disjoint and
+// each move weakens its own trigger (proved over 20 days in the suite).
+const HOURS_POLICY = {
+  showers: { quietDays: 3, pressureDays: 2, extendQ: 2, minSpan: 6 * 60, tiredCap: 0.75 },
+};
+let hoursPolicyState = {};        // biz -> { hist: [{f,l,q}...], cd }  (persisted)
+let hoursObs = {}, _wasOpen = {}; // per-day boundary observations (transient)
+function noteArrival(b) {         // somebody joined a queue: which hour was it?
+  const h = BIZ[b].hours;
+  const o = hoursObs[b] = hoursObs[b] || { first: 0, last: 0, closeQ: 0 };
+  if (tmin < h.open + 60) o.first++;
+  else if (tmin >= h.close - 60 && tmin < h.close) o.last++;
+}
+function trackCloseQueues() {     // the moment a shop's hours end, count who was left standing
+  for (const b of Object.keys(BIZ)) {
+    const open = bizUnlocked(b) && bizOpenNow(b);
+    if (_wasOpen[b] && !open) {
+      const q = customers.filter(k => k.biz === b && (k.state === "waiting" || k.state === "arriving")).length;
+      if (q) (hoursObs[b] = hoursObs[b] || { first: 0, last: 0, closeQ: 0 }).closeQ += q;
+    }
+    _wasOpen[b] = open;
+  }
+}
+function runHoursPolicy(b) {      // one NPC owner reads the day's signals at settlement
+  const cfg = HOURS_POLICY[b];
+  if (!cfg || window._noHoursPolicy) return;
+  const st = hoursPolicyState[b] = hoursPolicyState[b] || { hist: [], cd: 0 };
+  const obs = hoursObs[b] || { first: 0, last: 0, closeQ: 0 };
+  hoursObs[b] = { first: 0, last: 0, closeQ: 0 };
+  st.hist.push({ f: obs.first, l: obs.last, q: obs.closeQ });
+  if (st.hist.length > 4) st.hist.shift();
+  if (st.cd > 0) { st.cd--; return; }
+  const h = BIZ[b].hours, span = h.close - h.open;
+  const quiet = st.hist.slice(-cfg.quietDays), press = st.hist.slice(-cfg.pressureDays);
+  const staffRested = allCrabs().filter(k => k.p.job === b).every(k => (k.p.tired || 0) < cfg.tiredCap);
+  let open = h.open, close = h.close, line = null;
+  if (press.length >= cfg.pressureDays && press.every(d => d.q >= cfg.extendQ)
+      && staffRested && h.close + 60 <= HOURS_MAX) {
+    close += 60; line = "NOW CLOSES AT " + fmtHr(close);          // customers at the door: stay open later
+  } else if (quiet.length >= cfg.quietDays && quiet.every(d => d.f === 0) && span - 60 >= cfg.minSpan) {
+    open += 60; line = "NOW OPENS AT " + fmtHr(open);             // dead mornings: sleep in
+  } else if (quiet.length >= cfg.quietDays && quiet.every(d => d.l === 0 && d.q === 0) && span - 60 >= cfg.minSpan) {
+    close -= 60; line = "NOW CLOSES AT " + fmtHr(close);          // dead evenings: shut early
+  }
+  if (!line) return;
+  setBizHours(b, open, close);
+  st.hist = []; st.cd = 1;   // fresh eyes on the new schedule, and a day to breathe
+  const who = OWNERS[bizOwner(b)].name;
+  toast = { text: who + " " + line + " (" + BIZ[b].short + " " + fmtHr(h.open) + "-" + fmtHr(h.close) + ")", t: 7 };
+  today.moved.push(who + " " + line);
+  if (window._stats) (window._stats.hoursMoves = window._stats.hoursMoves || [])
+    .push({ day, biz: b, open: h.open, close: h.close });
+}
 
 // ---------------------------------------------------------------- line of credit
 // Every business owner (player and NPC alike) carries a small compounding
@@ -279,7 +384,10 @@ function clockStr() {
   const h = (tmin / 60) | 0, m = tmin % 60 | 0;
   return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
 }
-function shackOpen() { return tmin >= 8 * 60 && tmin < 20 * 60; }
+// the town's fixed day rhythm (errand windows, the tourist season's outer
+// bounds via anyBizOpenNow) - individual shops open/close inside it or past
+// it on their own BIZ hours
+function townOpen() { return tmin >= 8 * 60 && tmin < 20 * 60; }
 
 // ---------------------------------------------------------------- week / days off
 // A 7-day week derived from the day counter (day 1 = MON). Nothing new is
@@ -333,9 +441,25 @@ function coveringToday(c) {
 }
 // a crab's shift for TODAY: their own, or a full-open double shift on a day
 // they cover for a resting coworker (M and E never overlap, so the covering
-// crab IS the whole roster that day - shorter hours would just be dark hours)
-const COVER_SHIFT = { label: "8-20", start: 8 * 60, end: 20 * 60 };
-function effShift(c) { return coveringToday(c) ? COVER_SHIFT : SHIFTS[c.p.shift]; }
+// crab IS the whole roster that day - shorter hours would just be dark hours).
+// Shift windows DERIVE from the workplace's open hours - the least-invasive
+// coupling: the SHIFTS table keeps the SHAPE (M = first half, E = second
+// half, D = owner-operator open+30 to close-90, cover = the whole window)
+// and the biz hours give it a frame. Under the default 8-20 hours these
+// evaluate to exactly the old fixed SHIFTS. Fishing has no storefront, so
+// pier shifts stay the fixed table.
+function bizShiftWindow(b, kind) {
+  const h = BIZ[b].hours;
+  const mid = h.open + Math.round((h.close - h.open) / 2 / 30) * 30;
+  const w = kind === "M" ? { start: h.open, end: mid }
+    : kind === "E" ? { start: mid, end: h.close }
+    : kind === "D" ? { start: h.open + 30, end: h.close - 90 }
+    : { start: h.open, end: h.close };   // covering double: the full window
+  w.label = fmtHr(w.start) + "-" + fmtHr(w.end);
+  return w;
+}
+function baseShift(c) { return c.p.job === "fishing" ? SHIFTS[c.p.shift] : bizShiftWindow(c.p.job, c.p.shift); }
+function effShift(c) { return coveringToday(c) ? bizShiftWindow(c.p.job, "cover") : baseShift(c); }
 function bizRestingToday(b) {   // every worker on the roster is off today
   const staff = allCrabs().filter(k => k.p.job === b);
   return staff.length > 0 && staff.every(k => offToday(k));
@@ -431,10 +555,11 @@ let lastRentDay = 0, gameOver = false, newConfirmT = 0;
 let memorials = [];   // { x, name } - the town remembers
 let today = newDayLog();
 let report = null, reportT = 0, dossier = null, boardView = false;
+let manage = null;   // key of the player-owned business whose MANAGEMENT card is open
 let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
   return { served: 0, revenue: 0, rage: 0, sick: [], died: [], recovered: [],
-    moved: [], byCrab: {}, repStart: 30, catchStart: 0 };
+    moved: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {} };
 }
 let screen = "title", hasSave = false, wiping = false;
 function newGame() { wiping = true; localStorage.removeItem(SAVE_KEY); location.reload(); }
@@ -704,6 +829,9 @@ function save() {
       credit: { sudsy: { bal: OWNERS.sudsy.credit || 0, darkT: OWNERS.sudsy.darkT || 0 } },
       personas: npcs.map(c => c.p) },
     board: jobBoard, hireDay, trade, sudsRefund: sudsRefunded, firstPour,
+    hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
+    mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
+    hoursPol: hoursPolicyState,
   }));
 }
 let sudsRefunded = false;   // laundromat-removal migration: refund paid out (persisted)
@@ -774,6 +902,16 @@ function load() {
     day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, s.trade.day), spent: s.trade.spent || 0,
     landed: s.trade.landed || 0, landedDay: s.trade.landedDay || 0 };
   firstPour = !!s.firstPour;
+  // business settings: hours + staff-meal policy + CPU policy state. Old
+  // saves have none - the defaults above ARE the old behavior. setBizHours
+  // clamps, so a degenerate save can't wedge a shop shut.
+  if (s.hours) for (const b in s.hours)
+    if (BIZ[b] && Array.isArray(s.hours[b])) setBizHours(b, +s.hours[b][0] || 0, +s.hours[b][1] || 0);
+  if (s.mealPol) for (const b in s.mealPol)
+    if (BIZ[b] && MEAL_POLS.includes(s.mealPol[b])) BIZ[b].mealPol = s.mealPol[b];
+  if (s.hoursPol) for (const b in s.hoursPol)
+    if (BIZ[b] && s.hoursPol[b] && Array.isArray(s.hoursPol[b].hist))
+      hoursPolicyState[b] = { hist: s.hoursPol[b].hist.slice(-4), cd: s.hoursPol[b].cd || 0 };
   const away = (Date.now() - (s.t || Date.now())) / 1000;
   if (away > 60 && s.rate > 0) {
     const gain = Math.floor(s.rate * Math.min(away, 8 * 3600) * 0.5);
@@ -1077,7 +1215,8 @@ function updateSchedule(c, dt) {
     c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_SHIFT);   // a full shift takes it out of you
     c.p.dirt = Math.min(1, (c.p.dirt || 0) + 0.25);      // and grubbies up the shell
     c.p.bored = Math.min(1, (c.p.bored || 0) + 0.2);     // all work and no play...
-    // grab dinner on the way home instead of trekking back later
+    // grab dinner on the way home instead of trekking back later (gated on
+    // STAFFING, not hours: a staffed counter serves the after-shift crowd)
     const e = !c.p.sick && pickErrand(c);
     if (e && !e.selfCook) startErrand(c, e);
     else startCommute(c, false);
@@ -1090,6 +1229,9 @@ function updateSchedule(c, dt) {
     // fun and a grubby shell wait for the evening (unbounded breaks collapsed
     // the town's fish supply - measured, not guessed)
     const pressing = (c.p.hunger || 0) >= 0.5 || (c.p.thirst || 0) >= 0.6;
+    // NOTE: gated on STAFFING, not hours - the early crowd gets served while
+    // the crew sets up (a fisher may buy breakfast minutes before the sign
+    // flips; this is the pre-hours behavior, kept bit-for-bit)
     const e = pressing && pickErrand(c);
     if (e && !e.selfCook && (e.need === "food" || e.need === "drink")) {
       c.duty = false; c.errandCd = 6;
@@ -1108,11 +1250,11 @@ function updateSchedule(c, dt) {
   if (c.errandCd > 0) c.errandCd -= dt;
   const errandWindow = off ? tmin >= OFF_WAKE   // day off: sleep in, then the whole town is yours
     : (tmin < leaveGmin(c) - 30 || tmin >= sh.end);   // workday: before leaving, or after shift
-  const townAwake = shackOpen() || (tmin >= 20 * 60 && tmin < 23 * 60) || (tmin >= 5.5 * 60 && tmin < 8 * 60);
+  const townAwake = townOpen() || (tmin >= 20 * 60 && tmin < 23 * 60) || (tmin >= 5.5 * 60 && tmin < 8 * 60);
   if (c.dayState === "home" && townAwake && c.errandCd <= 0 && errandWindow) {
     const e = pickErrand(c);
     if (e && e.selfCook) startSelfCook(c, e);
-    else if (e && !e.selfCook && shackOpen()) startErrand(c, e);
+    else if (e && !e.selfCook && bizOpenNow(e.biz)) startErrand(c, e);
     else c.errandCd = 2;
   }
 }
@@ -1126,11 +1268,11 @@ function pickErrand(c) {
   // Full retail, full queue rules - off crabs are customers, not staff.
   const off = offToday(c) && !c.p.sick;
   const wantFood = (c.p.hunger || 0) >= (off ? 0.4 : 0.5);
-  // restaurant staff privilege: cook your own meal when the kitchen is unstaffed.
-  // Charged at RETAIL, same as the register.
-  // TODO: business settings - staff-meal pricing (retail/at-cost/free) becomes a per-business setting
+  // restaurant staff privilege: cook your own meal when the kitchen is
+  // unstaffed. Charged per the shop's staff-meal POLICY (management screen):
+  // RETAIL by default, AT COST or FREE if the owner says so.
   if (wantFood && !staffed("shack") && c.p.job === "shack" && !c.p.npc) {
-    const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= r.pay + 2);
+    const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= staffMealCharge("shack", r) + 2);
     if (affordable.length) {
       affordable.sort((a, b) => a.pay - b.pay);
       const r = c.p.wallet > 40 ? affordable[(Math.random() * affordable.length) | 0] : affordable[0];
@@ -1160,7 +1302,7 @@ function pickErrand(c) {
       }
     } else if (!c.p.npc && (c.p.job === "shack" || c.p.job === "juicebar")
         && bizUnlocked(c.p.job) && !staffed(c.p.job)) {
-      const drinks = BIZ[c.p.job].recipes.filter(r => DRINKS[r.id] && c.p.wallet >= r.pay + 2);
+      const drinks = BIZ[c.p.job].recipes.filter(r => DRINKS[r.id] && c.p.wallet >= staffMealCharge(c.p.job, r) + 2);
       if (drinks.length) {
         drinks.sort((a, b) => a.pay - b.pay);
         return { selfCook: true, biz: c.p.job, recipe: drinks[0], need: "drink" };
@@ -1193,14 +1335,15 @@ function updateSelfCook(c, dt) {
   if (c.cookStep === 0) {                      // to the source bin: ring yourself up first
     if (routedStep(c, crabMove(c), dt)) {
       const r = c.cookRecipe;
-      c.p.wallet = Math.max(0, c.p.wallet - r.pay);
-      creditBiz(sb, r.pay, c.x, FLOOR_Y - 40);          // retail into the till
-      debitBiz(sb, ingredientCost(r.raw), c.x, FLOOR_Y - 34);  // till buys the ingredients
+      const pay = staffMealCharge(sb, r);   // the shop's meal policy sets the price (retail/at-cost/free)
+      c.p.wallet = Math.max(0, c.p.wallet - pay);
+      if (pay > 0) creditBiz(sb, pay, c.x, FLOOR_Y - 40);      // the charge into the till
+      debitBiz(sb, ingredientCost(r.raw), c.x, FLOOR_Y - 34);  // till buys the ingredients either way
       consumeIngredient(r.raw, r);
       if (window._stats) {
-        window._stats.staffMealPaid = (window._stats.staffMealPaid || 0) + r.pay;
+        window._stats.staffMealPaid = (window._stats.staffMealPaid || 0) + pay;
         window._stats.staffMealCost = (window._stats.staffMealCost || 0) + INGREDIENT_COST[r.raw];
-        window._stats.lastStaffMeal = { id: r.id, pay: r.pay, cost: INGREDIENT_COST[r.raw] };
+        window._stats.lastStaffMeal = { id: r.id, pay, cost: INGREDIENT_COST[r.raw] };
       }
       c.carrying = r.raw; c.cookStep = 1; c.workT = 0.6;
     }
@@ -1250,7 +1393,7 @@ function updateErrand(c, dt) {
       const cust = { biz: c.errandBiz, recipe: c.errand.recipe, isCrab: true, crab: c,
         need: c.errand.need, x: c.x, spawnX: c.x, state: "waiting",
         patience: 90, maxPatience: 90, claimed: false, served: false };   // locals will wait
-      customers.push(cust);
+      customers.push(cust); noteArrival(c.errandBiz);
       c.errandCust = cust; c.dayState = "errand";
     }
   } else if (c.dayState === "errand") {
@@ -1381,8 +1524,8 @@ function updateDirected(c, dt) {
 function forcedErrand(c, b) {
   if (b === "shack") {
     if (!bizStaffed("shack")) {
-      if (c.p.job === "shack" && !c.p.npc) {   // staff privilege: cook your own, at retail
-        const aff = BIZ.shack.recipes.filter(r => c.p.wallet >= r.pay + 2);
+      if (c.p.job === "shack" && !c.p.npc) {   // staff privilege: cook your own, at the shop's meal policy
+        const aff = BIZ.shack.recipes.filter(r => c.p.wallet >= staffMealCharge("shack", r) + 2);
         if (aff.length) { aff.sort((a, b2) => a.pay - b2.pay); return { selfCook: true, recipe: aff[0] }; }
       }
       return null;
@@ -1408,7 +1551,7 @@ function forcedErrand(c, b) {
 // their workplace (clock in) > their home (knock off) > a business (errand)
 // > open ground (walk there). Every refusal pops - never silent.
 function orderCrab(c, wx, wy) {
-  const sh = SHIFTS[c.p.shift];
+  const sh = effShift(c);
   const jb = c.p.job === "fishing" ? null : BIZ[c.p.job];
   const atWorkplace = jb ? wx >= jb.x0 && wx <= jb.x1
     : wx >= PIER_X0 - 8 && wx <= PIER_X1 + 24;
@@ -1436,6 +1579,7 @@ function orderCrab(c, wx, wy) {
     if (!bizUnlocked(b) || wx < BIZ[b].x0 || wx > BIZ[b].x1) continue;
     if (c.duty || c.dayState === "working") return orderPop(c, false, "ON THE CLOCK");
     if (bizDark(b)) return orderPop(c, false, "IT'S SHUT");
+    if (!bizOpenNow(b) && b !== c.p.job) return orderPop(c, false, "IT'S CLOSED");   // own shop: selfCook privilege still applies
     const e = forcedErrand(c, b);
     if (!e) return orderPop(c, false, "CAN'T RIGHT NOW");
     abortActivity(c);
@@ -1776,6 +1920,7 @@ function newCustomer(bizKey) {
     claimed: false, served: false };
 }
 function updateCustomers(dt) {
+  trackCloseQueues();   // hours-policy signal: who was still in line when a shop shut
   const qi = {};
   for (const b of Object.keys(BIZ)) qi[b] = 0;
   for (const k of customers) {
@@ -1863,9 +2008,9 @@ function updateCustomers(dt) {
   }
   customers = customers.filter(k => k.isCrab ? !k.done : k.x < (k.spawnX || WORLD_W) + 20);
   spawnT -= dt;
-  if (spawnT <= 0 && shackOpen()) {
-    // tourists pick a staffed business
-    const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && !bizDark(b) && allCrabs().some(c => c.duty && c.workBiz === b));
+  if (spawnT <= 0 && anyBizOpenNow()) {
+    // tourists pick a staffed business that is INSIDE its own open hours
+    const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && !bizDark(b) && bizOpenNow(b) && allCrabs().some(c => c.duty && c.workBiz === b));
     if (open.length) {
       const weights = open.map(b => b === "shack" ? 0.5 : b === "arcade" ? 0.22 : b === "juicebar" ? 0.3 : 0.1);
       const wsum = weights.reduce((a, v) => a + v, 0);
@@ -1874,7 +2019,7 @@ function updateCustomers(dt) {
       // tourists never take the last slot - your own crew and neighbours eat too
       const tourQueue = customers.filter(k => k.biz === pick && !k.isCrab && k.state !== "leaving").length;
       const allQueue = customers.filter(k => k.biz === pick && k.state !== "leaving").length;
-      if (tourQueue < TOURIST_QUEUE_MAX && allQueue < QUEUE_MAX) customers.push(newCustomer(pick));
+      if (tourQueue < TOURIST_QUEUE_MAX && allQueue < QUEUE_MAX) { customers.push(newCustomer(pick)); noteArrival(pick); }
       // the juice bar is a NEW demand stream, not a split of the meal line:
       // beachgoers who'd never wait for a plate still grab a drink. Its weight
       // ADDS total traffic (interval shrinks so every other biz keeps the
@@ -2060,6 +2205,24 @@ cv.addEventListener("click", (ev) => {
     }
     dossier = null; return;
   }
+  if (manage) {
+    // the management card swallows every click; only its controls act
+    const pt = evPos(ev), R = manageRects(), h = BIZ[manage].hours;
+    const hit = (r) => pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h;
+    if (hit(R.om)) { setBizHours(manage, h.open - 30, h.close); sfx.buy(); save(); return; }
+    if (hit(R.op)) { setBizHours(manage, Math.min(h.open + 30, h.close - HOURS_SPAN_MIN), h.close); sfx.buy(); save(); return; }
+    if (hit(R.cm)) { setBizHours(manage, h.open, Math.max(h.close - 30, h.open + HOURS_SPAN_MIN)); sfx.buy(); save(); return; }
+    if (hit(R.cp)) { setBizHours(manage, h.open, h.close + 30); sfx.buy(); save(); return; }
+    if ((manage === "shack" || manage === "juicebar") && hit(R.meal)) {
+      BIZ[manage].mealPol = MEAL_POLS[(MEAL_POLS.indexOf(BIZ[manage].mealPol) + 1) % MEAL_POLS.length];
+      sfx.ding(); save(); return;
+    }
+    const owned = ownedBizList();
+    if (owned.length > 1 && hit(R.next)) { manage = owned[(owned.indexOf(manage) + 1) % owned.length]; sfx.ding(); return; }
+    const onCard = pt.x >= R.x - 2 && pt.x < R.x + R.w + 2 && pt.y >= R.y - 2 && pt.y < R.y + R.h + 2;
+    if (hit(R.done) || !onCard) manage = null;
+    return;
+  }
   if (boardView) { boardView = false; return; }
   if (reportT > 0) { reportT = 0; return; }
   startMusic();
@@ -2126,6 +2289,14 @@ cv.addEventListener("click", (ev) => {
   if (wx >= JOB_BOARD_X - 2 && wx < JOB_BOARD_X + 28 && p.y >= HOME_BOTTOM - 40 && p.y < HOME_BOTTOM + 4) {
     boardView = true; sfx.ding(); return;
   }
+  // a player-owned shop's sign (and its MANAGE chip) is the owner's office door
+  for (const b of ownedBizList()) {
+    const bz = BIZ[b], signW = textWidth(bz.sign) + 14;
+    const sx = (bz.x0 + bz.x1) / 2 - signW / 2;
+    if (wx >= sx - 4 && wx <= sx + signW + 4 && p.y >= 88 && p.y < 116) {
+      manage = b; sfx.ding(); return;
+    }
+  }
   // world: click any crab - crew or townsfolk - to follow them
   for (const c of allCrabs()) {
     if (!c.hidden && Math.abs(wx - (c.x + 8)) < 12 && Math.abs(p.y - (c.y - 6)) < 14) {
@@ -2151,7 +2322,7 @@ cv.addEventListener("click", (ev) => {
 cv.addEventListener("contextmenu", (ev) => {
   ev.preventDefault();
   if (screen !== "play" || gameOver) return;
-  if (dossier || boardView || reportT > 0) return;
+  if (dossier || boardView || manage || reportT > 0) return;
   if (window.MergeMode && MergeMode.active()) return;
   const p = evPos(ev);
   if (p.y >= PANEL_Y) return;   // the panel is left-click country
@@ -2167,7 +2338,7 @@ addEventListener("keydown", (e) => {
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; followCust = null; }
-  if (e.key === "Escape") { if (dossier) { dossier = null; return; } followIdx = -1; followNpc = null; followCust = null; }
+  if (e.key === "Escape") { if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } followIdx = -1; followNpc = null; followCust = null; }
 });
 
 // ---------------------------------------------------------------- drawing
@@ -2419,7 +2590,17 @@ function drawBusiness(key) {
   wrect(signX + 1, 93, signW - 2, 10, key === "shack" ? [190, 140, 80] : key === "juicebar" ? [255, 150, 60] : [96, 170, 220]);
   if (signX + signW - camX > 0 && signX - camX < W)
     textShadow(ctx, b.sign, signX + 7 - camX, 95, [255, 250, 240], [70, 50, 40]);
-  if (!shackOpen()) {
+  if (bizOwner(key) === "player") {
+    // MANAGE chip: the sign doubles as the owner's office door (tap to open
+    // the management screen - the chip is the discoverable half of the target)
+    const mw = smallTextWidth("MANAGE") + 6;
+    const mx = signX + signW / 2 - mw / 2;
+    wrect(mx, 105, mw, 9, [30, 20, 36]);
+    wrect(mx + 1, 106, mw - 2, 7, [96, 170, 220]);
+    if (mx - camX > -mw && mx - camX < W)
+      smallText(ctx, "MANAGE", mx + 3 - camX, 107, [255, 255, 255]);
+  }
+  if (!bizOpenNow(key)) {
     wrect(signX + signW / 2 - 23, 118, 46, 11, [30, 20, 36]);
     text(ctx, "CLOSED", signX + signW / 2 - 18 - camX, 120, [255, 120, 120]);
   } else if (bizRestingToday(key)) {
@@ -2659,7 +2840,7 @@ function drawCustCard(k) {
   smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
 }
 function drawFollowCard() {
-  if (dossier) return;   // the full record is open - don't double up
+  if (dossier || manage) return;   // a full-screen card is open - don't double up
   if (followCust) { drawCustCard(followCust); return; }
   const c = followNpc || (followIdx >= 0 && crabs[followIdx]);
   if (!c) return;
@@ -2677,7 +2858,7 @@ function drawFollowCard() {
   smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
   smallText(ctx, TRAITS[p.trait].label + " " + MODES[p.mode].label, 29, 13, [120, 90, 60]);
   smallText(ctx, crabStatus(c).slice(0, 26), 29, 21, [30, 110, 60]);
-  const shiftTxt = "SHIFT " + SHIFTS[p.shift].label;
+  const shiftTxt = "SHIFT " + baseShift(c).label;
   smallText(ctx, shiftTxt, 29, 28, [110, 110, 130]);
   const wTxt = "$" + fmt(Math.max(0, p.wallet));
   const wx3 = 126 - textWidth(wTxt, 5);
@@ -3001,7 +3182,7 @@ function drawDossier() {
   row("DOES", doesTxt, [70, 90, 130]);
   if (!p.npc && Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1)
     smallText(ctx, "TAP: REASSIGN", x + w2 - 58, ly - 9, [96, 170, 220]);
-  row("SHIFT", SHIFTS[p.shift].label);
+  row("SHIFT", baseShift(c).label);
   row("OFF", WEEKDAY_FULL[dayOffIdx(c)] + (offToday(c) ? " - THAT'S TODAY!" : ""), [70, 140, 200]);
   row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
   const [hl, hcol] = homeLabel(p);
@@ -3044,6 +3225,84 @@ function drawDossier() {
     ly += 8;
   }
   smallText(ctx, "CLICK TO CLOSE", x + w2 - 62, y + h2 - 9, [150, 140, 160]);
+}
+
+// ---------------------------------------------------------------- management screen
+// The owner's office: tap a player-owned shop's SIGN (or its MANAGE chip) to
+// open. Open/close hour steppers, today's takings/costs, the roster with
+// shifts + days off, and the staff-meal pricing policy. Same overlay-card
+// idiom as the dossier; one geometry table feeds both draw and hit-testing
+// so the tap targets stay honest on phones.
+function ownedBizList() { return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player"); }
+function manageRects() {
+  const x = 16, y = 6, w2 = 224, h2 = 164;
+  return {
+    x, y, w: w2, h: h2,
+    next: { x: x + w2 - 40, y: y + 2, w: 38, h: 11 },
+    om: { x: x + 34, y: y + 28, w: 16, h: 16 },   // open -30
+    op: { x: x + 88, y: y + 28, w: 16, h: 16 },   // open +30
+    cm: { x: x + 146, y: y + 28, w: 16, h: 16 },  // close -30
+    cp: { x: x + 200, y: y + 28, w: 16, h: 16 },  // close +30
+    meal: { x: x + 6, y: y + h2 - 30, w: 156, h: 14 },
+    done: { x: x + w2 - 46, y: y + h2 - 15, w: 42, h: 13 },
+  };
+}
+function drawManage() {
+  if (!manage) return;
+  const key = manage, b = BIZ[key], h = b.hours, R = manageRects();
+  const { x, y } = R, w2 = R.w, h2 = R.h;
+  ctx.fillStyle = "rgba(16,12,30,0.55)";
+  ctx.fillRect(0, 0, W, PANEL_Y);
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 14, [58, 42, 38]);
+  text(ctx, b.name + " - MGMT", x + 6, y + 4, [255, 240, 210]);
+  if (ownedBizList().length > 1) {
+    rect(ctx, R.next.x, R.next.y, R.next.w, R.next.h, [96, 170, 220]);
+    smallText(ctx, "NEXT>", R.next.x + 9, R.next.y + 3, [255, 255, 255]);
+  }
+  const btn = (r, label) => {
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [190, 140, 80]);
+    text(ctx, label, r.x + ((r.w - textWidth(label)) >> 1), r.y + 5, [40, 24, 16]);
+  };
+  smallText(ctx, "HOURS", x + 8, y + 19, [58, 42, 38]);
+  smallText(ctx, "6:00-24:00, AT LEAST 4H OPEN", x + 44, y + 19, [150, 140, 160]);
+  smallText(ctx, "OPEN", x + 8, y + 33, [110, 110, 130]);
+  btn(R.om, "-"); btn(R.op, "+");
+  text(ctx, fmtClock(h.open), x + 54 + ((32 - textWidth(fmtClock(h.open))) >> 1), y + 33, [40, 30, 40]);
+  smallText(ctx, "CLOSE", x + 118, y + 33, [110, 110, 130]);
+  btn(R.cm, "-"); btn(R.cp, "+");
+  text(ctx, fmtClock(h.close), x + 164 + ((34 - textWidth(fmtClock(h.close))) >> 1), y + 33, [40, 30, 40]);
+  smallText(ctx, "SHIFTS  M " + bizShiftWindow(key, "M").label + "   E " + bizShiftWindow(key, "E").label
+    + "   COVER " + bizShiftWindow(key, "cover").label, x + 8, y + 49, [70, 90, 130]);
+  const bk = today.biz[key] || { take: 0, cost: 0 };
+  smallText(ctx, "TODAY", x + 8, y + 61, [58, 42, 38]);
+  smallText(ctx, "TOOK $" + fmt(bk.take), x + 44, y + 61, [40, 150, 70]);
+  smallText(ctx, "COSTS $" + fmt(bk.cost), x + 104, y + 61, [190, 80, 80]);
+  smallText(ctx, "RENT TONIGHT $" + b.rent, x + 158, y + 61, [140, 110, 40]);
+  smallText(ctx, "STAFF", x + 8, y + 73, [58, 42, 38]);
+  const staff = crabs.filter(c => c.p.job === key);
+  if (!staff.length) smallText(ctx, "NOBODY ASSIGNED - REASSIGN FROM A DOSSIER", x + 8, y + 81, [190, 80, 80]);
+  for (let i = 0; i < Math.min(staff.length, 6); i++) {
+    const c = staff[i];
+    smallText(ctx, c.p.name, x + 8, y + 81 + i * 8, [40, 30, 40]);
+    smallText(ctx, "SHIFT " + baseShift(c).label + (coveringToday(c) ? " (COVERING " + bizShiftWindow(key, "cover").label + ")" : ""),
+      x + 62, y + 81 + i * 8, [110, 110, 130]);
+    smallText(ctx, "OFF " + WEEKDAYS[dayOffIdx(c)] + (offToday(c) ? " (TODAY)" : ""), x + 158, y + 81 + i * 8, [70, 140, 200]);
+  }
+  if (staff.length > 6) smallText(ctx, "+" + (staff.length - 6) + " MORE", x + 8, y + 129, [150, 140, 160]);
+  if (key === "shack" || key === "juicebar") {
+    rect(ctx, R.meal.x, R.meal.y, R.meal.w, R.meal.h, [30, 20, 36]);
+    rect(ctx, R.meal.x + 1, R.meal.y + 1, R.meal.w - 2, R.meal.h - 2, [235, 225, 205]);
+    smallText(ctx, "STAFF MEALS: " + MEAL_POL_LABEL[b.mealPol], R.meal.x + 4, R.meal.y + 4, [90, 60, 40]);
+    smallText(ctx, "TAP TO CHANGE", R.meal.x + R.meal.w - 56, R.meal.y + 4, [96, 170, 220]);
+    smallText(ctx, b.mealPol === "retail" ? "CREW PAY MENU PRICE AT THE PANTRY"
+      : b.mealPol === "atcost" ? "CREW PAY ONLY THE INGREDIENTS"
+      : "ON THE HOUSE - THE TILL EATS THE COST", R.meal.x + 4, R.meal.y + R.meal.h + 2, [110, 100, 110]);
+  }
+  rect(ctx, R.done.x, R.done.y, R.done.w, R.done.h, [190, 140, 80]);
+  text(ctx, "DONE", R.done.x + 9, R.done.y + 3, [40, 24, 16]);
 }
 
 function drawJobBoard() {
@@ -3235,6 +3494,7 @@ function frame(now) {
         today.moved.push(o.name + " WENT BANKRUPT - " + BIZ[b].short + " DARK");
         toast = { text: o.name + " WENT BANKRUPT! " + BIZ[b].name + " GOES DARK", t: 7 };
       }
+      runHoursPolicy(b);   // books settled: the day's demand signals tune tomorrow's hours
     }
     for (const c of npcs) {
       c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.1);
@@ -3473,6 +3733,7 @@ function frame(now) {
   drawDossier();
   drawJobBoard();
   drawReport();
+  drawManage();
   drawFollowCard();
   {  // town reputation chip, top-right of the world
     const rTxt = "REP " + Math.round(rep);
