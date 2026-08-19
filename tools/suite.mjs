@@ -923,9 +923,14 @@ scenario("credit: balance, flags and NPC lines roundtrip save/load", () => {
   const st = JSON.parse(b.G('JSON.stringify([credit.bal, credit.warned, OWNERS.sudsy.credit, OWNERS.sudsy.darkT, bizDark("showers")])'));
   if (st[0] !== 77 || st[1] !== true) return "player credit lost: " + JSON.stringify(st);
   if (st[2] !== 33 || st[3] !== 2 || st[4] !== true) return "npc credit/dark lost: " + JSON.stringify(st);
-  // an old save (pre-credit keys) must load with a zero balance, no flags
+  // an old save (pre-credit keys) must load with a zero balance, no flags.
+  // RE-POINTED with the business-succession build: the owner REGISTRY (`owners`)
+  // now carries every peer's till and line, so a pre-credit save is one with
+  // neither the legacy npc.credit key NOR the registry - delete both, or the
+  // fixture isn't the old save it claims to be. Nothing under test changed.
   const raw = JSON.parse(store.get(SLOT1));
   delete raw.credit; delete raw.bankrupt; delete raw.dayLog; delete raw.npc.credit;
+  delete raw.owners;
   store.set(SLOT1, JSON.stringify(raw));
   const c = createSim({ seed: 46, storage: store, fresh: false });
   const st2 = JSON.parse(c.G("JSON.stringify([credit.bal, OWNERS.sudsy.credit || 0, bankrupt])"));
@@ -1437,6 +1442,12 @@ scenario("cpu hours: SUDSY's policy converges and never thrashes", () => {
   let lastDay = 0;
   sim.runDays(30, { tickEvery: 20, onTick: (G) => {   // 30d: the fish market slowed her signal (fishers hold the rail; shower demand shifted later in the day)
     if (G("coins") < 300) G("coins = 800");
+    // RE-POINTED with the business-succession build: a peer owner who misses
+    // three leases now CLOSES for good (she used to go dark two nights and
+    // have the debt forgiven), and seed 1337's SUDSY fails on day 9 - a shop
+    // that is out of business cannot demonstrate 30 days of hours policy.
+    // She gets the same prop the player gets, for the same reason.
+    if (G("OWNERS.sudsy.till") < 60) G("OWNERS.sudsy.till = 200");
     const d = G("day");
     if (d !== lastDay && G("tmin") >= 6 * 60) {
       lastDay = d;
@@ -2203,6 +2214,241 @@ scenario("fishing experience: tiers accrue, save, and pay out on the water", () 
   const b = createSim({ seed: 10, storage: store, fresh: false });
   const back = b.G('(npcs.find(c => c.p.name === "SALTY") || npcs[0]).p.made.caught');
   return back >= 1 ? true : "the catch counter did not survive a save: " + back;
+});
+
+// ---- business failure, sale & succession -----------------------------------
+// The player is propped up throughout: these scenarios are about the TOWN's
+// economy, not about the player's eviction date.
+const KEEP = { onTick: (G) => { if (G("coins") < 500) G("coins = 900"); }, tickEvery: 40 };
+const keep = (o) => Object.assign({}, KEEP, o);
+// a sane asking price for a small beach business: more than a couple of
+// nights' rent, less than the arcade's shop-grid price. If a build ever
+// prices a shuttered shower house outside this, somebody moved a knob.
+const BIZ_MIN = 60, BIZ_MAX = 400;
+// drive ONE settlement in which the shop's owner cannot pay: till emptied and
+// the line pinned at its limit, which is exactly the "exhausted line + missed
+// obligations" the credit machinery already defines. Leaves the sim in the
+// following morning.
+function missOneLease(sim, biz) {
+  sim.runUntil("tmin >= 19.9 * 60", keep({ maxSteps: 300000 }));
+  sim.G(`{ const o = OWNERS[bizOwner("${biz}")]; if (o) { o.till = 0; o.credit = creditLimit(); } }`);
+  sim.runUntil("lastRentDay === day", keep({ maxSteps: 80000 }));
+  sim.runUntil("tmin > 7 * 60 && tmin < 12 * 60", keep({ maxSteps: 300000 }));
+}
+
+scenario("failure: three missed leases close a peer's shop and lay off its staff", () => {
+  const sim = createSim({ seed: 61 });
+  sim.runUntil("day >= 2 && tmin > 8 * 60", keep({ maxSteps: 400000 }));
+  // put a hired hand on SUDSY's payroll so the layoff has somebody in it
+  sim.G(`{ const f = npcs.find(k => k.p.job === "fishing");
+    f.p.job = "showers"; f.p.employer = "sudsy"; f.workBiz = "showers"; window._hand = f.p.name; }`);
+  const hand = sim.G("window._hand");
+  // ONE bad night is not a failure. Two aren't either - the strike is counted
+  // and the shop trades on, which is the whole point of the definition.
+  for (let i = 1; i <= 2; i++) {
+    missOneLease(sim, "showers");
+    if (sim.G('forSale("showers")')) return "the shop closed after only " + i + " missed night(s)";
+    if (sim.G("bizStrike.showers") !== i) return "strike " + i + " not counted: " + sim.G("bizStrike.showers");
+  }
+  missOneLease(sim, "showers");
+  if (!sim.G('forSale("showers")')) return "three missed leases did not close the shop";
+  if (sim.G('BIZ.showers.owner') !== null) return "closed but still owned by " + sim.G("BIZ.showers.owner");
+  if (!sim.G('bizDark("showers")')) return "a closed shop is not dark";
+  const price = sim.G("market.showers.price");
+  if (!(price >= BIZ_MIN && price <= BIZ_MAX)) return "asking price outside a sane band: $" + price;
+  // the owner-operator is staff too: she is out of a job, on the pier
+  const sud = JSON.parse(sim.G('JSON.stringify((() => { const c = allCrabs().find(k => k.p.name === "SUDSY"); return [c.p.owner, c.p.job, c.p.employer, !!c.p.fisher]; })())'));
+  if (sud[0] !== null || sud[1] !== "fishing" || sud[2] !== null || sud[3] !== true)
+    return "the bankrupt owner did not land on the pier: " + JSON.stringify(sud);
+  const hd = JSON.parse(sim.G(`JSON.stringify((() => { const c = allCrabs().find(k => k.p.name === "${hand}"); return [c.p.job, c.p.employer]; })())`));
+  if (hd[0] !== "fishing" || hd[1] !== null) return "the hired hand was not laid off: " + JSON.stringify(hd);
+  if (sim.G('jobBoard.some(j => j.biz === "showers")')) return "a closed shop is still advertising for staff";
+  // ...and it STOPS TRADING: no tourists, no errands, no takings
+  sim.G("window._stats.showersDone = 0;");
+  sim.runUntil("tmin > 17 * 60", keep({ maxSteps: 400000 }));
+  if (sim.G('customers.some(k => k.biz === "showers")')) return "tourists still queueing at a shuttered shop";
+  if (sim.G('bizStaffed("showers")')) return "a shuttered shop is somehow staffed";
+  if (sim.G("window._stats.showersDone") !== 0) return "a shuttered shop served " + sim.G("window._stats.showersDone") + " showers";
+  if (sim.G('Math.round((today.biz.showers || { take: 0 }).take)') !== 0) return "a shuttered shop took money";
+  // a grubby crab is not sent to a shop that isn't there (no wedge, no ghost errand)
+  sim.G(`{ const c = crabs[0]; c.p.dirt = 1; c.p.hunger = 0; c.p.thirst = 0; c.p.bored = 0; c.errandCd = 0; }`);
+  const e = sim.G('JSON.stringify(pickErrand(crabs[0]) || null)');
+  if (e !== "null" && e.includes("showers")) return "pickErrand still routes to the closed showers: " + e;
+  return true;
+});
+
+scenario("sale: a saved-up crab buys the failed shop and it TRADES AGAIN", () => {
+  const sim = createSim({ seed: 62 });
+  sim.runUntil("day >= 2 && tmin > 8 * 60", keep({ maxSteps: 400000 }));
+  for (let i = 0; i < 3; i++) missOneLease(sim, "showers");
+  if (!sim.G('forSale("showers")')) return "the shop never closed";
+  const price = sim.G('salePrice("showers")');
+  // the price is LEGIBLE: lease + fixtures + goodwill, every term checkable
+  const parts = JSON.parse(sim.G('JSON.stringify([BIZ.showers.rent * SALE_CFG.RENT_NIGHTS, bizFixtures("showers") * SALE_CFG.FIXTURE])'));
+  if (price < parts[0] + parts[1]) return "price $" + price + " is under lease+fixtures " + JSON.stringify(parts);
+  if (!(price >= BIZ_MIN && price <= BIZ_MAX)) return "asking price outside a sane band: $" + price;
+  // a fisher who has been saving takes it on instead of a boat
+  sim.G(`{ const f = npcs.find(k => k.p.job === "fishing" && k.p.name !== "SUDSY");
+    f.p.wallet = salePrice("showers") + SALE_CFG.RESERVE + 5; f.p.sick = null; window._buyer = f.p.name; }`);
+  const buyer = sim.G("window._buyer"), id = buyer.toLowerCase();
+  if (!sim.runUntil('!forSale("showers")', keep({ maxSteps: 400000 })))
+    return "a crab with the savings never bought the shop";
+  if (sim.G("BIZ.showers.owner") !== id) return "new owner is " + sim.G("BIZ.showers.owner") + ", expected " + id;
+  const till = sim.G("OWNERS['" + id + "'].till");
+  if (till !== Math.floor(price * sim.G("SALE_CFG.FLOAT_FRAC")))
+    return "opening till $" + till + " is not the float on a $" + price + " sale";
+  const who = JSON.parse(sim.G(`JSON.stringify((() => { const c = allCrabs().find(k => k.p.name === "${buyer}"); return [c.p.owner, c.p.job, c.p.employer, Math.round(c.p.wallet)]; })())`));
+  if (who[0] !== id || who[1] !== "showers" || who[2] !== null)
+    return "the buyer is not the owner-operator: " + JSON.stringify(who);
+  if (who[3] < 20) return "the buyer spent their housing reserve: $" + who[3];
+  // ...and they run the SAME policies every peer owner runs (the tables are
+  // keyed on the business, so a new owner inherits them by construction)
+  if (!sim.G("BIZ.showers.autoLabor")) return "the new owner does not auto-manage like a peer";
+  if (!sim.G("!!HOURS_POLICY.showers")) return "the hours policy no longer applies to the shop";
+  if (sim.G('bizDark("showers")')) return "the shop is still dark under its new owner";
+  // THE POINT: it opens up and takes money again
+  sim.G("window._stats.showersDone = 0;");
+  if (!sim.runUntil('bizStaffed("showers")', keep({ maxSteps: 500000 })))
+    return "the new owner never opened up";
+  if (!sim.runUntil('window._stats.showersDone > 0', keep({ maxSteps: 500000 })))
+    return "the shop never served a guest under its new owner";
+  if (!(sim.G('(today.biz.showers || { take: 0 }).take') > 0)) return "trading again, but no money in the till";
+  // and the new owner's hours policy really is live: it runs without a peep
+  sim.G('runHoursPolicy("showers")');
+  return true;
+});
+
+scenario("sale: the player buys a failed business through the shopfront", () => {
+  const sim = createSim({ seed: 63 });
+  sim.runUntil("day >= 2 && tmin > 8 * 60", keep({ maxSteps: 400000 }));
+  for (let i = 0; i < 3; i++) missOneLease(sim, "showers");
+  if (!sim.G('forSale("showers")')) return "the shop never closed";
+  const price = sim.G('salePrice("showers")');
+  // the BUY chip lives on the shopfront the MANAGE chip lives on
+  const r = JSON.parse(sim.G('JSON.stringify(saleChipRect("showers"))'));
+  if (!(r.x > sim.G("BIZ.showers.x0") && r.x + r.w < sim.G("BIZ.showers.x1")))
+    return "the BUY chip is not on the shopfront: " + JSON.stringify(r);
+  // short of the money: a tap refuses, and says so
+  sim.G("coins = " + (price - 1) + "; saleArm = null;");
+  if (sim.G('tapSaleChip("showers")') !== false) return "bought a business without the money";
+  if (sim.G("BIZ.showers.owner") !== null) return "the refused tap bought it anyway";
+  // with the money: the first tap ARMS, the second signs
+  sim.G("coins = " + (price + 400) + ";");
+  if (sim.G('tapSaleChip("showers")') !== false) return "a single tap bought a business";
+  if (sim.G("saleArm") !== "showers") return "the BUY chip did not arm";
+  const before = sim.G("Math.round(coins)");
+  if (sim.G('tapSaleChip("showers")') !== true) return "the confirming tap did not buy";
+  if (sim.G("BIZ.showers.owner") !== "player") return "owner after the buy: " + sim.G("BIZ.showers.owner");
+  const paid = before - sim.G("Math.round(coins)");
+  const flt = Math.floor(price * sim.G("SALE_CFG.FLOAT_FRAC"));
+  if (paid !== price - flt) return "player paid $" + paid + ", expected the $" + (price - flt) + " lease transfer";
+  // it is a real player business now: in the world, on the rent bill, manageable
+  if (!sim.G('bizUnlocked("showers")')) return "the bought shop fell out of the world";
+  if (!sim.G('ownedBizList().includes("showers")')) return "the bought shop is not on the management screen";
+  if (sim.G("totalRent()") < sim.G("BIZ.shack.rent + BIZ.showers.rent"))
+    return "the player is not paying rent on the shop they just bought";
+  if (sim.G('bizDark("showers")')) return "the bought shop is still dark";
+  // and the player's crew may staff it (an NPC shop's staff never could)
+  sim.G('crabs[0].p.job = "showers"; crabs[0].p.sick = null;');
+  if (!sim.runUntil('bizStaffed("showers")', keep({ maxSteps: 500000 })))
+    return "crew never opened the shop the player bought";
+  if (sim.G('crabs[0].p.job') !== "showers") return "the schedule bounced the crew back off a player-owned shop";
+  return true;
+});
+
+scenario("closure soak: a town with no shower house runs for weeks without wedging", () => {
+  const sim = createSim({ seed: 64 });
+  const det = stuckDetector(sim);
+  sim.runUntil("day >= 2 && tmin > 8 * 60", keep({ maxSteps: 400000 }));
+  for (let i = 0; i < 3; i++) missOneLease(sim, "showers");
+  if (!sim.G('forSale("showers")')) return "the shop never closed";
+  const startDay = sim.G("day"), serves0 = sim.G("window._stats.tourServes");
+  // nobody in town can afford it: that is the honest state, and the town has
+  // to survive it. Wallets are clamped just under the asking price so the
+  // scenario measures the LONG CLOSURE, not a lucky buyout.
+  const soak = {
+    tickEvery: 20,
+    onTick: (G) => {
+      if (G("coins") < 500) G("coins = 900");
+      G(`{ const cap = salePrice("showers") - 1;
+           for (const k of allCrabs()) if (k.p.wallet > cap) k.p.wallet = cap; }`);
+      det.tick(G);
+    },
+  };
+  sim.runDays(startDay + 20, soak);
+  if (sim.G("gameOver")) return "the propped-up town died anyway";
+  if (sim.G("day") < startDay + 20) return "the sim stopped early on day " + sim.G("day");
+  if (!sim.G('forSale("showers")')) return "somebody bought it despite the wallet clamp";
+  if (det.worstSeconds > 18) return "a crab froze for " + det.worstSeconds + "s during the closure";
+  if (!(sim.G("crabs.length") > 0)) return "the crew is gone";
+  // the town keeps trading through it - the shack never stopped
+  const served = sim.G("window._stats.tourServes") - serves0;
+  if (served < 40) return "only " + served + " guests served across 20 days of closure";
+  // dirt goes up and STAYS serviceable state: nobody is stuck in an errand
+  // loop chasing a shop that isn't there
+  if (sim.G('allCrabs().some(c => c.dayState === "toErrand" && c.errandBiz === "showers")'))
+    return "a crab is walking to a shop that closed weeks ago";
+  return true;
+});
+
+scenario("ownership + the FOR SALE market roundtrip save/load", () => {
+  // ARM 1: a shop on the market, mid-listing
+  const st1 = new Map();
+  const a = createSim({ seed: 65, storage: st1, fresh: false });
+  a.runDays(2);
+  a.G('bizTake.showers = [12, 8, 4]; bizStrike.showers = 2; listForSale("showers", "bankrupt"); save();');
+  const price = a.G("market.showers.price");
+  const a2 = createSim({ seed: 66, storage: st1, fresh: false });
+  const m = JSON.parse(a2.G('JSON.stringify([BIZ.showers.owner, forSale("showers"), (market.showers||{}).price, bizDark("showers"), bizTake.showers])'));
+  if (m[0] !== null || m[1] !== true) return "the listing did not survive a save: " + JSON.stringify(m);
+  if (m[2] !== price) return "asking price came back as $" + m[2] + ", was $" + price;
+  if (m[3] !== true) return "a for-sale shop loaded un-dark";
+  if (JSON.stringify(m[4]) !== "[12,8,4]") return "the takings history was lost: " + JSON.stringify(m[4]);
+  if (a2.G('allCrabs().some(k => k.p.owner === "sudsy")')) return "the bought-out owner still owns it after a load";
+
+  // ARM 2: sold to a crab - a brand-new owner in the registry, running the shop
+  const st2 = new Map();
+  const b = createSim({ seed: 67, storage: st2, fresh: false });
+  b.runDays(2);
+  b.G(`listForSale("showers", "bankrupt");
+    { const f = npcs.find(k => k.p.job === "fishing" && k.p.name !== "SUDSY");
+      f.p.wallet = 9999; buyBusiness("showers", f); window._o = f.p.name; }
+    bizStrike.showers = 2; save();`);
+  const nm = b.G("window._o"), id = nm.toLowerCase(), till = b.G("OWNERS['" + id + "'].till");
+  const b2 = createSim({ seed: 68, storage: st2, fresh: false });
+  const o = JSON.parse(b2.G(`JSON.stringify([BIZ.showers.owner, (OWNERS["${id}"]||{}).till, (OWNERS["${id}"]||{}).name,
+    (allCrabs().find(k => k.p.name === "${nm}") || { p: {} }).p.owner,
+    (allCrabs().find(k => k.p.name === "${nm}") || { p: {} }).p.job,
+    forSale("showers"), bizStrike.showers, BIZ.showers.autoLabor])`));
+  if (o[0] !== id) return "the new owner's lease was lost: " + JSON.stringify(o);
+  if (o[1] !== till) return "the new owner's till came back as $" + o[1] + ", was $" + till;
+  if (o[2] !== nm) return "the registry name was lost: " + o[2];
+  if (o[3] !== id || o[4] !== "showers") return "the owner-operator did not come back as the owner: " + JSON.stringify(o);
+  if (o[5] !== false) return "a sold shop reloaded as still for sale";
+  if (o[6] !== 2) return "the strike ledger was lost: " + o[6];
+  if (o[7] !== true) return "the new owner's auto-manage flag was lost";
+  // ...and the town keeps running on the loaded state
+  b2.runDays(b2.G("day") + 1, KEEP);
+  if (b2.G("BIZ.showers.owner") !== id) return "the loaded town lost the owner within a day";
+
+  // ARM 3: the player's own purchase, and an OLD save with none of this
+  const st3 = new Map();
+  const c = createSim({ seed: 69, storage: st3, fresh: false });
+  c.runDays(2);
+  c.G('listForSale("showers", "bankrupt"); coins = 4000; saleArm = "showers"; tapSaleChip("showers"); save();');
+  if (c.G("BIZ.showers.owner") !== "player") return "the player's purchase did not take";
+  const c2 = createSim({ seed: 70, storage: st3, fresh: false });
+  const pl = JSON.parse(c2.G('JSON.stringify([BIZ.showers.owner, !!BIZ.showers.bought, bizUnlocked("showers"), ownedBizList().includes("showers")])'));
+  if (pl[0] !== "player" || !pl[1] || !pl[2] || !pl[3])
+    return "the player's bought business did not roundtrip: " + JSON.stringify(pl);
+  const raw = JSON.parse(st3.get(SLOT1));
+  delete raw.owners; delete raw.bizOwner; delete raw.bizBought; delete raw.market;
+  delete raw.bizTake; delete raw.bizStrike;
+  st3.set(SLOT1, JSON.stringify(raw));
+  const c3 = createSim({ seed: 71, storage: st3, fresh: false });
+  const old = JSON.parse(c3.G('JSON.stringify([BIZ.showers.owner, Object.keys(market).length, forSale("showers")])'));
+  return old[0] === "sudsy" && old[1] === 0 && old[2] === false
+    ? true : "an old save did not open with SUDSY behind her own counter: " + JSON.stringify(old);
 });
 
 // ---- runner

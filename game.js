@@ -196,27 +196,42 @@ function staffMealCharge(b, r) {   // what a selfCooking staffer rings up
 //   shack/biz rents (nightly)      owner till  -> DESTROYED (Mr. Pincherton)
 // Crew wallets are fed only by wages; every sink above must keep the
 // steady-state wallet bounded (see suite: "no wallet inflation").
+// OWNERS is a REGISTRY, not a fixture: peer owners are added when a crab buys
+// a business and BIZ[k].owner is the key into it. `owner: null` means NOBODY
+// owns that business - it is closed and on the market (see the business
+// failure & succession block below).
 const OWNERS = { sudsy: { id: "sudsy", name: "SUDSY", till: 200, credit: 0, darkT: 0 } };
-const bizOwner = (b) => BIZ[b].owner || "player";
-function ownerFunds(b) { return bizOwner(b) === "player" ? coins : OWNERS[bizOwner(b)].till; }
+const bizOwner = (b) => BIZ[b].owner === null ? null : (BIZ[b].owner || "player");
+function ownerFunds(b) {
+  const o = bizOwner(b);
+  return o === "player" ? coins : o && OWNERS[o] ? OWNERS[o].till : 0;   // an unowned shop has no till
+}
 function bizDayBook(b) {   // today's per-business takings/costs (management screen + CPU policy signals)
   return today.biz[b] = today.biz[b] || { take: 0, cost: 0 };
 }
 function creditBiz(b, amt, x, y) {
+  const o = bizOwner(b);
+  if (!o) return;                          // a shuttered shop takes no money
   bizDayBook(b).take += amt;
-  if (bizOwner(b) === "player") { today.revenue += amt; earn(amt, x, y); }
+  if (o === "player") { today.revenue += amt; earn(amt, x, y); }
   else {
-    OWNERS[bizOwner(b)].till += amt;
+    OWNERS[o].till += amt;
     popText("+$" + Math.floor(amt), x, y, [150, 210, 255]);
     if (window._stats) window._stats.npcEarn = (window._stats.npcEarn || 0) + amt;
   }
 }
 function debitBiz(b, amt, x, y, label) {
+  const o = bizOwner(b);
+  if (!o) return;                          // ...and pays no bills
   bizDayBook(b).cost += amt;
-  if (bizOwner(b) === "player") expense(amt, x, y, label);
-  else OWNERS[bizOwner(b)].till -= amt;
+  if (o === "player") expense(amt, x, y, label);
+  else OWNERS[o].till -= amt;
 }
-const bizUnlocked = (b) => b === "shack" || bizOwner(b) !== "player"
+// "unlocked" = this lot exists in the world at all. A business the player
+// BOUGHT off the market carries `bought` (there is no shop-grid upgrade rung
+// behind it), and one that is FOR SALE stays in the world - shuttered, with a
+// sign - because a closed shop is still a building.
+const bizUnlocked = (b) => b === "shack" || !!BIZ[b].bought || bizOwner(b) !== "player"
   || !!(UPS[b] && UPS[b].lvl > 0);
 
 // ---------------------------------------------------------------- cpu owner hours policy
@@ -264,7 +279,7 @@ function trackCloseQueues() {     // the moment a shop's hours end, count who wa
 }
 function runHoursPolicy(b) {      // one NPC owner reads the day's signals at settlement
   const cfg = HOURS_POLICY[b];
-  if (!cfg || window._noHoursPolicy) return;
+  if (!cfg || window._noHoursPolicy || forSale(b)) return;
   const st = hoursPolicyState[b] = hoursPolicyState[b] || { hist: [], cd: 0 };
   const obs = hoursObs[b] || { first: 0, last: 0, closeQ: 0 };
   hoursObs[b] = { first: 0, last: 0, closeQ: 0 };
@@ -313,7 +328,11 @@ const CREDIT_CFG = {
   MIN_BASE: 12,        // ...plus a floor - proportional, so small debts don't crush a growing town
   WARN_DAYS: 4,        // forecast horizon that fires the bankruptcy toast
   CHIP_DAYS: 6,        // forecast horizon that shows the warning chip
-  NPC_DARK_NIGHTS: 2,  // NPC bankruptcy: shop shuttered this many nights
+  NPC_DARK_NIGHTS: 2,  // LEGACY: peer bankruptcy used to shutter a shop for two
+                       // nights and write the debt off - a zombie that closed
+                       // and reopened forever. It now CLOSES and goes up for
+                       // sale (see SALE_CFG). Kept only so a save taken
+                       // mid-dark loads and its timer still runs out.
 };
 // ==========================================================================
 let credit = { bal: 0, warned: false };   // the player's line (NPCs: OWNERS[o].credit)
@@ -325,7 +344,7 @@ let bankrupt = false;                     // gameOver flavor: the bank, not the 
 // (obligations missed with the line exhausted); funds are left untouched.
 function creditLimit() { return CREDIT_CFG.LIMIT + CREDIT_CFG.LIMIT_PER_CREW * Math.max(0, crabs.length - 2); }
 function settleCreditLine(bal, funds, due) {
-  const r = { bal, funds, drew: 0, interest: 0, paid: 0, ok: true };
+  const r = { bal, funds, drew: 0, interest: 0, paid: 0, ok: true, missedMin: false };
   if (r.bal > 0) { r.interest = Math.ceil(r.bal * CREDIT_CFG.RATE); r.bal += r.interest; }
   const minDue = r.bal > 0 ? Math.min(r.bal, r.interest + Math.ceil((r.bal - r.interest) * CREDIT_CFG.MIN_FRAC) + CREDIT_CFG.MIN_BASE) : 0;
   if (r.funds < due) {
@@ -336,8 +355,14 @@ function settleCreditLine(bal, funds, due) {
   r.funds -= due;
   if (minDue > 0) {
     if (r.funds >= minDue) { r.funds -= minDue; r.bal -= minDue; r.paid = minDue; }
-    else if (creditLimit() - r.bal < minDue) r.ok = false;   // missed + exhausted
-    // else: payment missed but headroom remains - the balance just compounds
+    else {
+      // missedMin is REPORTED, never acted on here: the player's cliff is
+      // unchanged (ok:false), but a peer owner's business failure counts
+      // these misses (see noteLeaseMiss) - repeated misses, not one bad night
+      r.missedMin = true;
+      if (creditLimit() - r.bal < minDue) r.ok = false;   // missed + exhausted
+      // else: payment missed but headroom remains - the balance just compounds
+    }
   }
   return r;
 }
@@ -346,7 +371,8 @@ function creditDueTonight() {   // cash the bank will auto-collect at 20:00
   const int2 = Math.ceil(credit.bal * CREDIT_CFG.RATE);
   return Math.min(credit.bal + int2, int2 + Math.ceil(credit.bal * CREDIT_CFG.MIN_FRAC) + CREDIT_CFG.MIN_BASE);
 }
-function bizDark(b) {   // an NPC shop shuttered by the bank after a bankruptcy
+function bizDark(b) {   // shut: nobody owns it, or (legacy saves) a dark-night timer is running
+  if (forSale(b)) return true;
   const o = OWNERS[bizOwner(b)];
   return !!(o && (o.darkT || 0) > 0);
 }
@@ -393,6 +419,230 @@ function updateBankWarning() {
     if (window._stats && window._stats.chipDay == null) window._stats.chipDay = day;
   } else if (bankHorizon > CREDIT_CFG.WARN_DAYS + 2) credit.warned = false;   // re-arm after real recovery
   if (bankHorizon <= CREDIT_CFG.CHIP_DAYS && window._stats && window._stats.chipDay == null) window._stats.chipDay = day;
+}
+
+// ------------------------------------------- business failure & succession
+// A business that cannot service its obligations no longer limps on as a
+// zombie (dark two nights, debt forgiven, repeat forever). It FAILS, CLOSES,
+// goes UP FOR SALE, and CHANGES HANDS.
+//
+// FAILURE is defined out of the credit machinery that was already here: each
+// settlement, a lease whose minimum payment is missed - or whose bill cannot
+// even be drawn on the line - is a STRIKE against that business. SALE_CFG
+// .STRIKES in a row (they reset the moment a night settles clean) and the
+// shutters go up. One bad night is not a failure; three in a row is.
+//
+// Everything here is DATA, never a special case for SUDSY: BIZ[k].owner keys
+// into the OWNERS registry, `null` means nobody owns it, and a new owner is
+// simply a new registry entry. So this supports an owner changing, an owner
+// with two businesses (one till, two leases, strikes counted per lease), an
+// owner with none (they lost it - the pier and the job board are their
+// livelihood, same as any crab), and - the death seam - an owner who is no
+// longer in the town at all: runSuccession sweeps their business onto the
+// market rather than leaving it orphaned.
+const SALE_CFG = {
+  STRIKES: 3,          // missed settlements in a row before the shutters go up
+  RENT_NIGHTS: 3,      // asking price: the landlord wants this many nights up front...
+  FIXTURE: 15,         // ...plus this per fixture (every station spot, stall and table)...
+  GOODWILL_DAYS: 2,    // ...plus this many days of what the place has been taking
+  FLOAT_FRAC: 0.5,     // half the price becomes the new owner's opening till
+  RESERVE: 30,         // ...and a buyer keeps 3 nights of house rent back: nobody buys their way onto a cot
+};
+let market = {};       // bizKey -> { price, day, why } - the live FOR SALE listings (persisted)
+let bizTake = {};      // bizKey -> the last 3 days' takings (persisted; the goodwill half of a price)
+let bizStrike = {};    // bizKey -> consecutive missed settlements (persisted)
+function forSale(b) { return !!BIZ[b] && BIZ[b].owner === null; }
+function saleList() { return Object.keys(BIZ).filter(forSale); }
+// the BUY chip on a shuttered shopfront - the same "the sign is the owner's
+// office door" idiom the MANAGE chip uses. One geometry function so the draw
+// and the hit-test can never drift apart; fixed width so the label can change.
+let saleArm = null, saleArmT = 0;   // two-tap confirm: a business is not a misclick
+function saleChipRect(b) {
+  const w = 42, z = BIZ[b];
+  return { x: Math.round((z.x0 + z.x1) / 2 - w / 2), y: 133, w, h: 11 };
+}
+// THE PLAYER'S BUY PATH, whole. The world click handler only decides WHICH
+// chip was hit and hands over to this - so the suite drives exactly the code
+// a tap drives, with nothing forked into tools/.
+function tapSaleChip(b) {
+  if (!forSale(b)) return false;
+  const price = salePrice(b);
+  if (coins < price) {
+    toast = { text: "YOU CAN'T COVER $" + fmt(price) + " FOR " + BIZ[b].name, t: 5 };
+    if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+    return false;
+  }
+  if (saleArm !== b) {   // a business is not a misclick: arm, then confirm
+    saleArm = b; saleArmT = 3.5;
+    toast = { text: "TAP AGAIN TO BUY " + BIZ[b].name + " FOR $" + fmt(price), t: 4 };
+    if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+    return false;
+  }
+  saleArm = null; saleArmT = 0;
+  const ok = buyBusiness(b, null);
+  if (ok) save();
+  return ok;
+}
+function bizFixtures(b) {
+  const z = BIZ[b];
+  let n = 0;
+  for (const k in z.stations) n += z.stations[k].length;
+  return n + (z.stalls || []).length + ((bizTables(b) || []).length);
+}
+// The asking price, every term of it legible on the sign: the LEASE
+// (RENT_NIGHTS nights of rent up front), the FIXTURES (every station spot,
+// stall and table at SALE_CFG.FIXTURE apiece) and GOODWILL (what the shop has
+// genuinely been taking, from the day book - not a guess). Fixed at listing
+// time: a shop sitting dark for a fortnight doesn't get cheaper, because what
+// you are buying is the lease and the kit.
+function askingPrice(b) {
+  const h = bizTake[b] || [];
+  const avg = h.length ? h.reduce((s, v) => s + v, 0) / h.length : 0;
+  return Math.max(BIZ[b].rent * 2, Math.round(
+    BIZ[b].rent * SALE_CFG.RENT_NIGHTS + bizFixtures(b) * SALE_CFG.FIXTURE
+    + avg * SALE_CFG.GOODWILL_DAYS));
+}
+function salePrice(b) { return market[b] ? market[b].price : askingPrice(b); }
+// Out of a job, not out of the simulation. The pier is the town's default
+// profession and the job board is the way back off it - a laid-off crab still
+// pays their $10 house rent tonight, and climbs (or slips) the same ladder
+// everyone else does.
+function layOff(k) {
+  abortChef(k); abortErrand(k);
+  k.duty = false; k.pendingOff = false; k.kstate = "idle"; k.carrying = null;
+  k.dayState = "home"; k.cstate = "";
+  k.p.employer = null; k.p.owner = null; k.p.ot = false;
+  if (k.p.npc) {
+    k.p.job = "fishing"; k.workBiz = "fishing"; k.p.fisher = true;
+    k.fishSpot = k.p.boat != null ? boatSpot(k.p.boat)
+      : fishSpotFor(npcs.filter(x => x.p.fisher && x !== k).length);
+  } else {
+    k.p.job = "shack"; k.workBiz = "shack";   // your crew come back to your kitchen
+  }
+}
+// THE SHUTTERS GO UP. Staff (and the owner-operator, who is staff too) are
+// laid off, the postings die with the shop, and the lot stands in the world
+// wearing a FOR SALE sign until somebody can afford it.
+function listForSale(b, why) {
+  if (!BIZ[b] || forSale(b) || bizOwner(b) === "player") return false;   // the player's own failure is BANKRUPT, not a sale
+  const o = OWNERS[bizOwner(b)];
+  const price = askingPrice(b);
+  const laid = [];
+  for (const k of allCrabs().slice()) {
+    if (k.p.job !== b && !(o && k.p.employer === o.id)) continue;
+    layOff(k);
+    laid.push(k.p.name);
+  }
+  BIZ[b].owner = null;
+  BIZ[b].autoLabor = false;
+  bizStrike[b] = 0;
+  market[b] = { price, day, why: why || "bankrupt" };
+  jobBoard = jobBoard.filter(j => j.biz !== b);
+  const who = o ? o.name : "THE OWNER";
+  toast = { text: BIZ[b].name + " HAS CLOSED - FOR SALE, $" + price, t: 8 };
+  today.moved.push(BIZ[b].short + " CLOSED - FOR SALE $" + price);
+  if (laid.length) today.moved.push(laid.join(", ") + " LAID OFF - BACK TO THE PIER");
+  popText("FOR SALE $" + price, (BIZ[b].x0 + BIZ[b].x1) / 2 - 20, 100, [255, 190, 90]);
+  if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+  if (window._stats) (window._stats.closures = window._stats.closures || [])
+    .push({ day, biz: b, price, why: why || "bankrupt", owner: who, laid: laid.slice() });
+  return true;
+}
+// a strike, or the third strike. Returns true when the shop closed tonight.
+function noteLeaseMiss(b, o) {
+  const n = bizStrike[b] = (bizStrike[b] || 0) + 1;
+  if (n >= SALE_CFG.STRIKES) return listForSale(b, "bankrupt");
+  const left = SALE_CFG.STRIKES - n;
+  toast = { text: (o ? o.name : "THE OWNER") + " MISSED THE " + BIZ[b].short + " RENT - "
+    + left + " NIGHT" + (left === 1 ? "" : "S") + " TO PUT IT RIGHT", t: 6 };
+  today.moved.push((o ? o.name : "THE OWNER") + " MISSED RENT (" + n + "/" + SALE_CFG.STRIKES + ")");
+  return false;
+}
+// a stable registry key for a crab-turned-owner (never "player")
+function ownerIdFor(c) {
+  let id = String(c.p.name).toLowerCase().replace(/[^a-z0-9]/g, "") || "owner";
+  if (id === "player") id = "owner" + id;
+  // a recycled name must not inherit a dead owner's till
+  if (OWNERS[id] && !allCrabs().some(k => k.p.owner === id)
+      && !Object.keys(BIZ).some(b => bizOwner(b) === id)) delete OWNERS[id];
+  return id;
+}
+// SUCCESSION. `buyer` is a crab, or null for the player buying through the
+// shopfront. The price is paid out of savings; SALE_CFG.FLOAT_FRAC of it
+// becomes the shop's OPENING TILL (stock, soap, change in the drawer) and the
+// remainder is the lease transfer Mr. Pincherton pockets - destroyed, exactly
+// like rent, so no money is ever minted here. For the player the two pots are
+// one (their till IS `coins`), so the float never leaves their pocket and
+// their real cost is the lease transfer - they must still HOLD the full
+// asking price to sign.
+function buyBusiness(b, buyer) {
+  if (!forSale(b)) return false;
+  const price = salePrice(b), float = Math.floor(price * SALE_CFG.FLOAT_FRAC);
+  let who;
+  if (!buyer) {
+    if (coins < price) return false;
+    coins -= price - float;
+    BIZ[b].owner = "player"; BIZ[b].bought = true; BIZ[b].autoLabor = false;
+    who = "YOU";
+  } else {
+    if (buyer.p.wallet < price + SALE_CFG.RESERVE) return false;
+    buyer.p.wallet -= price;
+    const id = ownerIdFor(buyer);
+    OWNERS[id] = OWNERS[id] || { id, name: buyer.p.name, till: 0, credit: 0, darkT: 0 };
+    OWNERS[id].till += float;
+    BIZ[b].owner = id;
+    BIZ[b].autoLabor = true;    // a peer owner runs the same policy table SUDSY does
+    if (!buyer.p.owner) {       // their FIRST shop: an owner-operator behind their own counter
+      abortChef(buyer); abortErrand(buyer);
+      buyer.p.owner = id; buyer.p.job = b; buyer.p.employer = null; buyer.p.shift = "D";
+      buyer.duty = false; buyer.pendingOff = false; buyer.kstate = "idle";
+      buyer.carrying = null; buyer.dayState = "home"; buyer.cstate = "";
+      buyer.workBiz = b; buyer.fishSpot = null;
+    }
+    who = buyer.p.name;
+  }
+  delete market[b];
+  bizStrike[b] = 0;
+  toast = { text: who + " BOUGHT " + BIZ[b].name + " FOR $" + price + "!", t: 8 };
+  today.moved.push(who + " BOUGHT " + BIZ[b].short + " ($" + price + ")");
+  popText("UNDER NEW OWNERSHIP", (BIZ[b].x0 + BIZ[b].x1) / 2 - 30, 100, [140, 255, 160]);
+  if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+  if (window._stats) (window._stats.sales = window._stats.sales || [])
+    .push({ day, biz: b, price, buyer: who, float });
+  return true;
+}
+// One pass at settlement: book the day's takings (they are the goodwill in
+// tomorrow's asking prices), sweep up any business whose owner is no longer
+// in the town, and let the market clear.
+function runSuccession() {
+  for (const b of Object.keys(BIZ)) {
+    const h = bizTake[b] = bizTake[b] || [];
+    h.push(Math.round(((today.biz || {})[b] || {}).take || 0));
+    if (h.length > 3) h.shift();
+  }
+  // THE DEATH SEAM (kept deliberately small): an owner who has left the town -
+  // dead, or gone any other way - leaves a business, not an orphan. Nobody
+  // holds the key, so the lot goes on the market on the same terms as a
+  // failure, and the same buyers turn up.
+  for (const b of Object.keys(BIZ)) {
+    const oid = bizOwner(b);
+    if (!oid || oid === "player") continue;
+    if (!allCrabs().some(k => k.p.owner === oid)) listForSale(b, "gone");
+  }
+  // ...and the market clears. ANY crab with the savings can take a shop on -
+  // a fisher who has been saving for a boat can buy a shower house instead
+  // and become an owner-operator. The deepest pocket signs; a buyer who
+  // already owns a shop simply adds a second lease to the same till. (The
+  // player's own crew are under contract with the player and are not in the
+  // pool - the player buys through the shopfront themselves.)
+  for (const b of saleList()) {
+    const price = salePrice(b);
+    const cands = allCrabs().filter(k => k.p.npc && !k.p.sick
+      && k.p.wallet >= price + SALE_CFG.RESERVE);
+    if (!cands.length) continue;
+    cands.sort((a, c2) => c2.p.wallet - a.p.wallet || (a.p.name < c2.p.name ? -1 : 1));
+    buyBusiness(b, cands[0]);
+  }
 }
 
 // ---------------------------------------------------------------- clock
@@ -646,7 +896,7 @@ function coverGapTomorrow(b) {
 }
 function runLaborPolicy(b) {
   if (!BIZ[b] || !BIZ[b].autoLabor || window._noLaborPolicy) return;
-  if (b === "fishing") return;
+  if (b === "fishing" || forSale(b)) return;   // nobody manages a shuttered shop
   const st = laborPolicyState[b] = laborPolicyState[b] || { cd: 0 };
   if (st.cd > 0) { st.cd--; return; }
   const roster = allCrabs().filter(k => k.p.job === b);
@@ -1252,6 +1502,14 @@ function save() {
     npc: { tills: { sudsy: OWNERS.sudsy.till },
       credit: { sudsy: { bal: OWNERS.sudsy.credit || 0, darkT: OWNERS.sudsy.darkT || 0 } },
       personas: npcs.map(c => c.p) },
+    // OWNERSHIP IS DATA: the whole owner registry, who holds which lease, what
+    // the player has bought off the market, and the live FOR SALE listings
+    owners: (() => { const m = {}; for (const k in OWNERS) m[k] = { name: OWNERS[k].name,
+      till: Math.round(OWNERS[k].till || 0), credit: Math.round(OWNERS[k].credit || 0),
+      darkT: OWNERS[k].darkT || 0 }; return m; })(),
+    bizOwner: (() => { const m = {}; for (const k in BIZ) m[k] = bizOwner(k); return m; })(),
+    bizBought: (() => { const m = {}; for (const k in BIZ) if (BIZ[k].bought) m[k] = true; return m; })(),
+    market, bizTake, bizStrike,
     board: jobBoard, hireDay, trade, sudsRefund: sudsRefunded, firstPour,
     musicOn, musNudges,
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
@@ -1301,6 +1559,36 @@ function load(slot) {
     const base = makeCrabPersona(i);
     return newCrab(Object.assign(base, p2));   // missing fields fall back to sane defaults
   });
+  // OWNERSHIP first: the personas below carry p.owner, and those ids have to
+  // resolve into the registry. Old saves have none of this - the defaults
+  // above (SUDSY owns the showers, the player owns the rest) ARE the old world.
+  if (s.owners) for (const k in s.owners) {
+    const so = s.owners[k];
+    if (!so || typeof so !== "object" || k === "player") continue;
+    OWNERS[k] = { id: k, name: String(so.name || k).toUpperCase().slice(0, 12),
+      till: Math.max(0, Math.round(+so.till || 0)), credit: Math.max(0, Math.round(+so.credit || 0)),
+      darkT: Math.max(0, Math.min(9, +so.darkT || 0)) };
+  }
+  if (s.bizOwner) for (const b in s.bizOwner) {
+    if (!BIZ[b]) continue;
+    const o2 = s.bizOwner[b];
+    if (o2 === null) BIZ[b].owner = null;                      // was on the market when they saved
+    else if (o2 === "player" || OWNERS[o2]) BIZ[b].owner = o2;  // an unknown id would strand the lot: keep the default
+  }
+  if (s.bizBought) for (const b in s.bizBought) if (BIZ[b]) BIZ[b].bought = !!s.bizBought[b];
+  bizTake = {};
+  if (s.bizTake) for (const b in s.bizTake) if (BIZ[b] && Array.isArray(s.bizTake[b]))
+    bizTake[b] = s.bizTake[b].slice(-3).map(v => Math.max(0, Math.round(+v || 0)));
+  market = {};
+  if (s.market) for (const b in s.market) {
+    const m2 = s.market[b];
+    if (!BIZ[b] || !m2 || !forSale(b)) continue;   // a listing only means anything for an unowned lot
+    market[b] = { price: Math.max(1, Math.round(+m2.price || 0)) || askingPrice(b),
+      day: Math.max(1, Math.round(+m2.day || 1)), why: String(m2.why || "bankrupt").slice(0, 12) };
+  }
+  bizStrike = {};
+  if (s.bizStrike) for (const b in s.bizStrike) if (BIZ[b])
+    bizStrike[b] = Math.max(0, Math.min(SALE_CFG.STRIKES - 1, Math.round(+s.bizStrike[b] || 0)));
   if (s.npc) {
     if (s.npc.tills && s.npc.tills.sudsy != null) OWNERS.sudsy.till = s.npc.tills.sudsy;
     if (s.npc.credit && s.npc.credit.sudsy) {
@@ -3229,6 +3517,15 @@ cv.addEventListener("click", (ev) => {
   if (wx >= JOB_BOARD_X - 2 && wx < JOB_BOARD_X + 28 && p.y >= HOME_BOTTOM - 40 && p.y < HOME_BOTTOM + 4) {
     boardView = true; sfx.ding(); return;
   }
+  // a shuttered shop's BUY chip: the player takes a failed business on through
+  // the same shopfront the MANAGE chip lives on. Two taps - $200-odd is not a
+  // misclick - and every refusal says why.
+  for (const b of saleList()) {
+    const r = saleChipRect(b);
+    if (wx >= r.x - 3 && wx <= r.x + r.w + 3 && p.y >= r.y - 2 && p.y < r.y + r.h + 2) {
+      tapSaleChip(b); return;
+    }
+  }
   // a player-owned shop's sign (and its MANAGE chip) is the owner's office door
   for (const b of ownedBizList()) {
     const bz = BIZ[b], signW = textWidth(bz.sign) + 14;
@@ -3546,7 +3843,25 @@ function drawBusiness(key) {
     if (mx - camX > -mw && mx - camX < W)
       smallText(ctx, "MANAGE", mx + 3 - camX, 107, [255, 255, 255]);
   }
-  if (!bizOpenNow(key)) {
+  if (forSale(key)) {
+    // THE SHUTTERS: boards nailed across the shopfront, and the sign that
+    // makes the opportunity legible from the street - price and all.
+    for (let i = 0; i < 3; i++) {
+      wrect(b.x0 + 5, 130 + i * 11, b.x1 - b.x0 - 10, 3, [176, 132, 84]);
+      wrect(b.x0 + 5, 133 + i * 11, b.x1 - b.x0 - 10, 1, [128, 92, 56]);
+    }
+    const price = salePrice(key), lbl = "FOR SALE  $" + fmt(price);
+    const pw = textWidth(lbl) + 12, px = (b.x0 + b.x1) / 2 - pw / 2;
+    wrect(px, 118, pw, 13, [30, 20, 36]);
+    wrect(px + 1, 119, pw - 2, 11, [255, 244, 210]);
+    if (px + pw - camX > 0 && px - camX < W)
+      text(ctx, lbl, px + 6 - camX, 121, [180, 60, 40]);
+    const r = saleChipRect(key), armed = saleArm === key;
+    wrect(r.x, r.y, r.w, r.h, [30, 20, 36]);
+    wrect(r.x + 1, r.y + 1, r.w - 2, r.h - 2, coins >= price ? (armed ? [255, 200, 90] : [96, 200, 120]) : [150, 140, 140]);
+    if (r.x - camX > -r.w && r.x - camX < W)
+      smallText(ctx, armed ? "TAP AGAIN" : "BUY IT", r.x + 4 - camX, r.y + 3, [30, 20, 36]);
+  } else if (!bizOpenNow(key)) {
     wrect(signX + signW / 2 - 23, 118, 46, 11, [30, 20, 36]);
     text(ctx, "CLOSED", signX + signW / 2 - 18 - camX, 120, [255, 120, 120]);
   } else if (bizRestingToday(key)) {
@@ -4364,7 +4679,10 @@ function drawManage() {
         : b.mealPol === "atcost" ? "CREW PAY ONLY THE INGREDIENTS"
         : "ON THE HOUSE - THE TILL EATS THE COST", R.meal.x + 4, R.meal.y + R.meal.h + 2, [110, 100, 110]);
     }
-    smallText(ctx, "ROSTER + OT + SICK DAYS: SEE THE SCHEDULE TAB", x + 8, y + h2 - 26, [150, 140, 160]);
+    const sale0 = saleList()[0];
+    smallText(ctx, sale0 ? "FOR SALE: " + BIZ[sale0].name + " $" + fmt(salePrice(sale0)) + " - TAP ITS SIGN"
+      : "ROSTER + OT + SICK DAYS: SEE THE SCHEDULE TAB", x + 8, y + h2 - 26,
+      sale0 ? [180, 60, 40] : [150, 140, 160]);
   } else if (manageTab === "SCHEDULE") {
     const auto = !!b.autoLabor;
     chip(R.auto, "AUTO-MANAGE " + (auto ? "ON" : "OFF"), null, auto);
@@ -4695,6 +5013,23 @@ function drawJobBoard() {
     smallText(ctx, "HELP WANTED: " + BIZ[j.biz].name, x + 6, ly, [40, 30, 40]); ly += 7;
     smallText(ctx, "$" + j.wage + "/DAY - SEE " + OWNERS[bizOwner(j.biz)].name + (day > j.day ? " (STILL OPEN)" : ""), x + 12, ly, [140, 110, 40]); ly += 9;
   }
+  {   // BUSINESSES FOR SALE: the board carries the town's opportunities, not
+      // just its vacancies. Price, why it closed, and how long it has stood
+      // empty - a shop nobody can afford stays here until somebody can.
+    const sale = saleList();
+    if (sale.length) {
+      ly += 2; smallText(ctx, "BUSINESS FOR SALE", x + 6, ly, [58, 42, 38]); ly += 8;
+      for (const b of sale.slice(0, 2)) {
+        const m2 = market[b] || { day, why: "closed" };
+        smallText(ctx, BIZ[b].name + " - $" + fmt(salePrice(b)), x + 6, ly, [180, 60, 40]); ly += 7;
+        const days = Math.max(0, day - (m2.day || day));
+        smallText(ctx, (m2.why === "gone" ? "NO OWNER" : "CLOSED, RENT UNPAID")
+          + " - " + (days === 0 ? "LISTED TODAY" : days + " DAY" + (days === 1 ? "" : "S") + " ON THE MARKET"),
+          x + 12, ly, [140, 110, 40]); ly += 7;
+        smallText(ctx, "ANY CRAB WITH THE SAVINGS CAN TAKE IT ON", x + 12, ly, [110, 110, 130]); ly += 9;
+      }
+    }
+  }
   {
     ly += 2; smallText(ctx, "TRADE LEDGER, TODAY / ALL TIME", x + 6, ly, [58, 42, 38]); ly += 8;
     smallText(ctx, "FISH LANDED OFF THE PIER", x + 6, ly, [40, 150, 70]);
@@ -4794,6 +5129,7 @@ function frame(now) {
   const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
   last = now; time += dt;
   if (saveConfirmT > 0) { saveConfirmT -= dt; if (saveConfirmT <= 0) saveConfirm = null; }
+  if (saleArmT > 0) { saleArmT -= dt; if (saleArmT <= 0) saleArm = null; }
   if (saveMsg && saveMsg.t > 0) { saveMsg.t -= dt; if (saveMsg.t <= 0) saveMsg = null; }
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
@@ -4919,26 +5255,29 @@ function frame(now) {
       }
     }
     // 2b. peer owners settle their own books on the same line of credit:
-    // shortfalls draw on the line; a busted line shutters the shop (dark)
-    // for CREDIT_CFG.NPC_DARK_NIGHTS nights and the bank writes the debt off
-    // (survivable - NPC bankruptcy is a setback, not a death)
+    // shortfalls draw on the line and interest compounds exactly as it does
+    // for the player. A settlement that misses the minimum (or can't even
+    // draw the night's bill) is a STRIKE against that lease; SALE_CFG.STRIKES
+    // in a row and the business CLOSES and goes up for sale (see the business
+    // failure & succession block). The debt is no longer quietly written off.
     for (const b of Object.keys(BIZ)) {
-      if (bizOwner(b) === "player") continue;
-      const o = OWNERS[bizOwner(b)];
+      const oid = bizOwner(b);
+      if (!oid || oid === "player") continue;
+      const o = OWNERS[oid];
       if (!o || day <= 1) continue;
-      if ((o.darkT || 0) > 0) {
+      if ((o.darkT || 0) > 0) {   // legacy saves only: run the old timer out
         if (--o.darkT === 0) toast = { text: BIZ[b].name + " IS BACK IN BUSINESS", t: 6 };
         continue;
       }
       const nf = settleCreditLine(o.credit || 0, o.till, BIZ[b].rent);
-      if (nf.ok) { o.credit = nf.bal; o.till = nf.funds; }
-      else {
-        o.credit = 0; o.darkT = CREDIT_CFG.NPC_DARK_NIGHTS;
-        today.moved.push(o.name + " WENT BANKRUPT - " + BIZ[b].short + " DARK");
-        toast = { text: o.name + " WENT BANKRUPT! " + BIZ[b].name + " GOES DARK", t: 7 };
-      }
+      o.credit = nf.bal; o.till = Math.max(0, nf.funds);   // interest lands either way; a missed bill stays owed
+      if (nf.ok && !nf.missedMin) bizStrike[b] = 0;        // a clean night wipes the slate
+      else if (noteLeaseMiss(b, o)) continue;              // shutters up: nothing left to manage tonight
       runHoursPolicy(b);   // books settled: the day's demand signals tune tomorrow's hours
     }
+    // the day's takings are booked, empty shops go on the market, and the
+    // market clears - one call, all of it in its own block above
+    runSuccession();
     for (const c of npcs) {
       c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.1);
     }
