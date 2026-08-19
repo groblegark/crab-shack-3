@@ -1041,7 +1041,10 @@ function stepTo(c, tx, speed, dt, ty) {
 // soft-radius separation + station bodies: nobody stands inside anybody
 function collide(dt) {
   const bodies = [];
-  for (const c of allCrabs()) if (!c.hidden && c.cstate !== "drive" && !c.errandCust) bodies.push(c);
+  for (const c of allCrabs()) {
+    c._blocked = false;   // set again below by furniture deflections; read next frame
+    if (!c.hidden && c.cstate !== "drive" && !c.errandCust) bodies.push(c);
+  }
   for (let i = 0; i < bodies.length; i++)
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i], b = bodies[j];
@@ -1078,6 +1081,7 @@ function collide(dt) {
           const push = Math.min(95 * dt, 5);
           if (Math.abs(dx) > Math.abs(dy) * 1.6) c.x += (dx > 0 ? 1 : -1) * push;
           else c.y = clampY(c.y + (dy > -2 ? 1 : -1) * push);
+          c._blocked = true;   // furniture is in the way: the bounce budget ticks
         }
       }
     }
@@ -1099,6 +1103,7 @@ function collide(dt) {
             const push = Math.min(95 * dt, 5);   // stable at fast-forward
             if (Math.abs(dx) > Math.abs(dy) * 1.6) c.x += (dx > 0 ? 1 : -1) * push;
             else c.y = clampY(c.y + (dy > -2 ? 1 : -1) * push);
+            c._blocked = true;
           }
         }
       }
@@ -1774,6 +1779,13 @@ const STUCK_DIST = 2;       // "no progress" = net displacement under this many 
 const STUCK_FAR = 8;        // only when genuinely underway (target further than this)
 const STUCK_RETRIES = 4;    // sidesteps before giving up with a quip
 const DETOUR_T = 1.0;       // seconds each sidestep waypoint lives
+// Matt's last-resort valve, on a different clock from the sidestep watchdog:
+// a trip may spend at most this many GAME-minutes bouncing off furniture in
+// total, then the crab squeezes past ("it's cute for ten minutes; all day is
+// terrible"). The sidestep breaks pins in real-seconds; this caps a whole
+// trip's bounce budget.
+const BOUNCE_BUDGET = 30;   // game minutes of obstruction per trip
+const WARP_PX = 14;         // a shell's width past the blocker, no more
 function updateStuck(c, dt) {
   if (c.detour) {   // sidestep in progress: steer for the waypoint, then resume
     c.detour.t -= dt;
@@ -1784,7 +1796,17 @@ function updateStuck(c, dt) {
   }
   const walking = c._stepped && !c.hidden && !c.errandCust &&
     Math.abs((c._mx != null ? c._mx : c.x) - c.x) > STUCK_FAR;
-  if (!walking) { c.stuckT = 0; c.stuckRef = null; c.stuckN = 0; return; }
+  if (!walking) { c.stuckT = 0; c.stuckRef = null; c.stuckN = 0; c.bounceT = 0; return; }
+  // bounce budget: count the game-minutes this trip has spent not getting there
+  if (c._blocked) c.bounceT = (c.bounceT || 0) + dt * TS;
+  if ((c.bounceT || 0) >= BOUNCE_BUDGET) {
+    c.bounceT = 0; c.stuckT = 0; c.stuckRef = null; c.stuckN = 0; c.detour = null;
+    const dir2 = Math.sign((c._mx != null ? c._mx : c.x) - c.x) || 1;
+    c.x += dir2 * WARP_PX;   // squeeze through, a shell's width
+    c.quip = { text: "EXCUSE ME", t: 1.8 };
+    if (window._stats) window._stats.warps = (window._stats.warps || 0) + 1;
+    return;
+  }
   if (!c.stuckRef) { c.stuckRef = { x: c.x, y: c.y }; c.stuckT = 0; return; }
   c.stuckT += dt;
   if (Math.hypot(c.x - c.stuckRef.x, c.y - c.stuckRef.y) >= STUCK_DIST) {
@@ -3633,8 +3655,17 @@ function frame(now) {
       if (c.p.homeless) {
         // shelter is free; move into a free house once savings allow
         const used = new Set(allCrabs().filter(k => !k.p.homeless).map(k => k.p.house));
-        let free = -1;
-        for (let h = 0; h < HOUSE_XS.length; h++) if (!used.has(h)) { free = h; break; }
+        // nobody rents the far end of town from their own job: take the free
+        // lot CLOSEST to where you work. (Fishers were buying the promenade -
+        // 1400px from the pier - then spending the week commuting, earning
+        // nothing, and losing the house again. The beach cottages exist.)
+        let free = -1, bestD = Infinity;
+        const door = jobDoor(c);
+        for (let h = 0; h < HOUSE_XS.length; h++) {
+          if (used.has(h)) continue;
+          const d = Math.abs(HOUSE_XS[h] - door);
+          if (d < bestD) { bestD = d; free = h; }
+        }
         if (free >= 0 && c.p.wallet >= MOVE_IN_COST + HOUSE_RENT) {
           c.p.wallet -= MOVE_IN_COST; c.p.house = free; c.p.homeless = false;
           today.moved.push(c.p.name + " GOT A HOUSE");
@@ -3659,6 +3690,26 @@ function frame(now) {
         sfx.ding();
       } else if (c.p.wallet >= HOUSE_RENT) {
         c.p.wallet -= HOUSE_RENT;
+        // careers move; so do crabs. A housed crab whose job has drifted far
+        // from their door takes a much-closer empty lot when they can cover
+        // the move (a quit fisher shouldn't keep the promenade forever)
+        // no deposit on a lateral move - you keep your tenancy, you just swap
+        // lots. Charging it again would trap the poorest crabs in the exact
+        // long commute that keeps them poor.
+        if (c.p.boat == null) {
+          const door2 = jobDoor(c), used2 = new Set(allCrabs().filter(k => !k.p.homeless).map(k => k.p.house));
+          let near = -1, nearD = Math.abs(HOUSE_XS[c.p.house] - door2) - 400;   // only for a real saving
+          for (let h = 0; h < HOUSE_XS.length; h++) {
+            if (used2.has(h)) continue;
+            const d = Math.abs(HOUSE_XS[h] - door2);
+            if (d < nearD) { nearD = d; near = h; }
+          }
+          if (near >= 0) {
+            c.p.house = near;
+            today.moved.push(c.p.name + " MOVED CLOSER TO WORK");
+            popText("CLOSER TO WORK", HOUSE_XS[near] + 8, 100, [140, 255, 160]);
+          }
+        }
       } else {
         c.p.homeless = true;
         evictedNames.push(c.p.name); today.moved.push(c.p.name + " -> SHELTER");
