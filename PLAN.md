@@ -329,7 +329,20 @@ vm — never fork game logic into tools/) and perf expectations live there.
     (before: 11,11,13,13,14,14,15,16, median 14 — one seed moved a day).
     Growth `--buy chef,table` 40d x 8: **3/8 alive, 7,9,15,20,39,41,41,41**
     (before 4/8, 7,9,15,22,41,41,41,41) — one marginal seed dies on day 39 of
-    40. Documented, not tuned away, per standing policy.
+    40. Documented, not tuned away, per standing policy. **Attributed**, seed
+    5348 (`--seedbase 3`), 40d, before vs after: showers served **83 -> 83**
+    and SUDSY's shop takings **$801.94 -> $801.94, byte-identical** (the shop
+    was already dead by the day-21 closure — it earned everything it was ever
+    going to earn first), but NPC spend at the player's shack
+    **$1555 -> $1191 (-23%)** and tourist serves **763 -> 678**, and the town
+    ends on 2 crew instead of 5. THE MECHANISM: the zombie was a MONEY PUMP.
+    SUDSY's shop pulled ~$800 of outside tourist money in over 40 days and
+    she recycled it into the player's shack as owner draws ($30 at a time);
+    once she is a fisher there is no till to draw from. That pump is worth
+    ~$9/day to a growth town, which on a knife edge is 5 crew vs 2. It is
+    seed-dependent in sign — across 6 seeds the same figure went the other
+    way ($1022 -> $1110), because a laid-off owner who fishes at a good
+    market price can be a BETTER customer than a failing shopkeeper.
   - **Measured knock-on** (6 seeds x 40d, kept-alive chef+table town, before
     vs after): mean dirt across all crabs **0.808 -> 0.809**, showers served
     **91 -> 91**, infections **17.67 -> 17.67**, dirt-caused illness
