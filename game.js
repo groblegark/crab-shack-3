@@ -12108,7 +12108,18 @@ function drawTitle() {
     smallText(ctx, n === 1 ? "1 TOWN SAVED" : n + " TOWNS SAVED", W / 2 - smallTextWidth(n + " TOWNS SAVED") / 2,
       sy + 19, [200, 190, 180]);
   }
-  smallText(ctx, "MUSIC: PIXEL WAVE WALTZ - MATT CLANKER", 14, PANEL_Y + 8, [170, 150, 135]);
+  // THE CREDIT NAMES THE TRACK THAT IS ACTUALLY QUEUED. It was hardcoded to
+  // PIXEL WAVE WALTZ while PLAYLIST rotates TWELVE tracks, so the title screen
+  // credited the wrong piece eleven times in twelve - and it is a credit line
+  // with a musician's name on it, which is the kind of wrong worth fixing
+  // properly rather than trimming.
+  //
+  // It fits on one line: measured, the longest is CARNIVAL OF THE GLITCH at
+  // 175px from x=14, ending at 189 on a 256px screen. (A report of 264px was
+  // measured in the 5x7 font; this call site is 3x5.) fitSmall is still on it,
+  // because the next track somebody adds does not get to break the title.
+  smallText(ctx, fitSmall("MUSIC: " + PLAYLIST[trackIdx].name + " - MATT CLANKER", W - 20),
+    14, PANEL_Y + 8, [170, 150, 135]);
   smallText(ctx, "BUILT ON THE SNESCAT TOY PPU", 44, PANEL_Y + 20, [140, 120, 105]);
 }
 // THE THIRD ENDING. EVICTED and BANKRUPT are the landlord and the bank; this

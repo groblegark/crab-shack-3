@@ -9234,6 +9234,47 @@ scenario("a rival never bids money she does not hold, and accepting always works
   return true;
 });
 
+// ===========================================================================
+// THE MUSIC CREDIT (2026-08-20)
+// ===========================================================================
+
+scenario("the title screen credits the track that is actually queued", () => {
+  // It was hardcoded to PIXEL WAVE WALTZ while PLAYLIST rotates twelve tracks,
+  // so the title credited the wrong piece eleven times in twelve. Inherited
+  // from CS2 and reported by a sibling session.
+  //
+  // Asserted over EVERY track rather than one, because the bug was that one
+  // track happened to be right: a fixture that checked the credit against
+  // PLAYLIST[0] would have passed against the hardcoded string.
+  const sim = createSim({ seed: 1 });
+  const bad = JSON.parse(sim.G(`(() => {
+    const bad = [], S = smallText;
+    const n = PLAYLIST.length;
+    for (let i = 0; i < n; i++) {
+      trackIdx = i;
+      const seen = [];
+      smallText = (c, str, x, y, col, sz) => { seen.push([String(str), x, smallTextWidth(String(str))]); return S(c, str, x, y, col, sz); };
+      screen = "title";
+      try { drawTitle(); } catch (e) { bad.push([PLAYLIST[i].name, "THREW", e.message]); }
+      smallText = S;
+      const line = seen.find(r => r[0].slice(0, 7) === "MUSIC: ");
+      if (!line) { bad.push([PLAYLIST[i].name, "NO CREDIT LINE", ""]); continue; }
+      // it names THIS track...
+      if (line[0].indexOf(PLAYLIST[i].name) < 0)
+        bad.push([PLAYLIST[i].name, "CREDITS THE WRONG TRACK", line[0]]);
+      // ...it keeps the musician's name...
+      if (line[0].indexOf("MATT CLANKER") < 0)
+        bad.push([PLAYLIST[i].name, "LOST THE COMPOSER", line[0]]);
+      // ...and it stays on the screen, for every name in the table.
+      if (line[1] < 0 || line[1] + line[2] > W)
+        bad.push([PLAYLIST[i].name, "OFF CANVAS", line[1] + "+" + line[2] + " of " + W]);
+    }
+    return JSON.stringify(bad);
+  })()`));
+  if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
