@@ -11,11 +11,24 @@ Three games, all live on GitHub Pages, all built on the snescat toy PPU
 
 ## STATE OF PLAY — start here (rewritten 2026-08-20, after a second day)
 
-**Suite 223 scenarios, green. Baseline 0/16 (median eviction day 14).
-Growth `--buy chef,table` 1/16 — and that is the target, see below.**
+**Suite 226 scenarios, green. Baseline 0/16 (median eviction day 13).
+Growth `--buy chef,table` 3/16 — see the note below on why it moved.**
 
-**GROWTH IS 1/16, AND THAT IS THE INTENDED DIFFICULTY** — ruled by Matt,
-2026-08-20: *"1/16 is ok, we'll do better than the tests, as players."*
+**GROWTH IS 3/16, AND THE DIFFICULTY IS NOT A TARGET TO HIT** — ruled by Matt,
+2026-08-20 at 1/16: *"1/16 is ok, we'll do better than the tests, as players."*
+
+**It moved from 1/16 to 3/16 the same day, and NOT by tuning.** The beach ball
+turned out to be drawn behind the crab shack — invisible since it landed — and
+fixing that meant moving `BALL_X` off the building and onto sand. That changes
+the DETOUR every crab pays to reach a game, which changes boredom relief, which
+changes walk-outs, which changes staffing. A rendering bug had been holding the
+economy fractionally tighter than anyone intended.
+
+Recorded rather than corrected, because the rule below still governs: the
+matrix is a regression detector, not a difficulty dial. **Nothing was tuned in
+either direction** — 1/16 was where four features left it and 3/16 is where a
+bug fix left it, and both are the floor a bot reaches, not a ceiling a player
+does.
 
 The documented pillar used to be 2–3 escapes per 8-seed block. It is now 1/16,
 and the drop was real: four changes in one day, each costing about one escape —
