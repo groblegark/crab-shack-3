@@ -3686,6 +3686,18 @@ mainland ferry is a different vessel entirely. Not resolved in code; the
 language is merely kept distinct so either reading still works.
 
 ## Conventions
+- **`shots/` IS UNTRACKED (2026-08-19).** Agent screenshots are how an agent
+  shows its work in a report; they are not published content. Two of them were
+  the ENDING CARD — the entire closing text plus "CRABALINA IS ON THE MAP" —
+  sitting browsable in a public repo, which is precisely what the embargo
+  exists to prevent, and 79 files had accumulated by default. `shots/` is now
+  gitignored; anything the devlog needs is harvested into `devlog/img/` and
+  committed deliberately. **Note the limit honestly:** removing them from HEAD
+  does not purge them from git history, and the name unavoidably ships inside
+  `game.js` anyway — this makes the reveal far less discoverable, not secret.
+  Whether that is enough, or whether history should be rewritten, is Matt's
+  call. (Older PLAN entries referencing paths "under shots/" still describe
+  real local files; they are simply no longer in the repo.)
 - **TEXT IS MEASURED, NOT COUNTED (2026-08-19).** Two bugs in one evening had
   the same shape: a string budgeted in CHARACTERS against a slot measured in
   PIXELS. The intro lease printed four of its six terms past the card and one

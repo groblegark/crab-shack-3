@@ -1,1 +1,9 @@
 .claude/
+
+# Agent screenshots are a BUILD ARTIFACT, not published content. They are how
+# an agent shows its work in a report; they are not the game. Two of them were
+# the ENDING CARD - the whole closing text plus the town-name reveal - sitting
+# browsable in a public repo, which is the exact thing the embargo protects.
+# Anything the devlog actually needs gets harvested into devlog/img/ and
+# committed deliberately.
+shots/
