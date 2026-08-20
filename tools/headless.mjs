@@ -33,6 +33,11 @@ const FAILOFF = (opt("failoff", "") || "").split(",").filter(Boolean);
 // peer owner coming for the player's juice bar - the paired arm behind the
 // numbers in PLAN.
 const NORIVAL = args.includes("--norival");
+// `--nohall` switches THE TOWN HALL off (game.js reads window._noHall through
+// hallOn() and never sets it): no fund, no levy, no shelter rent, no pot, no
+// elections. This is how the mayor pass's own balance movement was attributed
+// - the same arm-off pattern as --failoff and --norival.
+const NOHALL = args.includes("--nohall");
 const SEEDS = parseInt(opt("seeds", "1"));
 // THE WAGE LEVER. --wage N sets every PLAYER-owned shop's rate (the setting
 // the SCHEDULE tab exposes); --star N puts one named crab on a private deal
@@ -108,6 +113,7 @@ if (STAR != null)
 G('soundOn = false; musicOn = false; screen = "play"; window._headless = true; window._stats = { tourServes: 0, crabServes: 0, tourRage: 0, crabRage: 0, bused: 0 };');
 if (FAILOFF.length) G(`window._failOff = ${JSON.stringify(Object.fromEntries(FAILOFF.map(k => [k, 1])))};`);
 if (NORIVAL) G(`window._noRival = true;`);
+if (NOHALL) G(`window._noHall = true;`);
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);
 const buyScript = BUY.length ? new vm.Script(`
   if (tmin >= 9 * 60 && tmin <= 19 * 60 && Math.abs(tmin - Math.round(tmin / 60) * 60) < ${STEP} * TS / 2) {
