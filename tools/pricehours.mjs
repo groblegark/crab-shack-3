@@ -13,7 +13,13 @@
 // two things that are supposed to be the brakes - what the town takes, and what
 // it costs in rage-quits and unaffordable counters.
 //
-//   node tools/pricehours.mjs [--days 30] [--seeds 16]
+// `--buy` crosses all four arms with the GROWTH player the suite already
+// models (hourly purchase checks for a chef and tables, reserve = cost +
+// tonight's whole bill + a cushion). That is the arm that answers the question
+// as asked: an "overpowered STRATEGY" means a player who is also building, not
+// a do-nothing town that dies on day 12 whatever its board says.
+//
+//   node tools/pricehours.mjs [--days 30] [--seeds 16] [--buy]
 import { createSim } from "./simlib.mjs";
 
 const arg = (k, d) => {
@@ -32,19 +38,35 @@ const ARMS = {
 const seeds = [];
 for (let i = 0; i < SEEDS; i++) seeds.push(1337 + (BASE + i) * 991);
 
+const BUY = process.argv.includes("--buy");
+// the suite's own growth player, verbatim in shape: check hourly, keep a
+// reserve of the cost plus tonight's whole bill plus a cushion
+const BUY_SRC = `{
+  for (const k of ["chef", "table"]) {
+    const u = UPS[k];
+    const bill = CRAB_WAGE * (crabs.length + (k === "chef" ? 1 : 0)) +
+      Object.keys(BIZ).filter(b2 => bizUnlocked(b2) && bizOwner(b2) === "player")
+        .reduce((s2, b2) => s2 + BIZ[b2].rent, 0);
+    if (u.lvl < u.max && coins >= upCost(u) + bill + 30) tryBuy(k);
+  }
+}`;
+
 function run(setup, seed) {
   const sim = createSim({ seed });
   if (setup) sim.G(setup);
   // re-assert every morning: the auto-manager and the rivalry both move these
   // settings, and the question is about a player who HOLDS them at the max
-  let lastDay = 0;
+  let lastDay = 0, lastHour = -1;
   sim.runDays(DAYS, {
     onTick: (G) => {
-      if (!setup) return;
       const d = G("day");
-      if (d !== lastDay) { lastDay = d; G(setup); }
+      if (setup && d !== lastDay) { lastDay = d; G(setup); }
+      if (BUY) {
+        const h = Math.floor(G("tmin") / 60);
+        if (h >= 9 && h <= 19 && h !== lastHour) { lastHour = h; G(BUY_SRC); }
+      }
     },
-    tickEvery: 200,
+    tickEvery: BUY ? 20 : 200,
   });
   return JSON.parse(sim.G(`JSON.stringify({
     alive: !gameOver, day, lifetime: Math.round(lifetime), coins: Math.round(coins),
@@ -60,7 +82,7 @@ function run(setup, seed) {
 }
 
 const med = (a) => a.slice().sort((x, y) => x - y)[a.length >> 1];
-console.log(`days ${DAYS}, seeds ${SEEDS}\n`);
+console.log(`days ${DAYS}, seeds ${SEEDS}${BUY ? ", GROWTH player (buys chef+table)" : ", do-nothing town"}\n`);
 const table = [];
 for (const [name, setup] of Object.entries(ARMS)) {
   const rows = seeds.map(s => run(setup, s));
