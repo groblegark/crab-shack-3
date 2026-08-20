@@ -3939,6 +3939,7 @@ scenario("tip sharing + the table cap roundtrip save/load", () => {
 scenario("ferry: she costs exactly her price, and buying her is the win", () => {
   const sim = createSim({ seed: 1337 });
   if (sim.G("won")) return "a fresh town starts already won";
+  sim.G("UPS.arcade.lvl = 1;");   // the office only opens to a town with an arcade
   const price = sim.G("FERRY_PRICE");
   if (price < 5000) return `FERRY_PRICE is ${price} - that is not a boat`;
   // ONE DOLLAR SHORT IS SHORT. Two taps at price-1 must not arm, must not buy,
@@ -3972,7 +3973,7 @@ scenario("ferry: she costs exactly her price, and buying her is the win", () => 
 
 scenario("ferry: the arming tap times out, and an old save never won", () => {
   const sim = createSim({ seed: 21 });
-  sim.G("coins = FERRY_PRICE; ferryArm = 0;");
+  sim.G("UPS.arcade.lvl = 1; coins = FERRY_PRICE; ferryArm = 0;");
   if (sim.G("tapFerryChip()")) return "the first tap bought her";
   // let the confirm lapse (ferryArm counts down in frame), then top the till
   // back up: the next tap must ARM again rather than complete the old one
@@ -3988,7 +3989,7 @@ scenario("ferry: the win saves, and a reloaded town shows the same ending", () =
   const store = new Map();
   const sim = createSim({ seed: 4242, storage: store, fresh: false });
   sim.runDays(1);
-  sim.G("coins = FERRY_PRICE; ferryArm = 0; tapFerryChip(); tapFerryChip();");
+  sim.G("UPS.arcade.lvl = 1; coins = FERRY_PRICE; ferryArm = 0; tapFerryChip(); tapFerryChip();");
   if (!sim.G("won")) return "the setup did not win";
   const before = sim.G("JSON.stringify(winRec)");
   sim.G("save()");
@@ -4008,6 +4009,39 @@ scenario("ferry: the win saves, and a reloaded town shows the same ending", () =
   old.set(ACTIVE, "1");
   const legacy = createSim({ seed: 7, storage: old, fresh: false });
   if (legacy.G("won") || legacy.G("gameOver")) return "an old save opened as a finished game";
+  return true;
+});
+
+scenario("ferry: the office is shut, and she is nameless, until the arcade is fitted", () => {
+  const sim = createSim({ seed: 88 });
+  if (sim.G("ferryKnown()")) return "a fresh town already knows about the ferry";
+  // A TOWN THAT HAS NOT BUILT ANYTHING CANNOT BUY ITS WAY OUT. Money is not
+  // the gate here - twenty thousand dollars in hand buys nothing at all.
+  sim.G("coins = FERRY_PRICE * 2; ferryArm = 0;");
+  if (sim.G("tapFerryChip()") || sim.G("tapFerryChip()")) return "the ferry sold to a town with no arcade";
+  if (sim.G("won")) return "a town with no arcade won the game";
+  if (sim.G("ferryArm") > 0) return "the shut office still armed a confirm";
+  if (sim.G("Math.round(coins)") !== sim.G("FERRY_PRICE") * 2) return "the shut office took money";
+  // the draw side is gated at the same switch, so nothing about her renders
+  const drewShut = sim.G(`(() => { const n = [];
+    const t = smallText; smallText = (c, s2) => { n.push(s2); };
+    try { drawFerryOffice(); drawFerrySign(); } finally { smallText = t; }
+    return JSON.stringify(n); })()`);
+  if (JSON.parse(drewShut).length) return "the shut office still drew itself: " + drewShut;
+  // fit the arcade and the whole thing appears - office, sign, and the sale
+  sim.G("UPS.arcade.lvl = 1;");
+  if (!sim.G("ferryKnown()")) return "the arcade did not open the ferry office";
+  const drewOpen = JSON.parse(sim.G(`(() => { const n = [];
+    const t = smallText; smallText = (c, s2) => { n.push(s2); };
+    try { camX = FERRY_X - 40; drawFerryOffice(); camX = FERRY_SIGN_X - 40; drawFerrySign(); }
+    finally { smallText = t; }
+    return JSON.stringify(n); })()`));
+  if (!drewOpen.length) return "the fitted town still cannot see the office";
+  // HER NAME IS THE ENDING'S TO GIVE. Nothing on the promenade says it.
+  const named = drewOpen.filter(t => String(t).includes("CRABALINA"));
+  if (named.length) return "the town's name is on the signage before the reveal: " + JSON.stringify(named);
+  if (sim.G("tapFerryChip()")) return "the newly-opened office sold on one tap";
+  if (!sim.G("tapFerryChip()") || !sim.G("won")) return "the newly-opened office would not sell";
   return true;
 });
 

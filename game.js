@@ -2328,6 +2328,13 @@ let won = false, winT = 0, ferryArm = 0;
 let winRec = null;
 function commas(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 function ferryFare() { return commas(FERRY_PRICE); }
+// YOU DO NOT GET TO SEE THE WAY OUT UNTIL YOU HAVE BUILT SOMETHING. The boat
+// herself crosses the far channel every Thursday from the first morning - the
+// world is bigger than the town and always was. But the OFFICE, the fingerpost,
+// the fare, and her name arrive only once the town has fitted the arcade: the
+// last thing on the lot, and the proof this is a going concern rather than a
+// crab treading water. Until then a player who pans east finds sand.
+function ferryKnown() { return won || UPS.arcade.lvl > 0; }
 let memorials = [];   // { x, name } - the town remembers
 let today = newDayLog();
 let report = null, reportT = 0, dossier = null, boardView = false, dossierHit = {};
@@ -5846,7 +5853,7 @@ function tryBuy(key) {
 // suite drives exactly the code a tap drives and nothing forks into tools/.
 // Two taps, because $20,000 is emphatically not a misclick.
 function tapFerryChip() {
-  if (won) return false;
+  if (won || !ferryKnown()) return false;
   if (coins < FERRY_PRICE) {
     toast = { text: "THE FARE IS $" + ferryFare() + " - YOU HAVE $" + fmt(Math.round(coins)), t: 5 };
     ferryArm = 0;
@@ -5855,7 +5862,7 @@ function tapFerryChip() {
   }
   if (ferryArm <= 0) {
     ferryArm = 4;
-    toast = { text: "TAP AGAIN TO BUY THE CRABALINA FOR $" + ferryFare(), t: 4 };
+    toast = { text: "TAP AGAIN TO BUY THE FERRY FOR $" + ferryFare(), t: 4 };
     if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
     return false;
   }
@@ -5883,7 +5890,7 @@ function winFerry() {
   camX = clampCam(PIER_X0 - 96);
   followIdx = -1; followNpc = null; followCust = null;
   manage = null; dossier = null; boardView = false; saveView = false;
-  popText("THE CRABALINA IS IN", PIER_X0 - 20, 70, [255, 240, 170]);
+  popText("THE FERRY IS IN", PIER_X0 - 20, 70, [255, 240, 170]);
   if (music) { music.pause(); music = null; }
   sfx.ding(); sfx.coin();
   save();
@@ -6191,12 +6198,12 @@ cv.addEventListener("click", (ev) => {
     boardView = true; sfx.ding(); return;
   }
   // the ferry office: the whole kiosk is the target, the chip is the label
-  if (!won && wx >= FERRY_X - 6 && wx <= FERRY_X + FERRY_W + 6 && p.y >= 112 && p.y < 162) {
+  if (!won && ferryKnown() && wx >= FERRY_X - 6 && wx <= FERRY_X + FERRY_W + 6 && p.y >= 112 && p.y < 162) {
     tapFerryChip(); return;
   }
   // and the fingerpost points at it, in both senses
-  if (wx >= FERRY_SIGN_X - 4 && wx <= FERRY_SIGN_X + 72 && p.y >= 116 && p.y < 146) {
-    toast = { text: won ? "THE CRABALINA SAILS FROM THE PIER"
+  if (ferryKnown() && wx >= FERRY_SIGN_X - 4 && wx <= FERRY_SIGN_X + 72 && p.y >= 116 && p.y < 146) {
+    toast = { text: won ? "SHE SAILS FROM THE PIER"
       : "THE FERRY OFFICE IS DOWN AT THE PIER - $" + ferryFare(), t: 5 };
     sfx.ding(); return;
   }
@@ -6597,6 +6604,7 @@ function drawBoats() {
 const FERRY_W = 60;
 function ferryChipRect() { return { x: FERRY_X + 7, y: 147, w: 46, h: 11 }; }
 function drawFerryOffice() {
+  if (!ferryKnown()) return;
   const x = FERRY_X;
   if (x + FERRY_W - camX < -8 || x - camX > W + 8) return;
   const afford = coins >= FERRY_PRICE;
@@ -6611,7 +6619,7 @@ function drawFerryOffice() {
   const sx = x - camX;
   if (sx > -FERRY_W && sx < W) {
     smallText(ctx, "MAINLAND FERRY", sx + 2, 123, [235, 245, 255]);
-    smallText(ctx, "THE CRABALINA", sx + 4, 132, [120, 100, 80]);
+    smallText(ctx, "TO THE MAINLAND", sx + 2, 132, [120, 100, 80]);
     const fare = won ? "PAID" : "$" + ferryFare();
     text(ctx, fare, sx + (FERRY_W - textWidth(fare)) / 2, 138,
       won || afford ? [40, 130, 70] : [180, 60, 40], 6);
@@ -6625,10 +6633,11 @@ function drawFerryOffice() {
     smallText(ctx, lbl, r.x + ((r.w - smallTextWidth(lbl)) >> 1) - camX, r.y + 3, [30, 20, 36]);
   }
 }
-// The fingerpost on the promenade: the town's name on the top arm, and on the
-// bottom arm the direction and the fare. It is the dream, in the corner of the
-// player's eye, from the first morning.
+// The fingerpost on the promenade: the way out, and what it
+// costs, where the player already looks. The dream in the corner of the eye -
+// but only from the morning the arcade opens.
 function drawFerrySign() {
+  if (!ferryKnown()) return;
   const x = FERRY_SIGN_X;
   if (x + 70 - camX < 0 || x - camX > W) return;
   wrect(x + 22, 120, 4, 36, [150, 104, 62]);
@@ -6645,7 +6654,7 @@ function drawFerrySign() {
   for (let i = 0; i < 5; i++) wrect(x + 66 + i, 132 + i, 1, 11 - i * 2, [30, 20, 36]);   // the arm's point
   const sx = x - camX;
   if (sx > -70 && sx < W) {
-    smallText(ctx, "CRABALINA", sx + 6, 121, [70, 60, 70]);
+    smallText(ctx, "THE PIER", sx + 8, 121, [70, 60, 70]);
     smallText(ctx, won ? "FERRY - SAILING" : "FERRY $" + ferryFare(), sx + 4, 135,
       afford ? [30, 120, 60] : [40, 72, 112]);
   }
@@ -7476,7 +7485,7 @@ function drawEnding() {
     const t2 = Math.max(0, winT - 1.0) / (WIN_BEAT - 1.0);
     ctx.fillStyle = `rgba(16,12,30,${(0.55 * t2).toFixed(3)})`;
     ctx.fillRect(0, 0, W, H);
-    const hd = "THE CRABALINA IS IN";
+    const hd = "SHE IS IN";
     const hw = textWidth(hd) + 12;
     rect(ctx, (W - hw) / 2, 158, hw, 13, [30, 20, 36]);
     text(ctx, hd, (W - textWidth(hd)) / 2, 161, [255, 240, 170]);
@@ -7489,7 +7498,7 @@ function drawEnding() {
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
   rect(ctx, x, y, w2, 3, [96, 170, 220]);
-  const ttl = "THE FERRY";
+  const ttl = "THE CRABALINA";
   textShadow(ctx, ttl, (W - textWidth(ttl)) / 2, y + 8, [40, 110, 190], [190, 215, 235]);
   const crew = R.crew.slice(0, 4).join(", ") + (R.crew.length > 4 ? " +" + (R.crew.length - 4) : "");
   const body = [
@@ -8218,8 +8227,8 @@ function drawSaveScreen() {
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
   rect(ctx, x, y, w2, 14, [58, 42, 38]);
   text(ctx, "SAVED TOWNS", x + 6, y + 4, [255, 240, 210]);
-  // the town's name, written where a town writes its name: on the shelf of them
-  smallText(ctx, "CRABALINA - SLOT " + activeSlot + " IS YOURS", x + 84, y + 5, [200, 180, 160]);
+  // the slot, small, on the right: the town does not get a name until the end
+  smallText(ctx, "YOUR TOWN - SLOT " + activeSlot, x + 108, y + 5, [200, 180, 160]);
   rect(ctx, R.close.x, R.close.y, R.close.w, R.close.h, [150, 60, 60]);
   smallText(ctx, "X", R.close.x + 5, R.close.y + 4, [255, 230, 230]);
   // ---- the five slots

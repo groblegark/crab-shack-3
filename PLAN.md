@@ -1100,11 +1100,15 @@ vm — never fork game logic into tools/) and perf expectations live there.
   be a place, far enough to be somewhere else. The player is never told the
   geography. They work it out because they can see the other side, and because
   the only thing in the world that costs $20,000 is a boat.
-  - The name **CRABALINA** appears in exactly the four places a real town
-    writes its own name and nowhere else: the **fingerpost** on the promenade
-    outside the shack, the **ferry's own name** on the office board, her
-    **hull** when she comes in, and the **SAVED TOWNS header** ("CRABALINA -
-    SLOT 3 IS YOURS"). Never a sentence, never an explanation.
+  - **THE NAME IS THE ENDING'S TO GIVE (Matt, 2026-08-19: *"don't put the
+    town's name out there, it's going to be a cheeky reveal near the end"*).**
+    **CRABALINA** is rendered in exactly two places, both of them the win
+    itself: her **hull** as she comes alongside (`drawMooredFerry`, which only
+    draws when `won`) and the **ending card** — its title, and the last line,
+    "CRABALINA IS ON THE MAP". Nowhere in a running town. The office board
+    says TO THE MAINLAND, the fingerpost says THE PIER, the confirm toast says
+    THE FERRY, and the SAVED TOWNS header says "YOUR TOWN - SLOT 3". A player
+    plays the whole run without learning where they live.
 
   **2. THE MIST MODEL.** `mistPeak(day)` is an **integer hash of the day**
   (xorshift/imul, then `0.18 + 1.25 * u^0.85` clamped) — no RNG, no saved
@@ -1164,13 +1168,27 @@ vm — never fork game logic into tools/) and perf expectations live there.
     i.e. **5.5x under the fare**, and the new suite gate measures the PEAK
     till of both a do-nothing arm and a propped growth arm and fails if either
     comes within 8x / 3x of it.
+  - **YOU CANNOT SEE THE WAY OUT UNTIL YOU HAVE BUILT SOMETHING** (Matt,
+    2026-08-19: *"the ferry thing shouldn't even show up till you fit the
+    arcade; we should just see the ferry"*). `ferryKnown()` = `won ||
+    UPS.arcade.lvl > 0`, and it gates **four** surfaces at once: the office
+    draw, the fingerpost draw, both world click zones, and `tapFerryChip`
+    itself — twenty thousand dollars in hand buys nothing from a town with no
+    arcade. What is NOT gated is **the boat**: she still crosses the far
+    channel every Thursday from the first morning, because the world is bigger
+    than the town and always was. The arcade is the last thing on the lot, so
+    the gate reads as *this is a going concern now* rather than a tutorial
+    step. Receipt: scenario "the office is shut, and she is nameless, until
+    the arcade is fitted" drives the money path AND stubs `smallText` to prove
+    the shut office renders zero glyphs and the open one renders no name.
   - **Where you buy her**: a **ferry office** kiosk at the foot of the pier
-    (x1806) with MAINLAND FERRY on the fascia, THE CRABALINA under it, the
+    (x1806) with MAINLAND FERRY on the fascia, TO THE MAINLAND under it, the
     fare in the 5x7 font, and a **two-tap BUY HER chip** on the exact
     `tapSaleChip` idiom (one geometry function feeds draw and hit-test, the
     arm lapses after four seconds, every refusal says why). And the
-    **fingerpost outside the shack** — "CRABALINA" over "FERRY $20,000" with
-    an arrow east — is the discoverability: it carries the price from day one,
+    **fingerpost outside the shack** — "THE PIER" over "FERRY $20,000" with
+    an arrow east — is the discoverability: it carries the price from the
+    morning the arcade opens,
     and **its board turns green the morning the town can cover it**, so a
     player who never once panned east still finds out.
 
