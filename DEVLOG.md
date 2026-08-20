@@ -8,6 +8,101 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-19, later — ROE came over with $158
+
+![ROE's visit, hour by hour](devlog/img/2026-08-19-roe.png)
+
+*A visitor's record now reads like a diary, because it is one. Came over on
+an early ferry at 07:00. Fish taco at the shack, 10:37, $17. Deluxe soak at
+the showers, 11:54. Checked into room 5 at the Driftwood, 16:19. Another
+soak at 18:39. And at half past eight: STARVING, strolling the promenade
+with $78 left of the $158 she brought, sailing home in 35 hours.*
+
+Tourists used to be a timer. Reputation went up, crabs appeared. They were
+weather.
+
+Now they're **people who come from somewhere**. The ferry docks four times
+a day — eight, half ten, one, half three — stays seventy-five minutes
+alongside, and puts two to four visitors down the gangway depending on
+what your town's word of mouth is worth. They arrive with a real purse
+(~$85 on average), and they want what anyone wants off a boat: lunch, a
+cold drink, a shower, something to do, and after five o'clock, **a bed**.
+They stay about a day, spend about $29, and leave on a later sailing. Their
+wallets are minted when the boat lands and destroyed when it sails, so
+nobody's inflating anything.
+
+![THE FERRY IS IN](devlog/img/2026-08-19-ferry-in.png)
+
+Four small sailings instead of two big ones was a measurement, not a
+mood. Two big ones dropped the seated share from 88% to 61% — and the
+seated share is where the table tip lives, which is most of what a guest
+is worth. **The town does not have the tables for a crowd.** It has the
+tables for a trickle, four times a day.
+
+### The money that walks back onto the boat
+
+Here is the finding that reframes the whole game, and it came out of the
+measurement rather than anyone's design intent:
+
+**The most common reason a visitor is offered nothing at all is that your
+line is already full.**
+
+Not that they were broke. Not that they weren't interested. They walked
+up, saw a queue a two-crab shack couldn't clear, and got back on the boat
+with most of their purse still in it. The average visitor spends $29 of
+$85. The rest of it sails away.
+
+Every growth incentive this game has ever had was abstract — a number on a
+curve, a median in a matrix. This one you can watch happen. That's a purse
+with legs, walking back down the gangway.
+
+### The DRIFTWOOD HOTEL
+
+![The Driftwood at midnight, two guests in, and an OFFER on the sign](devlog/img/2026-08-19-driftwood.png)
+
+Seven rooms, $35 a night, run by a crab named REEF. About 4.8 lets a
+night, 69% occupancy. And it's for sale, like everything else on this
+promenade — an OFFER chip on the shopfront, roughly $570 to $700, the same
+two-tap arm as any other purchase. REEF banks precisely what leaves your
+pocket and walks to the pier a rich crab, which is the only exit strategy
+this town has ever offered anybody.
+
+Under the hood the rooms are *stalls* — the same objects as SUDSY's shower
+cubicles. Which is why the hotel cost almost nothing to build: every wedge
+guard, cleaning dispatch and abort path in the game already knew what a
+stall was and what to do when a guest died in one.
+
+![SLEPT ROUGH: sleeping on the beach, $9 left of $57](devlog/img/2026-08-19-slept-rough.png)
+
+And when the rooms are full, guests sleep on the sand. Nobody wrote that
+as a punishment — it falls out of one existing rule, that the sand banks
+no rest. They wake tired and grubby, they take the *next* boat instead of
+staying a second night, and your reputation pays for it. BIG up there has
+been in town since yesterday, has $9 left of the $57 he came with, and
+slept on a beach. He will not be recommending us.
+
+The nights that happens are the nights the hotel was badly run. That's the
+whole design: no penalty system, just a bed that either exists or doesn't.
+
+### Small print (two merge bugs that looked fine both ways)
+
+Both of these were clean-looking in isolation and wrong in combination —
+the kind you only catch by merging carefully rather than merging fast.
+
+- The retired spawn timer was, quietly, the thing that made **board price**
+  move visitors along the promenade. The new model picks by need and
+  distance — so merging it whole would have silently ended the price war,
+  and falsified the rivalry numbers we published this afternoon: a rival
+  could have undercut the shop next door and taken nothing off it.
+- A visitor's wallet was debited the *base* price while the shop was
+  credited the *board* price. At default prices those agree. Discounted,
+  it mints money on every sale. A price war would have been a money
+  printer.
+
+139 test scenarios, green.
+
+---
+
 ## 2026-08-19 — There is a way off this island
 
 ![The ferry office: TO THE MAINLAND, $20,000, BUY HER](devlog/img/2026-08-19-ferry-office.png)
