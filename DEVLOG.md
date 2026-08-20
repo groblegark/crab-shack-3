@@ -8,6 +8,87 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-20, last thing — The sale that had never once worked
+
+The owner sat down to play his own game and reported a small usability
+complaint: *"I saw that an NPC was interested but couldn't sell."*
+
+He was not confused. He had found a feature that had never worked, in any
+town, on any day, since the day it shipped.
+
+### What the complaint was actually made of
+
+Three separate things were wrong, stacked, and only the top one was the one
+he could see.
+
+**The visible one.** While the rival is EYEING your bar, there is genuinely
+nothing to click — she's still saving up. And when she *does* make an
+offer, the accept button wasn't in the management screen where an owner
+goes to do owner things. It was on the bar's own shopfront sign. You had to
+be told. That's fixed: you now answer the offer from the card that
+announces it.
+
+**The one underneath.** She was bidding against **four different pots** — a
+hidden war chest, her shop till, her personal pocket, and headroom on the
+same credit line the player borrows from — and settling out of two of them.
+As the owner put it: *"we can't have multiple accounts per crab, that's
+nuts."*
+
+**And the one underneath that.** Measured before changing anything: every
+single offer she made, across thirty days and two seeds, was **unpayable**.
+A $435 offer against a $63 purse. Accept it and you got CAN'T COVER and
+nothing happened. Not sometimes. Every time, in every town.
+
+The accept path had never once completed.
+
+### Seven green tests
+
+Here's the part that should worry anybody who ships software. Seven rivalry
+scenarios covered this feature. All seven were green. All seven had been
+green the whole time.
+
+Every one of them asserted that **an offer was made**. Not one asserted
+that it could be **taken**.
+
+That is the same shape as the beach ball and the illness roll, one turn
+worse: those tests asserted a coincidence instead of a mechanism. These
+asserted the *setup* instead of the *outcome* — they watched the pitch and
+never once checked whether the ball arrived. A suite can be exhaustive
+about a feature and still never test the moment the feature exists for.
+
+### The fix worth writing down
+
+Not the deletion of the extra pots — that's just tidying. The fix is that
+**coverage is now part of what "a live offer" means.** One predicate,
+consulted by the shopfront chips, the card chips, both hit-tests, and the
+settlement.
+
+The original bug was two numbers computed in two places, drifting apart. A
+predicate cannot drift from itself.
+
+### And a ruling about who we're balancing for
+
+Separately, the growth target moved to 1 town in 16, by decision rather
+than drift, and the reasoning is worth keeping.
+
+The headless matrix doesn't play well. It buys a fixed list in a fixed
+order and trades on autopilot. It never re-prices against a rival. It never
+moves an hours sign so its crew can reach a ballot box. It never fires a
+bad hire. It never reads the departure card and works out that half of
+every purse went home unspent.
+
+So the matrix isn't measuring the game. It's measuring **the floor** — what
+a town does when nobody is steering it. It's a regression detector, not a
+difficulty dial. The owner's ruling: *"1/16 is ok, we'll do better than the
+tests, as players."*
+
+Which gives us the rule this project will probably keep longest:
+**never make the game easier for a bot that isn't trying.**
+
+224 scenarios green, up from 167 this morning.
+
+---
+
 ## 2026-08-20, night — What they thought of you
 
 ![A bad day: 12 sailed, $822 went home in their pockets](devlog/img/2026-08-20-departures-bad-day.png)
