@@ -495,6 +495,53 @@ function staffMealCharge(b, r) {   // what a selfCooking staffer rings up
 // a business and BIZ[k].owner is the key into it. `owner: null` means NOBODY
 // owns that business - it is closed and on the market (see the business
 // failure & succession block below).
+// ============================================================ ONE WALLET
+// A CRAB HAS ONE WALLET, AND AN OWNER GETS THE MONEY FROM THEIR SHOPS.
+// (Matt, 2026-08-20: "I like the idea that each crab just has one wallet, and
+// the owner gets all the money from their shops, that's how we work.")
+//
+// A shop used to keep a TILL separate from its owner's POCKET, and three
+// different bits of code shuffled money between them - an owner-operator
+// topping herself up on the way past, a buyer drawing the till down to make a
+// deposit, and a rival paying out of both at once. That is two accounts for
+// one crab, which is the thing this town's own iron rule forbids everywhere
+// else, and it produced two bugs in a single day: a rival who could bid money
+// she could not settle, and an owner whose takings were invisible on her card.
+//
+// So `till` is an ACCESSOR ONTO THE OWNER CRAB'S WALLET. Every existing call
+// site keeps working and now means one thing. The backing number is used only
+// while a lease has NO LIVING OWNER - a crab died, or the shop is between
+// hands - because money must not evaporate just because nobody is holding it.
+function ownerCrabOf(id) {
+  return !id || id === "player" ? null : allCrabs().find(k => k.p.owner === id) || null;
+}
+function defineTill(o) {
+  let held = Math.max(0, Math.round(o.till || 0));
+  // THE MONEY FOLLOWS THE OWNER, and it has to do so the INSTANT a lease has
+  // one, or the backing becomes a ghost. Two ways that bites, both measured:
+  // SUDSY opens with $200 behind her lease before any crab exists, and that
+  // $200 sat in `held` for the whole game while her wallet did the work; and
+  // an owner who dies would have handed a stale backing back to worldMoney as
+  // money appearing from nowhere. So the moment a lease HAS a crab, whatever
+  // is parked moves into their pocket and the backing goes to zero.
+  const settle = () => {
+    const c = ownerCrabOf(o.id);
+    if (c && held > 0) { c.p.wallet = Math.max(0, (c.p.wallet || 0) + held); held = 0; }
+    return c;
+  };
+  o._settleTill = settle;
+  Object.defineProperty(o, "till", {
+    get() { const c = settle(); return c ? Math.max(0, c.p.wallet || 0) : held; },
+    set(v) { const c = settle(), n = Math.max(0, v);
+      if (c) c.p.wallet = n; else held = n; },
+    enumerable: true, configurable: true });
+  // the ownerless backing, read by worldMoney so a wallet and a till that are
+  // the same money can never be counted twice
+  Object.defineProperty(o, "_held", {
+    get() { return held; }, set(v) { held = Math.max(0, v); },
+    enumerable: false, configurable: true });
+  return o;
+}
 const OWNERS = {
   sudsy: { id: "sudsy", name: "SUDSY", till: 200, credit: 0, darkT: 0 },
   // REEF keeps the DRIFTWOOD HOTEL. A second peer owner, on exactly the same
@@ -509,6 +556,7 @@ const OWNERS = {
   // seller keys on the crab because not everybody is one.)
   reef: { id: "reef", name: "REEF", till: 140, credit: 0, darkT: 0, soft: true },
 };
+for (const k in OWNERS) defineTill(OWNERS[k]);
 const bizOwner = (b) => BIZ[b].owner === null ? null : (BIZ[b].owner || "player");
 // never let a draw path throw on an owner who has left the registry (sold up,
 // or - the death seam - left the town between one frame and the next settlement)
@@ -878,7 +926,14 @@ function bizAcct(b) {   // the till behind a lease, whoever holds it tonight
 // negative it is.
 function worldMoney() {
   let m = coins - (credit.bal || 0) + townFund.bal;
-  for (const k in OWNERS) m += (OWNERS[k].till || 0) - (OWNERS[k].credit || 0);
+  // an owner's till IS their crab's wallet, counted in the crab loop below, so
+  // only the OWNERLESS backing is added here - and every lease is settled onto
+  // its crab first, so a parked backing can neither hide from this total nor
+  // be counted twice against a wallet that already holds it.
+  for (const k in OWNERS) {
+    if (OWNERS[k]._settleTill) OWNERS[k]._settleTill();
+    m += (ownerCrabOf(k) ? 0 : (OWNERS[k]._held || 0)) - (OWNERS[k].credit || 0);
+  }
   for (const c of allCrabs()) m += c.p.wallet || 0;
   for (const k of customers) if (k.visitor && !k.gone) m += k.wallet || 0;
   return m;
@@ -2074,7 +2129,7 @@ function buyBusiness(b, buyer) {
     if (buyer.p.wallet < price + SALE_CFG.RESERVE) return false;
     buyer.p.wallet -= price;
     const id = ownerIdFor(buyer);
-    OWNERS[id] = OWNERS[id] || { id, name: buyer.p.name, till: 0, credit: 0, darkT: 0 };
+    OWNERS[id] = OWNERS[id] || defineTill({ id, name: buyer.p.name, till: 0, credit: 0, darkT: 0 });
     OWNERS[id].till += float;
     BIZ[b].owner = id;
     BIZ[b].autoLabor = true;    // a peer owner runs the same policy table SUDSY does
@@ -2276,8 +2331,11 @@ function prizeIsPlayers() {
 // her purse is her TILL plus her own POCKET - the same two pots the housing
 // ladder already moves money between, and the only money she has
 function rivalPurse() {
-  const o = OWNERS[rivalOwnerId()], c = rivalCrab();
-  return (o ? Math.max(0, o.till) : 0) + (c ? Math.max(0, c.p.wallet) : 0);
+  // ONE ACCOUNT: her shop's till and her own pocket are the same money now, so
+  // adding them would count it twice and hand her a purse she does not have -
+  // the same bug this system already had once, from the other direction.
+  const c = rivalCrab(), o = OWNERS[rivalOwnerId()];
+  return c ? Math.max(0, c.p.wallet || 0) : o ? Math.max(0, o._held || 0) : 0;
 }
 // HER LINE OF CREDIT, the same one the player draws on and the same one that
 // shuts a shop after three missed settlements. A small operator buying a second
@@ -2327,10 +2385,12 @@ function rivalFloat() {
 // then her own pocket. No third pot to draw on and no drawing on the line -
 // see the note above rivalRaise for why those two doors are shut.
 function payFromRival(amt) {
-  const o = OWNERS[rivalOwnerId()], c = rivalCrab();
+  const c = rivalCrab(), o = OWNERS[rivalOwnerId()];
   let left = Math.max(0, Math.round(amt));
-  if (o) { const d = Math.min(Math.max(0, o.till), left); o.till -= d; left -= d; }
-  if (c) { const d = Math.min(Math.max(0, c.p.wallet), left); c.p.wallet -= d; left -= d; }
+  // she pays out of the one place she keeps money; taking it from the till AND
+  // the pocket would take it twice out of the same wallet
+  if (c) { const d = Math.min(Math.max(0, c.p.wallet || 0), left); c.p.wallet -= d; left -= d; }
+  else if (o) { const d = Math.min(Math.max(0, o._held || 0), left); o._held -= d; left -= d; }
   return Math.round(amt) - left;
 }
 function bizTakeAvg(b) {
@@ -2743,10 +2803,8 @@ function rivalFirstRefusal(b) {
   if (!c || c.p.sick) return false;
   const price = salePrice(b), o = OWNERS[rivalOwnerId()];
   if (rivalPurse() < price + SALE_CFG.RESERVE) return false;
-  // the buy path pays out of a crab's POCKET, so she draws the till down into
-  // it first - the owner draw the housing ladder already uses. Nothing minted.
-  const need = price + SALE_CFG.RESERVE - c.p.wallet;
-  if (need > 0 && o) { const d = Math.min(Math.max(0, o.till), need); o.till -= d; c.p.wallet += d; }
+  // (the buy path used to draw the till down into the crab's pocket first.
+  // One wallet: the money is already there.)
   if (!buyBusiness(b, c)) return false;
   rival.stage = "done"; rival.offer = null; rival.intent = 0;
   today.rival.push(rivalName() + " WAS FIRST IN THE QUEUE FOR THE " + BIZ[b].short);
@@ -2807,7 +2865,14 @@ function tapAskChip(b) {
   askArm = null; askArmT = 0;
   coins -= price;   // ...and out of it the same way, off the trading books
   popText("-$" + fmt(price), (BIZ[b].x0 + BIZ[b].x1) / 2 - 12, 110, [255, 120, 120]);
-  if (o) o.till += price;     // the seller is PAID: a transfer between two owners, nothing minted
+  // THE SELLER IS PAID A CRAB, NOT A LEASE. With one wallet, `o.till` resolves
+  // through whoever currently holds the lease - and this sale is about to move
+  // it, and stepDownOwner below clears the seller's `p.owner` on the way. So
+  // the payee is captured HERE, by identity, before anything moves; otherwise
+  // the money lands in a backing number belonging to nobody.
+  const sellerCrab = ownerCrabOf(oid);
+  if (sellerCrab) sellerCrab.p.wallet = Math.max(0, (sellerCrab.p.wallet || 0) + price);
+  else if (o) o._held = Math.max(0, (o._held || 0) + price);
   // her people are hers, not yours: the owner-operator steps down (to another
   // counter if she holds one) and the payroll goes back to the pier
   for (const k of allCrabs().slice()) {
@@ -5726,6 +5791,11 @@ function save() {
     coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, t: nowMs(),   // (no `rate`: nothing accrues offline)
     bankrupt, credit: { bal: Math.round(credit.bal), warned: credit.warned },
     won, winRec,   // the ferry ending, snapshotted: a reloaded win reads identically
+    // ONE WALLET (see defineTill). A save written before this kept a shop's
+    // TILL and its owner's POCKET as two separate piles; a save written after
+    // has one number in two places. The loader must tell them apart or it
+    // either destroys a till or doubles it, so the world stamps itself.
+    _oneWallet: 1,
     dayLog: (window.dayLog || []).slice(-6),   // keeps the forecaster warm across reloads
     personas: crabs.map(c => c.p),
     npc: { tills: { sudsy: OWNERS.sudsy.till },
@@ -5889,12 +5959,12 @@ function load(slot) {
   if (s.owners) for (const k in s.owners) {
     const so = s.owners[k];
     if (!so || typeof so !== "object" || k === "player") continue;
-    OWNERS[k] = { id: k, name: String(so.name || k).toUpperCase().slice(0, 12),
+    OWNERS[k] = defineTill({ id: k, name: String(so.name || k).toUpperCase().slice(0, 12),
       till: Math.max(0, Math.round(+so.till || 0)), credit: Math.max(0, Math.round(+so.credit || 0)),
       darkT: Math.max(0, Math.min(9, +so.darkT || 0)),
       // a save written before willing sellers moved onto the owner: REEF was
       // the only one, and BIZ.sellable was the whole of it
-      soft: so.soft != null ? !!so.soft : k === "reef" };
+      soft: so.soft != null ? !!so.soft : k === "reef" });
   }
   if (s.bizOwner) for (const b in s.bizOwner) {
     if (!BIZ[b]) continue;
@@ -5917,7 +5987,10 @@ function load(slot) {
   if (s.bizStrike) for (const b in s.bizStrike) if (BIZ[b])
     bizStrike[b] = Math.max(0, Math.min(SALE_CFG.STRIKES - 1, Math.round(+s.bizStrike[b] || 0)));
   if (s.npc) {
-    if (s.npc.tills && s.npc.tills.sudsy != null) OWNERS.sudsy.till = s.npc.tills.sudsy;
+    // into the BACKING number, never through the accessor: the crab personas
+    // have not loaded yet, so writing `till` here would land in a wallet that
+    // is about to be overwritten. The reconcile below settles it.
+    if (s.npc.tills && s.npc.tills.sudsy != null) OWNERS.sudsy._held = s.npc.tills.sudsy;
     if (s.npc.credit && s.npc.credit.sudsy) {
       OWNERS.sudsy.credit = s.npc.credit.sudsy.bal || 0;
       OWNERS.sudsy.darkT = s.npc.credit.sudsy.darkT || 0;
@@ -5955,6 +6028,24 @@ function load(slot) {
     if (Array.isArray(s.npc.personas))
       npcs = npcs.filter(n => (preVis && n.p.owner === "reef")
         || s.npc.personas.some(sp => sp && sp.name === n.p.name));
+  }
+  // ONE WALLET, RECONCILED NOW THE CRABS EXIST. Until here every owner's money
+  // sits in `_held` and every crab's in their persona.
+  //   - A save from BEFORE the merge kept them apart, so they really are
+  //     different money and the till is ADDED to the pocket: same total, one
+  //     place, nothing lost and nothing conjured.
+  //   - A save from AFTER is one number written twice, so the pocket already
+  //     holds it and the backing is dropped.
+  // An owner with no living crab keeps `_held` either way, because a lease
+  // between hands still has money behind it.
+  {
+    const preMerge = !s._oneWallet;
+    for (const k in OWNERS) {
+      const c = ownerCrabOf(k);
+      if (!c) continue;
+      if (preMerge) c.p.wallet = Math.max(0, (c.p.wallet || 0) + (OWNERS[k]._held || 0));
+      OWNERS[k]._held = 0;
+    }
   }
   jobBoard = Array.isArray(s.board) ? s.board : [];
   // pre-toggle saves had music on by default - keep their experience
@@ -6835,13 +6926,9 @@ function updateSchedule(c, dt) {
       beginErrand(c, e, false);   // a fisher's water stop is the pier tap, ten paces off the rail
     } else c.errandCd = 3;
   }
-  // owner-operators top their pocket up from the till
-  if (c.p.npc) {
-    const o = OWNERS[c.p.owner];
-    const need = c.p.homeless ? 60 : 15;   // save up for a place of her own
-    if (o && c.p.wallet < need && o.till >= 90) { o.till -= 30; c.p.wallet += 30; }
-    else if (o && c.p.wallet < 15 && o.till >= 30) { o.till -= 30; c.p.wallet += 30; }
-  }
+  // (an owner-operator used to top her pocket up from her till here. One
+  // wallet: the shop's money is already in her pocket, so this was moving
+  // money from an account to itself.)
   // off-duty errands, while town is open and it's not almost shift time
   if (c.errandCd > 0) c.errandCd -= dt;
   // A SICK DAY IS NOT A SHIFT (Matt, 2026-08-19: "I feel like sick crabs dont
