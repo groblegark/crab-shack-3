@@ -6656,6 +6656,347 @@ scenario("a corrupt town hall in a save is clamped, not trusted", () => {
   return true;
 });
 
+// ===========================================================================
+// ACCOMMODATION UPGRADES - the shelter's beds and the Driftwood's cabanas
+// ===========================================================================
+scenario("shelter: the beds are finite, and the crab with no cot sleeps on the step", () => {
+  // THE MECHANISM, not a coincidence: the shelter beds exactly `shelterBeds()`
+  // crabs and the overflow sleeps rough - so the same town, on the same night,
+  // with two more beds in it, beds EVERYBODY. Both arms are asserted here
+  // because "somebody slept rough" on its own is true of any tired town.
+  const sim = createSim({ seed: 31 });
+  // AFTER the settlement, so the housing ladder cannot quietly rent four of
+  // them a house between the fixture and the night (it did, first time). Broke,
+  // for the same reason. They are stood at the shelter because the WALK home is
+  // the housing scenario's business; what is under test here is what happens
+  // when they get there.
+  sim.runUntil("day >= 2 && tmin > 20.5 * 60", { maxSteps: 400000 });
+  sim.G(`{ const roll = allCrabs().filter(c => !c.p.owner).slice(0, 6);
+    for (let i = 0; i < roll.length; i++) {
+      const c = roll[i];
+      c.p.homeless = true; c.p.house = null; c.p.boat = null; c.p.wallet = 5; c.p.rough = false;
+      c.p.nCot = i < 4 ? 20 - i : 0;                 // four regulars, two newcomers
+      c.x = SHELTER_X + 20; c.y = 155; setT(c, c.x, c.y);
+    }
+    for (const c of allCrabs()) if (roll.indexOf(c) < 0 && c.p.homeless) c.p.nCot = 0;
+  }`);
+  const beds = sim.G("shelterBeds()");
+  if (beds !== 4) return "a fresh shelter should stand " + 4 + " beds, not " + beds;
+  const roll = sim.G("cotRoster().length");
+  if (roll <= beds) return "the fixture did not overfill the shelter: " + roll + " crabs, " + beds + " beds";
+  if (sim.G("cotShort()") !== roll - 4) return "the waiting list is not the overflow: " + sim.G("cotShort()");
+  sim.runUntil("tmin >= 23.5 * 60", { maxSteps: 400000 });
+  const out = JSON.parse(sim.G(`JSON.stringify(cotRoster().map(c => [c.p.name, !!c.p.rough, c.p.nCot || 0]))`));
+  const rough = out.filter(r => r[1]).map(r => r[0]);
+  if (rough.length !== roll - 4) return "four beds, " + roll + " crabs, " + rough.length + " on the step: " + JSON.stringify(out);
+  // ...and it is the NEWEST arrivals who are out there, not whoever the roster
+  // happened to list last: the shelter keeps its regulars.
+  const bedded = out.slice(0, 4).map(r => r[0]);
+  for (const n of rough) if (bedded.includes(n)) return n + " is both bedded and on the step";
+  if (out.slice(0, 4).some(r => r[1])) return "a crab with tenure was turned out: " + JSON.stringify(out);
+  // THE COUNTER-ARM, and it is the whole point of the scenario: the same town,
+  // the same night, the same crabs, with the beds the mayor could have signed
+  // for. Nobody is on the step. "Somebody slept rough" on its own is true of
+  // any tired town; "somebody slept rough FOR WANT OF A BED" is this feature.
+  sim.G(`dorm.beds = cotRoster().length - 4; for (const c of allCrabs()) c.p.rough = false;`);
+  if (sim.G("shelterBeds()") !== roll) return "the bought beds did not stand";
+  sim.runUntil("tmin < 1 * 60", { maxSteps: 400000 });
+  sim.G(`{ for (const c of cotRoster()) { c.p.rough = false; c.x = SHELTER_X + 20; c.y = 155; setT(c, c.x, c.y); } }`);
+  sim.runUntil("tmin >= 23.5 * 60", { maxSteps: 400000 });
+  const out2 = JSON.parse(sim.G(`JSON.stringify(cotRoster().map(c => [c.p.name, !!c.p.rough]))`));
+  const rough2 = out2.filter(r => r[1]).map(r => r[0]);
+  if (rough2.length) return "a bed each and " + rough2.join(",") + " still slept outside";
+  return true;
+});
+
+scenario("shelter: a bed is RENT, not a purchase - the bill goes up for good, and it is remitted", () => {
+  // The whole design of the shelter half: nobody buys the building, the town
+  // rents it, so a bed is a permanent line on the fund's bill. This asserts the
+  // three things that makes true - the rent moves, the money leaves a real
+  // balance at a NAMED counterparty, and the ledger still adds up afterwards.
+  const sim = createSim({ seed: 1337 });
+  sim.G("window._auditFund = {};");
+  sim.runUntil("day >= 2 && tmin > 12 * 60", { maxSteps: 400000 });
+  const rent0 = sim.G("shelterRent()");
+  if (rent0 !== sim.G("SHELTER_RENT")) return "a shelter with no bought beds should cost the base rent";
+  sim.G("townFund.bal = 40; dorm.take = 999; townFund.arrears = 0; townFund.strikes = 0;");
+  const why = sim.G("JSON.stringify(bunkWhy())");
+  if (why !== "null") return "a solvent fund on a big purse still refused: " + why;
+  const before = sim.G("Math.round(worldMoney() * 100) / 100");
+  const bal0 = sim.G("townFund.bal");
+  if (!sim.G("buildBunk('TEST MAYOR')")) return "buildBunk refused with the gate open";
+  const after = sim.G("Math.round(worldMoney() * 100) / 100");
+  const key = sim.G("bunkKey()");
+  if (Math.abs((before - after) - key) > 0.005)
+    return "key money should leave the world exactly once: " + before + " -> " + after + " for $" + key;
+  if (Math.abs(sim.G("townFund.bal") - (bal0 - key)) > 0.005) return "the fund did not pay the key money";
+  const rent1 = sim.G("shelterRent()");
+  if (rent1 !== rent0 + sim.G("DORM_CFG.RENT")) return "the rent did not move: " + rent0 + " -> " + rent1;
+  const row = JSON.parse(sim.G(`JSON.stringify(townFund.ledger[townFund.ledger.length - 1])`));
+  if (!row || row.kind !== "remit" || !/PINCHERTON/.test(row.who || ""))
+    return "the key money has no named counterparty: " + JSON.stringify(row);
+  // ...and the ledger IS the balance, still (the town hall's own promise)
+  const sums = JSON.parse(sim.G(`JSON.stringify(townFund.ledger.reduce((a, r) =>
+    (a[r.kind] = (a[r.kind] || 0) + r.amt, a), {}))`));
+  // the ledger is capped at 24 rows, so only the SIGN of the movement is
+  // provable here - the conservation scenario owns the full-run arithmetic
+  if (!sums.remit || sums.remit <= 0) return "no remit ever reached the landlord";
+  // THE RECURRING HALF: tonight's rent is the bigger one, at the landlord
+  const paid0 = sim.G("townFund.ledger.filter(r => r.kind === 'remit' && /SHELTER RENT/.test(r.why || '')).length");
+  sim.G("townFund.bal = 200;");
+  sim.runUntil("day >= 3 && tmin > 21 * 60", { maxSteps: 400000 });
+  const rents = JSON.parse(sim.G(`JSON.stringify(townFund.ledger
+    .filter(r => r.kind === 'remit' && /SHELTER RENT/.test(r.why || '')).map(r => r.amt))`));
+  if (rents.length <= paid0) return "no shelter rent was remitted after the bed was signed for";
+  if (Math.abs(rents[rents.length - 1] - rent1) > 0.005)
+    return "the night's rent was $" + rents[rents.length - 1] + ", not the new $" + rent1;
+  return true;
+});
+
+scenario("shelter: the PURSE decides whether the town can grow it, and it says which one", () => {
+  // The fiscal gate, and it is the same one the CPU mayor sits: a purse that
+  // would not carry the bigger bill refuses, by name, and a purse that would
+  // carries it. Two arms, one town, nothing else moved.
+  const sim = createSim({ seed: 1337 });
+  sim.runUntil("day >= 2 && tmin > 19 * 60", { maxSteps: 400000 });
+  sim.G("townFund.bal = 60; townFund.arrears = 0; townFund.strikes = 0; townFund.shut = 0;");
+  sim.G("hall.policy = { mech: 'tin', rate: 0, bowls: 0 }; dorm.take = purseYield(hall.policy);");
+  const poor = sim.G("JSON.stringify(bunkWhy())");
+  if (poor === "null") return "a purse raising nothing was allowed to sign for a bed";
+  if (!/TIN/.test(poor)) return "the refusal does not name the purse the town voted for: " + poor;
+  if (sim.G("canBunk()")) return "canBunk disagrees with bunkWhy";
+  const beds0 = sim.G("shelterBeds()");
+  sim.G("hall.policy = { mech: 'levy', rate: 4, bowls: 0 }; dorm.take = 500;");
+  if (!sim.G("canBunk()")) return "a purse raising $500 a night still could not carry $13: " + sim.G("JSON.stringify(bunkWhy())");
+  if (!sim.G("buildBunk('TEST')")) return "the build refused with the gate open";
+  if (sim.G("shelterBeds()") !== beds0 + 1) return "the bed was not added";
+  // ...and the ceiling is a ceiling
+  sim.G("dorm.beds = DORM_CFG.MAX - DORM_CFG.BASE;");
+  if (sim.G("canBunk()")) return "the shelter grew past its own floor plan";
+  if (!/AS BIG AS IT GETS/.test(sim.G("JSON.stringify(bunkWhy())"))) return "the ceiling does not say so";
+  return true;
+});
+
+scenario("shelter: the BED+ chip is the mayor's, and it sits on the notice without covering it", () => {
+  // Who pays decides who chooses: the shelter is the town's bill, so the chip
+  // is live only while the player is wearing the hat. And it has to be a chip
+  // you can actually read - the notice above it carries three rows now.
+  const sim = createSim({ seed: 1337 });
+  sim.runUntil("tmin > 10 * 60", {});
+  sim.G("hall.mayor = npcs[0].p.name;");
+  if (sim.G("bunkChipLive()")) return "the chip was live while an NPC held the office";
+  sim.G("hall.mayor = crabs[0].p.name;");
+  if (!sim.G("playerMayor()")) return "the fixture did not put the player in the hat";
+  if (!sim.G("bunkChipLive()")) return "the chip is not live for the player's own mayor";
+  const g = JSON.parse(sim.G(`JSON.stringify({ r: bunkChipRect(), y: dormNoticeY(), h: dormNoticeH(),
+    top: HOME_BOTTOM - SHELTER2.h, w: SHELTER2.w })`));
+  if (g.r.y < g.y || g.r.y + g.r.h > g.y + g.h - 2)
+    return "the chip is not inside the notice it hangs on: " + JSON.stringify(g);
+  if (g.r.y < g.y + 21) return "the chip lands on the notice's own text rows: " + JSON.stringify(g);
+  if (g.y + g.h > g.top - 3) return "the notice runs onto the shelter's roof: " + JSON.stringify(g);
+  if (g.y < 40) return "the notice climbed off the top of the world: " + JSON.stringify(g);
+  if (g.r.x < 444 || g.r.x + g.r.w > 444 + 78) return "the chip hangs off the shelter";
+  // TWO TAPS, and the first one is the price of the recurring half
+  sim.G("townFund.bal = 60; townFund.arrears = 0; townFund.strikes = 0; dorm.take = 500;");
+  const beds0 = sim.G("shelterBeds()");
+  if (sim.G("tapBunkChip()")) return "one tap signed a permanent bill";
+  if (sim.G("shelterBeds()") !== beds0) return "the arming tap built a bed";
+  if (!/A NIGHT FOREVER/.test(sim.G("JSON.stringify(toast.text)"))) return "the arming toast hides the recurring cost: " + sim.G("JSON.stringify(toast.text)");
+  if (!sim.G("tapBunkChip()")) return "the second tap did not build";
+  if (sim.G("shelterBeds()") !== beds0 + 1) return "the second tap built nothing";
+  return true;
+});
+
+scenario("hotel: the annexe is real rooms - a guest sleeps in a cabana, and the lanes stay clear", () => {
+  // A cabana has to be a ROOM, not a picture of one: the same stall list, the
+  // same check-in, the same dirty-then-cleaned cycle. And the forecourt is the
+  // row the travel lanes are measured against, so a full annexe is the harshest
+  // version of the lane tripwire there is.
+  const sim = createSim({ seed: 1337 });
+  sim.G(`setHotelRooms(HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA);`);
+  const n = sim.G("hotelRooms().length");
+  if (n !== sim.G("HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA")) return "the annexe did not stand: " + n;
+  const bad = JSON.parse(sim.G(`JSON.stringify(LANES.map(l => [l, laneClear(l, 0, WORLD_W)]).filter(r => r[1] < LANE_PAD))`));
+  if (bad.length) return "a full annexe blocks a travel lane: " + JSON.stringify(bad);
+  // ...and no hut is parked on the queue, on the desk, or on another hut
+  const rooms = JSON.parse(sim.G("JSON.stringify(hotelRooms().map(r => [r.x, r.y, !!r.cabana]))"));
+  const qx = sim.G("BIZ.hotel.queueX");
+  for (const [x, y, cab] of rooms) {
+    if (x + 16 > qx) return "a room at x=" + x + " stands in the queue at " + qx;
+    if (x < sim.G("BIZ.hotel.x0") || x + 16 > sim.G("BIZ.hotel.x1")) return "a room at x=" + x + " is off the lot";
+    if (cab && y !== 158) return "a cabana is not on the forecourt row: y=" + y;
+  }
+  for (let i = 0; i < rooms.length; i++) for (let j = i + 1; j < rooms.length; j++)
+    if (rooms[i][1] === rooms[j][1] && Math.abs(rooms[i][0] - rooms[j][0]) < 18)
+      return "two rooms share a doorway: " + JSON.stringify([rooms[i], rooms[j]]);
+  // a guest takes the LAST room in the list (a cabana) and sleeps in it
+  sim.runUntil("customers.some(k => k.visitor && !k.gone)", { maxSteps: 400000 });
+  const ok = sim.runUntil(`(() => { const r = hotelRooms()[hotelRooms().length - 1];
+    const k = customers.find(c => c.visitor && !c.gone && !c.room);
+    if (k && !r.occupant && !r.dirty) { r.occupant = k; k.room = r; k.state = "toRoom"; }
+    return hotelRooms()[hotelRooms().length - 1].occupant &&
+      hotelRooms()[hotelRooms().length - 1].occupant.state === "inRoom"; })()`,
+    { maxSteps: 400000 });
+  if (!ok) return "a guest could not get into a cabana";
+  const at = JSON.parse(sim.G(`JSON.stringify((() => { const r = hotelRooms()[hotelRooms().length - 1];
+    return { rx: r.x, ry: r.y, kx: Math.round(r.occupant.x), ky: Math.round(r.occupant.wy) }; })())`));
+  if (Math.abs(at.kx - at.rx) > 14) return "the guest went to bed somewhere else: " + JSON.stringify(at);
+  // ...and checking out leaves an unmade bed that housekeeping turns over
+  sim.G(`{ const r = hotelRooms()[hotelRooms().length - 1]; checkOut(r.occupant); }`);
+  if (!sim.G("hotelRooms()[hotelRooms().length - 1].dirty")) return "a vacated cabana was not left dirty";
+  const cleaned = sim.runUntil("!hotelRooms()[hotelRooms().length - 1].dirty", { maxSteps: 400000 });
+  if (!cleaned) return "housekeeping never turned the cabana over";
+  return true;
+});
+
+scenario("hotel: a room is CAPITAL - it costs the owner's till and the landlord takes his cut", () => {
+  // The other half of the design: the hotel's rooms are bought, once, by
+  // whoever holds the lease - and the lease gets dearer, so an empty hut is a
+  // standing loss rather than a free option.
+  const sim = createSim({ seed: 1337 });
+  sim.G("coins = 4000;");
+  sim.runUntil("tmin > 10 * 60", {});
+  if (!sim.G("buyOutOwner('hotel')")) return "the fixture could not buy the hotel";
+  if (sim.G("bizOwner('hotel')") !== "player") return "the player does not hold the lease";
+  const c0 = sim.G("Math.round(coins)"), r0 = sim.G("BIZ.hotel.rent"), n0 = sim.G("hotelRooms().length");
+  const w0 = sim.G("Math.round(worldMoney() * 100) / 100");
+  if (!sim.G("buildRoom('player')")) return "the owner could not build with the money in hand";
+  if (sim.G("hotelRooms().length") !== n0 + 1) return "no room was added";
+  if (sim.G("Math.round(coins)") !== c0 - sim.G("roomBuildCost()")) return "the till did not pay for it";
+  if (sim.G("BIZ.hotel.rent") !== r0 + sim.G("ROOM_CFG.RENT")) return "the lease did not get dearer";
+  const w1 = sim.G("Math.round(worldMoney() * 100) / 100");
+  if (Math.abs((w0 - w1) - sim.G("roomBuildCost()")) > 0.005)
+    return "the build price did not leave the world at the landlord: " + w0 + " -> " + w1;
+  // ...and a till that cannot cover it is refused, by name
+  sim.G("coins = 5;");
+  if (sim.G("buildRoom('player')")) return "a broke owner built a cabana anyway";
+  if (!/TILL/.test(sim.G("JSON.stringify(roomWhy('player'))"))) return "the refusal does not say why: " + sim.G("JSON.stringify(roomWhy('player'))");
+  // ...and the ceiling holds
+  sim.G("coins = 4000; setHotelRooms(HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA);");
+  if (sim.G("buildRoom('player')")) return "the forecourt took a room it has no space for";
+  return true;
+});
+
+scenario("hotel: a PEER owner builds off turned-away guests, and never out of tomorrow's payroll", () => {
+  // The CPU arm of the same decision, and it keys on the LEASE rather than on
+  // BRASS - so REEF builds on it too. The signal is a guest bedded down on the
+  // sand with every room LET (capacity), which is the mirror of the unmade-bed
+  // signal the hotelier answers with wages (labour).
+  const sim = createSim({ seed: 1337 });
+  sim.runUntil("day >= 2 && tmin > 10 * 60", { maxSteps: 400000 });
+  const oid = sim.G("JSON.stringify(bizOwner('hotel'))");
+  if (oid === '"player"') return "the fixture town has no peer owner on the hotel";
+  const n0 = sim.G("hotelRooms().length");
+  // ARM ONE: the signal is there, the till is not. Nothing happens.
+  sim.G(`annexe.short = ROOM_CFG.SHORT + 2; annexe.day = day - ROOM_CFG.COOL; bizStrike.hotel = 0;
+         OWNERS[bizOwner('hotel')].till = roomBuildCost() + ROOM_CFG.FLOOR - 1;`);
+  sim.G("runAnnexePolicy();");
+  if (sim.G("hotelRooms().length") !== n0) return "a hotel built a cabana out of tomorrow's wages";
+  // ARM TWO: the till is there, the signal is not.
+  sim.G(`annexe.short = 0; annexe.day = day - ROOM_CFG.COOL; OWNERS[bizOwner('hotel')].till = 2000;`);
+  sim.G("runAnnexePolicy();");
+  if (sim.G("hotelRooms().length") !== n0) return "a hotel built a cabana nobody had asked for";
+  // ARM THREE: both. It builds, once, and the cooldown holds the next one back.
+  sim.G(`annexe.short = ROOM_CFG.SHORT; annexe.day = day - ROOM_CFG.COOL;`);
+  sim.G("runAnnexePolicy();");
+  if (sim.G("hotelRooms().length") !== n0 + 1) return "a full house with money in the till built nothing";
+  if (sim.G("annexe.short") !== 0) return "the tally was not spent";
+  sim.G(`annexe.short = ROOM_CFG.SHORT + 9;`);
+  sim.G("runAnnexePolicy();");
+  if (sim.G("hotelRooms().length") !== n0 + 1) return "the cooldown did not hold the second hut back";
+  // ...and the tally itself is only rung up when the house was genuinely FULL
+  const s0 = sim.G("annexe.short");
+  sim.G(`{ for (const r of hotelRooms()) { r.occupant = null; r.dirty = false; r.cleaning = false; }
+         hotelRooms()[0].dirty = true;
+         const k = customers.find(c => c.visitor && !c.gone) || newVisitor(false);
+         k.roughFlag = false; sleepOnSand(k); }`);
+  if (sim.G("annexe.short") !== s0) return "an unmade bed was counted as a missing one";
+  if (!(sim.G("today.roomsLost") > 0)) return "...and it was not counted as an unmade one either";
+  sim.G(`{ for (const r of hotelRooms()) { r.dirty = false; r.cleaning = false; r.occupant = { visitor: true }; }
+         const k = customers.find(c => c.visitor && !c.gone) || newVisitor(false);
+         k.roughFlag = false; sleepOnSand(k); }`);
+  if (sim.G("annexe.short") !== s0 + 1) return "a guest turned away from a FULL house was not counted";
+  return true;
+});
+
+scenario("accommodation: beds, cabanas, the bills they carry and a guest asleep in one all roundtrip", () => {
+  const store = new Map();
+  const a = createSim({ seed: 1337, storage: store, fresh: false });
+  a.runUntil("day >= 2 && tmin > 12 * 60", { maxSteps: 400000 });
+  a.G(`dorm.beds = 3; dorm.take = 42; setHotelRooms(HOTEL_ROOMS_BASE + 4);`);
+  // put a guest in the LAST cabana so the room index has to survive too
+  a.runUntil("customers.some(k => k.visitor && !k.gone)", { maxSteps: 400000 });
+  a.G(`{ const r = hotelRooms()[hotelRooms().length - 1];
+         const k = customers.find(c => c.visitor && !c.gone);
+         r.occupant = k; k.room = r; k.state = "inRoom"; k.roomN = hotelRooms().length; }`);
+  const want = JSON.parse(a.G(`JSON.stringify({ beds: shelterBeds(), rent: shelterRent(), take: dorm.take,
+    rooms: hotelRooms().length, lease: BIZ.hotel.rent, guest: hotelRooms()[hotelRooms().length - 1].occupant.name })`));
+  a.G("save()");
+  const b = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!b.G("load(activeSlot)")) return "the saved town would not load";
+  const got = JSON.parse(b.G(`JSON.stringify({ beds: shelterBeds(), rent: shelterRent(), take: dorm.take,
+    rooms: hotelRooms().length, lease: BIZ.hotel.rent,
+    guest: (hotelRooms()[hotelRooms().length - 1].occupant || {}).name || null,
+    cab: !!hotelRooms()[hotelRooms().length - 1].cabana })`));
+  for (const k of ["beds", "rent", "take", "rooms", "lease"])
+    if (got[k] !== want[k]) return k + " came back as " + got[k] + ", not " + want[k];
+  if (!got.cab) return "the last room came back as something other than a cabana";
+  if (got.guest !== want.guest) return "the guest asleep in cabana " + want.rooms + " woke up outdoors (" + got.guest + ")";
+  // an OLD save - one written before any of this existed - is a four-bed
+  // shelter and a seven-room hotel, which IS the old world
+  const env = JSON.parse(store.get(a.G("slotKey(activeSlot)")));
+  delete env.dorm; delete env.annexe;
+  store.set(a.G("slotKey(activeSlot)"), JSON.stringify(env));
+  const c = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!c.G("load(activeSlot)")) return "the pre-upgrade save would not load";
+  if (c.G("shelterBeds()") !== c.G("DORM_CFG.BASE")) return "an old save came back with beds it never had";
+  if (c.G("hotelRooms().length") !== c.G("HOTEL_ROOMS_BASE")) return "an old save came back with cabanas it never had";
+  if (c.G("BIZ.hotel.rent") !== c.G("HOTEL_RENT_BASE")) return "an old save came back paying for them";
+  if (c.G("shelterRent()") !== c.G("SHELTER_RENT")) return "an old save came back on a bigger shelter bill";
+  // ...and a corrupt one is clamped rather than trusted
+  const env2 = JSON.parse(store.get(a.G("slotKey(activeSlot)")));
+  env2.dorm = { beds: 900, day: -4, short: "yes", take: -1 };
+  env2.annexe = { built: 99, day: 1, short: -3 };
+  store.set(a.G("slotKey(activeSlot)"), JSON.stringify(env2));
+  const d = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!d.G("load(activeSlot)")) return "the corrupt save would not load at all";
+  if (d.G("shelterBeds()") > d.G("DORM_CFG.MAX")) return "a nonsense bed count survived the load";
+  if (d.G("hotelRooms().length") > d.G("HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA")) return "a nonsense room count survived the load";
+  if (d.G("dorm.take") < 0 || d.G("annexe.short") < 0) return "negative counters survived the load";
+  return true;
+});
+
+scenario("accommodation: the shelter's bill is what the town votes on", () => {
+  // The reason the shelter half is RENT and not a purchase: every extra bed
+  // walks into the election, because a platform whose purse cannot cover the
+  // roof is a platform that closes the shelter (platValue's roof term). Same
+  // town, same voters, two shelter sizes.
+  const sim = createSim({ seed: 1337 });
+  sim.runUntil("day >= 2 && tmin > 19 * 60", { maxSteps: 400000 });
+  const p = JSON.stringify({ mech: "rents", rate: 2, bowls: 0 });
+  const small = sim.G(`(() => { const q = ${p}; return purseYield(q) >= shelterRent() ? 1 : 0; })()`);
+  sim.G("dorm.beds = DORM_CFG.MAX - DORM_CFG.BASE;");
+  const big = sim.G(`(() => { const q = ${p}; return purseYield(q) >= shelterRent() ? 1 : 0; })()`);
+  if (!(small === 1 && big === 0))
+    return "a twelve-bed shelter did not change what that platform can afford (" + small + "/" + big + ")";
+  // ...AND THE BEDS COMPETE WITH THE BOWLS, out of one purse. platBowls only
+  // counts the bowls a platform can pay for AFTER the roof, so a shelter with
+  // three times the beds on it is a shelter whose soup the same purse can no
+  // longer afford - which is the argument the next ballot is actually about.
+  const before = sim.G(`(dorm.beds = 0, JSON.stringify(idealPlatform(cotRoster()[0] || allCrabs()[0])))`);
+  const after = sim.G(`(dorm.beds = DORM_CFG.MAX - DORM_CFG.BASE, JSON.stringify(idealPlatform(cotRoster()[0] || allCrabs()[0])))`);
+  const A = JSON.parse(before), B = JSON.parse(after);
+  if (before === after)
+    return "the town's ideal platform did not move when its shelter tripled: " + before;
+  if (B.bowls > A.bowls)
+    return "a dearer roof bought MORE soup out of the same purse: " + before + " vs " + after;
+  const bowlsA = sim.G(`(dorm.beds = 0, platBowls(${before}))`);
+  const bowlsB = sim.G(`(dorm.beds = DORM_CFG.MAX - DORM_CFG.BASE, platBowls(${before}))`);
+  if (!(bowlsB < bowlsA))
+    return "the same platform funds the same pot either side of eight new beds (" + bowlsA + "/" + bowlsB + ")";
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
