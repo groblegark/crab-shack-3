@@ -4164,6 +4164,71 @@ scenario("ferry: the win saves, and a reloaded town shows the same ending", () =
   return true;
 });
 
+scenario("no card prints text on top of its own text", () => {
+  // Matt: "the tips slider is mushed up with the other text; might be a couple
+  // of instances like that." There were: the SCHEDULE tab had three strings in
+  // one band - the slider's explanation sat on top of the slider's own track
+  // AND on top of the roster hint. The rect table had already been rearranged
+  // to fit the slider in and the TEXT was never moved with it.
+  //
+  // "A couple of instances like that" is the phrase that asks for a sweep
+  // rather than a fix, so this is the off-canvas sweep's sibling: every
+  // full-screen surface is drawn with the text calls measured, and any two
+  // strings whose boxes overlap by more than a pixel in both axes is a defect.
+  // DROP SHADOWS ARE NOT DEFECTS: textShadow draws the same string twice, one
+  // pixel apart, on purpose - so an identical string within 2px is ignored.
+  const sim = createSim({ seed: 11 });
+  sim.runDays(2);
+  sim.runUntil(`report && reportT > 0`, { maxSteps: 400000 });
+  const hits = JSON.parse(sim.G(`(() => {
+    const hits = [];
+    const T = text, S = smallText;
+    globalThis.SURF = "?"; globalThis.BOXES = [];
+    const rec = (str, x, y, h, meas, sz) => {
+      const w = meas(str, sz);
+      for (const b of BOXES) {
+        if (b.s === String(str) && Math.abs(b.x - x) <= 2 && Math.abs(b.y - y) <= 2) continue;   // a shadow
+        const ox = Math.min(b.x + b.w, x + w) - Math.max(b.x, x);
+        const oy = Math.min(b.y + b.h, y + h) - Math.max(b.y, y);
+        if (ox > 1 && oy > 1) hits.push([SURF, String(str), b.s, Math.round(ox), Math.round(oy)]);
+      }
+      BOXES.push({ x, y, w, h, s: String(str) });
+    };
+    text = (c, s2, x, y, col, sz) => { rec(s2, x, y, 7, textWidth, sz); return T(c, s2, x, y, col, sz); };
+    smallText = (c, s2, x, y, col) => { rec(s2, x, y, 5, smallTextWidth); return S(c, s2, x, y, col); };
+    const run = (name, setup, fn) => { SURF = name; BOXES = [];
+      try { if (setup) setup(); fn(); } catch (e) { hits.push([name, "THREW", e.message, 0, 0]); } };
+    const c0 = crabs[0];
+    run("intro", null, () => drawIntro());
+    run("card", () => { sel = c0; dossier = null; manage = null; boardView = false;
+      saveView = false; reportT = 0; tab = "crew"; }, () => drawFollowCard());
+    run("panel-crew", () => { tab = "crew"; }, () => drawPanel());
+    run("panel-shop", () => { tab = "shop"; }, () => drawPanel());
+    run("panel-menu", () => { tab = "menu"; }, () => drawPanel());
+    run("dossier", () => { tab = "crew"; dossier = c0; dossierTab = "STATS"; }, () => drawDossier());
+    run("diary", () => { dossier = c0; dossierTab = "DIARY"; }, () => drawDossier());
+    run("manage-hours", () => { dossier = null; manage = "shack"; manageTab = "HOURS"; }, () => drawManage());
+    run("manage-sched", () => { manage = "shack"; manageTab = "SCHEDULE"; }, () => drawManage());
+    run("census", () => { manage = "shack"; manageTab = "TOWN"; }, () => drawManage());
+    run("board", () => { manage = null; boardView = true; }, () => drawJobBoard());
+    run("save", () => { boardView = false; saveView = true; }, () => drawSaveScreen());
+    run("report", () => { saveView = false; }, () => drawReport());
+    text = T; smallText = S;
+    return JSON.stringify(hits);
+  })()`));
+  if (hits.length) {
+    const seen = new Set(), lines = [];
+    for (const [surf, a, b, ox, oy] of hits) {
+      const k = surf + "|" + a + "|" + b;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      lines.push(`${surf}: "${a}" lands on "${b}" (${ox}x${oy}px)`);
+    }
+    return lines.slice(0, 6).join("\n        ") + (lines.length > 6 ? `\n        (+${lines.length - 6} more)` : "");
+  }
+  return true;
+});
+
 scenario("no surface prints off the canvas", () => {
   // THE GENERAL FORM OF THE LEASE BUG. Every full-screen surface is drawn with
   // text/smallText stubbed to MEASURE what it prints, at the size it prints it,

@@ -2460,6 +2460,16 @@ function bizTables(key) {
 let coins = 0, lifetime = 0, time = 0;
 let crabs = [], customers = [], floaters = [];
 let toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x, 3=6x
+// PAUSE. From the game's first outside playtest (2026-08-19): "Meanwhile
+// theres a clock ticking. PAUSE ANYONE? I'm losing time here". He is right and
+// it was a straight omission - the speed chips went 1x/2x/3x/6x and never
+// stopped, so a new player reading the shop or a crab's dossier was being
+// charged rent for the privilege. Pausing freezes the SIM (dt is zeroed) and
+// nothing else: the frame still draws, every card still opens, and every chip
+// still takes a click, because half the reason to pause is to go and read
+// something. `last` is still advanced, so unpausing does not fast-forward the
+// hours you spent paused.
+let paused = false;
 const FF_SPEED = [1, 2, 3, 6];
 let camX = 1180, followIdx = -1, followNpc = null, followCust = null, tab = "crew";
 // SELECTION is not the camera. Click a crab to select (and focus) them; pan
@@ -7076,6 +7086,7 @@ cv.addEventListener("click", (ev) => {
   // panel
   if (p.y >= PANEL_Y) {
     if (p.y < TAB_Y - 1) {
+      if (p.x >= 191 && p.x < 203) { paused = !paused; sfx.ding(); return; }
       if (p.x > 233) { ffMode = ffMode === 3 ? 0 : 3; sfx.ding(); return; }
       if (p.x > 217) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }
       if (p.x > 203) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }
@@ -7234,6 +7245,10 @@ addEventListener("keydown", (e) => {
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
+  if (e.key === " " || e.key === "p") {                    // the key everybody tries first
+    paused = !paused; sfx.ding();
+    if (e.key === " " && e.preventDefault) e.preventDefault();   // space must not scroll the page
+  }
   // [ and ] step the selection through the town, exactly what the little crab
   // cycler's chevrons do - the camera comes along, unlike an arrow-key pan
   if (e.key === "[" && cyclerLive()) { cycleSel(-1); sfx.ding(); return; }
@@ -8304,6 +8319,14 @@ function drawPanel() {
     }
   }
   smallText(ctx, "SND", 190, PANEL_Y + 3, !muted && soundOn ? [140, 220, 140] : [140, 120, 110]);
+  // the pause chip sits FIRST in the speed row, because it is the same
+  // question the row answers: how fast is time going?
+  {
+    const on = paused;
+    rect(ctx, 191, PANEL_Y + 1, 11, 9, on ? [255, 230, 120] : [70, 58, 54]);
+    rect(ctx, 193, PANEL_Y + 3, 2, 5, on ? [40, 24, 16] : [190, 176, 166]);
+    rect(ctx, 197, PANEL_Y + 3, 2, 5, on ? [40, 24, 16] : [190, 176, 166]);
+  }
   smallText(ctx, ">>", 206, PANEL_Y + 3, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
   smallText(ctx, ">>>", 219, PANEL_Y + 3, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
   smallText(ctx, ">>>>", 236, PANEL_Y + 3, ffMode === 3 ? [255, 230, 120] : [150, 132, 122]);
@@ -9201,14 +9224,15 @@ function drawManage() {
     const th = tr.x + Math.round((tr.w - 7) * share);
     rect(ctx, th, tr.y - 1, 7, tr.h + 2, [58, 42, 38]);                                        // the thumb
     rect(ctx, th + 1, tr.y, 5, tr.h, [255, 250, 235]);
-    smallText(ctx, pct + "%", tr.x + tr.w + 5, tr.y + 4, pct ? [190, 110, 40] : [150, 140, 160]);
-    smallText(ctx, "CREW", tr.x + tr.w + 26, tr.y + 4, [110, 100, 110]);
-    // both hints share this line, so the long one has to leave room for
-    // "TAP A ROW" on the right at the 3x5 font's ~4px a character
-    const hint = pct === 0 ? "EVERY TIP GOES TO THE TILL"
-      : pct === 100 ? "THE TILL KEEPS NONE OF IT"
-      : "CREW POCKET " + pct + "% OF EVERY TIP";
-    smallText(ctx, hint, x + 6, y + 60, pct ? [190, 110, 40] : [150, 140, 160]);
+    // THE SLIDER SAYS IT ITSELF. Matt: "the tips slider is mushed up with the
+    // other text". It was: a separate sentence explaining the slider sat at
+    // y+60 - on top of the slider's own track at y+62 AND on top of the
+    // roster hint at y+61, three strings in one band. The rect table above
+    // already records that the wage steppers and this slider "both claimed
+    // this band"; the RECTS were rearranged for it and the text never was.
+    // The explanation is now the readout, which is where it belonged.
+    const cut = pct === 0 ? "ALL TO THE TILL" : pct === 100 ? "ALL TO THE CREW" : pct + "% TO CREW";
+    smallText(ctx, cut, tr.x + tr.w + 5, tr.y + 4, pct ? [190, 110, 40] : [110, 100, 110]);
     const rowHint = auto ? "AUTO ROTA" : "TAP A ROW";
     smallText(ctx, rowHint, x + w2 - 6 - smallTextWidth(rowHint), y + 60, [110, 100, 110]);
     const staff = allCrabs().filter(c => c.p.job === key);
@@ -9225,9 +9249,15 @@ function drawManage() {
     smallText(ctx, "TONIGHT $" + fmt(bill), x + 152, y + 45, [190, 80, 80]);
     smallText(ctx, "TOWN $" + townWage(key).toFixed(0) + "  PIER $" + Math.round(pierDay()),
       x + 152, y + 54, [110, 100, 110]);
-    smallText(ctx, deals ? deals + " ON A PRIVATE DEAL - ALL PUTS THEM BACK ON $" + bizWage(key)
+    // ...and the roster's own hint goes UNDER THE ROSTER, at the foot of the
+    // card, where there is a whole free row and where it is next to the thing
+    // it describes. Trimmed by WIDTH (fitSmall), not by character count: the
+    // AUTO line is 216px of 3x5 against 170px of card, and a slice(0, n) is a
+    // guess about a proportional budget - see the Conventions note in PLAN.
+    smallText(ctx, fitSmall(deals ? deals + " ON A PRIVATE DEAL - ALL PUTS THEM BACK ON $" + bizWage(key)
       : auto ? "AUTO: SICK DAYS GRANTED, OT CALLED WHEN COVER IS SHORT"
-      : "TAP A ROW: SHIFT, OT, SICK, OR - / + ON THE WAGE", x + 6, y + 61, [110, 100, 110]);
+      : "TAP A ROW: SHIFT, OT, SICK, OR - / + ON THE WAGE", R.done.x - (x + 6) - 6),
+      x + 6, y + h2 - 13, [110, 100, 110]);
     if (!staff.length) smallText(ctx, "NOBODY ASSIGNED - REASSIGN FROM A DOSSIER", x + 8, y + 70, [190, 80, 80]);
     for (let i = 0; i < Math.min(staff.length, R.rows.length); i++) {
       const c = staff[i], cell = R.cells[i], ry = R.rows[i].y;
@@ -9756,7 +9786,8 @@ function drawToast() {
 // ---------------------------------------------------------------- main loop
 let last = performance.now(), saveT = 0;
 function frame(now) {
-  const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
+  const dt = paused ? 0
+    : Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
   last = now; time += dt;
   if (saveConfirmT > 0) { saveConfirmT -= dt; if (saveConfirmT <= 0) saveConfirm = null; }
   if (saleArmT > 0) { saleArmT -= dt; if (saleArmT <= 0) saleArm = null; }
