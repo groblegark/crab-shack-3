@@ -211,7 +211,7 @@ const BIZ = {
     // player's kitchen ~$30 a day at exactly the wrong moment. At rent 60 and
     // an opening float of $140 he reaches the hiring line around day six, by
     // which time the ceiling posting has pulled a drifter in to replace them.
-    rent: 45, owner: "reef", lodging: true,
+    rent: 35, owner: "reef", lodging: true,
     // REEF has no heir and a fair price will always tempt him: this is the
     // "mechanism for owning it" the directive asked for, and it is DATA - any
     // business that carries `sellable` grows an OFFER chip on its shopfront.
@@ -241,7 +241,7 @@ const BIZ = {
     source: "linen", out: "desk", queueX: 2432,
     park: 2180, rack: 2196,
     recipes: [
-      { id: "room", icon: "roomkey", pay: 17, raw: "linen",
+      { id: "room", icon: "roomkey", pay: 13, raw: "linen",
         steps: [["linen", 2.2, "roomkey"]] },
     ],
   },
@@ -965,7 +965,16 @@ const OFF_WAKE = 9.5 * 60;   // a day off starts with a lie-in
 // weekdays keep the single-worker shops (SUDSY's showers, a one-crab
 // arcade) closed on DIFFERENT days - and keep the whole town on deck for
 // the brutal first two days of a new lease (nobody rests MON or TUE).
-const OFF_BASE = { shack: 2, arcade: 4, showers: 6, fishing: 3 };
+// THE REST-DAY TABLE, and it needs a row per business: a shop with no entry
+// falls through to base 0, which is MONDAY - and day 1 is a Monday, so the
+// whole point of the rule ("nobody rests MON/TUE") is lost for that shop on the
+// one day a new town cannot afford it. Measured when the hotel landed without a
+// row: REEF took day one off, the Driftwood was unstaffed from 07:00 to
+// midnight, and EVERY overnighter off the first day's boats slept on the sand.
+// (`juicebar` is still missing a row - a pre-existing fault of the same shape,
+// left alone here because fixing it moves the measured juice-bar curves and
+// this pass has enough numbers of its own. Flagged in PLAN.)
+const OFF_BASE = { shack: 2, arcade: 4, showers: 6, fishing: 3, hotel: 5 };
 let _offMap = {}, _needCover = {}, _offStamp = -1, _offN = -1;
 function refreshDaysOff() {
   const n = crabs.length + npcs.length;
@@ -4988,7 +4997,7 @@ const VIS_SPEED = 42;            // a stroll: a shade under a walking crab's 40 
 // batches are BURSTY where the old spawn timer was a trickle, so five guests
 // hit one counter at once - at 50 the burst cost 2 seated guests a day their
 // $9 table tip and put rage 62% above the pre-pass build.
-const VIS_PATIENCE = 85;
+const VIS_PATIENCE = 100;
 const VIS_THINK = 1.6;           // real seconds between "what do I fancy" checks
 // needs per GAME HOUR while awake. Pitched off the crabs' own cycle but a
 // little gentler: a visitor is not working a shift, and a visitor who needed
@@ -5023,8 +5032,15 @@ const VIS_STROLL = 340;          // ...and how far from here one stroll takes th
 const ROOM_RATE = BIZ.hotel.recipes[0].pay;
 const ROOM_HOUR = 15 * 60;       // past this the bed outranks everything - the desk
                                  // shuts with REEF's shift, and the sand is the alternative
-const ROOM_RANK = 6;             // ...before it, a bed pulls harder than a meal (4)...
-const ROOM_URGE = 4;             // ...and harder still as the afternoon wears on
+// ...and BEFORE it, a bed is the LAST thing on a holidaymaker's mind, which is
+// also the only setting that leaves the town any trade. Measured with the room
+// ranked above a meal (6 against food's 4): a visitor came off the boat and
+// walked the length of the promenade to the hotel first, dropped their bag,
+// and had half a day left to spend - the shack's peak till fell $70 and the
+// growth town could no longer afford its first chef. Ranked below everything,
+// the bed simply waits for the afternoon, when ROOM_HOUR makes it absolute.
+const ROOM_RANK = 1.5;
+const ROOM_URGE = 5;             // ...climbing all afternoon until it outranks lunch
 const BED_HOUR = 21 * 60;        // ...and turns in
 const WAKE_HOUR = 7.5 * 60;      // checkout: the room goes dirty and housekeeping gets it
 const VIS_DAYTRIP = 0.60;        // share of every boat BUT THE LAST who go home the same day
@@ -5091,7 +5107,8 @@ function newVisitor(overnightOnly) {
     color: (Math.random() * CRAB_COLORS.length) | 0,
     acc: ACC_KEYS[(Math.random() * ACC_KEYS.length) | 0],
     animT: Math.random() * 9,
-    x: FERRY.gangway, y: FERRY.deckY, wy: FLOOR_Y, leg: 0,
+    // they come off the boat ON THE PLANKS, at rail height, and walk down
+    x: FERRY.gangway, y: FERRY.deckY, wy: FERRY.deckY, leg: 0,
     state: "ashore",
     // the shop pipeline's own fields, dormant until they join a line
     biz: null, recipe: null, patience: VIS_PATIENCE, maxPatience: VIS_PATIENCE,
@@ -5139,7 +5156,7 @@ function ferryDock(n, idx) {
   const landed = [];
   for (let i = 0; i < count; i++) {
     const v = newVisitor(last);
-    v.x = FERRY.gangway + 8 + i * 5;   // they come down the plank in a line
+    v.x = FERRY.gangway - 4 - i * 7;   // down the plank and along the deck, in a line
     v.thinkT = i * 3 + Math.random() * 8;   // ...and they do not all want lunch at 9:01
     customers.push(v);
     visLog(v, "life", "CAME ASHORE OFF THE FERRY");
@@ -5182,7 +5199,10 @@ function ferryDepartCall(sailAbs) {   // who is going home on this one
   }
 }
 function visLeave(k) {
-  if (k.room) { k.room.occupant = null; k.room.dirty = true; k.room = null; }
+  // a guest called to the boat straight out of their bed has still SLEPT
+  // there: check them out properly so the night is credited and the room goes
+  // back to housekeeping, then send them down the pier
+  if (k.room) checkOut(k);
   k.state = "toPier"; k.leg = 0; k.target = null;
   visLog(k, "life", "HEADING BACK TO THE FERRY");
 }
@@ -6908,7 +6928,7 @@ function custStatus(k) {
   if (k.state === "toBiz") return "ON THEIR WAY TO THE " + BIZ[k.biz].short;
   if (k.state === "toRoom") return "OFF TO ROOM " + (k.roomN || "?");
   if (k.state === "inRoom") return "ASLEEP IN ROOM " + (k.roomN || "?");
-  if (k.state === "onSand") return "SLEEPING ON THE BEACH - NO ROOM";
+  if (k.state === "onSand") return "NO ROOM - OUT ON THE SAND";
   if (k.state === "roam") return k.wallet < 6 ? "OUT OF MONEY, TAKING IT IN"
     : k.idleT > 0 ? "WATCHING THE TOWN GO BY" : "STROLLING THE PROMENADE";
   if (k.state === "arriving") return "HEADING TO THE " + b;
@@ -6941,10 +6961,10 @@ function visCondition(k) {
 // carries, in the same order, so the player learns one thing and reads two
 const VIS_BAR = [["FED", "hunger"], ["THR", "thirst"], ["CLN", "dirt"], ["FUN", "bored"], ["SPA", "tired"]];
 function visBars(k, x, y, w) {
-  const cw = ((w - 4) / 5) | 0;
+  const cw = ((w - 16) / 5) | 0;   // four gaps of 4px: five meters have to read as five
   for (let i = 0; i < VIS_BAR.length; i++) {
     const [lbl, key] = VIS_BAR[i], v = Math.max(0, Math.min(1, k[key] || 0));
-    const bx = x + i * (cw + 1);
+    const bx = x + i * (cw + 4);
     smallText(ctx, lbl, bx, y, [120, 110, 125]);
     rect(ctx, bx, y + 6, cw, 3, [30, 20, 36]);
     rect(ctx, bx, y + 6, Math.round(cw * (1 - v)), 3,
@@ -8729,12 +8749,15 @@ function frame(now) {
       const guest = t.occupant && t.occupant.visitor ? t.occupant : null;
       const lit = guest && (guest.state === "inRoom" || darkness() > 0.4);
       wblit(HOTEL_DOOR[lit ? 1 : 0], t.x, t.y - HOTEL_DOOR[0].h);
+      // the room number on the transom, and a Z over the door of an occupied
+      // one. Both sit in the 4px of wall between the awning and the door head -
+      // anything higher is painted over by the shopfront's own roofline.
       const n = stalls.indexOf(t) + 1;
       const nx = t.x + 7 - camX;
-      if (nx > -12 && nx < W) smallText(ctx, "" + n, nx, t.y - HOTEL_DOOR[0].h - 7, [235, 225, 200]);
-      if (guest && guest.state === "inRoom") {   // ZZZ over the transom
-        const ph = ((time * 0.7) % 1);
-        smallText(ctx, "Z", t.x + 12 - camX, t.y - HOTEL_DOOR[0].h - 2 - ph * 5, [200, 210, 255]);
+      if (nx > -12 && nx < W) smallText(ctx, "" + n, nx, t.y - HOTEL_DOOR[0].h - 5, [70, 60, 90]);
+      if (guest && guest.state === "inRoom") {
+        const ph = ((time * 0.7 + t.x * 0.01) % 1);
+        smallText(ctx, "Z", t.x + 12 - camX, t.y - HOTEL_DOOR[0].h + 3 - ph * 4, [190, 205, 255]);
       }
       if (t.dirty) {   // the maid hasn't been round
         px(ctx, t.x + 3 - camX, t.y - 2, [220, 190, 130]);

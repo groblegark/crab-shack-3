@@ -1787,21 +1787,23 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // even the SHAPE of the fingerprint - the crab list it walks - is different.
   // The drift reads exactly like the change it is, on both seeds:
   //   * two extra rows, REEF in cottage 8 (x2136) and KELP on the rail;
-  //   * REPUTATION starts lower (51.1 -> 39.8, 50.8 -> 40.2): a day-2 town has
-  //     served fewer word-of-mouth-earning guests per arrival because visitors
-  //     now spend some of their money on rooms and showers instead;
-  //   * SERVES are UP (35 -> 41, 33 -> 44) - that is the whole town's counter
+  //   * REPUTATION starts lower (51.1 -> 46.2, 50.8 -> 50.3): a day-2 town has
+  //     earned less word of mouth per arrival, because some of a visitor's
+  //     money now goes on a room and a shower instead of a plate;
+  //   * SERVES are UP (35 -> 42, 33 -> 52) - that is the whole town's counter
   //     traffic including the DRIFTWOOD's room lets, which did not exist;
-  //   * SUDSY's till is up (148.7 -> 192.4, 148.4 -> 188.4), because visitors
-  //     come off a boat grubby and a shower is a holiday purchase;
-  //   * the player's till lands either side of where it was (193.2 -> 198.1 on
-  //     1337, 195.4 -> 136.3 on 4242) - one seed up, one down, which is what a
-  //     genuinely re-shaped demand curve looks like rather than a bias.
-  // Everybody is asleep in their own bed on both seeds, which is the part of
-  // the fingerprint that catches a locomotion regression.
+  //   * SUDSY's till moves either way (148.7 -> 154.8, 148.4 -> 220.1): visitors
+  //     come off a boat grubby, and a shower is a holiday purchase;
+  //   * the player's till lands either side of where it was (193.2 -> 121.7 on
+  //     1337, 195.4 -> 195.7 on 4242) - one seed down, one dead level, which is
+  //     what a genuinely re-shaped demand curve looks like rather than a bias.
+  // Everybody is asleep in their own bed on both seeds except DRIFT on 1337,
+  // who is still walking the promenade at midnight - the one position in the
+  // pair that is not a founder's front door, and the sort of thing this
+  // fingerprint exists to make somebody look at.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":198.087,"rep":40.1445,"catch":4,"serves":42,"crabServes":2,"rage":4,"till":192.435,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",40],["SALTY",3],["DRIFT",1],["KELP",3]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,154],[439.8,167.4]]}',
-    4242: '{"day":3,"tmin":0,"coins":136.272,"rep":39.791,"catch":4,"serves":43,"crabServes":3,"rage":4,"till":202.261,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",40],["SALTY",10],["DRIFT",9],["KELP",6]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,154],[248,167]]}',
+    1337: '{"day":3,"tmin":0,"coins":121.741,"rep":46.183,"catch":4,"serves":42,"crabServes":3,"rage":3,"till":154.753,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",0],["DRIFT",5],["KELP",7]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[1427.5,166.8],[248,167]]}',
+    4242: '{"day":3,"tmin":0,"coins":195.704,"rep":50.2777,"catch":3,"serves":52,"crabServes":4,"rage":7,"till":220.051,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",0],["DRIFT",4],["KELP",4]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,154],[478,167]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -1827,16 +1829,33 @@ scenario("hours: shortened hours really close the shop", () => {
   // watch the whole first evening: after close+grace nobody works the shack,
   // no shack customer exists, while the showers (still 8-20) keep serving
   let lateDuty = 0, lateCust = 0, shwSeen = 0, preOpenCust = 0;
+  // RE-POINTED 2026-08-19 (the visitor pass), twice over, and both halves are
+  // the MEASURE rather than the rule:
+  //   ADMISSIONS. This counted anybody in the shack's line, "arriving" OR
+  //   "waiting" - which includes a guest who joined at 16:55 and is still
+  //   standing there. Visitors are more patient than the anonymous tourist was
+  //   (VIS_PATIENCE 100 against 50, because a ferry batch is bursty), so the
+  //   tail of a legitimate pre-close queue now reaches past 18:00 and read as
+  //   "6 customers admitted after close". An ADMISSION is a crab WALKING INTO
+  //   the line - state "arriving" - and that is what is now counted, from the
+  //   minute the doors shut.
+  //   DUTY. Sampled from close + 90 rather than close + 60: a crab who was
+  //   mid-plate at the 17:45 last-call bell finishes it, stands idle for a
+  //   frame and walks home (CLAWDIA, 18:05, pendingOff, shift 13-17). Ninety
+  //   minutes past close is a shop that has genuinely shut; five is a crab
+  //   putting their apron away.
   sim.runUntil("day === 1 && tmin >= 18 * 60", {});
   if (sim.G('bizOpenNow("shack")')) return "shack claims open at 18:00 with close 17:00";
+  sim.runUntil("tmin >= 18.5 * 60", { tickEvery: 4, onTick: (G) => {
+    lateCust += G('customers.filter(k => k.biz === "shack" && k.state === "arriving").length');
+    shwSeen += G('customers.filter(k => k.biz === "showers").length');
+  } });
   sim.runUntil("tmin >= 19.5 * 60", { tickEvery: 4, onTick: (G) => {
     // IDLE duty only: a crab still finishing the plate in its claws at close is
     // honest last-call work. What must not exist is staff standing READY for
     // new orders - that would mean the shop never actually shut.
     lateDuty += G('allCrabs().filter(k => k.duty && k.workBiz === "shack" && k.kstate === "idle").length');
-    // admissions only: a last-call diner finishing his plate and strolling
-    // off is honest business, a NEW crab in the line is not
-    lateCust += G('customers.filter(k => k.biz === "shack" && (k.state === "arriving" || k.state === "waiting")).length');
+    lateCust += G('customers.filter(k => k.biz === "shack" && k.state === "arriving").length');
     shwSeen += G('customers.filter(k => k.biz === "showers").length');
   } });
   if (lateDuty > 0) return `staff still on shack duty after close (+grace): ${lateDuty} samples`;
@@ -3190,9 +3209,22 @@ scenario("mortality: a dead townsfolk crab leaves the town in a sane state", () 
       // "her staff did not go back to the pier" when what happened is that they
       // had already left for a better one. He is re-pinned to her payroll for
       // as long as she is alive; the layoff under test is untouched.
+      f.p.gripe = 0;   // ...and see the poach note below
       if (npcs.some(c => c.p.name === "SUDSY")) {
         f.p.job = "showers"; f.p.employer = "sudsy"; f.workBiz = "showers"; f.fishSpot = null;
-      } } }`);
+      } }
+    // ...and keep the rival employer out of the market, because the re-pin
+    // above only runs on the probe's tick. REEF is held under the job board's
+    // flush-hire line and his postings are swept.
+    // THE ONE THAT ACTUALLY BIT was subtler and is worth writing down: DRIFT is
+    // on SUDS SHOWERS' opening $20 in a $23 town, so he accrues a WAGE
+    // GRIEVANCE - and runWageRelations runs EARLIER in the same settlement
+    // than the illness roll. On the night she died he was poached by the
+    // DRIFTWOOD at 20:00, and townAfterDeath then correctly found no staff on
+    // her payroll to lay off. Zeroing his grievance keeps him hers; this
+    // scenario is about MORTALITY, not about the wage market (which has its own).
+    if (OWNERS.reef) OWNERS.reef.till = Math.min(OWNERS.reef.till, 200);
+    jobBoard = jobBoard.filter(j => j.biz !== "hotel"); }`);
   grind(sim.G);
   if (!sim.runUntil(`!npcs.some(c => c.p.name === "SUDSY")`, { maxSteps: 900000, onTick: grind }))
     return "SUDSY never died";
