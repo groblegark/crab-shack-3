@@ -8211,14 +8211,25 @@ function tipTrackHit(p) {
   return p.x >= tr.x - 4 && p.x < tr.x + tr.w + 4 && p.y >= tr.y - 3 && p.y < tr.y + tr.h + 3;
 }
 let dragging = false, dragStartX = 0, dragCamX = 0, dragMoved = false;
+// SCRUBBING THE NAV STRIP is its own grab, exactly as the tip slider is: a
+// finger on the map must move the CAMERA, never pan the town underneath it.
+let navDrag = false, navDragX = 0;
 cv.addEventListener("mousedown", (ev) => {
   if (ev.button !== 0) return;   // right button is for orders - it must not pan or drop the follow
   const p = evPos(ev);
   if (tipTrackHit(p)) { tipDrag = true; return; }   // grabbing the thumb must never pan the town behind the card
+  if (navTrackHit(p)) { navDrag = true; navDragX = p.x; return; }
   if (p.y < PANEL_Y) { dragging = true; dragStartX = p.x; dragCamX = camX; dragMoved = false; }
 });
 addEventListener("mousemove", (ev) => {
   if (tipDrag) { tipSliderTo(manage, evPos(ev).x); return; }
+  if (navDrag) {
+    const p = evPos(ev);
+    // past the same 4px the town's own pan uses this is a SCRUB, not a tap:
+    // dragMoved swallows the click that follows, so it never also snaps
+    if (Math.abs(p.x - navDragX) > 4) { dragMoved = true; navScrubTo(p.x); }
+    return;
+  }
   if (!dragging) return;
   const p = evPos(ev);
   if (Math.abs(p.x - dragStartX) > 4) { dragMoved = true; followIdx = -1; followNpc = null; followCust = null; }   // camera only: sel survives the pan
@@ -8226,6 +8237,7 @@ addEventListener("mousemove", (ev) => {
 });
 addEventListener("mouseup", () => {
   if (tipDrag) { tipDrag = false; sfx.buy(); save(); }
+  navDrag = false;
   dragging = false; setTimeout(() => { dragMoved = false; }, 50);
 });
 cv.addEventListener("touchstart", (ev) => {
@@ -8233,11 +8245,18 @@ cv.addEventListener("touchstart", (ev) => {
   const p = evPos(t);
   if (window.MergeMode && MergeMode.touchStart(p)) return;
   if (tipTrackHit(p)) { tipDrag = true; return; }
+  if (navTrackHit(p)) { navDrag = true; navDragX = p.x; return; }
   if (p.y < PANEL_Y) { dragging = true; dragStartX = p.x; dragCamX = camX; dragMoved = false; }
 }, { passive: true });
 cv.addEventListener("touchmove", (ev) => {
   if (tipDrag) { ev.preventDefault(); tipSliderTo(manage, evPos(ev.touches[0]).x); return; }
   if (window.MergeMode && MergeMode.touchMove(evPos(ev.touches[0]))) { ev.preventDefault(); return; }
+  if (navDrag) {
+    ev.preventDefault();
+    const p = evPos(ev.touches[0]);
+    if (Math.abs(p.x - navDragX) > 6) { dragMoved = true; navScrubTo(p.x); }
+    return;
+  }
   if (!dragging) return;
   ev.preventDefault();
   const p = evPos(ev.touches[0]);
@@ -8245,7 +8264,7 @@ cv.addEventListener("touchmove", (ev) => {
   if (dragMoved) camX = clampCam(dragCamX - (p.x - dragStartX));
 }, { passive: false });
 cv.addEventListener("touchcancel", () => {
-  tipDrag = false;
+  tipDrag = false; navDrag = false;
   dragging = false; dragMoved = false;
   if (window.MergeMode && MergeMode.touchCancel) MergeMode.touchCancel();
 }, { passive: true });
@@ -8253,6 +8272,7 @@ cv.addEventListener("touchend", (ev) => {
   if (tipDrag) { tipDrag = false; dragging = false; dragMoved = false; sfx.buy(); save(); return; }
   const t = ev.changedTouches && ev.changedTouches[0];
   if (window.MergeMode && MergeMode.touchEnd(t ? evPos(t) : null)) { dragging = false; dragMoved = false; return; }
+  navDrag = false;
   setTimeout(() => { dragging = false; dragMoved = false; }, 50);
 });
 // horizontal wheel / trackpad swipe pans the town (shift+wheel too)
@@ -8466,7 +8486,7 @@ cv.addEventListener("click", (ev) => {
       }
     }
     const owned = ownedBizList();
-    if (owned.length > 1 && hit(R.next)) { manage = owned[(owned.indexOf(manage) + 1) % owned.length]; sfx.ding(); return; }
+    if (manageBizCycler() && hit(R.next)) { manage = owned[(owned.indexOf(manage) + 1) % owned.length]; sfx.ding(); return; }
     const onCard = pt.x >= R.x - 2 && pt.x < R.x + R.w + 2 && pt.y >= R.y - 2 && pt.y < R.y + R.h + 2;
     if (hit(R.done) || !onCard) manage = null;
     return;
@@ -8519,6 +8539,10 @@ cv.addEventListener("click", (ev) => {
     }
     return;
   }
+  // THE NAV STRIP is painted over the bottom rows of the world, so it answers
+  // for them: its chips first, then the map, then the town underneath.
+  if (navTapChip(p)) return;
+  if (navTrackHit(p)) { navJumpTo(p.x); sfx.ding(); return; }
   // follow-card job toggle
   if (followIdx >= 0 && !followNpc
       && Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1
@@ -9768,6 +9792,231 @@ function drawFollowCard() {
   }
 }
 
+// ---------------------------------------------------------------- the nav strip
+// THE TOWN IS 2512 PIXELS WIDE AND THE WINDOW IS 256. Before this the only way
+// to learn the shape of the place was to hold an arrow key down: no map, no
+// index, and the two screens that matter most were reached by CLICKING A
+// PICTURE OF A BUILDING - the management card off a shopfront's sign, and the
+// census filed as a TAB INSIDE that card, so the whole town lived inside one
+// shop. Matt: "i know the town view needs to be more obvious; that's hard to
+// get to", "the management screen is too important to be a graphic in the
+// game, needs more central positioning", "a minimap nav thingy would be nice".
+//
+// So: the town drawn to scale in the only rows the world has never used.
+// FLOOR_MAX is 168 and the panel starts at 176 - nothing has ever been painted
+// between them - which is where the whole strip fits without covering a single
+// crab. It is a CROSS-SECTION, not a floorplan: water, shore, promenade, lots,
+// top to bottom, the same order your eye reads the real screen in, so the map
+// and the town agree about which way is out to sea.
+//
+// ONE WORD IS PRINTED ON IT AND IT IS "SHACK". At 1:9.8 the shack's 340px lot
+// is 35 strip pixels - the only building both wide enough to carry a name and
+// tall enough to hold one - and pure geography lands it within a pixel of the
+// middle of the map. That is the answer to "maybe it's not obvious enough that
+// the crab shack is the central place money comes from": on the map it is the
+// tallest thing, the only gold thing and the only named thing, dead centre.
+//
+// MONEY ARRIVING, ON THE MAP. Matt: "maybe it's not obvious enough that the
+// crab shack is the central place money comes from". The map answers the WHERE
+// (tallest, goldest, named, dead centre); this answers the WHAT. Every time one
+// of your shops takes money its block on the strip flashes, so a player who has
+// never opened a ledger watches the coins land on the middle of the town.
+//
+// It is READ-ONLY BOOKKEEPING: the draw watches today.biz[key].take, which the
+// till already keeps for the management card, and remembers what it saw. The
+// sim does not know this exists and cannot be changed by it - note the plain
+// lookup rather than bizDayBook(), which would CREATE a day-book entry for a
+// shop that has not traded and put a phantom line in the night's report.
+const NAV_FLASH = 0.22;                     // long enough to catch, short enough not to strobe
+const navTake = {}, navFlash = {};
+function navTill(key) { const bk = today.biz[key]; return bk ? bk.take || 0 : 0; }
+function navFlashing(key) {
+  const take = navTill(key);
+  const seen = navTake[key];
+  if (seen != null && take > seen) navFlash[key] = time;
+  navTake[key] = take;                      // ...and a day rollover resets it to 0 without a flash
+  return navFlash[key] != null && time - navFlash[key] < NAV_FLASH;
+}
+const NAV_H = 7;                            // the free rows between FLOOR_MAX and the panel
+const NAV_CHIP_H = 11;                      // ...and a thumb-sized chip row above them
+// The map is the full width of the canvas and cannot be anything else, so it is
+// a const rather than a fresh object per call - navToScreen is on the hot path
+// (once per landmark and once per crab, every frame).
+const NAV_MAP = { x: 0, y: PANEL_Y - NAV_H, w: W, h: NAV_H };
+// MANAGE and TOWN are the two screens that were only ever reachable by finding
+// the right building. They sit on the LEFT of the chip row above the map,
+// because the RIGHT of that row is already spoken for: the debt and bankruptcy
+// warnings stack up from there.
+function navRects() {
+  const cy = NAV_MAP.y - NAV_CHIP_H - 1;
+  const mw = smallTextWidth("MANAGE") + 8, tw = smallTextWidth("TOWN") + 8;
+  return {
+    map: NAV_MAP,
+    manage: { x: 2, y: cy, w: mw, h: NAV_CHIP_H },
+    town: { x: 4 + mw, y: cy, w: tw, h: NAV_CHIP_H },
+  };
+}
+// world x <-> strip x. Rounded on the way out so a building's block and its
+// hit test land on the same pixel column.
+function navToScreen(wx) { return NAV_MAP.x + Math.round(wx * NAV_MAP.w / WORLD_W); }
+function navToWorld(px) { return (px - NAV_MAP.x) * WORLD_W / NAV_MAP.w; }
+// ONE TABLE, THREE READERS: the draw, the hit test and the camera jump all walk
+// this list, so nothing can be drawn somewhere you cannot click and nothing can
+// be clickable that was never drawn. Shops come straight out of BIZ, which is
+// what makes a new lot appear on the map the day it opens.
+function navMarks() {
+  const M = [];
+  for (const k of Object.keys(BIZ)) {
+    if (!bizUnlocked(k)) continue;
+    const b = BIZ[k];
+    M.push({ x0: b.x0, x1: b.x1, kind: k === "shack" ? "shack" : "biz", key: k,
+      mine: bizOwner(k) === "player" });
+  }
+  M.push({ x0: SHELTER_X, x1: SHELTER_X + SHELTER2.w, kind: "shelter" });
+  M.push({ x0: PIER_X0 - 4, x1: PIER_X1 + 4, kind: "pier" });
+  M.push({ x0: FERRY.hull - 14, x1: FERRY.hull + 14, kind: "boat" });
+  for (const hx of HOUSE_XS) M.push({ x0: hx, x1: hx + HOUSES2[0].w, kind: "house" });
+  return M;
+}
+// the strip is live on exactly the terms the crab cycler is: the town is on
+// screen and nothing is being read on top of it
+function navLive() {
+  return screen === "play" && !gameOver
+    && !(dossier || manage || boardView || saveView || reportT > 0)
+    && !(window.MergeMode && MergeMode.active());
+}
+// ...and the two chips need somewhere to go: a player with no shop left has no
+// management card to open, and the census is drawn on one.
+function navChipsLive() { return navLive() && ownedBizList().length > 0; }
+
+// A CLICK ON THE STRIP PUTS THE CAMERA THERE, and on a landmark it centres the
+// LANDMARK rather than the pixel you hit - a beach cottage is six strip pixels
+// wide and nobody can aim at that. The slop is exactly one strip pixel of world,
+// so the target is the block you can see plus the rounding that drew it.
+function navPlaceAt(px) {
+  const wx = navToWorld(px), grab = WORLD_W / NAV_MAP.w;
+  let best = null, bestD = 1e9;
+  for (const mk of navMarks()) {
+    if (wx < mk.x0 - grab || wx > mk.x1 + grab) continue;
+    const d = Math.abs((mk.x0 + mk.x1) / 2 - wx);
+    if (d < bestD) { bestD = d; best = mk; }
+  }
+  return best;
+}
+function navCamFor(px) {
+  const mk = navPlaceAt(px);
+  const cx = mk ? (mk.x0 + mk.x1) / 2 : navToWorld(px);
+  return clampCam(Math.round(cx - W / 2));
+}
+function navJumpTo(px) {
+  camX = navCamFor(px);
+  followIdx = -1; followNpc = null; followCust = null;   // you asked for a place, not a crab
+}
+// dragging along the strip SCRUBS the town past the window - no snapping, the
+// camera tracks the finger
+function navScrubTo(px) {
+  camX = clampCam(Math.round(navToWorld(px) - W / 2));
+  followIdx = -1; followNpc = null; followCust = null;
+}
+function navTrackHit(p) {
+  if (!navLive()) return false;
+  const m = NAV_MAP;
+  // two rows of slop above the strip: it is seven pixels tall and a thumb is not
+  const y0 = m.y - 2;
+  return p.x >= m.x && p.x < m.x + m.w && p.y >= y0 && p.y < m.y + m.h;
+}
+function navTapChip(p) {
+  if (!navChipsLive()) return false;
+  const R = navRects();
+  const hit = (r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+  if (hit(R.manage)) {
+    // WHICH SHOP? The one you are looking at, if you own it - the chip answers
+    // for the business on screen - and the SHACK otherwise, because the shack is
+    // the business this game is about. NEXT> on the card reaches the rest.
+    const owned = ownedBizList(), mid = camX + W / 2;
+    manage = owned.find(b => mid >= BIZ[b].x0 - 48 && mid <= BIZ[b].x1 + 48)
+      || (owned.includes("shack") ? "shack" : owned[0]);
+    manageTab = "HOURS"; sfx.ding(); return true;
+  }
+  if (hit(R.town)) {
+    // THE TOWN IS NOT A PAGE OF A SHOP. It is still drawn on the management
+    // card - one card, three tabs - but you no longer have to go through a
+    // shopfront to reach it, and the card retitles itself when you arrive here.
+    manage = ownedBizList().includes("shack") ? "shack" : ownedBizList()[0];
+    manageTab = "TOWN"; sfx.ding(); return true;
+  }
+  return false;
+}
+
+function drawNav() {
+  if (!navLive()) return;
+  const R = navRects(), m = NAV_MAP, sx = navToScreen, marks = navMarks();
+  // ---- the cross-section. Four bands, end to end, so the strip reads as a
+  // coastline before a single building is on it.
+  rect(ctx, m.x, m.y, m.w, 1, [40, 140, 220]);           // out to sea
+  rect(ctx, m.x, m.y + 1, m.w, 1, [246, 222, 170]);      // the shore
+  rect(ctx, m.x, m.y + 2, m.w, 1, [96, 92, 110]);        // the promenade, end to end
+  rect(ctx, m.x, m.y + 3, m.w, m.h - 3, [232, 208, 162]);  // the lots
+  // ---- what is on it. Heights ARE the legend: the taller it is the more it
+  // matters, and only one thing reaches the water.
+  for (const mk of marks) {
+    const x0 = sx(mk.x0), w = Math.max(1, sx(mk.x1) - x0);
+    if (mk.kind === "pier") { rect(ctx, x0, m.y, w, 1, [236, 214, 170]); continue; }
+    if (mk.kind === "boat") { rect(ctx, x0 + ((w - 3) >> 1), m.y, 3, 1, [240, 246, 255]); continue; }
+    if (mk.kind === "house") {
+      rect(ctx, x0, m.y + 5, w, 1, [150, 92, 70]);       // roof
+      rect(ctx, x0, m.y + 6, w, 1, [206, 158, 118]);     // and the wall under it
+      continue;
+    }
+    if (mk.kind === "shelter") { rect(ctx, x0, m.y + 4, w, 3, [128, 150, 186]); continue; }
+    if (mk.kind === "shack") continue;                   // drawn last, over everything
+    rect(ctx, x0, m.y + 3, w, m.h - 3, !mk.mine ? [108, 100, 140]
+      : navFlashing(mk.key) ? [255, 244, 210] : [212, 142, 56]);
+  }
+  const shack = marks.find(mk => mk.kind === "shack");
+  if (shack) {
+    const x0 = sx(shack.x0), w = Math.max(1, sx(shack.x1) - x0);
+    rect(ctx, x0, m.y + 1, w, m.h - 1,
+      navFlashing("shack") ? [255, 250, 230] : [255, 216, 96]);   // through the promenade and onto the sand
+    // the one word on the map. It only prints if the lot is genuinely wide
+    // enough to hold it - measured, never counted - so a future shack that
+    // shrinks loses its label instead of spilling onto its neighbours.
+    const lbl = "SHACK", lw = smallTextWidth(lbl);
+    if (lw + 2 <= w) smallText(ctx, lbl, x0 + ((w - lw) >> 1), m.y + 1, [70, 48, 20]);
+  }
+  // ---- WHERE THE CREW ARE. One pixel each, in their own shell colour, on the
+  // promenade line: the answer to "where did PINCHY go" without a card.
+  for (const c of crabs) {
+    if (c.hidden) continue;
+    const pal = CRAB_COLORS[c.p.color % CRAB_COLORS.length];
+    rect(ctx, Math.max(m.x, Math.min(m.x + m.w - 1, sx(c.x + 8))), m.y + 2, 1, 1, pal[0]);
+  }
+  // ---- THE WINDOW. Everything you are NOT looking at goes under a wash, so the
+  // bright slice of coast IS the screen above it - no legend needed.
+  const cx0 = sx(camX), cw = Math.max(4, sx(camX + W) - cx0);
+  ctx.fillStyle = "rgba(20,14,34,0.2)";
+  ctx.fillRect(m.x, m.y, cx0 - m.x, m.h);
+  ctx.fillRect(cx0 + cw, m.y, m.x + m.w - (cx0 + cw), m.h);
+  rect(ctx, cx0, m.y, 1, m.h, [255, 255, 255]);
+  rect(ctx, cx0 + cw - 1, m.y, 1, m.h, [255, 255, 255]);
+  rect(ctx, cx0, m.y + m.h - 1, cw, 1, [255, 255, 255]);   // ...and underlined, so it reads as a frame
+  // whoever is picked - crab, townsfolk or tourist - goes on top of the wash, so
+  // the strip answers "where are they" even when they are three screens away
+  if (sel && sel.x != null && !sel.hidden) {
+    const px2 = Math.max(m.x, Math.min(m.x + m.w - 1, sx(sel.x + 8)));
+    rect(ctx, px2, m.y + 2, 1, 1, [255, 255, 255]);
+  }
+  // ---- and the two screens that used to be buildings
+  if (!navChipsLive()) return;
+  const chip = (r, label) => {
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [235, 225, 205]);
+    smallText(ctx, label, r.x + ((r.w - smallTextWidth(label)) >> 1), r.y + 3, [90, 60, 40]);
+  };
+  chip(R.manage, "MANAGE");
+  chip(R.town, "TOWN");
+}
+
 function drawPanel() {
   rect(ctx, 0, PANEL_Y, W, H - PANEL_Y, [58, 42, 38]);
   rect(ctx, 0, PANEL_Y, W, 1, [120, 90, 70]);
@@ -10528,6 +10777,14 @@ function drawDossier() {
 // apart on purpose.
 function ownedBizList() { return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player"); }
 const MANAGE_TABS = ["HOURS", "SCHEDULE", "TOWN", "HALL"];
+// NEXT> steps to the next SHOP you own, which means nothing at all on a page
+// about the TOWN - and the census is now reached straight from the nav strip,
+// by players who never picked a business in the first place. One predicate for
+// the draw and the hit test, so hiding it never leaves a dead zone behind.
+// The HALL is the same case: it is a page about the town, not about a shop.
+function manageBizCycler() {
+  return manageTab !== "TOWN" && manageTab !== "HALL" && ownedBizList().length > 1;
+}
 let manageTab = "HOURS";
 // HALL tab view state (transient, like the census sort): which of the three
 // reading surfaces you are on - the town's books, the last ballot's result, or
@@ -10643,8 +10900,12 @@ function drawManage() {
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
   rect(ctx, x, y, w2, 14, [58, 42, 38]);
-  text(ctx, b.name + " - MGMT", x + 6, y + 4, [255, 240, 210]);
-  if (ownedBizList().length > 1) {
+  // THE CENSUS IS THE TOWN'S PAGE, NOT THE SHOP'S. It is still drawn on the
+  // management card - one card, three tabs - but the nav strip's TOWN chip
+  // opens it directly now, so a player can arrive here without ever choosing a
+  // business, and the header has to say what they are actually looking at.
+  text(ctx, manageTab === "TOWN" ? "TOWN CENSUS" : b.name + " - MGMT", x + 6, y + 4, [255, 240, 210]);
+  if (manageBizCycler()) {
     rect(ctx, R.next.x, R.next.y, R.next.w, R.next.h, [96, 170, 220]);
     smallText(ctx, "NEXT>", R.next.x + 9, R.next.y + 3, [255, 255, 255]);
   }
@@ -11993,6 +12254,7 @@ function frame(now) {
     }
   }
   drawNight();
+  drawNav();      // HUD, so: after the night wash - the map never goes dark
   drawJobBoard();
   // A READING SURFACE OWNS THE SCREEN (owner report: "events appear at same
   // time as ledger and block it out"). The day report and toasts wait their
@@ -12021,8 +12283,9 @@ function frame(now) {
     px(ctx, W - 17, 23, sc); px(ctx, W - 11, 23, sc);
     if (on) smallText(ctx, "ZZZ", W - 44, 17, [255, 230, 120]);
   }
-  {  // line-of-credit chips, bottom-right of the world (right above the BILL chip)
-    let cy = PANEL_Y - 12;
+  {  // line-of-credit chips, bottom-right of the world - now stacking up from
+     // the nav strip's chip row, whose left end carries MANAGE and TOWN
+    let cy = PANEL_Y - NAV_H - 12;
     if (bankHorizon <= CREDIT_CFG.CHIP_DAYS && !gameOver) {
       const wTxt = bankHorizon <= 0 ? "BANKRUPT TONIGHT!" : "BANKRUPT IN " + bankHorizon + "D";
       const ww = smallTextWidth(wTxt) + 8;

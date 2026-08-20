@@ -4297,6 +4297,163 @@ scenario("the beach ball is LIMITED fun", () => {
   return true;
 });
 
+scenario("the nav strip: one table draws it, hit-tests it and jumps the camera", () => {
+  // THE MINIMAP'S OWN CONTRACT. The town is 2512px wide behind a 256px window,
+  // and before the strip the only index to it was holding an arrow key down.
+  // Five things have to stay true or the map is a decoration:
+  //   1. ONE TABLE. navMarks() is what gets DRAWN and what gets HIT, so a
+  //      landmark can never be painted somewhere you cannot tap, and nothing
+  //      can be tappable that was never painted.
+  //   2. A TAP AT A PLACE PUTS THE CAMERA THERE - actually there, with the
+  //      place inside the window, not merely somewhere near it.
+  //   3. IT NEVER DRAWS OFF THE CANVAS, in EITHER screen height. The strip
+  //      lives in the seven rows between FLOOR_MAX and the panel - a budget of
+  //      exactly nothing - and portrait phones move the panel but not the world.
+  //   4. THE CHIPS OPEN THE TWO SCREENS THAT USED TO BE BUILDINGS.
+  //   5. IT IS DEAD WHILE A CARD IS UP. A reading surface owns the screen; a
+  //      strip still swallowing taps under the census would be a trap.
+  const sim = createSim({ seed: 11 });
+  sim.runDays(2);
+  sim.G(`manage = null; dossier = null; boardView = false; saveView = false; reportT = 0;`);
+
+  // ---- 1. the table IS the map
+  const bad = JSON.parse(sim.G(`(() => {
+    const bad = [], m = navRects().map;
+    for (const mk of navMarks()) {
+      const x0 = navToScreen(mk.x0), x1 = navToScreen(mk.x1);
+      if (x0 < m.x || x1 > m.x + m.w) bad.push([mk.kind, "is drawn off the strip", x0, x1]);
+      const mid = (mk.x0 + mk.x1) / 2, got = navPlaceAt(navToScreen(mid));
+      if (!got) bad.push([mk.kind, "has nothing clickable at its own middle", Math.round(mid), 0]);
+      else if (got.x0 !== mk.x0 || got.x1 !== mk.x1)
+        bad.push([mk.kind, "hits " + got.kind + " at its own middle", Math.round(mid), 0]);
+    }
+    return JSON.stringify(bad);
+  })()`));
+  if (bad.length) return bad.map(b => `${b[0]} ${b[1]} (${b[2]}..${b[3]})`).join("\n        ");
+
+  // the SHAPE of the town has to be on it: the shack, a neighbour's shop, the
+  // shelter, the houses, the pier and the boat off the end of it
+  const kinds = JSON.parse(sim.G(`JSON.stringify(navMarks().map(m => m.kind))`));
+  for (const need of ["shack", "biz", "shelter", "house", "pier", "boat"])
+    if (!kinds.includes(need)) return `the map has no ${need} on it: ${JSON.stringify(kinds)}`;
+
+  // ONE WORD IS PRINTED ON THE MAP AND IT IS "SHACK" - measured, not counted,
+  // and it has to keep fitting inside the lot it names
+  const fit = JSON.parse(sim.G(`(() => { const s = navMarks().find(m => m.kind === "shack");
+    return JSON.stringify([smallTextWidth("SHACK") + 2, navToScreen(s.x1) - navToScreen(s.x0)]); })()`));
+  if (fit[0] > fit[1]) return `"SHACK" is ${fit[0]}px on a ${fit[1]}px block - the map would lose its one label`;
+
+  // ---- 2. a tap at a place puts the camera there
+  const jumps = JSON.parse(sim.G(`(() => {
+    const out = [];
+    for (const mk of navMarks()) {
+      const mid = (mk.x0 + mk.x1) / 2, cam = navCamFor(navToScreen(mid));
+      out.push([mk.kind, Math.round(mid), cam, mid >= cam && mid <= cam + W]);
+    }
+    return JSON.stringify(out);
+  })()`));
+  for (const [kind, mid, cam, inside] of jumps)
+    if (!inside) return `tapping ${kind} at world ${mid} left the camera at ${cam}`;
+  // ...and the shack specifically, since that is the one a lost player wants
+  const shackCam = sim.G(`(() => { const s = navMarks().find(m => m.kind === "shack");
+    return navCamFor(navToScreen((s.x0 + s.x1) / 2)); })()`);
+  sim.G(`camX = 0; followIdx = 0;`);
+  sim.G(`(() => { const s = navMarks().find(m => m.kind === "shack");
+    navJumpTo(navToScreen((s.x0 + s.x1) / 2)); })()`);
+  if (sim.G(`Math.round(camX)`) !== shackCam) return "navJumpTo did not land where navCamFor said it would";
+  if (sim.G(`followIdx`) !== -1) return "a jump to a PLACE left the camera following a crab";
+  // dragging along it SCRUBS instead, no snapping
+  sim.G(`navScrubTo(0)`);
+  if (sim.G(`Math.round(camX)`) !== 0) return "scrubbing to the west end did not reach it";
+
+  // ---- 3. every pixel of it lands on the canvas, in both screen heights
+  const probe = `(() => {
+    manage = null; dossier = null; boardView = false; saveView = false; reportT = 0;
+    const out = [];
+    const R = rect, P = px, S = smallText, B = blit;
+    const note = (what, x, y, w, h) => {
+      if (x < 0 || y < 0 || x + w > W || y + h > H)
+        out.push([what, Math.round(x), Math.round(y), Math.round(w), Math.round(h)]);
+    };
+    rect = (c, x, y, w, h, col) => { note("rect", x, y, w, h); return R(c, x, y, w, h, col); };
+    px = (c, x, y, col) => { note("px", x, y, 1, 1); return P(c, x, y, col); };
+    smallText = (c, s, x, y, col) => { note('"' + s + '"', x, y, smallTextWidth(s), 5); return S(c, s, x, y, col); };
+    blit = (c, a, x, y, f) => { note("blit", x, y, a.w, a.h); return B(c, a, x, y, f); };
+    try { for (const cam of [0, 900, clampCam(1e9)]) { camX = cam; drawNav(); } }
+    finally { rect = R; px = P; smallText = S; blit = B; }
+    // the camera-window wash goes straight onto the 2d context, which no stub
+    // can see - so its two rects are checked by the arithmetic that makes them
+    const m = navRects().map;
+    for (const cam of [0, 900, clampCam(1e9)]) {
+      camX = cam;
+      const cx0 = navToScreen(camX), cw = Math.max(4, navToScreen(camX + W) - cx0);
+      if (cx0 < m.x || cx0 + cw > m.x + m.w) out.push(["window", cx0, cw, m.x, m.x + m.w]);
+    }
+    return JSON.stringify({ out, H, panelY: PANEL_Y, floorMax: FLOOR_MAX, map: m,
+      chips: [navRects().manage, navRects().town] });
+  })()`;
+  const flat = JSON.parse(sim.G(probe));
+  if (flat.H !== 240) return "the default sim is no longer the classic 240";
+  if (flat.out.length) return `at H=240 the strip drew off the canvas: ` + JSON.stringify(flat.out.slice(0, 4));
+
+  // the same again on a portrait phone's 288-row canvas - the mode a strip
+  // pinned to a hard-coded row near the bottom of the SCREEN would break in
+  const tall = createSim({ seed: 11, screenH: 288 });
+  tall.runDays(1);
+  const tallOut = JSON.parse(tall.G(probe));
+  if (tallOut.H !== 288) return "the portrait sim did not come up at 288 rows";
+  if (tallOut.out.length) return `at H=288 the strip drew off the canvas: ` + JSON.stringify(tallOut.out.slice(0, 4));
+  if (JSON.stringify(tallOut.map) !== JSON.stringify(flat.map))
+    return `the strip moved between screen heights: ${JSON.stringify(flat.map)} vs ${JSON.stringify(tallOut.map)}`;
+  // and it stays out of the town's way: nothing is painted where a crab can walk
+  if (flat.map.y <= flat.floorMax) return `the strip at y${flat.map.y} covers crabs, whose feet reach ${flat.floorMax}`;
+  if (flat.map.y + flat.map.h > flat.panelY) return "the strip runs into the panel";
+  for (const c of flat.chips) {
+    if (c.y < 0 || c.x < 0 || c.x + c.w > 256) return "a nav chip hangs off the canvas";
+    if (c.y + c.h > flat.map.y) return "a nav chip sits on top of the map";
+  }
+  if (flat.chips[0].x + flat.chips[0].w > flat.chips[1].x) return "the MANAGE and TOWN chips overlap";
+
+  // ---- 4. the two chips, which are the whole point of the exercise
+  const chip = (which) => sim.G(`(() => {
+    manage = null; dossier = null; boardView = false; saveView = false; reportT = 0;
+    const r = navRects().${which};
+    return navTapChip({ x: r.x + (r.w >> 1), y: r.y + (r.h >> 1) }) ? manage + "/" + manageTab : "MISS";
+  })()`);
+  sim.G(`camX = clampCam(BIZ.shack.x0)`);
+  const m1 = chip("manage");
+  if (m1 !== "shack/HOURS") return `the MANAGE chip opened ${m1}, not the shack's card`;
+  const t1 = chip("town");
+  if (t1 !== "shack/TOWN") return `the TOWN chip opened ${t1}, not the census`;
+  // ...and the census retitles the card, because a player who arrived by the
+  // TOWN chip never chose a business and must not be told they are in one
+  const title = sim.G(`(() => { manage = "shack"; manageTab = "TOWN";
+    const seen = []; const T = text; text = (c, s) => { seen.push(String(s)); };
+    try { drawManage(); } finally { text = T; }
+    return JSON.stringify(seen[0]); })()`);
+  if (!JSON.parse(title).includes("TOWN")) return `the census card still calls itself ${title}`;
+
+  // ---- 5. dead under a reading surface
+  const dead = JSON.parse(sim.G(`(() => {
+    const out = {}, m = navRects().map, mr = navRects().manage;
+    const clear = () => { manage = null; dossier = null; boardView = false; saveView = false; reportT = 0; };
+    const probe1 = (name) => { out[name] = [navLive(), navTrackHit({ x: m.x + 4, y: m.y + 2 }),
+      navTapChip({ x: mr.x + 4, y: mr.y + 4 })]; clear(); };
+    clear(); manage = "shack"; probe1("the management card");
+    clear(); dossier = crabs[0]; probe1("a dossier");
+    clear(); boardView = true; probe1("the job board");
+    clear(); saveView = true; probe1("the saved towns card");
+    clear(); reportT = 3; probe1("the day report");
+    clear(); gameOver = true; probe1("game over"); gameOver = false;
+    clear();
+    return JSON.stringify(out);
+  })()`));
+  for (const k of Object.keys(dead))
+    if (dead[k].some(Boolean)) return `the strip was still live behind ${k}: ${JSON.stringify(dead[k])}`;
+
+  return true;
+});
+
 scenario("no card prints text on top of its own text", () => {
   // Matt: "the tips slider is mushed up with the other text; might be a couple
   // of instances like that." There were: the SCHEDULE tab had three strings in
@@ -4349,6 +4506,7 @@ scenario("no card prints text on top of its own text", () => {
     run("intro", null, () => drawIntro());
     run("card", () => { sel = c0; dossier = null; manage = null; boardView = false;
       saveView = false; reportT = 0; tab = "crew"; }, () => drawFollowCard());
+    run("nav", () => { tab = "crew"; }, () => drawNav());
     run("panel-crew", () => { tab = "crew"; }, () => drawPanel());
     run("panel-shop", () => { tab = "shop"; }, () => drawPanel());
     run("panel-menu", () => { tab = "menu"; }, () => drawPanel());
@@ -4413,6 +4571,7 @@ scenario("no surface prints off the canvas", () => {
       if (!v) throw new Error("no visitor in town to draw a card for");   // a silent no-op proves nothing
       v.wallet = 188; v.purse = 200; v.room = true; v.roomN = 7; sel = v;
     }, () => drawFollowCard());
+    run("nav", null, () => drawNav());
     run("panel", null, () => drawPanel());
     run("dossier", () => { dossier = c0; dossierTab = "STATS"; }, () => drawDossier());
     run("diary", () => { dossier = c0; dossierTab = "DIARY"; }, () => drawDossier());

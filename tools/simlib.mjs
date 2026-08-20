@@ -17,7 +17,7 @@ export function mulberry32(a) {
   };
 }
 
-export function createSim({ seed = 1337, storage = null, fresh = true } = {}) {
+export function createSim({ seed = 1337, storage = null, fresh = true, screenH = 0 } = {}) {
   const ctxStub = new Proxy({}, {
     get: (t, k) => {
       if (k === "createImageData") return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
@@ -44,6 +44,11 @@ export function createSim({ seed = 1337, storage = null, fresh = true } = {}) {
     Math: seededMath, JSON, rafCb: null, simNow: 0,
   };
   sandbox.window = sandbox;
+  // PORTRAIT PHONES get a 256x288 canvas: index.html sets window.SCREEN_H
+  // before ppu.js derives H. A scenario that has to prove a surface fits in
+  // BOTH screen heights needs the same switch, so the sandbox honours it.
+  // Left unset (the default) the sim is the classic 240 it has always been.
+  if (screenH) sandbox.SCREEN_H = screenH;
   sandbox.requestAnimationFrame = (cb) => { sandbox.rafCb = cb; };
   sandbox.performance = { now: () => sandbox.simNow };
   const C = vm.createContext(sandbox);

@@ -54,6 +54,12 @@ guests escapes on roughly 6 runs in 16 past day 40.
 
 ## Controls
 
+The town is ten screens wide, so there is a **map** along the bottom of it:
+the whole coast at 1:10, with the slice you are looking at bracketed in white
+and the CRAB SHACK in gold in the middle of it. Tap anywhere on the map to go
+there, drag along it to scrub, and the **MANAGE** and **TOWN** chips above its
+left end open the management card and the town census from wherever you are.
+
 Click a crab — crew, SUDSY, or a fisher — to follow them. Drag or arrow keys
 to pan, ESC to let go. CREW / SHOP / MENU tabs; the BILL chip opens tonight's
 itemized bill. `>>` / `>>>` (or F) fast-forward, M mutes, N music, B skips
