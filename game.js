@@ -9150,9 +9150,9 @@ cv.addEventListener("click", (ev) => {
       // new case wedged in at the top: that is how the pause chip ended up
       // eating SND's clicks, because a band inserted above the chain silently
       // takes its pixels from whatever was underneath.
-      if (p.x >= 227) { ffMode = ffMode === 3 ? 0 : 3; sfx.ding(); return; }   // >>>>
-      if (p.x >= 213) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }   // >>>
-      if (p.x >= 202) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }   // >>
+      if (p.x >= 234) { ffMode = ffMode === 3 ? 0 : 3; sfx.ding(); return; }   // >>>>
+      if (p.x >= 218) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }   // >>>
+      if (p.x >= 204) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }   // >>
       if (p.x >= 189) { soundOn = !soundOn; if (soundOn) sfx.ding(); return; } // SND
       if (p.x >= 168) { toggleMusic(); return; }                               // MUS
       if (p.x >= 145) { toggleMute(); if (!muted) sfx.ding(); return; }        // the speaker
@@ -10738,14 +10738,16 @@ function drawPanel() {
   }
   smallText(ctx, "SND", 190, PANEL_Y + 3, !muted && soundOn ? [140, 220, 140] : [140, 120, 110]);
   // THE SPEED ROW, and it has no stop on it - see the ruling at `FF_SPEED`.
-  // The three chips sit back where they were before a pause chip was briefly
-  // wedged in at their head; the row still has NO free space (mute, music and
-  // sound own every pixel from 145 to 201 in one unbroken chain), which is why
-  // the pause chip could only ever have been made room for by moving these,
-  // and why moving them back is the whole of taking it out again.
-  smallText(ctx, ">>", 203, PANEL_Y + 3, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
-  smallText(ctx, ">>>", 215, PANEL_Y + 3, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
-  smallText(ctx, ">>>>", 229, PANEL_Y + 3, ffMode === 3 ? [255, 230, 120] : [150, 132, 122]);
+  // These three x values are EXACTLY the ones this row had before a pause chip
+  // was briefly wedged in at its head (206/219/236, bands at 204/218/234), read
+  // back off the commit before it rather than eyeballed - because that row has
+  // NO free space (mute, music and sound own every pixel from 145 to 203 in one
+  // unbroken chain), making room for pause meant sliding these right, and the
+  // whole of taking it out again is sliding them back to where they were. A
+  // re-derived layout that merely looks about right leaves SND crowded.
+  smallText(ctx, ">>", 206, PANEL_Y + 3, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
+  smallText(ctx, ">>>", 219, PANEL_Y + 3, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
+  smallText(ctx, ">>>>", 236, PANEL_Y + 3, ffMode === 3 ? [255, 230, 120] : [150, 132, 122]);
   // tabs
   for (const [i, t] of [["crew", 0], ["shop", 1]].map((v, i) => [i, v[0]])) {
     const x = 4 + i * 34, active = tab === t;
