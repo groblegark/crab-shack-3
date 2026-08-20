@@ -6656,6 +6656,156 @@ scenario("a corrupt town hall in a save is clamped, not trusted", () => {
   return true;
 });
 
+// ===========================================================================
+// THE ILLNESS-ROLL CLOCK ARTIFACT — investigated 2026-08-20, NOT "fixed"
+// (Matt: "clawdia still has supercrab powers of never getting sick btw, she
+// keeps making all the money.")
+//
+// The standing diagnosis was that the nightly sickness roll reads needs at the
+// INSTANT of the 20:00 settlement, which is a different place in every crab's
+// day, and that morning crabs were consequently ill 9.2% of the time against
+// evening's 1.9%. HALF of that is true and is pinned below: 20:00 really does
+// land before an evening crab's day has finished happening. The other half did
+// not reproduce in any rig - hunger and thirst favour the evening crab, the
+// day's exhaustion favours the morning one, and in the assembled risk they
+// cancel to M/E x0.98 over 2124 crab-nights. Two candidate rewrites were built
+// and measured, and neither was an improvement: judging the crab's own-day
+// PEAK is no fairer (x1.03) and more than doubles the town's illness, and
+// banking HOURS over the line is measurably LESS fair (x1.43), because a
+// morning crab really does spend longer awake and exhausted. The full receipt
+// is in game.js above illRisk(); the rig is tools/shiftill.mjs.
+//
+// So these three gates guard the FINDING, not a fix: the ordering that makes
+// the artifact real, the outcome that says it does not matter, and the
+// measurement seam that settled it staying inert.
+// ===========================================================================
+
+scenario("sickness: the 20:00 roll reads an evening crab before their day has finished", () => {
+  // THE ORDERING, isolated, with no statistics in it. An E-shift crab works
+  // 14:00-20:00 and takes the day's hunger/thirst/dirt bump when they clock
+  // off. The settlement runs at the TOP of frame(), before the crab loop, so
+  // on the frame the clock reaches 20:00 the roll has already judged them -
+  // and the bump lands afterwards, after the 45-minute last-call grace window
+  // on top of that. This is a KNOWN, MEASURED, DELIBERATELY UNFIXED property
+  // (see illRisk): the gate exists so that anyone who moves the settlement, or
+  // the shift table, or the clock-off, has to come and read the receipt rather
+  // than discover it a third time.
+  //
+  // The probe is DIRT, because dirt's clock-off bump is a flat +0.25 that does
+  // not scale with hours worked and does not clamp from a comfortable start.
+  // Every other need is held comfortable so the crab cannot fall ill at the
+  // roll - a crab who does takes their sick day and walks home WITHOUT the
+  // clock-off bump, and there would be nothing left to measure. A seed where
+  // contagion catches them anyway is a spoiled fixture, not a failure, so the
+  // probe walks a short list of towns and reports if none of them held.
+  let spoiled = "no town reached the probe at all";
+  for (const seed of [4011, 1337, 2674]) {
+    const sim = createSim({ seed });
+    sim.runUntil("day >= 2 && tmin >= 12 * 60", { maxSteps: 200000 });
+    if (sim.G("crabs[1].p.shift") !== "E") return "fixture drift: crabs[1] is not the evening crab";
+    const easy = `{ const b = crabs[1]; b.p.wallet = 0; b.p.dirt = 0.2;
+                    b.p.hunger = 0.2; b.p.thirst = 0.2; b.p.tired = 0.2; }`;
+    sim.G(easy);
+    if (!sim.runUntil("tmin >= 19.9 * 60 && lastRentDay !== day",
+      { maxSteps: 200000, tickEvery: 4, onTick: (G) => G(easy) })) return "could not reach the settlement";
+    // at the moment of judgement the evening crab is STILL ON SHIFT
+    if (sim.G("crabs[1].dayState") !== "working")
+      return "fixture drift: the evening crab was not still on shift at 19:54";
+    const atRoll = +sim.G("crabs[1].p.dirt");
+    if (!sim.runUntil("lastRentDay === day", { maxSteps: 200000 })) return "the settlement never fired";
+    if (sim.G("!!crabs[1].p.sick")) { spoiled = `seed ${seed}: contagion took the probe crab at the roll`; continue; }
+    if (Math.abs(+sim.G("crabs[1].p.dirt") - atRoll) > 1e-9)
+      return "the clock-off bump landed BEFORE the roll - the ordering changed, re-read illRisk";
+    // ...and now the crab's own day ends, up to an hour after the judgement
+    if (!sim.runUntil("tmin >= 21.5 * 60", { maxSteps: 200000 })) return "could not reach 21:30";
+    const after = +sim.G("crabs[1].p.dirt");
+    if (!(after - atRoll >= 0.15))
+      return `the evening crab never took a clock-off bump at all `
+        + `(dirt ${atRoll.toFixed(3)} -> ${after.toFixed(3)}) - the fixture, not the rule`;
+    // ...and the same probe on the MORNING crab must be the other way round:
+    // their bump is hours old by the time the roll looks at them.
+    const m = createSim({ seed });
+    m.runUntil("day >= 2 && tmin >= 8 * 60", { maxSteps: 200000 });
+    if (m.G("crabs[0].p.shift") !== "M") return "fixture drift: crabs[0] is not the morning crab";
+    m.G("crabs[0].p.dirt = 0.2; crabs[0].p.wallet = 0;");
+    if (!m.runUntil("tmin >= 16 * 60", { maxSteps: 200000 })) return "could not reach 16:00";
+    if (!(+m.G("crabs[0].p.dirt") - 0.2 >= 0.15))
+      return "the morning crab had not taken their clock-off bump by 16:00 - the artifact needs BOTH halves";
+    return true;
+  }
+  return spoiled;
+});
+
+scenario("sickness: shift kind does not predict the roll across the roster", () => {
+  // THE OUTCOME GATE. Grow a crew through the game's own hireCrew() - it
+  // alternates M/E by crew size, so three of each with the same founder/hire
+  // and housing mix on both sides - keep the town solvent (we are measuring
+  // the roll, not the landlord) and read the risk the settlement assembles for
+  // every at-risk crab every night, off the game's own rollLog seam.
+  //
+  // Assert on the RATIO of mean risk, M against E. It is a continuous quantity
+  // with hundreds of samples where illness itself is a rare coin with tens,
+  // and it is the number that decides the question: a shift that tells you
+  // nothing reads 1.00. The full rig (12 seeds x 30d, 2124 crab-nights) reads
+  // x0.98; this cheap version runs two towns for a week.
+  //
+  // NOT a mutation-tested gate, and it says so: there is no counter-arm to
+  // build, because the build BEFORE this investigation is the build after it.
+  // What it catches is a future read that is shaped like the wall clock again
+  // - and the mechanism proof is the ordering probe above.
+  const rows = [];
+  for (const seed of [1337, 2674]) {
+    const sim = createSim({ seed });
+    sim.G("window._stats.rollLog = [];");
+    sim.runUntil("day >= 2 && tmin >= 7 * 60", { maxSteps: 200000 });
+    sim.G(`coins = 3000; UPS.chef.lvl = Math.max(UPS.chef.lvl, 6);
+           while (crabs.length < 6) hireCrew();`);
+    for (let d = 0; d < 7; d++) {
+      if (sim.G("gameOver")) break;
+      sim.G("if (coins < 500) coins = 900;");
+      if (!sim.runUntil("lastRentDay === day", { maxSteps: 200000 })) break;
+      if (!sim.runUntil("tmin < 10 * 60 && tmin > 6 * 60", { maxSteps: 200000 })) break;
+    }
+    rows.push(...JSON.parse(sim.G("JSON.stringify(window._stats.rollLog)")));
+  }
+  const arm = (k) => { const r = rows.filter(x => x.shift === k);
+    return r.length ? { n: r.length, risk: r.reduce((s, x) => s + x.risk, 0) / r.length } : null; };
+  const m = arm("M"), e = arm("E");
+  if (!m || !e) return "one of the two shifts never appeared on the roster";
+  if (m.n + e.n < 60) return `only ${m.n + e.n} M/E rolls - not enough to say anything`;
+  const ratio = e.risk > 0 ? m.risk / e.risk : (m.risk > 0 ? Infinity : 1);
+  // ~40 crab-nights an arm swings this by a third on stream order alone
+  // (measured: 0.75 to 1.12 across trajectories at 180 an arm), so the window
+  // is wide on purpose. The candidate exposure-integral rewrite read x1.43 on
+  // the full rig, which is the size of thing this is meant to stop.
+  if (!(ratio >= 0.4 && ratio <= 2.5))
+    return `shift predicts the roll: M ${m.risk.toFixed(5)} (n=${m.n}) vs E ${e.risk.toFixed(5)} (n=${e.n}), x${ratio.toFixed(2)}`;
+  return true;
+});
+
+scenario("sickness: the roll-log seam is inert (a measured town is the same town)", () => {
+  // The rollLog seam exists so this question can be re-asked with numbers
+  // instead of reasoning. It must never become a behaviour change: it consumes
+  // no RNG and touches nothing, so a town with the log armed has to be
+  // BYTE-IDENTICAL to one without. Three days of the same seed, one
+  // fingerprint - and the town has to have actually rolled for somebody, or
+  // the comparison is two empty hands.
+  const fp = (armed) => {
+    const sim = createSim({ seed: 1337 });
+    if (armed) sim.G("window._stats.rollLog = [];");
+    sim.runDays(3);
+    return { rolls: armed ? sim.G("window._stats.rollLog.length") : -1,
+      s: sim.G(`JSON.stringify({ coins: Math.round(coins * 1000), rep: Math.round(rep * 1000),
+        crabs: allCrabs().map(c => [c.p.name, Math.round(c.x), Math.round(c.p.wallet * 100),
+          Math.round((c.p.tired || 0) * 1000), !!c.p.sick].join("|")),
+        inf: window._stats.infections || 0 })`) };
+  };
+  const off = fp(false), on = fp(true);
+  if (on.rolls < 10) return `the armed town only logged ${on.rolls} rolls - nothing was compared`;
+  if (off.s !== on.s) return "arming the roll log moved the town:\n        off " + off.s + "\n        on  " + on.s;
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

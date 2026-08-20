@@ -3719,6 +3719,83 @@ const TIRED_NAP = { bed: 0.24, cot: 0.08 };   // the same 0.8x of the bedtime ra
                                              // the shift-fairness probe chose, on the new numbers
 
 // ===========================================================================
+// THE NIGHTLY SICKNESS ROLL, and the clock artifact that ISN'T one
+// ---------------------------------------------------------------------------
+// Matt, 2026-08-20: "clawdia still has supercrab powers of never getting sick
+// btw, she keeps making all the money." PLAN carried the diagnosis with it:
+// the roll reads every crab's needs at the INSTANT of the 20:00 settlement,
+// 20:00 is a different place in every crab's day, and morning crabs were said
+// to be ill 9.2% of the time against evening's 1.9%.
+//
+// THE HALF THAT IS TRUE. 20:00 really is a different place in every crab's
+// day, and the bias in what the roll READS is enormous. Measured
+// (tools/shiftill.mjs, 12 solvent towns x 30d, ~1060 at-risk rolls a side),
+// the needs the roll actually sampled:
+//     shift   hunger  thirst   dirt   tired
+//     M       0.263   0.483   0.481   0.579
+//     E       0.152   0.266   0.446   0.693
+// A morning crab is carrying 1.7x the hunger and 1.8x the thirst of an evening
+// crab at the moment of judgement. It is not even a soft effect: the
+// settlement runs at the TOP of frame(), before the crab loop, so an E-shift
+// crab (14:00-20:00) is still `working` when the roll reads them and their
+// whole clock-off bump - hunger, thirst, +0.25 dirt - lands AFTER it, every
+// night, along with the 45-minute last-call grace window on top.
+//
+// THE HALF THAT IS NOT. It does not reach the outcome, because the two halves
+// of the artifact point in OPPOSITE directions. A morning crab carries the
+// day's hunger and thirst into the roll; an evening crab carries the day's
+// EXHAUSTION into it (0.693 against 0.579 - they are read minutes after a
+// six-hour shift, where the morning crab has had an afternoon of TIRED_NAP).
+// Assembled into risk they cancel almost exactly:
+//     mean risk   M 0.00906   E 0.00926   -> M/E x0.98
+// and the illness that follows is x1.14 on prevalence, x1.32 on incidence, on
+// twenty-odd events. PINCHY was ill on 1.94% of 360 nights and CLAWDIA on
+// 1.39% of hers; in 16 ORGANIC towns it runs the other way (PINCHY 0.00%,
+// CLAWDIA 2.41%). There is no supercrab, and 9.2% against 1.9% does not
+// reproduce in any rig this was measured in. What CLAWDIA has is a BIKE, TIDY
+// (work 1.1, tip 1.05) and PINCHY's walk to compare against - founder identity,
+// fixed in crabs.js, nothing to do with the shift she draws.
+//
+// TWO CANDIDATE FIXES WERE MEASURED AND BOTH REJECTED, on the same 4658 rolls,
+// by scoring each recorded roll under each rule (M/E, then town-wide risk
+// against the shipped 0.01678):
+//     rule                              M/E     town-wide
+//     shipped: the instant sample       x0.98     0.01678
+//     the crab's own-day PEAK           x1.03     0.03632  (+116%)
+//     hours banked over the line / 6h   x1.43     0.02241  (+34%)
+// The exposure integral - the obvious "judge their own day" fix - is WORSE on
+// the very thing it was meant to fix: a morning crab spends 2.48 hours a night
+// over the exhaustion line against an evening crab's 1.41, because they finish
+// work at 14:00 exhausted and stay awake for six hours while an evening crab
+// finishes at 20:00 and goes to bed. That is a real difference in a real day,
+// not a clock artifact, and integrating over the day surfaces it instead of
+// removing it. The peak rule is as fair as what we have and more than doubles
+// the town's illness, which would need every number below retuned to buy
+// nothing. So the roll stays as it is, ON PURPOSE, with the receipt attached.
+//
+// AND THIS IS THE SECOND TIME. "STILL has supercrab powers" is the giveaway:
+// the same complaint, read the same way, landed on 2026-08-19 - sleep only
+// repaired tiredness while darkness() > 0.7, so a morning crab lost recovery an
+// evening crab kept - and TIRED_NAP above was added and tuned by an M/E
+// shift-fairness probe to close it. That fix holds (suite: "tired: the morning
+// and evening shifts end the week level", mean gap 0.007 over six seeds). The
+// clock half of the shift problem is already fixed; what is left under the same
+// words is CLAWDIA herself.
+//
+// If anyone reopens this: `window._stats.rollLog` (below) is the seam that
+// measured it, `tools/shiftill.mjs` is the rig, `--swap` is the experiment that
+// separates the crab from the shift, and the bar to clear is x0.98 - not
+// "better than nothing".
+function illRisk(c) {
+  let risk = 0;
+  if ((c.p.hunger || 0) >= 0.95) risk += 0.10;
+  if ((c.p.thirst || 0) >= 0.95) risk += 0.12;   // dehydration: the scariest neglect
+  if ((c.p.dirt || 0) >= 0.95) risk += 0.06;
+  if ((c.p.tired || 0) >= 0.95) risk += 0.05;   // run ragged - exhaustion is worse than sand ever was
+  return risk;
+}
+
+// ===========================================================================
 // NEEDS THAT FAIL IN THEIR OWN CHARACTER - boredom "drifts", tiredness "stalls"
 // (design/needs-failure-patterns.md, the owner's picks: B1 + B3, TI1 + TI4)
 //
@@ -12029,16 +12106,28 @@ function frame(now) {
       const sickNow = everyone.filter(k => k.p.sick);
       for (const k of everyone) {
         if (k.p.sick) continue;
-        let risk = 0;
-        if ((k.p.hunger || 0) >= 0.95) risk += 0.10;
-        if ((k.p.thirst || 0) >= 0.95) risk += 0.12;   // dehydration: the scariest neglect
-        if ((k.p.dirt || 0) >= 0.95) risk += 0.06;
-        if ((k.p.tired || 0) >= 0.95) risk += 0.05;   // run ragged - exhaustion is worse than sand ever was
+        // ONE INSTANT SAMPLE of the four needs, and it is the fairest of the
+        // three rules that were measured against each other - see illRisk.
+        let risk = illRisk(k);
         for (const s2 of sickNow) {
           const coworkers = s2.workBiz === k.workBiz && k.dayState !== "home" && !s2.p.npc;
           const shelterMates = k.p.homeless && s2.p.homeless;
           if (coworkers || shelterMates) risk += 0.08;
         }
+        // THE ROLL'S OWN VIEW OF THE TOWN, for a measurement rig that needs
+        // the DENOMINATOR as well as the cases - every at-risk crab-night, who
+        // they were, what shift they drew and what the roll read off them.
+        // This is the seam the shift-vs-illness question was settled on
+        // (tools/shiftill.mjs); reasoning about it from the code got the wrong
+        // answer twice. Off unless a rig asked for it, and it consumes no RNG,
+        // so a build with it on is behaviour-identical to one without.
+        if (window._stats && window._stats.rollLog) window._stats.rollLog.push({
+          day, name: k.p.name, shift: k.p.shift, npc: !!k.p.npc,
+          homeless: !!k.p.homeless, wallet: Math.round(k.p.wallet || 0),
+          risk: +risk.toFixed(5),
+          now: { hunger: +(k.p.hunger || 0).toFixed(3), thirst: +(k.p.thirst || 0).toFixed(3),
+                 dirt: +(k.p.dirt || 0).toFixed(3), tired: +(k.p.tired || 0).toFixed(3) },
+        });
         if (risk > 0 && Math.random() < Math.min(0.5, risk)) {
           k.p.sick = { days: 0 }; today.sick.push(k.p.name);
           logFellIll(k);   // DIARY
