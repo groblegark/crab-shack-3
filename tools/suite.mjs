@@ -4286,6 +4286,126 @@ scenario("ferry: the office is shut, and she is nameless, until the arcade is fi
   return true;
 });
 
+scenario("a sick day is not a shift: an ill crab can leave the house", () => {
+  // Matt, 2026-08-19: "I feel like sick crabs dont get food or clean or
+  // anything; seems like a problem." Two causes; this is the one that ships.
+  // `off` excludes illness on purpose - an ill crab must not get a day-off
+  // crab's loose SPENDING thresholds, they are not on holiday - but it was
+  // also feeding the errand WINDOW, so a crab at home ill was treated as
+  // mid-shift and could not leave the house between the morning commute and
+  // the end of a shift they were not working. Measured before the fix: of
+  // every tick where a sick, broke, starving crab sat at home, 83 of 137 were
+  // refused by this window and NOT ONE ever passed it. Mean hunger while ill
+  // ran 0.799 against 0.534 well.
+  //
+  // (The other cause - that there is no free FOOD anywhere, the way the taps
+  // are free water - is NOT fixed here. A shelter pot was built and measured
+  // and then deliberately held back: it produced food out of nothing, and this
+  // town's economy does not do that. It comes back funded, under the mayor.)
+  const sim = createSim({ seed: 11 });
+  sim.runDays(2);
+  const w = JSON.parse(sim.G(`(() => {
+    const c = crabs[0];
+    c.p.sick = { days: 1 }; c.dayState = "home"; c.errandCd = 0;
+    tmin = 11 * 60;
+    const sh = effShift(c);
+    return JSON.stringify({
+      off: awayToday(c) && !c.p.sick,
+      workdayWindow: (tmin < leaveGmin(c) - 30 || tmin >= sh.end),
+      ownTime: (awayToday(c) && !c.p.sick) || !!c.p.sick });
+  })()`));
+  if (w.off) return "the fixture crab is on a day off - it proves nothing about a sick day";
+  if (w.workdayWindow) return "the fixture hour is inside the workday window already";
+  if (!w.ownTime) return "a sick day is still being treated as a shift";
+  // ...and with the window open, a sick crab who CAN pay actually gets fed:
+  // the errand has to be picked, begun, and finish with the hunger down.
+  const fed = JSON.parse(sim.G(`(() => {
+    const c = crabs[0];
+    c.p.hunger = 0.85; c.p.wallet = 200; c.errandCd = 0; c.dayState = "home";
+    const before = c.p.hunger;
+    const e = pickErrand(c);
+    if (!e || e.need !== "food") return JSON.stringify({ picked: e ? e.need : null });
+    if (!beginErrand(c, e, true)) return JSON.stringify({ picked: "food", began: false });
+    for (let i = 0; i < 20000 && (c.p.hunger || 0) >= before - 0.01; i++) frame(performance.now() + i * 100);
+    return JSON.stringify({ picked: "food", began: true, before, after: c.p.hunger });
+  })()`));
+  if (fed.picked !== "food") return `a starving sick crab was offered ${fed.picked || "nothing"}`;
+  if (!fed.began) return "the food errand could not be started";
+  if (!(fed.after < fed.before - 0.01)) return `the sick crab never actually ate (${fed.before} -> ${fed.after})`;
+  return true;
+});
+
+scenario("a town saved mid-errand reloads and keeps running", () => {
+  // THE CRASH THIS GUARDS: the envelope wrote a visitor's STATE but not their
+  // errand (biz/recipe/target), so a save taken while any tourist was walking
+  // to a counter - most of the day - reloaded into visOpen(undefined) and took
+  // the whole frame loop down on the first tick. The game froze on load. The
+  // headless suite missed it because a save staged at a quiet moment has
+  // nobody mid-walk; this one waits until somebody IS.
+  const store = new Map();
+  const sim = createSim({ seed: 4242, storage: store, fresh: false });
+  sim.runDays(1);
+  sim.runUntil(`customers.some(k => k.visitor && k.state === "toBiz")`, { maxSteps: 200000 });
+  const walking = sim.G(`customers.filter(k => k.visitor && k.state === "toBiz").length`);
+  if (!walking) return "no visitor was ever mid-errand - the scenario proves nothing";
+  sim.G(`save()`);
+  const back = createSim({ seed: 4242, storage: store, fresh: false });
+  if (!back.G(`customers.filter(k => k.visitor).length`))
+    return "the reloaded town has no visitors at all";
+  if (back.G(`customers.some(k => k.visitor && k.state === "toBiz" && !k.biz)`))
+    return "a visitor came back walking to a business that is not there";
+  // AND IT HAS TO KEEP RUNNING. The original bug threw on the first tick.
+  try { back.runDays(1); } catch (e) {
+    return "the reloaded town died on the next tick: " + (e.message || e);
+  }
+  if (!back.G(`customers.some(k => k.visitor)`) && back.G(`day`) < 3)
+    return "every visitor vanished after the reload";
+  // a lookup miss must never be able to do that again
+  for (const k of ["undefined", "null", '"nosuchbiz"'])
+    if (back.G(`bizUnlocked(${k})`) !== false) return `bizUnlocked(${k}) did not simply say no`;
+  return true;
+});
+
+scenario("the ferry is ONE boat: the day boat and the win are the same hull", () => {
+  // CANON (a), Matt 2026-08-19: the boat you buy IS the boat that has been
+  // bringing you tourists. The failure this guards against is the one the
+  // build actually shipped for a few hours - a bespoke second hull, drawn in a
+  // different place, appearing only on the winning frame.
+  const sim = createSim({ seed: 4242 });
+  sim.runDays(1);
+  if (sim.G(`typeof drawMooredFerry`) !== "undefined")
+    return "there is a second ferry hull in the build";
+  // she is called what a timetable calls her while she is somebody else's
+  sim.G(`ferryT = 60`);
+  const before = JSON.parse(sim.G(`(() => { const n = []; const t = smallText;
+    smallText = (c, s2) => { n.push(String(s2)); };
+    try { camX = clampCam(FERRY.hull - W / 2); drawFerry(); } finally { smallText = t; }
+    return JSON.stringify(n); })()`));
+  if (!before.length) return "the day boat drew nothing at her own berth";
+  if (before.some(t => t.includes("CRABALINA")))
+    return "the day boat is already wearing the name: " + JSON.stringify(before);
+  // buy her, and the SAME sprite at the SAME berth is what the win shows you
+  sim.G(`UPS.arcade.lvl = 1; coins = FERRY_PRICE; ferryArm = 0; tapFerryChip(); tapFerryChip();`);
+  if (!sim.G(`won`)) return "the setup did not win";
+  if (!sim.G(`FERRY.hull - camX > 0 && FERRY.hull - camX < W`))
+    return "the winning camera is not looking at the boat you just bought";
+  const after = JSON.parse(sim.G(`(() => { const n = []; const t = smallText;
+    smallText = (c, s2) => { n.push(String(s2)); };
+    try { ferryT = 0; drawFerry(); } finally { smallText = t; }
+    return JSON.stringify(n); })()`));
+  if (!after.length) return "she is not drawn on the winning frame (she sails at her own times)";
+  if (!after.some(t => t.includes("CRABALINA")))
+    return "the win did not put her name on her: " + JSON.stringify(after);
+  // ...and the boat on the FAR channel is somebody else's, so it never says so
+  const far = JSON.parse(sim.G(`(() => { const n = []; const t = smallText, T2 = text;
+    smallText = (c, s2) => { n.push(String(s2)); }; text = (c, s2) => { n.push(String(s2)); };
+    try { won = false; day = 1; while (weekdayIdx(day) !== FERRY_DAY) day++;
+      tmin = 12 * 60; drawHorizonTraffic(); } finally { smallText = t; text = T2; }
+    return JSON.stringify(n); })()`));
+  if (far.length) return "the far-channel crossing is labelled: " + JSON.stringify(far);
+  return true;
+});
+
 scenario("ferry: nobody wins by accident - the fare is out of a playing town's reach", () => {
   // (b) of the brief, measured rather than asserted. A do-nothing town and a
   // propped GROWTH town both run their documented length; the gate is what

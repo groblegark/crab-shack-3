@@ -487,8 +487,8 @@ function debitBiz(b, amt, x, y, label) {
 // BOUGHT off the market carries `bought` (there is no shop-grid upgrade rung
 // behind it), and one that is FOR SALE stays in the world - shuttered, with a
 // sign - because a closed shop is still a building.
-const bizUnlocked = (b) => b === "shack" || !!BIZ[b].bought || bizOwner(b) !== "player"
-  || !!(UPS[b] && UPS[b].lvl > 0);
+const bizUnlocked = (b) => b === "shack" || (!!BIZ[b] && (!!BIZ[b].bought || bizOwner(b) !== "player"
+  || !!(UPS[b] && UPS[b].lvl > 0)));
 
 // ---------------------------------------------------------------- cpu owner hours policy
 // NPC owners tune their own OPEN HOURS with a small, legible state machine,
@@ -3423,7 +3423,9 @@ function save() {
     // saved is put back on the promenade, which is honest and cannot wedge.
     visitors: customers.filter(k => k.visitor && !k.gone).map(k => ({
       n: k.name, c: k.color, a: k.acc, x: Math.round(k.x), y: Math.round(k.wy),
-      s: VIS_STATES[k.state] ? k.state : "roam",
+      // ...and only the states that survive WITHOUT an errand attached: see
+      // load(). A guest mid-walk is written down as roaming and re-decides.
+      s: VIS_SAVE_STATES[k.state] ? k.state : "roam",
       w: Math.round(k.wallet), p: k.purse, sp: Math.round(k.spent),
       ni: k.nights, nh: k.nightsHad, rn: k.roughNights, un: k.unhoused,
       ar: k.arrived, lt: Math.round(k.leaveT), b: k.buys,
@@ -3633,7 +3635,7 @@ function load(slot) {
     if (ACC_KEYS.includes(v.a)) k.acc = v.a;
     k.x = Math.max(0, Math.min(WORLD_W, +v.x || 0));
     k.wy = Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, +v.y || FLOOR_Y));
-    k.state = VIS_STATES[v.s] ? v.s : "roam";
+    k.state = VIS_SAVE_STATES[v.s] ? v.s : "roam";   // never an errand we cannot restore
     k.wallet = Math.max(0, Math.round(+v.w || 0)); k.purse = Math.max(1, Math.round(+v.p || k.wallet));
     k.spent = Math.max(0, Math.round(+v.sp || 0));
     k.nights = Math.max(0, Math.min(3, +v.ni || 0)); k.nightsHad = Math.max(0, +v.nh || 0);
@@ -4305,7 +4307,17 @@ function updateSchedule(c, dt) {
   }
   // off-duty errands, while town is open and it's not almost shift time
   if (c.errandCd > 0) c.errandCd -= dt;
-  const errandWindow = off ? tmin >= OFF_WAKE   // day off: sleep in, then the whole town is yours
+  // A SICK DAY IS NOT A SHIFT (Matt, 2026-08-19: "I feel like sick crabs dont
+  // get food or clean or anything"). `off` deliberately excludes illness, so
+  // that a sick crab does not get a day-off crab's SPENDING thresholds - they
+  // are not on holiday. But it was also feeding the errand WINDOW, which meant
+  // an ill crab sitting at home all day was treated as mid-shift and could not
+  // leave the house between the morning commute and the end of a shift they
+  // were not working. Measured: of every tick where a sick, broke, starving
+  // crab was at home, 83 in 137 were refused by this window and NOT ONE ever
+  // passed it. Their time is their own; the thresholds stay strict.
+  const ownTime = off || !!c.p.sick;
+  const errandWindow = ownTime ? tmin >= OFF_WAKE   // day off (or a sick day): the whole town is yours
     : (tmin < leaveGmin(c) - 30 || tmin >= sh.end);   // workday: before leaving, or after shift
   const townAwake = townOpen() || (tmin >= 20 * 60 && tmin < 23 * 60) || (tmin >= 5.5 * 60 && tmin < 8 * 60);
   if (c.dayState === "home" && townAwake && c.errandCd <= 0 && errandWindow) {
@@ -4433,6 +4445,7 @@ function pickErrand(c) {
     // detour score picks the near one.
     if ((c.p.thirst || 0) >= TAP_AT)
       for (let i = 0; i < WATER_TAPS.length; i++) take({ tap: i, need: "drink", appeal: TAP_APPEAL });
+
   }
   // dirt is serviced at the showers too (the laundromat is gone): a grubby
   // crab heads for the taps at the same 0.66 threshold that fed the sickness
@@ -5789,6 +5802,10 @@ function ferryBatch() {
 }
 // ---- THE VISITOR -----------------------------------------------------------
 const VIS_STATES = { ashore: 1, roam: 1, toBiz: 1, toRoom: 1, inRoom: 1, onSand: 1, toPier: 1 };
+// WHICH OF THOSE A SAVE MAY CARRY. `toBiz` is deliberately absent: it is the
+// only state whose whole meaning lives in fields the envelope does not store
+// (biz/recipe/target), so restoring it hands updateVisitor an errand to nowhere.
+const VIS_SAVE_STATES = { ashore: 1, roam: 1, toRoom: 1, inRoom: 1, onSand: 1, toPier: 1 };
 const VIS_SPEED = 42;            // a stroll: a shade under a walking crab's 40 x trait
 // A VISITOR WAITS LONGER THAN A PASSER-BY. The old anonymous tourist had 50;
 // somebody who crossed on a boat to be here and is staying the night will give
@@ -6811,7 +6828,7 @@ function winFerry() {
     hand: (town.find(k => k.p.job === "fishing") || town[0] || { p: { name: "SOMEBODY" } }).p.name,
   };
   gameOver = true; toast = null; report = null; reportT = 0;
-  camX = clampCam(PIER_X0 - 96);
+  camX = clampCam(FERRY.hull - W / 2 + 14);   // she is at her own berth; go and look at her
   followIdx = -1; followNpc = null; followCust = null;
   manage = null; dossier = null; boardView = false; saveView = false;
   popText("THE FERRY IS YOURS", PIER_X0 - 20, 70, [255, 240, 170]);   // the day boat says "IS IN" four times a day
@@ -7334,8 +7351,9 @@ function drawHorizon() {
 // SOMEWHERE ELSE IS A PLACE, NOT A BACKDROP. The tourists arrive from somewhere
 // and so does everything the trade ledger counts as an IMPORT - so on a day the
 // town actually shipped something in, a little freighter works the far channel,
-// and on Thursdays THE CRABALINA herself crosses, out there, on somebody else's
-// business. Drawn after the sea (a boat floats ON the water) and before the
+// and on Thursdays another crossing works the far channel entirely - not yours;
+// yours is alongside your own pier - so the water out there is always somebody
+// else's business right up until the morning some of it is not. Drawn after the sea (a boat floats ON the water) and before the
 // mist (a boat out there goes when the shore goes).
 function drawHorizonTraffic() {
   if (window._noHorizon) return;
@@ -7352,13 +7370,16 @@ function drawHorizonTraffic() {
     if (night) px(ctx, bx + 3, by - 2, [255, 206, 120]);
   }
   if (weekdayIdx(day) === FERRY_DAY && tmin > 8 * 60 && tmin < 18 * 60 && !won) {
-    // she runs the far side, west to east, and she does not call here
+    // NOT HER. Under canon (a) your ferry is alongside your own pier four times
+    // a day, so the boat on the far channel is the mainland's own traffic -
+    // long, low, dark, and masted where yours has a funnel, so the two can
+    // never be confused at a glance across the water.
     const p = (tmin - 8 * 60) / (10 * 60);
     const bx = Math.round(-22 + p * (W + 44)), by = HZ_Y + 2;
-    const hull = night ? [56, 62, 92] : [214, 224, 236];
-    rect(ctx, bx, by, 20, 3, hull);
-    rect(ctx, bx + 3, by - 3, 12, 3, night ? [46, 52, 80] : [236, 242, 248]);
-    rect(ctx, bx + 13, by - 6, 3, 3, night ? [70, 40, 44] : [206, 96, 84]);   // the funnel
+    const hull = night ? [40, 46, 72] : [96, 112, 140];
+    rect(ctx, bx, by, 24, 3, hull);
+    rect(ctx, bx + 4, by - 2, 9, 2, night ? [34, 40, 64] : [116, 132, 158]);
+    rect(ctx, bx + 16, by - 5, 1, 5, night ? [50, 56, 80] : [140, 152, 176]);   // a mast, not a funnel
     for (let i = 1; i < 5; i++) px(ctx, bx - i * 4, by + 2, [200, 226, 240]);  // wake
   }
 }
@@ -7519,8 +7540,13 @@ function drawPier() {
 // horizon and the run out to sea belong to the agent building them; this is
 // only the boat the visitors walk off. She rides a little at her lines while
 // she is tied up, and the gangway is a plank down to the pier's east end.
+// CANON (a), settled by Matt 2026-08-19: THE BOAT YOU BUY IS THE BOAT THAT HAS
+// BEEN BRINGING YOU TOURISTS. So there is exactly ONE hull in this function and
+// the win does not draw a second one somewhere else - she is the same sprite,
+// at the same berth, that the player has watched come and go four times a day
+// since the first morning. All that changes is whose she is, and that she stays.
 function drawFerry() {
-  if (!ferryHere()) return;
+  if (!ferryHere() && !won) return;
   const x = FERRY.hull, y = FERRY.hullY;
   if (x + 60 - camX < 0 || x - 60 - camX > W) return;
   const bob = Math.sin(time * 0.9) > 0 ? 1 : 0;
@@ -7530,7 +7556,9 @@ function drawFerry() {
   wrect(FERRY.gangway + 2, y + 10 + bob, x - FERRY.gangway - 2, 1, [140, 90, 50]);
   for (let i = 0; i < 5; i++)
     wrect(FERRY.gangway - 2 + i * 3, y + 11 + bob + i * 2, 4, 1, [206, 156, 94]);
-  const lbl = "FERRY";
+  // ...and her NAME goes on at the win. Until then she is somebody else's boat
+  // and the town calls her what a timetable calls her.
+  const lbl = won ? "CRABALINA" : "FERRY";
   const lx = x + 13 - smallTextWidth(lbl) / 2 - camX;
   if (lx > -20 && lx < W) {
     smallText(ctx, lbl, lx + 1, y - 11, [30, 20, 36]);
@@ -7615,28 +7643,6 @@ function drawFerrySign() {
       afford ? [30, 120, 60] : [40, 72, 112]);
   }
 }
-// SHE CAME IN. Drawn only on the winning frame and after - a proper hull along
-// the seaward side of the pier, with the town's name on her bow.
-function drawMooredFerry() {
-  const x = PIER_X0 - 30, y = 56;
-  if (x + 120 - camX < 0 || x - camX > W) return;
-  wrect(x, y + 10, 116, 10, [248, 250, 252]);                 // hull
-  wrect(x, y + 20, 116, 4, [40, 60, 96]);
-  wrect(x - 4, y + 12, 5, 8, [248, 250, 252]);                // bow flare
-  wrect(x + 116, y + 12, 4, 8, [248, 250, 252]);
-  wrect(x + 14, y, 78, 10, [236, 242, 250]);                  // superstructure
-  wrect(x + 14, y, 78, 1, [200, 212, 230]);
-  for (let i = 0; i < 9; i++) wrect(x + 18 + i * 8, y + 3, 5, 4, [96, 170, 220]);   // windows
-  wrect(x + 78, y - 8, 8, 9, [206, 96, 84]);                  // funnel
-  wrect(x + 78, y - 8, 8, 2, [40, 40, 52]);
-  wrect(x + 44, y + 24, 3, 6, [70, 90, 120]);                 // gangway down to the deck
-  wrect(x + 40, y + 29, 12, 2, [140, 90, 50]);
-  const sx = x - camX;
-  if (sx > -120 && sx < W) smallText(ctx, "CRABALINA", sx + 20, y + 13, [40, 72, 112]);
-  for (let i = 0; i < 6; i++)   // she is still making a little way against the tide
-    wrect(x - 6 - i * 7, y + 22 + (i % 2), 5, 1, [200, 226, 240]);
-}
-
 function drawTown() {
   // coast road runs the full length of town, behind everything
   wrect(0, ROAD_Y0, WORLD_W, ROAD_Y1 - ROAD_Y0, [120, 116, 130]);
@@ -7707,7 +7713,6 @@ function drawTown() {
   // the crossing you cannot afford, and the sign that says so every morning
   drawFerrySign();
   drawFerryOffice();
-  if (won) drawMooredFerry();
   // parked vehicles: buggies pull off on the shoulder, bikes rack on the apron
   for (const c of crabs) {
     if (c.dayState !== "working") continue;

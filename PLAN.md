@@ -2385,6 +2385,41 @@ first, connect later. Don't build the network before the node is beautiful.
   easy remembering" which town is which. Validate-before-mutate on import;
   a bad file must never touch the running game.
 
+## CANON: THERE IS ONE FERRY (Matt, 2026-08-19)
+
+**Settled by Matt selecting option (a) from a two-option picker put to him by
+the devlog session. He added no free text, so the choice is the whole of his
+input — do not attribute prose about this to him.** The framing below is the
+devlog session's, offered as a recommendation and ratified by that selection;
+treat it as approved intent rather than his phrasing.
+
+**(a) SAME BOAT — YOU BUY THE CROSSING.** The day boat that has been landing
+tourists all game IS the ferry. Buying her means the town buys the crossing it
+has always depended on: the tourists' money paid for the boat that brings the
+tourists. The ending card already says exactly this ("You did not buy a way
+out. You bought the crossing, and a crossing runs both ways"). The freighter
+and the Thursday crossing stay as **other people's traffic**.
+
+What that forced in code (2026-08-19, same day):
+- **ONE HULL.** `drawMooredFerry` is DELETED. It drew a bespoke 116px white
+  hull at `PIER_X0 - 30`, on the winning frame only — a second vessel, in a
+  different place, from the one the player watches four times a day. The win
+  now draws the SAME `FERRY_ART` sprite at the SAME berth (`FERRY.hull`), and
+  `drawFerry` simply keeps drawing when `won` (she stays; she is yours).
+- **HER NAME GOES ON AT THE WIN.** The label is `won ? "CRABALINA" : "FERRY"` —
+  a timetable name while she is somebody else's, her own name once she is not.
+  This is also the embargo's reveal moment, so the two rules agree.
+- **THE CAMERA GOES TO HER**, not to a spot on the pier she is not at:
+  `camX = clampCam(FERRY.hull - W / 2 + 14)`.
+- **THE FAR-CHANNEL BOAT MUST NOT READ AS HER.** Under (a) yours is alongside
+  your own pier four times a day, so the Thursday crossing is the mainland's
+  own traffic: longer, darker, and **masted where yours has a funnel**, so the
+  two can never be confused at a glance across the water.
+- Receipt: scenario **"the ferry is ONE boat: the day boat and the win are the
+  same hull"** — asserts `drawMooredFerry` no longer exists, that she is
+  unnamed before the win and named after, that the winning camera is looking at
+  her berth, and that the far-channel crossing carries no text at all.
+
 ## SPOILER EMBARGO — the town's name (Matt, 2026-08-19)
 Matt: "don't put the town's name out there, it's going to be a cheeky
 reveal near the end." The name renders in exactly two places, both in the
@@ -2617,6 +2652,80 @@ herself fed, watered and clean and reaches **BED REST** on day 8, where the
 roll cures her at the improved 0.55 lane. She is back on her stalls on day 9,
 and she sleeps at home every night. Shots: `tap-drinking`, `tap-night`,
 `tap-pier`, `fading-dossier`, `death-report`, `memorial-townsfolk`.
+
+## SICK CRABS COULD NOT LEAVE THE HOUSE (Matt, 2026-08-19)
+
+Matt: *"I feel like sick crabs dont get food or clean or anything; seems like a
+problem."* Right, and worse than the report: mean hunger while ill ran **0.799
+against 0.534 well**, and a sick crab spent **47.3% of its illness at or above
+0.95 hunger**. Neither cause was in the sickness rules, and both were found by
+instrumenting REFUSALS rather than reading code.
+
+**CAUSE 1 — SHIPPED FIX. A sick day was being treated as a shift.** `off`
+deliberately excludes illness, so an ill crab does not inherit a day-off crab's
+loose *spending* thresholds — they are not on holiday. But `off` also fed the
+errand WINDOW, so a crab at home ill was treated as mid-shift and could not
+leave the house between the morning commute and the end of a shift they were
+not working. Measured: **83 of 137** refusals for a starving sick crab at home,
+and **not one ever passed**. Fixed with `ownTime = off || sick`, which opens the
+window and leaves the thresholds alone. On its own this reads **3/8 growth**.
+Receipt: scenario *"a sick day is not a shift: an ill crab can leave the
+house"*. It re-baselined the frozen day-2 fingerprint — DRIFT is ill on day 2
+of seed 1337 and now walks to eat instead of sitting at home starving.
+
+**CAUSE 2 — BUILT, MEASURED, THEN DELIBERATELY HELD BACK.** There is no free
+FOOD anywhere the way the taps are free water, and a sick day pays nothing. The
+most useful number in the investigation: of every tick where a sick, hungry
+crab could not buy food, **1800 were NPCs and ZERO were the player's crew** —
+it is the TOWNSFOLK who starve, because they have no wage coming in. And every
+crab who starved right through an illness worked at the **showers or the
+hotel**, while every **fisher** was fine: a fisher roasts their own catch.
+
+A SHELTER POT was built for it (a tap-shaped stop at `SHELTER_X + 10`, 0.45 of
+relief for 11 minutes, sick crabs only, offered last). It worked — mean hunger
+while ill **0.434**, starving share **13.8%**, growth **2/8 + 2/8** — and it is
+**NOT IN THE BUILD**, because Matt caught the real problem with it:
+
+> *"Sorry do we have some kind of communal food pot? We are going to need a
+> charity system, these resources don't come from nowhere. Same thing for rent
+> on the shelter."*
+
+He is right and it is the same rule this game applies everywhere else (visitor
+wallets are minted and destroyed so nothing inflates; every import is on the
+ledger). **Free food from nowhere is not allowed.** The pot returns FUNDED,
+under the mayor — see the next section. The working code is parked at
+`scratchpad/game-with-pot.js`.
+
+Worth keeping from the measurement work: **the two halves interact**. Window
+fix alone 3/8; pot alone 3/8; both with the pot open to everyone **1/8 + 1/8**,
+because the player's own crew stopped buying plates and queued at the shelter.
+Restricting it to the ill gave back nearly all of it AND fed the ill *better*
+(0.434 vs 0.514), because the well keep the counters busy. Whatever funds the
+pot later, that lesson stands: a free option open to everyone competes with the
+counter, and the counter is where the town's money is.
+
+## THE MAYOR, THE TOWN FUND AND ELECTIONS (Matt, 2026-08-19) — NEXT
+
+Matt's direction, verbatim: *"We are going to need a charity system, these
+resources don't come from nowhere. Same thing for rent on the shelter.
+Unfortunately this means a new mayor character and elections. So far they just
+manage the homeless shelter… yeah this will be a whole thing but it shouldn't
+be too bad eh! Little top hat and all."*
+
+Two design questions were put to him as a picker, and his answers shape the
+whole feature:
+- **Where the money comes from: "This is exactly the choice the mayor will
+  make."** The funding MECHANISM is not a constant — it is the office's policy
+  lever, and therefore what an election is actually about. A levy on
+  businesses, a collection tin, a cut of Pincherton's rents, harbour dues on
+  every visitor the ferry lands: a mayor picks, and the town lives with it.
+- **The player can STAND AND WIN.** With the conflict of interest that comes
+  with it: set the levy and you pay it too.
+
+The office's remit, for now, is the homeless shelter: its **rent** and its
+**pot**. If the fund runs dry, the pot goes cold and the shelter's crabs sleep
+rough — which is already a modelled state with real consequences (`sleepRough`,
+reputation, illness), so the failure mode costs something the player can feel.
 
 ## THE SELF-HEALING RULE (Matt, 2026-08-19) — read before adding any free cure
 Matt: "I appreciate the self healing stuff but I feel it breaks the economy. I
@@ -3107,6 +3216,26 @@ payroll-scaled limit 90 + 70/crew, both inert); the collapse is growth-town
 unit economics.
 
 ## Backlog (rough priority)
+- **THE DEPARTURE CARD (Matt, 2026-08-19):** *"we should also have a view at
+  end of day of folks leaving on the ferry and how they are feeling, with a
+  'quote' based on stats."* The visitors already carry everything this needs —
+  purse and spend, buys, nights, `roughNights`/`unhoused`, the rage-quit path,
+  their room, and a per-visitor LOG (`visLog`) of what they actually did. So
+  the card is a READING of data that already exists, not new simulation. The
+  quote must be DERIVED, never random: a guest who slept on the sand, one who
+  stood at the counter until they gave up, one who left with $6 of the $158
+  they brought, and one who never found anything open should each say something
+  only they could say. Same editorial rule as the devlog — individual named
+  crabs, specifics over aggregates. Pairs naturally with the nightly report
+  (`drawReport`), which already owns the end-of-day moment.
+- **A SURF SPOT, mid-beach (Matt, 2026-08-19, queued behind the beach ball):**
+  *"i was thinking there needs to be a surf spot kind of right in the middle,
+  but one thing at a time."* Explicitly deferred by him; the beach ball comes
+  first. Both belong to the same want: **better sources of LIMITED fun**, so
+  that boredom has answers other than the paid arcade and the very costly
+  chatter. Whatever the surf spot is, "limited" is the load-bearing word — a
+  free unlimited cure for boredom would flatten the arcade and the need with
+  it.
 1. ~~**Business settings**~~ — **shipped**: shop hours + the management screen
    (2026-08-18), per-business and per-crab WAGES (2026-08-19, "THE WAGE IS A
    SETTING"), and per-business **PRICES** (2026-08-19, with the rivalry — it
