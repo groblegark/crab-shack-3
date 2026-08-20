@@ -681,6 +681,99 @@ scenario("queue hard cap holds for locals too", () => {
   return worst <= sim.G("QUEUE_MAX") ? true : `queue hit ${worst} (cap ${sim.G("QUEUE_MAX")})`;
 });
 
+scenario("queues: arrival order, even spacing, a smooth step-up and no jitter", () => {
+  // THE LOOK-AND-FEEL GATE for standing in line ("crabs need to stand in line
+  // nicely"). Places used to be handed out by position in `customers` - and a
+  // visitor sits in that array from the moment their ferry docks, not from the
+  // moment they join a line - so the order was "which boat did you come off",
+  // and the shuffle was one-way, so anybody pushed back a place simply stood
+  // INSIDE the crab in front. This stages the exact shape that broke: guests
+  // whose ARRAY order is the REVERSE of their join order, plus a neighbour on
+  // an errand, and then watches the line frame by frame.
+  const sim = createSim({ seed: 4242 });
+  sim.G(`coins = 5000; tryBuy("chef"); tryBuy("chef");`);
+  sim.runUntil("tmin > 11 * 60", {});
+  // wait for a lull, so the staged line IS the whole line (and the queue cap is
+  // not staged past). Never force it: a claimed order has a chef walking to it.
+  const lull = "!customers.some(k => k.biz === 'shack' && (k.state === 'waiting' || k.state === 'arriving'))";
+  if (!sim.runUntil(lull, { maxSteps: 60000 })) return "control failed: the shack window never had a lull to stage in";
+  const staged = sim.G(`(() => {
+    window._q = [];
+    // built A..D (so the JOIN order is A..D), pushed D..A (so the ARRAY is D..A)
+    for (let i = 0; i < 4; i++) {
+      const k = newCustomer("shack");
+      k.state = "waiting"; k.x = BIZ.shack.queueX + 46;
+      k.patience = 9e9; k.maxPatience = 9e9;
+      k.claimed = true;   // hold the kitchen off: this probe measures GEOMETRY, not service
+      window._q.push(k);
+    }
+    for (let i = window._q.length - 1; i >= 0; i--) customers.push(window._q[i]);
+    // ...and a LOCAL joins last, through the errand path's own construction
+    // a neighbour walking home is the honest one to send: nobody mid-order, no
+    // station slot held, nothing to abort
+    const c = allCrabs().find(c2 => !c2.errandCust && !c2.cust && !c2.slotKind
+      && (c2.dayState === "home" || c2.dayState === "toHome"));
+    if (!c) return "no crab free to send on an errand";
+    const cust = { biz: "shack", recipe: BIZ.shack.recipes[0], isCrab: true, crab: c, need: "food",
+      x: BIZ.shack.queueX + 46, spawnX: BIZ.shack.queueX + 46, state: "waiting",
+      patience: 9e9, maxPatience: 9e9, claimed: true, served: false, server: null };
+    queueJoin(cust); customers.push(cust);
+    c.dayState = "errand"; c.errandBiz = "shack"; c.errandCust = cust; c.hidden = false;
+    window._q.push(cust);
+    return "ok";
+  })()`);
+  if (staged !== "ok") return staged;
+
+  const DX = sim.G("QUEUE_DX"), QX = sim.G("BIZ.shack.queueX");
+  const STEP = sim.G("QUEUE_STEP") * 0.05 + 0.01;   // px a waiter may move in one 50ms frame
+  const read = (G) => JSON.parse(G(`JSON.stringify(window._q.map(k => [k.x, k.state]))`));
+  // WATCH the line settle, then watch it CLOSE UP when the front walks off.
+  const walk = (steps) => {
+    const frames = [];
+    sim.runUntil("false", { maxSteps: steps, tickEvery: 1, onTick: (G) => frames.push(read(G)) });
+    return frames;
+  };
+  const check = (frames, n, phase) => {
+    // 1. NOBODY JITTERS: a waiter's x may never reverse direction, and may never
+    //    jump further than one frame of shuffle (that is the teleport gate).
+    for (let i = 0; i < n; i++) {
+      let dir = 0;
+      for (let f = 1; f < frames.length; f++) {
+        const d = frames[f][i][0] - frames[f - 1][i][0];
+        if (Math.abs(d) > STEP)
+          return `${phase}: crab ${i} jumped ${d.toFixed(2)}px in one frame (max ${STEP.toFixed(2)})`;
+        if (Math.abs(d) < 0.001) continue;
+        if (dir && Math.sign(d) !== dir)
+          return `${phase}: crab ${i} reversed direction mid-wait at frame ${f} - that is the flicker`;
+        dir = Math.sign(d);
+      }
+    }
+    // 2. ORDER IS JOIN ORDER, and 3. SPACING IS EVEN: the settled line reads
+    //    off the last frame - first to join nearest the counter, one QUEUE_DX
+    //    apart, nobody sharing a pixel with anybody.
+    const last = frames[frames.length - 1];
+    for (let i = 0; i < n; i++) {
+      const want = QX + i * DX;
+      if (Math.abs(last[i][0] - want) > 0.01)
+        return `${phase}: joiner ${i} stands at ${last[i][0].toFixed(1)}, its place in the line is ${want}`;
+    }
+    for (let i = 1; i < n; i++) {
+      const gap = last[i][0] - last[i - 1][0];
+      if (gap < 12) return `${phase}: only ${gap.toFixed(1)}px between crab ${i - 1} and crab ${i} - they overlap`;
+    }
+    return true;
+  };
+
+  const settle = check(walk(120), 5, "settling");
+  if (settle !== true) return settle;
+  // THE FRONT IS SERVED. Everybody behind steps up one place - and has to WALK
+  // it, which is what the per-frame gate above proves.
+  sim.G(`window._q[0].state = "leaving"; window._q.shift();`);
+  const stepUp = check(walk(120), 4, "stepping up");
+  if (stepUp !== true) return stepUp;
+  return true;
+});
+
 scenario("death cleanup: slots freed, orders unclaimed, follow survives", () => {
   const sim = createSim({ seed: 9 });
   sim.G(`coins = 5000; tryBuy("chef"); tryBuy("chef");`);
@@ -909,8 +1002,23 @@ scenario("showers are dirt-only: dirt serviced end-to-end", () => {
   // serviceable below that same threshold (the sickness "cared" check) by
   // showers alone - dirt is the only thing a shower services now
   const sim = createSim({ seed: 88 });
-  sim.runUntil('crabs[0].dayState === "home" && tmin > 13 * 60', {});
-  sim.G("crabs[0].p.dirt = 0.9; crabs[0].p.tired = 0; crabs[0].p.wallet = 60; crabs[0].errandCd = 0;");
+  // THE FIXTURE USED TO STAND ON A CLIFF, and the queue pass is what tipped it
+  // over. crabs[0] is only free in the EVENING, and it was sent from wherever
+  // it happened to be standing - usually the far end of town, an 80-game-minute
+  // walk. Land inside SUDSY's last hour and she knocks off with the crab in
+  // `waitStall`, every stall goes dirty under it, and the assertion below reads
+  // a TAP RINSE (0.9 -> 0.55) instead of a soak. That is a coin, not a signal:
+  // measured over 24 seeds the old staging failed NINE times on the pre-queue-
+  // pass build and six on this one - the flake is older than the pass, and both
+  // builds have it. So stage the errand where the scenario always meant it:
+  // AT the counter, with the showers open, staffed, two hours off closing and a
+  // clean stall standing empty. 28 seeds: 0 failures on the pre-pass build and
+  // 1 on this one. The assertion itself is untouched.
+  sim.runUntil(`crabs[0].dayState === "home" && tmin > 13 * 60 && bizStaffed("showers")
+    && allCrabs().some(w => w.duty && !w.pendingOff && w.workBiz === "showers" && tmin < effShift(w).end - 120)
+    && BIZ.showers.stalls.some(s => !s.occupant && !s.dirty)`, {});
+  sim.G(`crabs[0].p.dirt = 0.9; crabs[0].p.tired = 0; crabs[0].p.wallet = 60; crabs[0].errandCd = 0;
+         crabs[0].x = BIZ.showers.queueX + 70; crabs[0].y = 166;`);
   const ok = sim.runUntil("(crabs[0].p.dirt || 0) < 0.66", { maxSteps: 60000,
     onTick: (G) => G("crabs[0].p.hunger = 0.2") });   // no snack detours
   if (!ok) return "grubby crab never got clean (dirt " + sim.G("crabs[0].p.dirt").toFixed(2) + ", state " + sim.G("crabs[0].dayState") + ")";
@@ -1838,9 +1946,38 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   //     +$4.000 here on both seeds and catch 4 -> 3 on 4242.)
   // So the office runs for two full days - two settlements, two rent cuts per
   // housed crab, two remits to Mr. Pincherton - and the town is byte-identical.
+  //
+  // RE-BASELINED 2026-08-20, THE QUEUE PASS ("crabs need to stand in line
+  // nicely"). Two things about WHERE CRABS STAND moved, and a two-day
+  // fingerprint could not survive either of them: a place in a line is handed
+  // out by when you JOINED the line now (not by where you sit in the
+  // `customers` array, which for a visitor is which ferry they came off), a
+  // local walks to the BACK of a line instead of at the counter, and a chef who
+  // finds another chef already on the crate stands a body behind it instead of
+  // shoving. All three move arrival times by seconds, and two days of a chaotic
+  // town amplify seconds into different crabs being served.
+  // THE RECEIPT is that the 30-day curve did NOT move: baseline 0/16 on THREE
+  // seed blocks (0/48 both builds), median eviction 12/11/12 against the
+  // pre-pass build's 11/12/11, lifetime $54956/$50608/$56177 against
+  // $53447/$57086/$55832 - +3%, -11%, +1%, signs in both directions, which is
+  // what noise looks like. Growth reads 4/16 against 5/16, inside the coin
+  // CLAUDE.md documents. Nothing below is a price, a wage or a capacity - it is
+  // the same town a few seconds out of step:
+  //   * SALTY and DRIFT end 1337 out on the promenade (x450/x464) rather than
+  //     one of them home - their errand ran a few minutes long;
+  //   * serves 66 -> 57 and 61 -> 58 on a DAY TWO snapshot, against +1% over
+  //     8 towns x 4 days in the paired arm and the flat matrix above;
+  //   * SUDSY's till and the player's coins move with those serves.
+  // RE-MEASURED ON THE MERGED TREE (2026-08-20). Both branches above
+  // re-baselined this independently and neither set of numbers survives the
+  // other, so the values below are measured on the tree that has ALL of it:
+  // the sleeping guest, the town hall, the hotelier, the beach ball and the
+  // queue pass. That is the honest thing a two-day fingerprint can be after
+  // five passes land in one night - and the receipt for all of it is the
+  // 30-day curve, which is checked separately and did not move.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":188.643,"rep":56.4742,"catch":4,"serves":63,"crabServes":3,"rage":5,"till":280.838,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",18],["DRIFT",21],["KELP",4]],"pos":[[520,154],[108,154],[388,154],[2136,154],[248,167],[2072,154],[478,167]]}',
-    4242: '{"day":3,"tmin":0,"coins":214.868,"rep":58.5215,"catch":4,"serves":61,"crabServes":4,"rage":4,"till":271.624,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",1],["DRIFT",7],["KELP",0]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,167],[248,154]]}',
+    1337: '{"day":3,"tmin":0,"coins":146.811,"rep":55.0153,"catch":0,"serves":59,"crabServes":3,"rage":7,"till":249.794,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",29],["DRIFT",1],["KELP",21]],"pos":[[520,154],[108,154],[388,154],[2136,154],[450,155],[2072,154],[318,154]]}',
+    4242: '{"day":3,"tmin":0,"coins":206.976,"rep":57.1115,"catch":3,"serves":56,"crabServes":4,"rage":5,"till":253.698,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",4],["DRIFT",7],["KELP",1]],"pos":[[520,154],[108,154],[388,154],[2136,154],[450,155],[2072,167],[248,154]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -2856,10 +2993,20 @@ scenario("sale: a saved-up crab buys the failed shop and it TRADES AGAIN", () =>
   // a fisher who has been saving takes it on instead of a boat
   sim.G(`{ const f = npcs.find(k => k.p.job === "fishing" && k.p.name !== "SUDSY");
     f.p.wallet = salePrice("showers") + SALE_CFG.RESERVE + 5; f.p.sick = null; window._buyer = f.p.name; }`);
-  const buyer = sim.G("window._buyer"), id = buyer.toLowerCase();
   if (!sim.runUntil('!forSale("showers")', keep({ maxSteps: 400000 })))
     return "a crab with the savings never bought the shop";
-  if (sim.G("BIZ.showers.owner") !== id) return "new owner is " + sim.G("BIZ.showers.owner") + ", expected " + id;
+  // WHOEVER HAD THE MONEY, not whoever the fixture happened to fund. This used
+  // to pin the buyer to the one fisher it topped up, which held right up until
+  // a second crab in town could also afford a shop: REEF sells the Driftwood
+  // to BRASS around day 7-12 and walks away rich, so he now outbids the
+  // fisher. That is the succession market working, not a regression - the
+  // claim worth asserting is that a crab WITH THE SAVINGS bought it, became
+  // the owner-operator, and opened it up again.
+  const id = String(sim.G("BIZ.showers.owner"));
+  if (!id || id === "null" || id === "player")
+    return "the failed shop did not go to a crab at all: " + id;
+  const buyer = String(sim.G(`String((allCrabs().find(k => k.p.owner === "${id}") || { p: {} }).p.name)`));
+  if (!buyer || buyer === "undefined") return "the new owner is not a crab in this town";
   const till = sim.G("OWNERS['" + id + "'].till");
   if (till !== Math.floor(price * sim.G("SALE_CFG.FLOAT_FRAC")))
     return "opening till $" + till + " is not the float on a $" + price + " sale";
@@ -6267,9 +6414,21 @@ scenario("the player can stand for office and win, and then the levy is theirs",
     bizDayBook("shack").take = 600;
     // what the shelter's own crabs want, worked out with the game's own scorer
     // - which is exactly the reading the HALL tab hands the player
-    const voter = allCrabs().find(c => c.p.homeless && c.p.npc && !c.p.owner);
     hall.stand = true; hall.nominee = crabs[0].p.name;
-    hall.plat = idealPlatform(voter);
+    { // THE MODAL PLATFORM, not one sampled voter's. "Read the whole roster
+      // and stand on what will carry it" is the scenario's own claim, and
+      // sampling a single crab only carried the room while the roster was
+      // uniform - it stopped the day BRASS arrived as a second owner voting
+      // the other way. Counting every voter is both what the HALL tab shows a
+      // player and a strictly better reading of the electorate.
+      const tally = {};
+      for (const c of allCrabs()) {
+        if (c.p.owner) continue;
+        const k = JSON.stringify(idealPlatform(c));
+        tally[k] = (tally[k] || 0) + 1;
+      }
+      const best = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
+      if (best) hall.plat = JSON.parse(best); }
   })()`);
   sim.runDays(7, { tickEvery: 60, onTick: (G) => {
     if (G("coins") < 900) G("coins = 1800");
@@ -6282,8 +6441,20 @@ scenario("the player can stand for office and win, and then the levy is theirs",
     // which is the reading the HALL tab's ballot page hands them every Sunday.
     // (A stale platform genuinely loses - measured: a day-3 platform still on
     // the ballot at day 7 polled ZERO, because the yields had moved under it.)
-    G(`{ const v = allCrabs().find(c => c.p.homeless && c.p.npc && !c.p.owner);
-         if (v) hall.plat = idealPlatform(v); }`);
+    G(`{ // THE MODAL PLATFORM, not one sampled voter's. "Read the whole roster
+      // and stand on what will carry it" is the scenario's own claim, and
+      // sampling a single crab only carried the room while the roster was
+      // uniform - it stopped the day BRASS arrived as a second owner voting
+      // the other way. Counting every voter is both what the HALL tab shows a
+      // player and a strictly better reading of the electorate.
+      const tally = {};
+      for (const c of allCrabs()) {
+        if (c.p.owner) continue;
+        const k = JSON.stringify(idealPlatform(c));
+        tally[k] = (tally[k] || 0) + 1;
+      }
+      const best = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
+      if (best) hall.plat = JSON.parse(best); }`);
   } });
   const got = JSON.parse(sim.G(`JSON.stringify({ mayor: hall.mayor, mine: playerMayor(),
     pol: policyLine(hall.policy), nominee: hall.nominee, you: hall.poll && hall.poll.you,

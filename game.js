@@ -5771,7 +5771,7 @@ function pickErrand(c) {
 function startSelfCook(c, e) {
   c.dayState = "selfCook"; c.cookStep = 0; c.cookRecipe = e.recipe;
   c.cookBiz = e.biz || "shack"; c.cookNeed = e.need || "food";
-  const s0 = stationSpot(c.cookBiz, BIZ[c.cookBiz].source, 0); setT(c, s0.x, s0.y);
+  const s0 = sourceSpot(c.cookBiz, c); setT(c, s0.x, s0.y);   // same rule for a staff meal
 }
 function updateSelfCook(c, dt) {
   const sb = c.cookBiz || "shack", wk = sb === "juicebar" ? "juicer" : "grill";
@@ -5822,7 +5822,15 @@ function updateSelfCook(c, dt) {
 function startErrand(c, e) {
   c.dayState = "toErrand"; c.errandBiz = e.biz; c.errand = e;
   c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_ERRAND);   // errand legwork tires, a little
-  setT(c, BIZ[e.biz].queueX + 4, 166);
+  // WALK TO THE BACK OF THE LINE. Aiming at the counter meant a local coming
+  // from the east walked THROUGH everybody already queued, reached the window,
+  // and only then slid back out to their own place - which is the one thing
+  // that reads worse than a huddle, because it reads as pushing in. The line's
+  // far end is where a newcomer stands, and aiming at the SLOT rather than
+  // four pixels past it (the old queueX + 4) means that if the line is the
+  // same length when they get there - the common case - they walk straight
+  // into their place and never shuffle at all.
+  setT(c, queueSlotX(e.biz, queueLen(e.biz)), 166);
 }
 // A STOP AT THE TAP. No queue entity, no till, no staff to wait on - walk up,
 // use it, walk on. Deliberately its own tiny state so nothing in the customer
@@ -5922,6 +5930,14 @@ function afterErrand(c, chain) {
 }
 function updateErrand(c, dt) {
   if (c.dayState === "toErrand") {
+    // THE LINE IS ALIVE WHILE YOU WALK TO IT. startErrand aims at the back of
+    // the line as it stood when the crab set off; three guests can form up in
+    // the time it takes to cross the promenade, and a fixed aim then lands the
+    // crab inside whoever is standing there. Re-aim only when the tail has
+    // actually moved (a shop's line changes a handful of times an hour, not
+    // every frame), so this is a comparison per crab and nothing re-plans.
+    const tail = queueSlotX(c.errandBiz, queueLen(c.errandBiz));
+    if (c.tx !== tail) setT(c, tail, 166);
     if (routedStep(c, crabMove(c), dt)) {
       // the 5-slot line is a hard cap for locals too: full line, come back later
       const q = customers.filter(k => k.biz === c.errandBiz && (k.state === "waiting" || k.state === "arriving")).length;
@@ -5934,6 +5950,7 @@ function updateErrand(c, dt) {
       const cust = { biz: c.errandBiz, recipe: c.errand.recipe, isCrab: true, crab: c,
         need: c.errand.need, x: c.x, spawnX: c.x, state: "waiting",
         patience: 90, maxPatience: 90, claimed: false, served: false, server: null };   // locals will wait
+      queueJoin(cust);   // a neighbour takes their ticket like anybody else
       customers.push(cust); noteArrival(c.errandBiz);
       c.errandCust = cust; c.dayState = "errand";
     }
@@ -5972,6 +5989,41 @@ function stationSpot(bizKey, kind, slot) {
   const xs = BIZ[bizKey].stations[kind];
   const st = xs[slot] != null ? xs[slot] : xs[0];
   return { x: st.x + 2, y: st.y + 7 };   // stand just in front of the appliance
+}
+// TWO CHEFS, ONE CRATE. Every crab that claims an order walks to source slot
+// ZERO - the same pixel - and the source is the one station nothing acquires,
+// so when two of them converge on it they simply shove each other off it. The
+// standoff is invisible to every guard we have: the crab is three pixels short
+// of its target, which is inside STUCK_FAR, so the no-progress watchdog reads
+// it as "arrived" and the bounce budget never ticks because no FURNITURE is in
+// the way. Measured on seed 4242, two shack chefs, 28 seconds nose to nose.
+// So the second crab stands a body-width BEHIND the first, out on the walkway
+// where no counter band reaches - the same "everybody gets their own place"
+// rule the line outside the window is built on. It cannot deadlock: the crab
+// on the spot is never the one that yields, and the pickup happens on arrival
+// at whatever spot the crab was sent to.
+// SCOPED AS TIGHTLY AS THE FAULT: only a crab working THIS shop counts, and
+// only one actually STANDING on the spot. A passer-by on the boardwalk must
+// never push an attendant off her own counter - a wider test cost SUDSY her
+// drink window and took her time on the dehydration line from 10% to 36% - and
+// this way a ONE-STAFF shop is bit-identical to the shipped build, because
+// there is never anybody to yield to.
+// It is also decided LATE, every frame of the walk rather than once at claim
+// time, and that is what makes it free: reserving the back spot up front made
+// the second chef of every busy service walk an extra body-width whether or not
+// anybody was there, and measured -9% of lifetime take over 48 towns. Deciding
+// on arrival costs the extra steps only in the case that actually goes wrong.
+// The two radii are hysteresis: a crab that has already stepped back holds its
+// place until the spot is properly clear, so a shuffling occupant cannot make
+// it flip-flop between two targets.
+const SOURCE_BACK = 13;   // one body, the same step a queue uses
+function sourceSpot(bizKey, c) {
+  const s = stationSpot(bizKey, BIZ[bizKey].source, 0);
+  const r = c._srcBack ? 11 : 7;
+  const taken = allCrabs().some(w => w !== c && !w.hidden && w.workBiz === bizKey &&
+    Math.abs(w.x - s.x) < r && Math.abs(w.y - s.y) < 8);
+  c._srcBack = taken;
+  return taken ? { x: s.x, y: clampY(s.y + SOURCE_BACK) } : s;
 }
 function setT(c, x, y) { c.tx = x; c.ty = y; }
 
@@ -6561,6 +6613,14 @@ function updateKitchen(c, dt) {
       // local past half patience jumps the line: the juice bar's steady
       // tourist stream never lulls on its own, and a starved local walking
       // away parched is the exact spiral the reserved 5th slot exists to stop
+      // NOT sorted into queue order, and that is a MEASURED refusal. Serving
+      // the front of the line first is the obvious companion to standing in
+      // one, and it costs the town real money: the tip is
+      // `menuPrice x 0.5 x patience/maxPatience`, so FIFO takes every tip at
+      // the BOTTOM of the patience curve. Measured, 30 days x 16 seeds x two
+      // blocks: lifetime $53447/$57086 unsorted against $49914/$48958 sorted,
+      // -8% and -14%, while the queue geometry alone reads +2%/-1%. Where the
+      // crabs STAND is a look; who gets served is the economy. See PLAN.
       const pending = customers.filter(k => k.biz === bizKey &&
         (k.state === "waiting" || k.state === "seatedWaiting") && !k.claimed && !k.served);
       const o = pending.find(k => k.isCrab && k.patience < k.maxPatience * 0.5)
@@ -6594,7 +6654,7 @@ function updateKitchen(c, dt) {
           const seat = pickSeat(bts, o);
           if (seat) { seat.occupant = o; o.table = seat; o.state = "toSeat"; }
         }
-        const s0 = stationSpot(bizKey, biz.source, 0); setT(c, s0.x, s0.y);
+        const s0 = sourceSpot(bizKey, c); setT(c, s0.x, s0.y);   // a body back if somebody is already on the crate
         return;
       }
       const grubby = !c.pendingOff && biz.stalls && biz.stalls.find(t => t.dirty && !t.cleaning && !t.occupant);
@@ -6657,6 +6717,13 @@ function updateKitchen(c, dt) {
     setT(c, ix, clearSpotY(ix, 146 + (Math.max(0, crabs.indexOf(c)) % 2) * 10));
     routedStep(c, spd, dt);
   } else if (c.kstate === "walk") {
+    // the crate is decided on ARRIVAL, not on claim - see sourceSpot. Only the
+    // leg to the source (stepIdx -1) is re-aimed; a station slot is acquired,
+    // so nobody else can be standing on one of those.
+    if (c.stepIdx === -1) {
+      const sp = sourceSpot(bizKey, c);
+      if (c.tx !== sp.x || c.ty !== sp.y) setT(c, sp.x, sp.y);
+    }
     if (routedStep(c, spd, dt)) {
       if (c.stepIdx === -1) {
         if (ownerFunds(bizKey) < ingredientCost(c.cust.recipe.raw)) { c.kstate = "waitCash"; return; }
@@ -7672,7 +7739,12 @@ function updateVisitor(k, dt) {
       return;
     }
     k.state = "arriving"; k.spawnX = k.x; k.y = FLOOR_Y;
+    // visStep settles within a pixel of its target y, and a line standing on
+    // five different y values reads as a huddle however even the spacing is.
+    // Everybody in a line stands ON the boardwalk line.
+    k.wy = FLOOR_Y;
     k.patience = VIS_PATIENCE; k.maxPatience = VIS_PATIENCE;
+    queueJoin(k);   // the ticket is stamped HERE, not when their ferry docked
     noteArrival(k.biz);
     return;
   }
@@ -7723,6 +7795,38 @@ function visAfterCounter(k) {
   k.y = FLOOR_Y; k.wy = FLOOR_Y;
 }
 
+// ------------------------------------------------------------ standing in line
+// A QUEUE IS AN ORDER, NOT AN ARRAY. Places used to be handed out by position
+// in `customers` - and a visitor lives in that array for their WHOLE STAY, so
+// the line was sorted by which ferry you came off rather than by when you
+// joined it. A guest who landed on the 09:00 boat and strolled up fourth took
+// the spot at the window and pushed everyone already standing there back a
+// place; and because the shuffle was one-way (`if (k.x > slot)`), nobody who
+// was pushed back ever moved. They just stood INSIDE the crab in front.
+// Measured, seed 4242 x 3 days, waiting pairs: 25.5% in the wrong order, 58%
+// closer than half a body, 7900 pair-frames at the same pixel.
+// So: your place is stamped when you JOIN the line and never changes, and the
+// shuffle steps both ways. `qSeq` is monotonic across the town rather than per
+// counter - a single counter is one comparison and the numbers never collide.
+let qSeqN = 0;
+function queueJoin(k) { k.qSeq = ++qSeqN; }
+function inLine(k) { return k.state === "arriving" || k.state === "waiting"; }
+// Everyone standing in one business's line, nearest the counter first. It
+// stamps a ticket on anything that got into a line without one (a suite
+// fixture setting `state` by hand, a save that predates this) so the order is
+// always total and the sort is always stable.
+function queueOrder(bizKey) {
+  const q = customers.filter(k => k.biz === bizKey && inLine(k));
+  for (const k of q) if (!k.qSeq) queueJoin(k);
+  return q.sort((a, b) => a.qSeq - b.qSeq);
+}
+function queueLen(bizKey) { return customers.filter(k => k.biz === bizKey && inLine(k)).length; }
+// Where the Nth crab in a line stands. Lines run EAST from their counter, one
+// place per QUEUE_DX - a shade over the collider's own 12px body, so a queue is
+// spaced exactly the way crabs stand everywhere else in town.
+function queueSlotX(bizKey, i) { return BIZ[bizKey].queueX + i * QUEUE_DX; }
+const QUEUE_STEP = 45;   // px/s of shuffle: the speed the one-way clamp used
+
 // ---------------------------------------------------------------- customers
 function newCustomer(bizKey) {
   const biz = BIZ[bizKey];
@@ -7734,29 +7838,41 @@ function newCustomer(bizKey) {
     acc: ACC_KEYS[(Math.random() * ACC_KEYS.length) | 0],
     animT: Math.random() * 9,
     x: spawnX, spawnX, state: "arriving", patience: 50, maxPatience: 50,
+    qSeq: ++qSeqN,   // a walk-in joins the line the moment it is built
     claimed: false, served: false, server: null };
 }
 function updateCustomers(dt) {
   trackCloseQueues();   // hours-policy signal: who was still in line when a shop shut
   runFerry(dt * TS);    // the timetable: she docks, lands a batch, and sails
   sweepRooms();         // a room whose guest has left town is an empty room, always
-  const qi = {};
-  for (const b of Object.keys(BIZ)) qi[b] = 0;
+  // one pass over every line, so a place is a POSITION IN THE QUEUE rather than
+  // a position in the array. Rebuilt each frame, which is what compacts the
+  // line when the front is served: everybody behind moves up exactly one place.
+  const qslot = new Map();
+  for (const b of Object.keys(BIZ)) queueOrder(b).forEach((k, i) => qslot.set(k, queueSlotX(b, i)));
   for (const k of customers) {
     if (k.visitor) {
       visTick(k, dt);                                        // needs run wherever they are
       if (VIS_STATES[k.state]) { updateVisitor(k, dt); continue; }
     }
     if (k.state === "arriving" || k.state === "waiting") {
-      const slot = BIZ[k.biz].queueX + (qi[k.biz]++) * QUEUE_DX;
+      // joined DURING this pass (a visitor whose walk ended a few lines up):
+      // stand still, take a place next frame. One frame, and it is the frame
+      // they stopped walking on.
+      const slot = qslot.has(k) ? qslot.get(k) : k.x;
+      // SHUFFLE, BOTH WAYS. The step is clamped to the distance left, so it can
+      // never overshoot its slot - which is the whole anti-jitter argument: with
+      // no overshoot there is nothing to correct on the next frame, and a place
+      // that only ever moves TOWARD the counter can never flip direction either.
+      const dxq = slot - k.x;
+      if (Math.abs(dxq) <= QUEUE_STEP * dt) { k.x = slot; k.qWalk = false; k.face = -1; }
+      else { k.x += Math.sign(dxq) * QUEUE_STEP * dt; k.qWalk = true; k.face = Math.sign(dxq); }
       if (k.state === "arriving") {
-        k.x -= 45 * dt;
-        if (k.x <= slot) {
-          k.x = slot; k.state = "waiting";
+        if (k.x === slot) {
+          k.state = "waiting";
           popText((k.isCrab ? k.crab.p.name : k.name.split(" ")[0]) + ": " + ITEM_NAMES[k.recipe.icon] + "?", k.x - 26, FLOOR_Y - 42, [255, 255, 255]);
         }
       } else {
-        if (k.x > slot) k.x = Math.max(slot, k.x - 45 * dt);
         k.patience -= dt * (bizStaffed(k.biz) ? 1 : 6) * serverFilth(k);   // nobody home? give up quick
         if (k.patience <= 0) {
           k.state = "leaving"; k.happy = false; k.claimed = false;
@@ -9555,7 +9671,9 @@ function drawCustomer(k) {
       const arts = CRAB_ARTS[k.color];
       if (k.state === "showering") return;   // behind the curtain (stall draws the bather)
       if (k.state === "inRoom") return;      // upstairs with the lamp on (the door draws them)
-      const moving = k.state !== "waiting" && k.state !== "onSand";
+      // a crab shuffling up the line is WALKING, and legs sell it. Without this
+      // the whole line slid up the boardwalk on its belly when the front left.
+      const moving = (k.state !== "waiting" && k.state !== "onSand") || (k.state === "waiting" && k.qWalk);
       const art = moving && ((k.animT * 8) | 0) % 2 ? arts.b : arts.a;
       // a visitor faces the way they are walking; the old anonymous tourist
       // only ever walked one way, which is why this used to be a state test
