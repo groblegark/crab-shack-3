@@ -1787,23 +1787,21 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // even the SHAPE of the fingerprint - the crab list it walks - is different.
   // The drift reads exactly like the change it is, on both seeds:
   //   * two extra rows, REEF in cottage 8 (x2136) and KELP on the rail;
-  //   * REPUTATION moves either way (51.1 -> 45.6, 50.8 -> 54.5);
-  //   * SERVES are UP (35 -> 50, 33 -> 57) - that is the whole town's counter
+  //   * REPUTATION is up on both (51.1 -> 58.0, 50.8 -> 58.5);
+  //   * SERVES are UP (35 -> 66, 33 -> 61) - that is the whole town's counter
   //     traffic including the DRIFTWOOD's room lets, which did not exist;
-  //   * SUDSY's till is up on both (148.7 -> 222.0, 148.4 -> 239.8): visitors
+  //   * SUDSY's till is up on both (148.7 -> 300.4, 148.4 -> 263.8): visitors
   //     come off a boat grubby, and a shower is a holiday purchase;
-  //   * the player's till lands either side of where it was (193.2 -> 154.4 on
-  //     1337, 195.4 -> 213.3 on 4242) - one seed down, one up, which is what a
-  //     genuinely re-shaped demand curve looks like rather than a bias.
-  // Not everybody makes it home on 1337: REEF, SALTY and DRIFT are all still
-  // out on the promenade at midnight. That is the price of a hotel at the far
-  // EAST end of a 2512px town - its keeper's errands are a long walk - and it
-  // is exactly the sort of thing this fingerprint exists to make somebody look
-  // at rather than something it should hide. Seed 4242 puts REEF in his own
-  // cottage.
+  //   * the player's till is up on both (193.2 -> 228.8, 195.4 -> 216.2) - day
+  //     two is the day a new town's opening crowd is still ashore, and the
+  //     30-day curve is where that gets paid back (0/16, median 11).
+  // Everybody is home on 1337; on 4242 DRIFT is still out on the promenade at
+  // midnight. That kind of position is exactly what this fingerprint exists to
+  // make somebody look at rather than something it should hide - and the town
+  // is 2512px wide now, with a hotel at the far east end of it.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":154.433,"rep":45.6378,"catch":1,"serves":50,"crabServes":4,"rage":6,"till":222.013,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",40],["SALTY",10],["DRIFT",7],["KELP",1]],"pos":[[520,154],[108,154],[388,154],[646,163],[450,155],[464,155],[2072,167]]}',
-    4242: '{"day":3,"tmin":0,"coins":213.268,"rep":54.5114,"catch":2,"serves":57,"crabServes":3,"rage":4,"till":239.816,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",0],["DRIFT",10],["KELP",5]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,167],[831.7,167.5]]}',
+    1337: '{"day":3,"tmin":0,"coins":228.814,"rep":57.9782,"catch":4,"serves":66,"crabServes":3,"rage":5,"till":300.414,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",21],["DRIFT",21],["KELP",3]],"pos":[[520,154],[108,154],[388,154],[2136,154],[248,167],[2072,154],[318,167]]}',
+    4242: '{"day":3,"tmin":0,"coins":216.207,"rep":58.5215,"catch":4,"serves":61,"crabServes":4,"rage":5,"till":263.804,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",4],["DRIFT",10],["KELP",7]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[620.9,167.2],[478,155]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -2435,8 +2433,16 @@ scenario("npc shops run the same policy: SUDSY takes a sick day, placard up, no 
   const sim = createSim({ seed: 707 });
   sim.runUntil("day >= 2 && tmin >= 9 * 60", { maxSteps: 300000 });
   // SUDSY is an owner-operator: she grants herself sick days by the same rule
+  // RE-POINTED 2026-08-19 (the visitor/hotel pass): this is about a SINGLE-
+  // WORKER shop hanging its own placard, and the fixture never made sure the
+  // shop had one worker. A town with ferry traffic keeps SUDSY's till healthier,
+  // so the job board signs her an attendant on day 2 and the shop stops resting
+  // when she does - which is CORRECT behaviour and the wrong thing to measure
+  // here. Anybody else on her roster is sent back to the pier, and kept there.
+  const solo = (G) => G(`for (const k of allCrabs()) if (k.p.job === "showers" && k.p.owner !== "sudsy") layOff(k);`);
   sim.G(`{ const s = npcs.find(k => k.p.owner === "sudsy");
     s.p.sick = { days: 1 }; OWNERS.sudsy.till = 600; jobBoard.length = 0; hireDay = day; }`);
+  solo(sim.G);
   if (!sim.G(`onSickDay(npcs.find(k => k.p.owner === "sudsy"))`))
     return "SUDSY did not grant herself the sick day";
   if (!sim.G(`BIZ.showers.autoLabor`)) return "peer owners should ship with auto-manage ON";
@@ -2447,7 +2453,7 @@ scenario("npc shops run the same policy: SUDSY takes a sick day, placard up, no 
   // she stays home all day, unpaid, and the job board does NOT post: a bout
   // of flu is not a vacancy
   sim.runUntil("tmin >= 8 * 60 && day > " + sim.G("day"), { maxSteps: 400000,
-    onTick: (G) => G(`{ const s = npcs.find(k => k.p.owner === "sudsy"); if (s) s.p.sick = s.p.sick || { days: 1 }; OWNERS.sudsy.till = 600; }`) });
+    onTick: (G) => { G(`{ const s = npcs.find(k => k.p.owner === "sudsy"); if (s) s.p.sick = s.p.sick || { days: 1 }; OWNERS.sudsy.till = 600; }`); solo(G); } });
   const posted = JSON.parse(sim.G("JSON.stringify(jobBoard.filter(j => j.biz === 'showers'))"));
   if (posted.length) return "a sick day triggered the emergency HELP WANTED posting: " + JSON.stringify(posted);
   return sim.G(`npcs.find(k => k.p.owner === "sudsy").dayState !== "working"`)

@@ -5128,7 +5128,7 @@ function newVisitor(overnightOnly) {
 // that predates the ferry) opens with a boat-load already mid-visit.
 function seedVisitors() {
   if (customers.some(k => k.visitor)) return;
-  const n = ferryBatch() + 4;   // a day's worth: yesterday's overnighters and this morning's crowd
+  const n = ferryBatch() + 6;   // a day-and-a-bit: yesterday's overnighters and this morning's crowd
   for (let i = 0; i < n; i++) {
     // about half of them are mid-stay rather than day-tripping, so the town
     // still has a population on DAY 2 (measured: seeding day-trippers only left
@@ -5503,7 +5503,12 @@ function updateVisitor(k, dt) {
   // the beach, because the desk has shut and there is nowhere else to go.
   if (tmin >= BED_HOUR || tmin < WAKE_HOUR) {
     if (k.room) { k.state = "toRoom"; return; }
-    if (!k.rough) sleepOnSand(k);
+    // ...and a visitor only beds down on the sand at ACTUAL BEDTIME. The town
+    // opens at 07:00, which is on the wrong side of WAKE_HOUR: without this
+    // clause the boat-load a new town starts with was filed as sleeping rough
+    // for the first half hour of the game, and docked the town a point of
+    // reputation each for a bed nobody could have sold them yet.
+    if (!k.rough && tmin >= BED_HOUR) sleepOnSand(k);
     return;
   }
   if (k.thinkT <= 0) {

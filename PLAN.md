@@ -209,12 +209,13 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ### Verified balance (8 seeds, tools/headless.mjs)
 - **CURRENT (2026-08-19, after the ferry/visitor/hotel pass):** baseline
   `--days 30 --seeds 16` **0/16, median 11**
-  (9,10,10,10,10,11,11,11,11,12,13,13,14,14,14,15); growth
-  `--buy chef,table --days 40 --seeds 8` **2/8 alive** (9,10,10,11,14,14,41,41)
-  and **4/8 on the second seed block** (`--seedbase 8`: 10,11,11,12,41x4).
-  ACROSS BOTH BLOCKS the growth curve is **6/16 before and 6/16 after** — the
-  8-seed figure is block noise, which is why the second block exists. See the
-  visitor entry for the full before/after and the propped demand probe.
+  (6,8,9,9,10,11,11,11,11,12,12,13,13,13,14,15); growth
+  `--buy chef,table --days 40 --seeds 8` **2/8 alive** (6,8,9,10,14,15,41,41)
+  and **3/8 on the second seed block** (`--seedbase 8`: 11,11,12,15,17,41x3).
+  ACROSS BOTH BLOCKS the growth curve is **6/16 before and 5/16 after** — and
+  the pre-pass build itself reads 4/8 then 2/8 on those same two blocks, so
+  eight growth seeds is a coin. See the visitor entry for the full before/after
+  and the propped demand probe.
 - (superseded) after the table-service economy: baseline
   `--days 30 --seeds 16` **0/16, median 13** (10-19); growth
   `--buy chef,table --days 40 --seeds 8` **3/8 alive**
@@ -484,6 +485,14 @@ vm — never fork game logic into tools/) and perf expectations live there.
      200px from the pier was checking out at **05:15** for an 08:00 boat. It is
      now sized per visitor off the walk they actually face.
   4. Visitors came off the plank at boardwalk height and rose to the rail.
+  5. **The town opens at 07:00, which is on the wrong side of `WAKE_HOUR`**, so
+     the boat-load a new town starts with was filed as SLEEPING ROUGH for the
+     first half hour of the game — and docked the town a point of reputation
+     each for a bed nobody could have sold them yet. A visitor now only beds
+     down on the sand at actual bedtime. (Honest note: that accident was worth
+     about two escapes in sixteen growth seeds, because a rough-slept visitor
+     takes the next boat and the seeded crowd was therefore staying longer. The
+     bug is still a bug; the opening crowd was widened by two to pay for it.)
 
   ### A THIRD FISHER, and why the hotel needed one
   The job board lets a flush NPC owner hire a jobless fisher, and with a SECOND
@@ -503,13 +512,15 @@ vm — never fork game logic into tools/) and perf expectations live there.
 
   | matrix | before | after |
   |---|---|---|
-  | baseline `--days 30 --seeds 16` | 0/16, median **10** | **0/16, median 11** (9,10,10,10,10,11,11,11,11,12,13,13,14,14,14,15) |
-  | growth `--buy chef,table` 40d x 8 | **4/8** | **2/8** (9,10,10,11,14,14,41,41) |
-  | growth, second block `--seedbase 8` | **2/8** | **4/8** (10,11,11,12,41x4) |
-  | growth, both blocks (16 seeds) | **6/16** | **6/16** |
+  | baseline `--days 30 --seeds 16` | 0/16, median **10** | **0/16, median 11** (6,8,9,9,10,11,11,11,11,12,12,13,13,13,14,15) |
+  | growth `--buy chef,table` 40d x 8 | **4/8** | **2/8** (6,8,9,10,14,15,41,41) |
+  | growth, second block `--seedbase 8` | **2/8** | **3/8** (11,11,12,15,17,41,41,41) |
+  | growth, both blocks (16 seeds) | **6/16** | **5/16** |
 
-  **The growth curve is UNCHANGED at 16 seeds and the 8-seed block is noise** —
-  which is the honest reading and the reason the second block was run at all.
+  **The 8-seed growth block is a COIN, and that is the finding to carry
+  forward**: the same pre-pass build reads 4/8 on the default seeds and 2/8 on
+  `--seedbase 8`. Across sixteen growth seeds the curve moves by ONE town, which
+  is the honest reading and the reason the second block was run at all.
   Lose-by-default is absolute (0/16) and the median sits inside CLAUDE.md's
   documented 11-13 band. Propped 6-town probe (the demand, isolated from the
   eviction): player takings **$300.4/day -> $299.3/day**, seatings 11.1 -> 10.9,
@@ -531,7 +542,7 @@ vm — never fork game logic into tools/) and perf expectations live there.
   build with a ReferenceError rather than a behavioural failure — honest but
   weaker, and noted as such, because the entities they test do not exist there.
 
-  **Re-pointings (11, every one with its receipt written into the scenario):**
+  **Re-pointings (13, every one with its receipt written into the scenario):**
   1. `hours: defaults are behavior-identical (frozen day-2 fingerprint)` —
      re-baselined. It could not possibly have survived: the pass replaces the
      entire demand model AND adds two founders, so even the SHAPE of the
@@ -574,8 +585,33 @@ vm — never fork game logic into tools/) and perf expectations live there.
      roll.
   11. `staff meals` (both) — they waited for `customers.length === 0`, and a
      visitor never leaves that list. Asked as "nobody is mid-order" instead.
+  12. `npc shops run the same policy: SUDSY takes a sick day` — the fixture is
+     about a SINGLE-WORKER shop hanging its own placard and never made sure the
+     shop had one worker. Ferry traffic keeps her till healthier, so the job
+     board signs her an attendant on day 2 and the shop correctly stops resting
+     when she does. Her roster is now held at one.
+  13. `visitors: the reserved local slot still feeds the neighbours` (one of the
+     new six, re-pointed before it shipped, and the control is the interesting
+     part): the "nobody is left pinned at hunger" bar is a SHARE of the town,
+     not a flat count, because SUDSY sits at 1.00 on day 4 of the PRE-PASS build
+     too, on every seed measured — the lone attendant reaching the shack's
+     evening queue is a named open trap in this file and not this pass's doing.
+     What the gate proves positively is the other half: the same four days serve
+     locals 10-12 times against the pre-pass build's 7-8.
 
-  ### Story beat (organic, browser, seed unseeded — day 2 of a full house)
+  ### Story beat (organic, browser — ROE, two days at the Driftwood)
+  Open her record and the whole visit is on one card. **ROE** came over on an
+  earlier ferry at **07:00** with **$158** and a purple shell. She ate a FISH
+  TACO at the shack at **10:37** ($17), had a DELUXE SOAK at SUDS SHOWERS at
+  **11:54** ($10), took **ROOM 5 AT THE DRIFTWOOD** at **16:19**, went back out
+  and had a second soak at **18:39**, and at 20:35 she is out on the promenade
+  reading **STARVING - STROLLING THE PROMENADE**, **$78 LEFT OF THE $158 THEY
+  BROUGHT**, **$80 SPENT IN TOWN OVER 4 VISITS**, **SAILS HOME IN 35H**. She is
+  the sentence the directive asked for: that's ROE, she's been here since this
+  morning, she's in room 5, and she is about to want her dinner.
+  Shot: `visitor-dossier`.
+
+  ### Story beat (organic, browser — day 2 of a full house)
   Six guests, seven rooms, and you can read every one of their days off the
   dossier. **PEARL** came ashore on the 08:00 boat with $97. She had a DELUXE
   SOAK at SUDS SHOWERS at 10:08, checked into **room 2** at 13:41, ate a FISH
