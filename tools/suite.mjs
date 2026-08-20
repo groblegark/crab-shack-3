@@ -1799,9 +1799,26 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // midnight. That kind of position is exactly what this fingerprint exists to
   // make somebody look at rather than something it should hide - and the town
   // is 2512px wide now, with a hotel at the far east end of it.
+  //
+  // RE-BASELINED 2026-08-19 for THE SLEEPING GUEST (see the hotel flicker
+  // scenario below). updateVisitor had no `inRoom` case, so an overnighter
+  // bounced inRoom<->toRoom every frame all night - and visTick only skips the
+  // needs loop on an `inRoom` frame, so half of every night in a paid bed was
+  // charged as a night on the promenade: hunger, thirst, dirt and boredom all
+  // climbed, and tiredness drained at half rate. Fixing the loop restores what
+  // visTick was written to do, and the drift is exactly that shape - a well
+  // rested guest wakes up wanting LESS, so day two sells less of everything:
+  //   * 1337: serves 66 -> 63, SUDSY's till 300.4 -> 280.8, player's till
+  //     228.8 -> 188.6, rep 58.0 -> 56.5. SALTY and KELP are a wallet apart
+  //     and KELP ends the night at a different cottage on the rail.
+  //   * 4242: serves 61 (unmoved), rep 58.5 (unmoved), till 216.2 -> 214.9,
+  //     SUDSY 263.8 -> 271.6, and one walkout fewer (rage 5 -> 4).
+  // The 30-day curve was re-measured against a control on the same tree:
+  // lose-by-default holds at 0/16 either way, median eviction 11 -> 12 and the
+  // tails tighten (6-15 -> 10-14). See PLAN, THE FLICKERING HOTEL.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":228.814,"rep":57.9782,"catch":4,"serves":66,"crabServes":3,"rage":5,"till":300.414,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",21],["DRIFT",21],["KELP",3]],"pos":[[520,154],[108,154],[388,154],[2136,154],[248,167],[2072,154],[318,167]]}',
-    4242: '{"day":3,"tmin":0,"coins":216.207,"rep":58.5215,"catch":4,"serves":61,"crabServes":4,"rage":5,"till":263.804,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",4],["DRIFT",10],["KELP",7]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[620.9,167.2],[478,155]]}',
+    1337: '{"day":3,"tmin":0,"coins":188.643,"rep":56.4742,"catch":4,"serves":63,"crabServes":3,"rage":5,"till":280.838,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",18],["DRIFT",21],["KELP",4]],"pos":[[520,154],[108,154],[388,154],[2136,154],[248,167],[2072,154],[478,167]]}',
+    4242: '{"day":3,"tmin":0,"coins":214.868,"rep":58.5215,"catch":4,"serves":61,"crabServes":4,"rage":4,"till":271.624,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",1],["DRIFT",7],["KELP",0]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,167],[248,154]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -2178,9 +2195,14 @@ scenario("fish market: floor-price week - the roast keeps a broke fisher alive",
   sim.runDays(7, { tickEvery: 8, onTick: (G) => {
     // freeze the labor market (days-off scenario pattern): at a $2 price a
     // $20 posting rationally poaches SALTY off the pier, and a poached
-    // employee is not the glut-priced FISHER this scenario constructs
+    // employee is not the glut-priced FISHER this scenario constructs.
+    // EVERY peer owner has to be held under the posting threshold, not just
+    // SUDSY - the visitor pass gave the town a second one, and REEF was
+    // hiring SALTY onto the hotel desk on day 4 of this fixture on both
+    // sides of the sleeping-guest fix. His $23 wage is what "$45" and "$67"
+    // measured; neither number was ever about fish.
     G(`trade.price = 2; if (coins < 300) coins = 600;
-      OWNERS.sudsy.till = Math.min(OWNERS.sudsy.till, 200);
+      for (const o of Object.values(OWNERS)) o.till = Math.min(o.till, 200);
       if (npcs[0]) npcs[0].p.sick = null;
       { const f = npcs.find(c => c.p.name === "SALTY");
         if (f) {
@@ -5071,6 +5093,69 @@ scenario("hotel: a full house is handled sanely - nobody wedges, nobody vanishes
   const recovered = sim.runUntil(`(window._stats.roomLets || 0) > ${lets0}`, { maxSteps: 600000,
     tickEvery: 25, onTick: (G) => G("if (coins < 900) coins = 1800;") });
   return recovered ? true : "the hotel never recovered after the jam cleared";
+});
+
+scenario("hotel: a guest asleep in their room holds ONE state, and the card holds still", () => {
+  // OWNER REPORT (Matt, 2026-08-19): "some kind of crazy flashing happens at
+  // night at the hotel, where if I click on a crab the character panel and the
+  // crab flicker like crazy". It was a two-state loop in updateVisitor: with no
+  // `inRoom` case the sleeping guest fell through to the ROAM block, which sees
+  // bedtime and a room key and sends them back to `toRoom` - and they are stood
+  // at their own door, so the next frame put them back to `inRoom`. Every
+  // frame, all night.
+  //
+  // It is asserted THROUGH THE DRAW PATH, because that is where it was seen:
+  // rendering is switched back on (the stub ctx swallows the pixels), and each
+  // frame is signed by what the card PRINTED and whether the guest's body was
+  // blitted onto the boardwalk. A flicker is more than one signature.
+  const sim = createSim({ seed: 1337 });
+  const bed = sim.runUntil(`day >= 2 && tmin >= 22 * 60
+    && BIZ.hotel.stalls.some(r => r.occupant && r.occupant.state === "inRoom")`, { maxSteps: 900000 });
+  if (!bed) return "no guest ever got to bed - the fixture never reached a night in the hotel";
+  const sigs = JSON.parse(sim.G(`(() => {
+    window._headless = false;              // draw for real; the ctx stub eats it
+    const g = BIZ.hotel.stalls.find(r => r.occupant && r.occupant.state === "inRoom").occupant;
+    followCrab(g);                          // ...which is what clicking them does
+    const oFrame = frame, oCust = drawCustomer, oCard = drawFollowCard, oT = text, oS = smallText, oW = wblit;
+    let card = [], body = 0, inCard = false, inGuest = false;
+    text = (c, s, x, y, col, sz) => { if (inCard) card.push(String(s)); return oT(c, s, x, y, col, sz); };
+    smallText = (c, s, x, y, col, sz) => { if (inCard) card.push(String(s)); return oS(c, s, x, y, col, sz); };
+    wblit = (art, wx, y, flip) => { if (inGuest) body++; return oW(art, wx, y, flip); };
+    drawCustomer = (k) => { if (k !== g) return oCust(k); inGuest = true; try { return oCust(k); } finally { inGuest = false; } };
+    drawFollowCard = () => { inCard = true; try { return oCard(); } finally { inCard = false; } };
+    const out = [];
+    frame = (t) => { card = []; body = 0; const r = oFrame(t);
+      out.push(JSON.stringify({ state: g.state, card, body: body > 0 })); return r; };
+    requestAnimationFrame(frame);
+    for (let i = 0; i < 40; i++) { simNow += 16; rafCb(simNow); }
+    frame = oFrame; drawCustomer = oCust; drawFollowCard = oCard; text = oT; smallText = oS; wblit = oW;
+    requestAnimationFrame(frame);
+    return JSON.stringify(out);
+  })()`));
+  if (sigs.length !== 40) return "the probe only saw " + sigs.length + " frames";
+  const uniq = [...new Set(sigs)];
+  if (uniq.length !== 1)
+    return `the selected guest oscillated over 40 frames - ${uniq.length} distinct frames, e.g.\n        `
+      + uniq.slice(0, 2).map(s => s.slice(0, 220)).join("\n        ");
+  const one = JSON.parse(uniq[0]);
+  if (one.state !== "inRoom") return "the fixture stopped watching a sleeping guest: " + one.state;
+  if (one.body) return "a guest asleep behind their door was also painted on the boardwalk";
+  if (!one.card.some(s => s.startsWith("ASLEEP IN ROOM")))
+    return "the card never said where the guest was: " + JSON.stringify(one.card);
+  // ...and the night is a REST, not a shift. The bed drains tiredness and the
+  // other four needs stand still - which is only true if nothing is dragging
+  // them back out of the room to accrue a walk's worth of hunger.
+  const a = JSON.parse(sim.G(`(() => { const g = BIZ.hotel.stalls.find(r => r.occupant
+    && r.occupant.state === "inRoom").occupant; window._BED = g;
+    return JSON.stringify([g.tired, g.hunger, g.thirst, g.dirt, g.bored]); })()`));
+  sim.G(`for (let i = 0; i < 600; i++) { simNow += 16; rafCb(simNow); }`);
+  const b = JSON.parse(sim.G(`(() => { const g = window._BED;
+    return JSON.stringify([g.state, g.tired, g.hunger, g.thirst, g.dirt, g.bored]); })()`));
+  if (b[0] !== "inRoom") return "the guest left the room mid-probe (" + b[0] + ")";
+  if (!(b[1] < a[0])) return `a night in a paid bed did not rest them: tired ${a[0]} -> ${b[1]}`;
+  for (let i = 1; i < 5; i++)
+    if (b[i + 1] > a[i]) return `need ${["hunger", "thirst", "dirt", "bored"][i - 1]} climbed while they slept indoors: ${a[i]} -> ${b[i + 1]}`;
+  return true;
 });
 
 scenario("visitors: the reserved local slot still feeds the neighbours", () => {
