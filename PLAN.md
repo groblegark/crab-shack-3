@@ -112,11 +112,21 @@ against the tree you are landing on, not against the number in this file.**
     it; an agent asked to reproduce it first found it was noise at ~180
     crab-nights an arm. Ask for the reproduction BEFORE the fix, every time.
 
-**NEXT UP:** nothing is blocked. Matt's queue is clear. The standing backlog
-below still holds — a surf spot mid-beach (deferred behind the beach ball), the
-lease card's wall of text (the last item from Ben's playtest), and whether a
-player should be able to INVITE an offer for a business rather than only answer
-one, which is a design question rather than a UX fix.
+**NEXT UP — THE BRIEF IS NOW CULTURAL COMPLETENESS** (Matt, 2026-08-20): CS3
+has to be *"a really complete crab island culture"*, and **the crab people are
+a REPRESENTATIVE CRABOCRACY**. See THE CULTURE OF THE CRAB PEOPLE below — it
+carries the canon, including the mainland pigs, and what it does to the
+backlog. CS4 ("build your own cultureway") is pushed back.
+
+Open, in order:
+- **The lease card's wall of text** — the last item from Ben's playtest, and
+  the first screen a new player sees. It wants a hook, not more words.
+- **Deepening the crabocracy** — the office, the ballot and the count are the
+  town's central institution now, not a side system.
+- ~~A surf spot mid-beach~~ — **HELD** by Matt: "not quite yet, but we will do
+  it." Do not build it; do not drop it.
+- ~~Owner-initiated FOR SALE~~ — **SETTLED**: the player answers an offer, they
+  do not invite one. "Let's keep (3) the same for now."
 - ~~**The departure card**~~ — **SHIPPED 2026-08-20**: the day report's second
   page, naming every visitor who sailed on today's boats, with a quote DERIVED
   from a per-visit stay ledger — never random. See "THE DEPARTURE CARD" at the
@@ -3312,6 +3322,46 @@ cannot be stopped: there is no pause, and no speed of zero"** pins the ruling
 as a mechanism rather than a grep — there must be no pause STATE to flip and no
 entry in `FF_SPEED` that stops time, and the clock is then checked to actually
 run, so a pause shipped as "speed 0 by default" fails it.
+
+## THE CULTURE OF THE CRAB PEOPLE (Matt, 2026-08-20) — the direction for CS3
+
+CS4 is **pushed back**, deliberately, and CS3's remaining scope is named:
+
+> "CS3 needs to be a full 'culture'; CS4 will be 'build your own cultureway' in
+> ways I haven't gotten into yet. So we want a really complete crab island
+> culture (with hints at neighboring cultures, for instance I happen to know
+> that a lot of pigs live on the mainland, and pigs and crabs have a lot in
+> common. This probably won't come up in CS3 though)."
+
+**So the remaining work on CS3 is CULTURAL COMPLETENESS, not features.** The
+question to ask of a proposal is no longer "does this add a system" but "does a
+crab island feel like a place with its own way of doing things".
+
+### CANON
+
+- **The crab people are a REPRESENTATIVE CRABOCRACY.** (Matt, verbatim.) This
+  is not decoration — it is the name of the thing POLLING DAY already models,
+  and it means the office, the ballot, the purse and the count are the CENTRAL
+  cultural institution rather than a side system. Anything that deepens how the
+  town governs itself is on-brief.
+- **THERE IS A MAINLAND, AND PIGS LIVE ON IT.** Pigs and crabs have a lot in
+  common. The far shore already exists in pixels — hills behind hills, a light
+  on the point, a scatter of blocks that comes on after dark — and the trade
+  ledger already treats the town as a NODE that imports. That is the seam:
+  neighbouring cultures are HINTED, through what arrives on the ferry and what
+  can be seen across the water, never stated.
+- **It probably will not come up in CS3.** Matt said so. So: hints, not
+  characters. A pig does not get off the boat in this game.
+
+### WHAT THIS DOES TO THE BACKLOG
+
+- **The surf spot is HELD** — "not quite yet, but we will do it". Keep it; do
+  not build it yet.
+- **The rivalry stays as it is** — the player answers an offer, they do not
+  invite one. Matt: "let's keep (3) the same for now."
+- **CS4 is further off than the 2026-08-18 CLOSING ACT assumed.** That section
+  said park new ideas as CS4 design material; the ideas to park now are
+  "build your own cultureway" ones. Cultural depth for the crabs stays in CS3.
 
 ## SCREENSHOTS: THE HANDOFF (process, 2026-08-20)
 

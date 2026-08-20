@@ -5015,7 +5015,14 @@ function awayToday(c) { return offToday(c) || walkoutToday(c); }
 // a special case: relief is decided when the timer ends by looking at who else
 // is standing at the ball. Nobody there, you were bouncing it off your own
 // claw and it shows.
-const BALL_X = 1290;          // open sand between the showers and the shack
+// OPEN SAND BETWEEN THE SHOWERS AND THE SHACK - which is what this comment
+// always said, and 1290 was not it. The SHACK's own span is 1220-1560, so the
+// ball sat SEVENTY PIXELS INSIDE A BUILDING and was painted over by its decking
+// in every frame since it landed (Matt: "the beach ball needs screenshot
+// testing, I don't see it"). 1150 is the real gap: the showers end at 1120,
+// their queue stands at 1126, the bus stop is at 1180, and the shack starts at
+// 1220 - so a game here is on sand, beside a bus stop, in front of nothing.
+const BALL_X = 1150;
 const BALL_AT = 0.66;         // you'd BUY fun at 0.45; you walk out here when properly bored
 const BALL_JOIN = 0.48;       // ...but a game already going is worth joining at much less
 const BALL_YIELD = 0.55;      // ...and any real need outranks it well before boredYields' 0.8
@@ -10796,7 +10803,6 @@ function drawTown() {
   wrect(0, ROAD_Y1, WORLD_W, 3, [214, 196, 156]);   // shoulder
   drawPier();
   drawFerry();
-  drawBeachBall();
   drawBoats();
   // houses face the promenade - ALL nine lots stand, always: an occupied
   // house wears its tenant's roof color, an empty one sits weathered-grey
@@ -15100,6 +15106,17 @@ function frame(now) {
   } });
   for (const c of allCrabs()) paint.push({ base: c.cstate === "drive" && (c.dayState === "toWork" || c.dayState === "toHome") ? ROAD_Y1 : c.y, f: () => drawCrab(c) });
   paint.push({ base: FLOOR_Y, f: drawLandlord });
+  // THE BALL IS A THING ON THE SAND, so it belongs in the paint list with the
+  // crabs rather than in the terrain pass. (Matt: "the beach ball needs
+  // screenshot testing, I don't see it." He could not see it: it was drawn
+  // THIRD in drawTown, ahead of the houses and every shopfront, and BALL_X
+  // 1290 is inside the CRAB SHACK's own span (1220-1560) - so the shack's
+  // decking painted over it in every frame of every day since it landed.
+  // Moving it later inside drawTown was not enough either; the shopfronts
+  // come after that too. Sorted by y with everything else is the position
+  // that cannot be wrong: it composites against the crabs playing with it
+  // instead of racing them.)
+  paint.push({ base: BALL_Y + 1, f: drawBeachBall });
   paint.sort((a, b) => a.base - b.base);
   for (const e of paint) e.f();
   drawForSaleSigns();   // boards go over the furniture, and the price has to read from the street

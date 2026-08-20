@@ -9275,6 +9275,78 @@ scenario("the title screen credits the track that is actually queued", () => {
   return true;
 });
 
+// ===========================================================================
+// THE BEACH BALL IS ACTUALLY ON THE SCREEN (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("the beach ball is drawn where you can see it, not behind a building", () => {
+  // Matt: "the beach ball needs screenshot testing, I don't see it." He could
+  // not: BALL_X was 1290, which is SEVENTY PIXELS INSIDE the crab shack's own
+  // span (1220-1560), and drawBeachBall ran THIRD in drawTown - ahead of the
+  // houses and every shopfront - so the shack's decking painted straight over
+  // it in every frame of every day since the ball landed. A feature that draws
+  // and is never seen passes every test that asks whether it drew.
+  //
+  // So this asks the question a screenshot asks: AFTER the whole frame is
+  // painted, is any of the ball still on top? Same shape as the rect-over-text
+  // sweeps - the ball's own rects are recorded, then anything drawn later that
+  // covers them is counted. Mutation-tested BOTH ways: put BALL_X back to 1290
+  // and it fails; move the draw back into drawTown's terrain pass and it fails.
+  const sim = createSim({ seed: 11 });
+  sim.runDays(1);
+  const got = JSON.parse(sim.G(`(() => {
+    // two crabs mid-game, so the ball is in flight rather than at rest
+    const [p, q] = crabs;
+    p.x = BALL_X - 26; q.x = BALL_X + 30; p.y = q.y = BALL_Y;
+    p.dayState = "atBall"; p.ballT = 6; q.dayState = "atBall"; q.ballT = 6;
+    camX = clampCam(BALL_X - 120);
+    const R = rect, P = px;
+    let ballRects = [], phase = "before", covered = 0, drew = 0;
+    const note = (x, y, w, h) => {
+      if (phase === "ball") { ballRects.push([x, y, w, h]); drew++; return; }
+      if (phase !== "after") return;
+      for (const b of ballRects)
+        if (x < b[0] + b[2] && x + w > b[0] && y < b[1] + b[3] && y + h > b[1]) covered++;
+    };
+    rect = (c, x, y, w, h, col) => { note(x, y, w, h); return R(c, x, y, w, h, col); };
+    px = (c, x, y, col) => { note(x, y, 1, 1); return P(c, x, y, col); };
+    const RB = drawBeachBall, RBZ = drawBusiness;
+    let ballAt = -1, lastShopAt = -1, tick = 0;
+    drawBusiness = (...a) => { lastShopAt = ++tick; return RBZ(...a); };
+    drawBeachBall = () => { ballAt = ++tick; phase = "ball"; const r = RB(); phase = "after"; return r; };
+    // simlib runs with window._headless set, and frame() returns before it
+    // draws anything at all - so the frame has to be un-blinded for the one
+    // call this scenario is about.
+    const wasHeadless = window._headless;
+    window._headless = false;
+    let err = null;
+    try { frame(performance.now() + 16); } catch (e) { err = e.message; }
+    window._headless = wasHeadless;
+    rect = R; px = P; drawBeachBall = RB; drawBusiness = RBZ;
+    return JSON.stringify({ err, drew, covered, ballX: BALL_X, ballAt, lastShopAt,
+      inABuilding: Object.keys(BIZ).filter(b => BALL_X >= BIZ[b].x0 && BALL_X <= BIZ[b].x1) });
+  })()`));
+  if (got.err) return "the frame threw: " + got.err;
+  if (!got.drew) return "the ball drew nothing at all during a frame";
+  // 1. NOTHING PAINTS OVER IT once it is down.
+  if (got.covered) return `${got.covered} draws landed on top of the ball after it was painted`;
+  // 2. ...and it is not standing inside a shop in the first place, which is
+  //    the condition that made it invisible and would make it look absurd even
+  //    if the draw order were right - crabs playing catch on a restaurant floor.
+  if (got.inABuilding.length)
+    return `BALL_X ${got.ballX} is inside ${got.inABuilding.join(", ")} - a beach ball on a shop floor`;
+  // 3. ...and it is painted AFTER the shopfronts. This one is deliberately
+  //    independent of where the ball stands: on open sand nothing covers it
+  //    whatever the order, so assertion 1 goes quiet and would let the draw
+  //    slide back into the terrain pass unnoticed - which is half of the
+  //    original bug, waiting for somebody to move the ball again. (Measured:
+  //    with the ball back in the terrain pass at the GOOD x, assertions 1 and
+  //    2 both pass and only this one fails.)
+  if (!(got.ballAt > got.lastShopAt))
+    return `the ball is painted before the shopfronts (ball ${got.ballAt}, last shop ${got.lastShopAt})`;
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
