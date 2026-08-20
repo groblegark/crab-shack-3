@@ -6288,6 +6288,36 @@ Four traps, all of which cost an hour each:
 The manifest is DAY state, so it is not in a save file: build the town in
 `simlib`, and carry `departQ.rows` alongside the save envelope.
 
+### Merging it onto main, and the one place the standing rule needs a footnote
+
+Landed on `d0c0e0c` (polling day, the empty opening, the illness pass,
+accommodation upgrades, the onboarding pass, the pause removal). Four conflicts,
+and **not one of them was safe to resolve by union alone**:
+
+- **`navLive`** — both sides added a reading surface to the same guard. The help
+  card and this card are both full-screen; both terms stay.
+- **Three of the onboarding pass's new surfaces are drawn AFTER this card and
+  had never heard of it**: the shop tooltip, the hire card (y78) and the toast
+  band (y62..75) all land in the middle of a 158px card. Each already listed
+  every other reading surface, so `departT > 0` simply joins the list — the
+  same fix main had just made for `helpView`, one card later. The toast is
+  HELD, not dropped, so nothing is lost behind it.
+- **`reading` gained `helpView`.** It is the thing that pauses the day's two
+  cards rather than burning them down behind something you opened. `departT` is
+  deliberately NOT in it: `departTick` is gated on `!reading`, so a card that
+  counted itself as "being read" would never close.
+- **PAUSE** cost nothing — nothing here ever referenced it.
+
+**THE APPENDED-BLOCK RULE NEEDS A FOOTNOTE.** The standing rule is right: the
+shared text after the conflict marker closes only the LAST block, so the block
+that goes first needs its own `return true; });`. What bit me is that **the two
+blocks did not end the same way** — main's last scenario ended inside a `for`
+loop and needed a `}` first, mine ended on a bare `return` and did not. A
+blanket tail applied to both produced a clean `node --check` failure at the
+seam, which is the GOOD outcome; a subtler pair would have produced a
+*swallowed scenario that still parses*. **Count the registered scenarios after
+the merge** — 207 + 13 = 220 is the only cheap proof that nothing was eaten.
+
 ### Left undone, on purpose
 
 - **No way to re-open last night's card.** It is an end-of-day beat, and a
