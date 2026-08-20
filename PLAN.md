@@ -3252,6 +3252,31 @@ and friends are one file on one machine. Two agents redirecting into it get one
 interleaved, truncated file and both read a false result. **Put the log inside
 your own worktree**, or name it after your branch.
 
+**3. A RELAYED FACT IS A CLAIM, AND SO IS A RELAYED CONSTRAINT.** A sibling
+session reported a real bug and attached two details: line numbers, and a width
+("the credit measures 264px on a 256px screen, so it needs its own line"). Both
+were wrong. The line numbers were stale; the width was measured in the 5x7 font
+when the call site is 3x5, where the worst case is 175px and fits easily. Taken
+at face value, the second one would have had somebody split a line that did not
+need splitting — a rework caused entirely by trusting a number that arrived
+pre-measured.
+
+**Measure the constraint against the thing you are changing, even when someone
+has already measured it.** Especially then: a number that arrives with a
+report reads as settled, and this project has now been bitten three times in
+one day by a plausible number nobody re-derived (the illness figure I wrote
+into this file, the growth pillar, and this).
+
+The sibling's own diagnosis of their error is the sharper rule and is worth
+having verbatim: they had not grepped a stale worktree — they **re-quoted a
+three-day-old grep without re-running it**. So the rule is not "pull first", it
+is **re-run the grep; never quote old output.**
+
+And the flip side, which matters just as much: **the report was still worth
+having.** It found a real bug that eleven-twelfths of players would have seen.
+Wrong details on a true finding is a good trade — say so when you correct
+someone, or you will get fewer reports.
+
 And the one that is not about collisions: **a detached run's log will look
 EMPTY for a long time even when the run is healthy**, because node
 block-buffers to a file. `ps aux | grep [s]uite.mjs` is how you tell "still
