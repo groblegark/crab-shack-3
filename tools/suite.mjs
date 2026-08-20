@@ -1835,12 +1835,12 @@ scenario("hiring converts a visiting tourist (identity kept, entity gone, homele
 
 scenario("hiring with no tourists books a morning-bus arrival who works day-of", () => {
   const sim = createSim({ seed: 29 });   // day 1, 7:00: the town is not open yet
-  // RE-POINTED 2026-08-19 (the visitor pass): a town is no longer EMPTY before
-  // it opens - seedVisitors() puts a boat-load already mid-stay on the
-  // promenade, because people were holidaying here before you took the lease.
-  // What this scenario is about is the OTHER branch of hireCrew: with nobody
-  // convertible, the ad is answered off the morning bus. So the fixture sends
-  // the visitors home rather than asserting they were never there.
+  // RE-POINTED 2026-08-19 (the visitor pass), and UN-POINTED the same day (the
+  // empty-start pass): a new town opens with nobody ashore again, so 7:00 on
+  // day 1 is genuinely an empty town. The sweep below is kept as a BELT: what
+  // this scenario is about is the OTHER branch of hireCrew - with nobody
+  // convertible, the ad is answered off the morning bus - and it must keep
+  // proving that even if somebody later seeds the promenade again.
   sim.G("for (const k of customers.filter(c => c.visitor)) k.gone = true; customers = customers.filter(k => !k.gone);");
   if (sim.G("customers.length") !== 0) return "expected an empty town at 7:00";
   sim.G('coins = 500; tryBuy("chef")');
@@ -1975,9 +1975,54 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // queue pass. That is the honest thing a two-day fingerprint can be after
   // five passes land in one night - and the receipt for all of it is the
   // 30-day curve, which is checked separately and did not move.
+  // RE-BASELINED AGAIN 2026-08-19 - THE EMPTY START (owner: "the game should
+  // start with no tourists present"). A new town no longer opens with a
+  // boat-load already mid-stay; it opens deserted at 07:00 and the 08:00
+  // sailing lands the first tourists. This fingerprint runs the first TWO days,
+  // which is precisely the window that crowd used to cover, so it could not
+  // have survived - and the drift reads exactly like the change it is:
+  //   * SERVES roughly halve (66 -> 38, 61 -> 41). Day one lost its opening
+  //     crowd, and day two lost the ~45% of that crowd who were seeded as
+  //     multi-night stayers specifically to keep day two populated.
+  //   * SUDSY's till halves with them (300.4 -> 168.5, 263.8 -> 174.3):
+  //     visitors come off a boat grubby, and there were nine fewer of them.
+  //   * REPUTATION is down a few points on both (58.0 -> 53.0, 58.5 -> 53.7) -
+  //     fewer served guests is fewer word-of-mouth ticks.
+  //   * The player's till is down $64 and $105 at the end of day two, which is
+  //     the measured cost of the empty opening ($34 of the day-one till)
+  //     carried through a second settlement. It does NOT compound: the 30-day
+  //     baseline reads 0/16 median 11 on both sides of this change.
+  //   * Removing the seeding also removes its random draws, so every seed's
+  //     stream is shifted - positions and wallets differ for that reason alone.
+  // RE-BASELINED AT THE MERGE, 2026-08-20. The empty start above was branched
+  // before five other passes landed (the queue pass, the nav strip, the town
+  // hall, BRASS at the Driftwood, and pause + the beach ball), so NEITHER
+  // side's frozen numbers could survive the merge and the values here were
+  // re-MEASURED on the merged tree rather than picked from one branch. A
+  // fingerprint is measured, never merged.
+  //
+  // WHAT WAS PROVED BEFORE TOUCHING IT, because "re-baseline it" is how a
+  // frozen fingerprint stops being worth having: the POLLING DAY landed in
+  // the same merge, and it is byte-for-byte inert across this window - coins
+  // 146.811, rep 55.0153 and SUDSY's till 249.794 on seed 1337 on BOTH sides
+  // of that commit, and the same on 4242. It has to be: the first ballot is
+  // day 7 and this fixture runs two days. So every dollar of the drift here
+  // belongs to the empty opening meeting the five merges it had not seen.
+  // RE-BASELINED 2026-08-20 for THE SHELTER'S BEDS, and the drift is one crab
+  // standing 28px away. EVERY economic number is byte-identical on both seeds -
+  // coins, rep, catch, serves, crab serves, rage, SUDSY's till and all seven
+  // wallets - and the only difference is KELP's x on 4242: 478 -> 450.
+  //
+  // ATTRIBUTED, not assumed: the shelter had no capacity at all before this
+  // (homeSpot cycled four cot positions with a modulo, which is exactly why the
+  // fifth homeless crab slept inside the first). Beds are now assigned in
+  // roster order, cotSpot reads [450, 464, 478, 492], and KELP is the town's
+  // only cot-sleeper on day 2 - so he takes bed 0 where the modulo used to hand
+  // him the third slot. A crab sleeping in the correct bed is the fix, and it
+  // moves nothing else: no money changed hands differently anywhere.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":146.811,"rep":55.0153,"catch":0,"serves":59,"crabServes":3,"rage":7,"till":249.794,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",29],["DRIFT",1],["KELP",21]],"pos":[[520,154],[108,154],[388,154],[2136,154],[450,155],[2072,154],[318,154]]}',
-    4242: '{"day":3,"tmin":0,"coins":206.976,"rep":57.1115,"catch":3,"serves":56,"crabServes":4,"rage":5,"till":253.698,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",4],["DRIFT",7],["KELP",1]],"pos":[[520,154],[108,154],[388,154],[2136,154],[450,155],[2072,167],[248,154]]}',
+    1337: '{"day":3,"tmin":0,"coins":148.494,"rep":53.609,"catch":4,"serves":42,"crabServes":4,"rage":4,"till":180.466,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",1],["DRIFT",16],["KELP",1]],"pos":[[520,154],[108,154],[974.7,166.9],[2136,154],[2072,154],[894.7,167.8],[443.2,167.4]]}',
+    4242: '{"day":3,"tmin":0,"coins":112.651,"rep":54.2896,"catch":4,"serves":44,"crabServes":3,"rage":5,"till":186.001,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",40],["SALTY",1],["DRIFT",1],["KELP",8]],"pos":[[520,154],[108,154],[388,154],[646,163],[2072,154],[318,154],[450,155]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -4674,6 +4719,46 @@ scenario("no card prints text on top of its own text", () => {
       if (!today.left.length) throw new Error("no visitors in town to build a manifest from");
       depart = departBuild(); departT = 11; departPage = 0; },
       () => { drawDepart(); depart = null; departT = 0; });
+    // ---- THE ONBOARDING PASS'S OWN SURFACES, and one class this sweep had
+    // never been pointed at. reportT has to come down first: the sim was run
+    // UNTIL a report exists, and every one of these is gated on nothing being
+    // read on top of it.
+    for (let hp = 0; hp < HELP_PAGES.length; hp++)
+      run("help-" + (hp + 1), () => { reportT = 0; helpView = true; helpPage = hp; }, () => drawHelp());
+    for (const uk of Object.keys(UPS))
+      run("shoptip-" + uk, () => { helpView = false; tab = "shop"; hireCard = null; shopTip = uk; },
+        () => drawShopTip());
+    run("hire-card", () => { shopTip = null; tab = "crew";
+      hireCard = { c: crabs[0], how: "WAS HERE ON HOLIDAY - LIKED IT AND STAYED", t: 5 }; },
+      () => drawHireCard());
+    // ---- THE CHARACTER CARD, WITH THE LONGEST NAME THE GAME CAN ACTUALLY DEAL
+    // and the widest mood it can print beside it. This is how the class got
+    // missed for so long: crabs[0] is PINCHY, six characters, and the card only
+    // breaks at about ten. TIDEPOOL TIM is a real name off the customer roster
+    // and it printed straight through DOWN.
+    run("card-longname", () => {
+      hireCard = null; sel = crabs[0]; dossier = null; manage = null;
+      const longest = CRAB_NAMES.concat(CUSTOMER_NAMES)
+        .reduce((a, b) => (textWidth(b) > textWidth(a) ? b : a));
+      crabs[0].p.name = longest;
+      crabs[0].p.homeless = true; crabs[0].p.wallet = 0;   // DOWN: the widest mood on the roster
+    }, () => drawFollowCard());
+    // ...and the VISITOR's card, which is a different layout with the same
+    // name/mood row and had the same fault - a slice(0, 9) where a measurement
+    // belonged, against a mood that can be as wide as DELIGHTED.
+    run("visitor-card", () => {
+      const v = customers.find(k => k.visitor);
+      if (!v) throw new Error("no visitor in town to draw a card for");   // a silent no-op proves nothing
+      v.name = CUSTOMER_NAMES.reduce((a, b) => (textWidth(b) > textWidth(a) ? b : a));
+      v.wallet = 188; v.purse = 200; v.room = true; v.roomN = 7; sel = v;
+    }, () => drawFollowCard());
+    // A SHOPFRONT IS A CARD TOO. Everything above is a panel; this is the first
+    // time the sweep has been pointed at WORLD text, and it is where the newest
+    // string in the game lives - the shack's TILL TODAY board, hung in the same
+    // slot as the CLOSED placard, one roofline under the sign and the MANAGE
+    // chip. Midday, so the shop is open and the board is actually up.
+    run("shopfront", () => { hireCard = null; tmin = 12 * 60;
+      camX = clampCam((BIZ.shack.x0 + BIZ.shack.x1) / 2 - W / 2); }, () => drawBusiness("shack"));
     text = T; smallText = S; rect = RC;
     return JSON.stringify(hits);
   })()`));
@@ -4749,6 +4834,19 @@ scenario("no surface prints off the canvas", () => {
     // the job board card carries the TRADE LEDGER under the openings
     run("board", () => { toast = null; boardView = true; }, () => drawJobBoard());
     run("save", () => { boardView = false; saveView = true; }, () => drawSaveScreen());
+    // ---- the onboarding pass's surfaces, every page and every button, before
+    // the run reaches the two end-of-game cards (which set gameOver and won and
+    // would put all three of these behind their own liveness gates)
+    run("help", () => { saveView = false; helpView = true; }, () => {
+      for (helpPage = 0; helpPage < HELP_PAGES.length; helpPage++) drawHelp();
+    });
+    run("shoptip", () => { helpView = false; reportT = 0; tab = "shop"; hireCard = null; }, () => {
+      for (const uk of Object.keys(UPS)) { shopTip = uk; drawShopTip(); }
+    });
+    run("hire-card", () => { shopTip = null; tab = "crew";
+      hireCard = { c: crabs[0], how: "WAS HERE ON HOLIDAY - LIKED IT AND STAYED", t: 5 }; },
+      () => drawHireCard());
+    run("nav-chips", () => { hireCard = null; helpSeen = false; day = 1; }, () => drawNav());
     run("gameover", () => { saveView = false; gameOver = true; bankrupt = false; }, () => drawGameOver());
     run("ending", () => { won = true; winT = 99; winRec = { day: 40, lifetime: 99999,
       crew: ["PINCHY", "CLAWDIA", "SHELDON", "BARNACLE", "REEF"], pop: 9, housed: 7,
@@ -5504,7 +5602,9 @@ function visitorTown(sim, days) {
 
 scenario("ferry: a batch lands, walks down the pier, and reaches the town", () => {
   const sim = createSim({ seed: 1337 });
-  // clear the boat-load the town opens with: this is about an ARRIVAL
+  // A new town opens EMPTY now (the empty-start pass), so this sweep is a BELT
+  // rather than the fixture it used to be - the scenario is about an ARRIVAL
+  // and must start from nobody ashore however the town got that way.
   sim.G("for (const k of customers.filter(c => c.visitor)) k.gone = true; customers = customers.filter(k => !k.gone);");
   const before = sim.G("visitorsInTown().length");
   if (before !== 0) return "fixture failed to clear the town: " + before;
@@ -6376,9 +6476,20 @@ scenario("votes are self-interest: the same ballot splits the town by circumstan
     const A = { mech: "levy", rate: 4, bowls: 4 };     // feeds the shelter, businesses pay
     const B = { mech: "rents", rate: 4, bowls: 0 };    // costs nobody in town, feeds nobody
     bizDayBook("shack").take = 600;                    // a trading town, so A can actually deliver
-    const h = allCrabs().find(c => c.p.homeless && !c.p.fisher && !c.p.owner);
+    // THE TWO ENDS OF THE TOWN ARE BUILT, NOT HUNTED FOR. This used to search
+    // the day-3 roster for a crab who was homeless, not a fisher and not an
+    // owner - and that is a COINCIDENCE of the seed, not the thing under test.
+    // It held until the empty opening day changed what day 3 looks like, at
+    // which point seed 1337's only cot-sleeper was SALTY, who IS a fisher (and
+    // therefore roasts his own catch, which is exactly why the fixture
+    // excluded fishers in the first place). What this scenario is about is how
+    // CIRCUMSTANCE splits a vote, so the circumstances are set here and the
+    // valuation is what gets measured. That the town reaches these states on
+    // its own is asserted by the election scenarios that run real towns.
     const o = allCrabs().find(c => c.p.owner);
+    const h = allCrabs().find(c => !c.p.fisher && !c.p.owner && c !== o);
     if (!h || !o) return JSON.stringify({ miss: 1 });
+    h.p.homeless = true; h.p.house = null; h.p.boat = null;
     return JSON.stringify({ h: h.p.name, o: o.p.name,
       hA: platValue(h, A), hB: platValue(h, B), oA: platValue(o, A), oB: platValue(o, B),
       hWhy: voteReason(h, A), oWhy: voteReason(o, B), bowlsA: platBowls(A), bowlsB: platBowls(B) });
@@ -7233,6 +7344,1639 @@ scenario("departures: a display card moves nothing in the town", () => {
     hotelRooms().filter(r => r.occupant).length,
     Math.round(customers.reduce((s, k) => s + (k.visitor ? k.wallet : 0), 0))])`);
   if (before !== after) return `the card moved the town: ${before} -> ${after}`;
+  return true;
+});
+
+// ---- THE OPENING: THE TOWN, AND THEN THE BOAT ----------------------------
+// Owner, 2026-08-19: "the game should start with no tourists present". These
+// five pin the beat itself - empty at 07:00, the boat on time at 08:00 with
+// day one's whole timetable intact, the lease card holding the clock while Mr.
+// Pincherton talks, a SAVED town keeping every guest it went to bed with, and
+// the one migration case that still gets a seeded crowd.
+
+scenario("a new town opens EMPTY: nobody ashore, nobody mid-walk", () => {
+  const sim = createSim({ seed: 1337 });
+  if (sim.G("day") !== 1 || Math.round(sim.G("tmin")) !== 7 * 60)
+    return "a new town no longer opens at 07:00 on day 1";
+  const vis = sim.G("customers.filter(k => k.visitor).length");
+  if (vis) return `a new town opened with ${vis} visitors ashore`;
+  if (sim.G("customers.length")) return "somebody is already standing in a queue at 07:00";
+  // ...and nobody is MID-WALK either. A visitor lives in `customers` for their
+  // whole stay, so that list IS the population - but the boat, the timetable
+  // and the hotel all carry state that would give a stowaway away.
+  if (sim.G("visitorsInTown().length")) return "a visitor is in town but not in `customers`";
+  if (sim.G("ferryHere()")) return "the ferry is already alongside at 07:00";
+  if (sim.G("ferrySail") !== -1) return "a sailing had already run before the game began";
+  const beds = sim.G("hotelRooms().filter(r => r.occupant).length");
+  if (beds) return `${beds} hotel rooms are occupied in a town with no visitors`;
+  return true;
+});
+
+scenario("the first ferry still lands, on time, and day one keeps all four sailings", () => {
+  // THE TRAP THIS GUARDS: paying for the empty start by pushing the timetable.
+  // Day 1 opens at 07:00, one game-hour BEFORE the 08:00 sailing, so the
+  // opening beat costs the day nothing - all four boats still run, and the
+  // first one is the fattest (FERRY_LOAD[0] = 1.2).
+  const sim = createSim({ seed: 1337 });
+  if (!sim.runUntil("visitorsInTown().length > 0", { maxSteps: 200000 }))
+    return "no visitor ever came ashore";
+  const t = Math.round(sim.G("tmin"));
+  if (t < 8 * 60 || t > 8 * 60 + 20)
+    return `the first visitors landed at ${Math.floor(t / 60)}:${t % 60}, not off the 08:00 sailing`;
+  if (sim.G("ferrySail") !== 0) return "the first landing was not the FIRST sailing of the day";
+  if (!sim.G(`visitorsInTown().every(k => k.arrived === 1)`))
+    return "somebody ashore did not arrive today";
+  sim.runDays(1, { tickEvery: 25, onTick: (G) => { if (G("coins") < 900) G("coins = 1800"); } });
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  const sailings = sim.G("FERRY_TIMES.length");
+  if (st.ferries !== sailings) return `day one ran ${st.ferries} sailings, not ${sailings}`;
+  if (!(st.arrivals >= 8)) return `day one landed only ${st.arrivals} visitors in four sailings`;
+  return true;
+});
+
+scenario("the lease card holds the clock: no boat lands while Pincherton talks", () => {
+  // The intro is drawn at 07:00 with the sim frozen (`frame` only advances
+  // tmin while screen === "play"). If that ever stopped being true the 08:00
+  // boat would dock behind the card and the player would sign the lease into a
+  // town that had already had its first crowd.
+  const sim = createSim({ seed: 88 });
+  sim.G(`screen = "intro"`);
+  const t0 = sim.G("tmin");
+  sim.runUntil("false", { maxSteps: 6000 });   // ~5 game-hours' worth of frames
+  if (sim.G("tmin") !== t0) return "the clock ran while the lease was on screen";
+  if (sim.G("visitorsInTown().length")) return "the ferry landed behind the lease card";
+  sim.G(`screen = "play"`);
+  return sim.runUntil("visitorsInTown().length > 0", { maxSteps: 200000 })
+    ? true : "signing the lease did not start the day";
+});
+
+scenario("a loaded save keeps its guests: the empty start is a NEW-GAME rule", () => {
+  // The other half of the owner's directive, and the one that is easy to break
+  // by putting the rule in load(): a town in progress must reload with exactly
+  // the guests it was saved with - not an empty promenade, and not a fresh
+  // boat-load seeded on top of them.
+  const store = new Map();
+  const sim = createSim({ seed: 4242, storage: store, fresh: false });
+  sim.runDays(1, { tickEvery: 25, onTick: (G) => { if (G("coins") < 900) G("coins = 1800"); } });
+  sim.runUntil("day === 2 && tmin >= 12 * 60", { maxSteps: 400000,
+    onTick: (G) => { if (G("coins") < 900) G("coins = 1800"); }, tickEvery: 25 });
+  const before = JSON.parse(sim.G(`JSON.stringify(visitorsInTown().map(k =>
+    [k.name, Math.round(k.wallet), Math.round(k.spent)]).sort())`));
+  if (before.length < 2) return "the fixture town had no guests to keep: " + before.length;
+  sim.G("save()");
+  const back = createSim({ seed: 4242, storage: store, fresh: false });
+  const after = JSON.parse(back.G(`JSON.stringify(visitorsInTown().map(k =>
+    [k.name, Math.round(k.wallet), Math.round(k.spent)]).sort())`));
+  if (JSON.stringify(after) !== JSON.stringify(before))
+    return `the reloaded town's guest list changed:\n        before ${JSON.stringify(before)}\n        after  ${JSON.stringify(after)}`;
+  return true;
+});
+
+scenario("a PRE-FERRY save still gets a crowd: the one branch seedVisitors keeps", () => {
+  // The empty start turned seedVisitors() into a MIGRATION, and this is the
+  // only caller left. A save written before the visitor pass has no guest list
+  // (no `_vis` marker), and a fortnight-old town reloading onto a deserted
+  // promenade would read as a bug, not as an opening beat - so that one case
+  // is still handed the boat-load it would have had.
+  const store = new Map();
+  const sim = createSim({ seed: 909, storage: store, fresh: false });
+  sim.runDays(1, { tickEvery: 25, onTick: (G) => { if (G("coins") < 900) G("coins = 1800"); } });
+  sim.G("save()");
+  const key = sim.G("slotKey(activeSlot)");
+  const env = JSON.parse(store.get(key));
+  if (!env._vis) return "a modern save no longer carries the _vis marker";
+  delete env._vis; delete env.visitors; delete env.ferry;   // age it back before the pass
+  store.set(key, JSON.stringify(env));
+  const old = createSim({ seed: 909, storage: store, fresh: false });
+  if (!old.G("hasSave")) return "the aged save would not load at all";
+  if (!(old.G("visitorsInTown().length") > 0))
+    return "a pre-ferry save reloaded into a town with nobody in it";
+  if (!old.G(`visitorsInTown().every(k => k.state === "roam")`))
+    return "the seeded crowd is not standing on the promenade";
+  return true;
+});
+
+// ===========================================================================
+// POLLING DAY - VOTING IS AN ACTION (2026-08-20)
+// ===========================================================================
+// Matt: "voting is an action, polls have a closing time, and ballots are made
+// and counted on paper." Three claims, and each one is a mechanism rather than
+// a feeling, so each one gets asserted as a mechanism.
+
+scenario("voting is an ACTION: crabs walk to a table, and nothing is counted until the count", () => {
+  // THE THREE THINGS THAT SEPARATE A POLL FROM A FUNCTION CALL:
+  //   1. crabs are physically AT a table, in the atTap stop state, during the
+  //      day - not teleported at settlement;
+  //   2. the TALLY DOES NOT EXIST while the box is filling. Papers go in face
+  //      down and cands[].votes stays at zero until the count reads them out.
+  //      This is the one that would silently rot back into an aggregate, so it
+  //      is sampled on every tick the polls are open rather than once;
+  //   3. PAPER IS CONSERVED - blanks left plus papers in the box equals what
+  //      was printed, always. Same law the town fund lives under.
+  const sim = createSim({ seed: 1337 });
+  const seen = { atTable: 0, boxFilling: 0, tallyEarly: 0, leak: 0, shutCast: -1, lastCast: -1 };
+  sim.runDays(7, { tickEvery: 20, onTick: (G) => {
+    if (G("coins") < 400) G("coins = 900");
+    const r = G(`JSON.stringify(pollCalled() && ballotBox.printed > 0 ? {
+      open: pollOpen(), shut: ballotBox.shut, declared: ballotBox.declared,
+      at: allCrabs().filter(k => k.dayState === "atTap" && k.tapStop && k.tapStop.vote).length,
+      cast: ballotBox.cast.length, papers: ballotBox.papers, printed: ballotBox.printed,
+      votes: ballotBox.cands.reduce((a, k) => a + k.votes, 0) } : null)`);
+    if (!r || r === "null") return;
+    const g = JSON.parse(r);
+    if (g.at > 0) seen.atTable++;
+    if (g.papers + g.cast !== g.printed) seen.leak++;
+    if (g.open && g.cast > 0) { seen.boxFilling++; if (g.votes > 0) seen.tallyEarly++; }
+    if (g.shut && seen.shutCast < 0) seen.shutCast = g.cast;
+    seen.lastCast = g.cast;
+  } });
+  const p = JSON.parse(sim.G("JSON.stringify(hall.poll)"));
+  if (!p) return "no ballot was declared by the end of day 7";
+  if (!seen.atTable) return "nobody was ever stood at a polling table - the vote is not an errand";
+  if (seen.leak) return `paper stopped adding up on ${seen.leak} ticks (blanks + box != printed)`;
+  if (!seen.boxFilling) return "the box never had a paper in it while the polls were open";
+  if (seen.tallyEarly) return `the tally moved ${seen.tallyEarly} times while the polls were still open`;
+  if (seen.shutCast !== seen.lastCast)
+    return `${seen.lastCast - seen.shutCast} papers went in after the polls shut`;
+  const cast = p.cands.reduce((a, k) => a + k.votes, 0);
+  if (cast !== p.turnout) return `${cast} votes counted, ${p.turnout} papers in the box`;
+  if (!(p.turnout > 0 && p.turnout <= p.roll)) return `turnout of ${p.turnout} against a roll of ${p.roll}`;
+  if (p.lines.length !== Math.min(p.turnout, sim.G("POLL_LINES")))
+    return `${p.lines.length} written reasons for ${p.turnout} voters`;
+  if (sim.G("hall.mayor") !== p.winner) return "the winner did not take the office";
+  return true;
+});
+
+scenario("the polls have a CLOSING TIME, and a crab who misses it loses their vote", () => {
+  // THE MECHANISM, not a coincidence: a crab who reaches the table after
+  // POLL_SHUT is turned away and SAID SO, and a crab already standing there
+  // when it shuts is not. Both halves are constructed rather than waited for -
+  // waiting for a natural latecomer would pass on the seed that happened to
+  // produce one and quietly stop testing anything on the seed that did not.
+  const sim = createSim({ seed: 909 });
+  sim.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  // ...into polling day, with the polls open and paper on the table
+  sim.runUntil(`pollOpen() && ballotBox.printed > 0`, { maxSteps: 400000 });
+  const got = JSON.parse(sim.G(`(() => {
+    const B = ballotBox, c = allCrabs().find(k => !B.voters[k.p.name]);
+    if (!c) return JSON.stringify({ err: "the whole town had already voted" });
+    // ONE MINUTE PAST THE HOUR, standing at the table. The stop is started by
+    // hand at the table's own x so the walk is not what is under test here -
+    // the CLOCK is.
+    tmin = POLL_SHUT + 1;
+    const cast0 = B.cast.length, late0 = B.late.length;
+    c.x = POLL_PLACES[0].x + 4; c.errandCd = 0; c.duty = false;
+    startTapStop(c, { vote: true, poll: 0, need: "vote" });
+    for (let i = 0; i < 600 && c.dayState === "atTap"; i++) updateTap(c, 0.25);
+    return JSON.stringify({ name: c.p.name, state: c.dayState,
+      voted: !!B.voters[c.p.name], dCast: B.cast.length - cast0, dLate: B.late.length - late0,
+      open: pollOpen(), diary: (c.p.log || []).slice(-3).map(e => e[3]) });
+  })()`));
+  if (got.err) return got.err;
+  if (got.open) return "the polls were still open a minute after POLL_SHUT";
+  if (got.voted || got.dCast !== 0) return `${got.name} voted after the polls had shut`;
+  if (got.dLate !== 1) return `${got.name} was not recorded as a latecomer (late went up by ${got.dLate})`;
+  if (!got.diary.some(l => /SHUT/.test(l))) return `${got.name}'s diary does not say what happened: ${got.diary.join(" | ")}`;
+  if (got.state === "atTap") return `${got.name} is still stood at a shut polling table`;
+  return true;
+});
+
+scenario("ballots are PAPER: bought off the ferry, on the ledger, and they run out", () => {
+  // NOTHING IS CONJURED, and paper is not an exception. The office orders one
+  // sheet per crab plus BALLOT_SPARE, the money leaves the fund through the
+  // one door that destroys it at a named supplier, and the sheets land on the
+  // trade ledger like every other import. Then: a box with one sheet left
+  // serves exactly one more crab and turns the rest away BY NAME.
+  const sim = createSim({ seed: 4242 });
+  sim.runDays(5, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const buy = JSON.parse(sim.G(`(() => {
+    const paper0 = trade.total.paper || 0, w0 = worldMoney(), rows0 = townFund.ledger.length;
+    // run the office's own printing pass, exactly as the eve settlement does
+    const roll = allCrabs().length;
+    printBallots();
+    const rows = townFund.ledger.slice(rows0);
+    return JSON.stringify({ roll, spare: BALLOT_SPARE, price: BALLOT_PRICE,
+      printed: ballotBox ? ballotBox.printed : -1, papers: ballotBox ? ballotBox.papers : -1,
+      dPaper: (trade.total.paper || 0) - paper0, dWorld: Math.round((worldMoney() - w0) * 1000) / 1000,
+      ferry: rows.filter(r => r.kind === "remit" && r.who === "THE FERRY")
+        .reduce((a, r) => a + r.amt, 0),
+      whip: rows.filter(r => r.why === "PAPER WHIP-ROUND").length });
+  })()`));
+  if (buy.printed !== buy.roll + buy.spare)
+    return `printed ${buy.printed} papers for a roll of ${buy.roll} (+${buy.spare} spare)`;
+  if (buy.papers !== buy.printed) return "the box did not start full";
+  if (buy.dPaper !== buy.printed) return `${buy.dPaper} sheets reached the trade ledger, ${buy.printed} were printed`;
+  const cost = Math.round(buy.printed * buy.price * 1000) / 1000;
+  if (Math.abs(buy.ferry - cost) > 0.005) return `the ferry was paid ${buy.ferry} for ${cost} of paper`;
+  // the money LEFT THE WORLD at the supplier - less whatever the whip-round
+  // moved between live balances, which is a transfer and not a destruction
+  if (Math.abs(buy.dWorld + cost) > 0.005)
+    return `the world's money moved by ${buy.dWorld} buying ${cost} of paper`;
+  // ---- AND NOW THE PILE RUNS OUT.
+  const out = JSON.parse(sim.G(`(() => {
+    const B = ballotBox;
+    B.day = day; B.papers = 1; B.printed = 1; B.cast = []; B.voters = {}; B.turnedAway = [];
+    B.shut = false; B.declared = false; B.counted = 0;
+    tmin = POLL_OPEN + 120;
+    const town = allCrabs().slice(0, 4), res = town.map(c => castVote(c));
+    return JSON.stringify({ res, cast: B.cast.length, papers: B.papers,
+      away: B.turnedAway, tally: B.cands.reduce((a, k) => a + k.votes, 0) });
+  })()`));
+  if (out.cast !== 1) return `${out.cast} papers went into a box that held one`;
+  if (out.papers !== 0) return "the pile did not empty";
+  if (out.away.length !== 3) return `${out.away.length} crabs were turned away, expected 3`;
+  if (out.res[0] !== "cast" || out.res.slice(1).some(r => r !== "nopaper"))
+    return `the outcomes read ${out.res.join(",")}`;
+  if (out.tally !== 0) return "a vote was tallied before the count";
+  return true;
+});
+
+scenario("the count is BY HAND: the result appears one paper at a time", () => {
+  // COUNT_MINS a paper, in the order they went into the box, and the office is
+  // not allowed to know the answer before the last one is read. The clock is
+  // what is under test, so it is driven directly rather than waited on.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  sim.runUntil(`pollOpen() && ballotBox.printed > 0`, { maxSteps: 400000 });
+  const got = JSON.parse(sim.G(`(() => {
+    const B = ballotBox;
+    // five papers in the box, by hand, so the count has a known length
+    B.cast = []; B.voters = {}; B.counted = 0; B.countT = 0; B.shut = false; B.declared = false;
+    for (const k of B.cands) k.votes = 0;
+    const town = allCrabs().slice(0, 5);
+    for (const c of town) { delete B.voters[c.p.name]; castVote(c); }
+    const n = B.cast.length;
+    tmin = POLL_SHUT;
+    const trace = [];
+    // one COUNT_MINS of game time per step (dt is real seconds; TS minutes a second)
+    for (let i = 0; i < n + 4; i++) {
+      updatePoll(COUNT_MINS / TS);
+      trace.push([B.counted, B.cands.reduce((a, k) => a + k.votes, 0), B.declared ? 1 : 0]);
+    }
+    return JSON.stringify({ n, trace, mayor: hall.mayor, pollDay: hall.poll && hall.poll.day });
+  })()`));
+  if (got.n < 3) return `only ${got.n} papers went in - not enough to watch a count`;
+  let last = 0;
+  for (let i = 0; i < got.trace.length; i++) {
+    const [counted, votes, declared] = got.trace[i];
+    if (counted !== votes) return `step ${i}: ${counted} papers read but ${votes} votes on the board`;
+    if (counted < last) return "the count went backwards";
+    if (counted - last > 1) return `step ${i} read ${counted - last} papers in one COUNT_MINS`;
+    if (declared && counted < got.n) return `declared with ${counted} of ${got.n} papers read`;
+    last = counted;
+  }
+  if (last !== got.n) return `the count stopped at ${last} of ${got.n}`;
+  if (!got.trace[got.trace.length - 1][2]) return "the count finished and nothing was declared";
+  return true;
+});
+
+scenario("a town with no rent roll still holds its election - the hat gets passed", () => {
+  // THE RATCHET THIS KILLS, and it was a real one. On the founding RENTS
+  // policy the purse is a cut of the HOUSE RENTS; a town where everybody
+  // sleeps at the shelter pays none, so the office could not afford paper, so
+  // there was no election - and an election was the only thing that could have
+  // moved that town off RENTS. PLAN's rule for this whole system is that a
+  // town can vote itself into losing the shelter and then vote itself back
+  // out: a corrective loop, never a ratchet.
+  //
+  // MUTATION-TESTED: with whipRound() returning 0, this scenario fails on the
+  // first assertion - no paper is printed at all.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(4, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    // NOBODY OWNS A ROOF, so the rents purse raises exactly nothing, and the
+    // fund is empty besides.
+    for (const c of allCrabs()) { c.p.homeless = true; c.p.house = null; c.p.boat = null;
+      c.p.wallet = Math.max(c.p.wallet, 20); }
+    hall.policy = { mech: "rents", rate: 4, bowls: 2 };
+    townFund.bal = 0; townFund.arrears = 0; townFund.ledger = [];
+    const w0 = worldMoney(), rows0 = townFund.ledger.length;
+    printBallots();
+    const rows = townFund.ledger.slice(rows0);
+    const whip = rows.filter(r => r.why === "PAPER WHIP-ROUND");
+    return JSON.stringify({ printed: ballotBox ? ballotBox.printed : -1,
+      whipRows: whip.length, whipTotal: Math.round(whip.reduce((a, r) => a + r.amt, 0) * 100) / 100,
+      whipWho: whip.map(r => r.who),
+      ferry: rows.filter(r => r.who === "THE FERRY").reduce((a, r) => a + r.amt, 0),
+      dWorld: Math.round((worldMoney() - w0) * 1000) / 1000 });
+  })()`));
+  if (!(got.printed > 0)) return "a town with no rent roll printed no ballot paper at all";
+  if (!got.whipRows) return "the paper was found without anybody being asked for it";
+  if (got.whipWho.some(w => !w || w === "?")) return `a whip-round row names nobody: ${got.whipWho.join(",")}`;
+  // CONSERVATION. The whip-round is a TRANSFER between live balances and the
+  // ferry payment is a DESTRUCTION, so the world is exactly the ferry poorer.
+  if (Math.abs(got.dWorld + got.ferry) > 0.01)
+    return `the world moved ${got.dWorld} while ${got.ferry} went to the ferry`;
+  if (!(got.whipTotal > 0)) return "the whip-round raised nothing but was recorded anyway";
+  return true;
+});
+
+scenario("the ballot box roundtrips save/load, and a reload conjures no paper and no second vote", () => {
+  // A town saved at noon on polling day has real paper in a real box. Without
+  // this the reload would hand the whole town a second vote and a fresh pile
+  // nobody paid for - the same class of bug as the fund minting money.
+  const store = new Map();
+  const a = createSim({ seed: 909, storage: store, fresh: false });
+  a.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const reached = a.runUntil(`pollOpen() && ballotBox.printed > 0 && ballotBox.cast.length >= 2`,
+    { maxSteps: 600000, tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  if (!reached) return "the town never got two papers into a box on polling day: "
+    + a.G(`JSON.stringify({ day, tmin: Math.round(tmin), over: gameOver,
+        box: ballotBox && { day: ballotBox.day, printed: ballotBox.printed, cast: ballotBox.cast.length } })`);
+  const before = a.G(`JSON.stringify({ day: ballotBox.day, printed: ballotBox.printed,
+    papers: ballotBox.papers, cast: ballotBox.cast.map(v => v.voter + ">" + v.pick),
+    voters: Object.keys(ballotBox.voters).sort(), lines: ballotBox.lines.length,
+    cands: ballotBox.cands.map(k => k.name + "|" + policyLine(k.plat)) })`);
+  a.G("save();");
+  const b = createSim({ seed: 909, storage: store, fresh: false });
+  const after = b.G(`JSON.stringify({ day: ballotBox.day, printed: ballotBox.printed,
+    papers: ballotBox.papers, cast: ballotBox.cast.map(v => v.voter + ">" + v.pick),
+    voters: Object.keys(ballotBox.voters).sort(), lines: ballotBox.lines.length,
+    cands: ballotBox.cands.map(k => k.name + "|" + policyLine(k.plat)) })`);
+  if (before !== after) return `the box changed across a reload:\n  ${before}\n  ${after}`;
+  // ...and a crab who already voted cannot vote again on the far side
+  const twice = b.G(`(() => { const n = Object.keys(ballotBox.voters)[0];
+    const c = allCrabs().find(k => k.p.name === n);
+    return c ? castVote(c) + ":" + hasVoted(c) : "nobody"; })()`);
+  if (twice !== "twice:true") return `a reloaded crab who had voted got "${twice}"`;
+  // A CORRUPT BOX IS CLAMPED, NOT TRUSTED - and specifically it can never hold
+  // more paper than was printed less what is already in it.
+  const c = createSim({ seed: 909, storage: store, fresh: false });
+  c.G(`(() => { const k = slotKey(activeSlot), d = JSON.parse(localStorage.getItem(k));
+    d.box.papers = 9999; d.box.printed = 4; d.box.cands = d.box.cands.concat([{ name: "", plat: null }]);
+    localStorage.setItem(k, JSON.stringify(d)); })()`);
+  const d = createSim({ seed: 909, storage: store, fresh: false });
+  const clamp = JSON.parse(d.G(`JSON.stringify({ papers: ballotBox.papers, printed: ballotBox.printed,
+    cast: ballotBox.cast.length, blank: ballotBox.cands.filter(k => !k.name).length })`));
+  if (clamp.papers > clamp.printed - clamp.cast)
+    return `a corrupt save conjured paper: ${clamp.papers} blanks against ${clamp.printed} printed and ${clamp.cast} cast`;
+  if (clamp.blank) return "a candidate with no name survived the load";
+  return true;
+});
+
+scenario("polling day draws in every state, on the canvas and never over itself", () => {
+  // The two general sweeps upstream drive the ordinary surfaces. Polling day
+  // has FIVE states that only exist for one day a week, and every one of them
+  // paints a board in the world and a page on the HALL tab - so they get the
+  // same two checks, applied to the same measured-text stub.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  sim.runUntil(`pollCalled()`, { maxSteps: 400000 });
+  const bad = JSON.parse(sim.G(`(() => {
+    const bad = [], T = text, S = smallText, R = rect;
+    let SURF = "?", box = [];
+    const wrap = (fn, meas, h) => (c, str, x, y, col, sz) => {
+      const w = meas(str, sz);
+      if (x < 0 || x + w > W) bad.push([SURF, "OFF CANVAS", String(str)]);
+      for (const b of box)
+        if (x < b.x1 && x + w > b.x0 && y < b.y1 && y + h > b.y0 && Math.abs(y - b.y0) > 2)
+          bad.push([SURF, "OVER " + b.s, String(str)]);
+      box.push({ x0: x, x1: x + w, y0: y, y1: y + h, s: String(str) });
+      return fn(c, str, x, y, col, sz);
+    };
+    text = wrap(T, textWidth, 7); smallText = wrap(S, smallTextWidth, 5);
+    // ...AND A FILLED RECT PAINTED OVER SOMEBODY ELSE'S LABEL, which is how the
+    // first cut of the polling board printed straight through the JOB BOARD's
+    // sign - the town's furniture is one surface and a new piece of it can
+    // bury an old one. The card sweep upstream already learned this lesson (a
+    // pause chip over the SND label); the WORLD had never been swept for it.
+    rect = (c, x, y, w, h, col) => {
+      for (const b of box)
+        if (x < b.x1 && x + w > b.x0 && y < b.y1 && y + h > b.y0 && b.s.trim())
+          bad.push([SURF, "RECT OVER " + b.s, x + "," + y + " " + w + "x" + h]);
+      return R(c, x, y, w, h, col);
+    };
+    const run = (name, setup) => {
+      SURF = name; box = [];
+      try {
+        setup();
+        // BOTH TABLES, and the camera parked on each in turn - a collision
+        // only exists where the camera can see it, and the pier head is a
+        // different neighbourhood with different furniture next to it.
+        for (const pl of POLL_PLACES) { box = []; camX = clampCam(pl.x - 100); drawTown(); }
+        box = [];
+        manage = "shack"; manageTab = "HALL"; hallView = "BALLOT"; drawManage();
+        box = []; hallView = "BOOKS"; drawManage();
+        box = []; hallView = "ROLL"; drawManage();
+      } catch (e) { bad.push([name, "THREW", e.message]); }
+    };
+    const B = ballotBox;
+    const reset = (n) => { B.day = day; B.printed = n; B.papers = n; B.cast = []; B.voters = {};
+      B.lines = []; B.turnedAway = []; B.late = []; B.counted = 0; B.countT = 0;
+      B.shut = false; B.declared = false; for (const k of B.cands) k.votes = 0; };
+    run("before-open", () => { reset(9); tmin = POLL_OPEN - 30; });
+    run("open", () => { reset(9); tmin = POLL_OPEN + 200; castVote(allCrabs()[0]); });
+    run("no-paper-left", () => { reset(9); tmin = POLL_OPEN + 600;
+      for (const c of allCrabs()) castVote(c);
+      B.papers = 0; B.turnedAway = allCrabs().map(c => c.p.name); B.late = allCrabs().map(c => c.p.name); });
+    run("counting", () => { reset(9); tmin = POLL_SHUT + 10;
+      for (const c of allCrabs()) castVote(c);
+      B.shut = true; B.counted = 1; B.cands[0].votes = 1; });
+    run("declared", () => { reset(9); tmin = POLL_SHUT + 90;
+      for (const c of allCrabs()) castVote(c);
+      B.shut = true; finishCount(); });
+    run("no-poll-at-all", () => { reset(0); tmin = POLL_OPEN + 200; });
+    text = T; smallText = S; rect = R;
+    return JSON.stringify(bad.slice(0, 8));
+  })()`));
+  if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
+  return true;
+});
+
+// ===========================================================================
+// THERE IS NO PAUSE (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("the clock cannot be stopped: there is no pause, and no speed of zero", () => {
+  // A RULING, pinned as a test, because it will otherwise be rebuilt from the
+  // same playtest quote that built it the first time - "Meanwhile theres a
+  // clock ticking. PAUSE ANYONE?" Matt's answer: "Remove the pause button tho.
+  // It's against the spirit of the game." The playtester was describing the
+  // game working.
+  //
+  // Asserted as a MECHANISM rather than a grep: there must be no pause STATE
+  // to flip, and no entry in the speed table that stops time. A future pause
+  // that dodges both of those is not a pause.
+  const sim = createSim({ seed: 1337 });
+  const got = JSON.parse(sim.G(`(() => {
+    // typeof on an undeclared name is SAFE - it returns "undefined" rather
+    // than throwing - so "undefined" is the pass here, and any other type
+    // means somebody declared a pause flag again. (No backticks in this
+    // comment: it lives inside a template literal.)
+    return JSON.stringify({ has: typeof paused, speeds: FF_SPEED,
+      zero: FF_SPEED.filter(v => !(v > 0)).length });
+  })()`));
+  if (got.has !== "undefined") return `there is a pause state again (typeof paused === "${got.has}")`;
+  if (got.zero) return `the speed table has ${got.zero} setting(s) that stop the clock: ${got.speeds}`;
+  // ...and the clock actually runs. A pause that shipped as "speed 0 by
+  // default" would pass both checks above and fail this one.
+  const t0 = sim.G("day * 1440 + tmin");
+  sim.runUntil(`day * 1440 + tmin > ${t0} + 120`, { maxSteps: 60000 });
+  if (!(sim.G("day * 1440 + tmin") > t0 + 120)) return "the town clock did not advance";
+  return true;
+});
+
+// ===========================================================================
+// YOU DO NOT SET THE TOWN'S POLICY UNLESS YOU HOLD THE OFFICE (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("a crab who is not mayor cannot move the town's policy one step", () => {
+  // Matt: "shouldn't be able to change town policy if not mayor". The gate has
+  // always been there - `apply` is conditioned on playerMayor() - and what was
+  // actually wrong was that the card never SAID so, which is a different bug
+  // and fixed in drawHall. This pins the gate itself, because a legibility fix
+  // that quietly loosened the rule underneath it would be the worst outcome of
+  // the two.
+  //
+  // Driven through the SAME code path the click handler uses, not through a
+  // convenience setter: the dials write `hall.plat` and `apply` decides
+  // whether any of that reaches the town.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(3, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    const dial = (mech, rate, bowls) => {
+      const ed = hall.plat;
+      ed.mech = mech; ed.rate = rate; ed.bowls = bowls;
+      if (playerMayor()) hall.policy = Object.assign({}, ed);   // the handler's own apply()
+    };
+    // 1. THE OFFICE IS SOMEBODY ELSE'S. Turn every dial to the far end.
+    hall.mayor = allCrabs().filter(c => c.p.npc)[0].p.name;
+    const held = policyLine(hall.policy), wasMine = playerMayor();
+    dial("levy", 4, 6);
+    const after = policyLine(hall.policy), plat = policyLine(hall.plat);
+    // ...and a settlement must not launder it either: the purse struck tonight
+    // is the MAYOR's, not the platform of whoever was poking the card.
+    const bal0 = townFund.bal, you0 = townFund.youPaid;
+    runTownHall();
+    const billed = townFund.youPaid - you0;
+    // 2. NOW PUT ONE OF YOUR OWN CREW IN THE HAT and turn the same dial.
+    hall.mayor = crabs[0].p.name;
+    dial("dues", 3, 1);
+    return JSON.stringify({ wasMine, held, after, plat, billed,
+      asMayor: policyLine(hall.policy), mineNow: playerMayor() });
+  })()`));
+  if (got.wasMine) return "the fixture started with the player already in office";
+  if (got.after !== got.held)
+    return `a non-mayor moved the town from "${got.held}" to "${got.after}"`;
+  if (got.plat === got.held)
+    return "the dials did not even move the player's own platform - the fixture proves nothing";
+  if (got.billed > 0.005)
+    return `a non-mayor's platform billed the player $${got.billed} at settlement`;
+  if (!got.mineNow) return "putting a crew crab in the hat did not make the player mayor";
+  if (got.asMayor !== "DUES $3 / 1 BOWL")
+    return `in office the same dial did NOT take effect: policy reads "${got.asMayor}"`;
+  return true;
+});
+
+// ===========================================================================
+// THE ILLNESS-ROLL CLOCK ARTIFACT — investigated 2026-08-20, NOT "fixed"
+// (Matt: "clawdia still has supercrab powers of never getting sick btw, she
+// keeps making all the money.")
+//
+// The standing diagnosis was that the nightly sickness roll reads needs at the
+// INSTANT of the 20:00 settlement, which is a different place in every crab's
+// day, and that morning crabs were consequently ill 9.2% of the time against
+// evening's 1.9%. HALF of that is true and is pinned below: 20:00 really does
+// land before an evening crab's day has finished happening. The other half did
+// not reproduce in any rig - hunger and thirst favour the evening crab, the
+// day's exhaustion favours the morning one, and in the assembled risk they
+// cancel to M/E x0.98 over 2124 crab-nights. Two candidate rewrites were built
+// and measured, and neither was an improvement: judging the crab's own-day
+// PEAK is no fairer (x1.03) and more than doubles the town's illness, and
+// banking HOURS over the line is measurably LESS fair (x1.43), because a
+// morning crab really does spend longer awake and exhausted. The full receipt
+// is in game.js above illRisk(); the rig is tools/shiftill.mjs.
+//
+// So these three gates guard the FINDING, not a fix: the ordering that makes
+// the artifact real, the outcome that says it does not matter, and the
+// measurement seam that settled it staying inert.
+// ===========================================================================
+
+scenario("sickness: the 20:00 roll reads an evening crab before their day has finished", () => {
+  // THE ORDERING, isolated, with no statistics in it. An E-shift crab works
+  // 14:00-20:00 and takes the day's hunger/thirst/dirt bump when they clock
+  // off. The settlement runs at the TOP of frame(), before the crab loop, so
+  // on the frame the clock reaches 20:00 the roll has already judged them -
+  // and the bump lands afterwards, after the 45-minute last-call grace window
+  // on top of that. This is a KNOWN, MEASURED, DELIBERATELY UNFIXED property
+  // (see illRisk): the gate exists so that anyone who moves the settlement, or
+  // the shift table, or the clock-off, has to come and read the receipt rather
+  // than discover it a third time.
+  //
+  // The probe is DIRT, because dirt's clock-off bump is a flat +0.25 that does
+  // not scale with hours worked and does not clamp from a comfortable start.
+  // Every other need is held comfortable so the crab cannot fall ill at the
+  // roll - a crab who does takes their sick day and walks home WITHOUT the
+  // clock-off bump, and there would be nothing left to measure. A seed where
+  // contagion catches them anyway is a spoiled fixture, not a failure, so the
+  // probe walks a short list of towns and reports if none of them held.
+  let spoiled = "no town reached the probe at all";
+  for (const seed of [4011, 1337, 2674]) {
+    const sim = createSim({ seed });
+    sim.runUntil("day >= 2 && tmin >= 12 * 60", { maxSteps: 200000 });
+    if (sim.G("crabs[1].p.shift") !== "E") return "fixture drift: crabs[1] is not the evening crab";
+    const easy = `{ const b = crabs[1]; b.p.wallet = 0; b.p.dirt = 0.2;
+                    b.p.hunger = 0.2; b.p.thirst = 0.2; b.p.tired = 0.2; }`;
+    sim.G(easy);
+    if (!sim.runUntil("tmin >= 19.9 * 60 && lastRentDay !== day",
+      { maxSteps: 200000, tickEvery: 4, onTick: (G) => G(easy) })) return "could not reach the settlement";
+    // at the moment of judgement the evening crab is STILL ON SHIFT
+    if (sim.G("crabs[1].dayState") !== "working")
+      return "fixture drift: the evening crab was not still on shift at 19:54";
+    const atRoll = +sim.G("crabs[1].p.dirt");
+    if (!sim.runUntil("lastRentDay === day", { maxSteps: 200000 })) return "the settlement never fired";
+    if (sim.G("!!crabs[1].p.sick")) { spoiled = `seed ${seed}: contagion took the probe crab at the roll`; continue; }
+    if (Math.abs(+sim.G("crabs[1].p.dirt") - atRoll) > 1e-9)
+      return "the clock-off bump landed BEFORE the roll - the ordering changed, re-read illRisk";
+    // ...and now the crab's own day ends, up to an hour after the judgement
+    if (!sim.runUntil("tmin >= 21.5 * 60", { maxSteps: 200000 })) return "could not reach 21:30";
+    const after = +sim.G("crabs[1].p.dirt");
+    if (!(after - atRoll >= 0.15))
+      return `the evening crab never took a clock-off bump at all `
+        + `(dirt ${atRoll.toFixed(3)} -> ${after.toFixed(3)}) - the fixture, not the rule`;
+    // ...and the same probe on the MORNING crab must be the other way round:
+    // their bump is hours old by the time the roll looks at them.
+    const m = createSim({ seed });
+    m.runUntil("day >= 2 && tmin >= 8 * 60", { maxSteps: 200000 });
+    if (m.G("crabs[0].p.shift") !== "M") return "fixture drift: crabs[0] is not the morning crab";
+    m.G("crabs[0].p.dirt = 0.2; crabs[0].p.wallet = 0;");
+    if (!m.runUntil("tmin >= 16 * 60", { maxSteps: 200000 })) return "could not reach 16:00";
+    if (!(+m.G("crabs[0].p.dirt") - 0.2 >= 0.15))
+      return "the morning crab had not taken their clock-off bump by 16:00 - the artifact needs BOTH halves";
+    return true;
+  }
+  return spoiled;
+});
+
+scenario("sickness: shift kind does not predict the roll across the roster", () => {
+  // THE OUTCOME GATE. Grow a crew through the game's own hireCrew() - it
+  // alternates M/E by crew size, so three of each with the same founder/hire
+  // and housing mix on both sides - keep the town solvent (we are measuring
+  // the roll, not the landlord) and read the risk the settlement assembles for
+  // every at-risk crab every night, off the game's own rollLog seam.
+  //
+  // Assert on the RATIO of mean risk, M against E. It is a continuous quantity
+  // with hundreds of samples where illness itself is a rare coin with tens,
+  // and it is the number that decides the question: a shift that tells you
+  // nothing reads 1.00. The full rig (12 seeds x 30d, 2124 crab-nights) reads
+  // x0.98; this cheap version runs two towns for a week.
+  //
+  // NOT a mutation-tested gate, and it says so: there is no counter-arm to
+  // build, because the build BEFORE this investigation is the build after it.
+  // What it catches is a future read that is shaped like the wall clock again
+  // - and the mechanism proof is the ordering probe above.
+  const rows = [];
+  for (const seed of [1337, 2674]) {
+    const sim = createSim({ seed });
+    sim.G("window._stats.rollLog = [];");
+    sim.runUntil("day >= 2 && tmin >= 7 * 60", { maxSteps: 200000 });
+    sim.G(`coins = 3000; UPS.chef.lvl = Math.max(UPS.chef.lvl, 6);
+           while (crabs.length < 6) hireCrew();`);
+    for (let d = 0; d < 7; d++) {
+      if (sim.G("gameOver")) break;
+      sim.G("if (coins < 500) coins = 900;");
+      if (!sim.runUntil("lastRentDay === day", { maxSteps: 200000 })) break;
+      if (!sim.runUntil("tmin < 10 * 60 && tmin > 6 * 60", { maxSteps: 200000 })) break;
+    }
+    rows.push(...JSON.parse(sim.G("JSON.stringify(window._stats.rollLog)")));
+  }
+  const arm = (k) => { const r = rows.filter(x => x.shift === k);
+    return r.length ? { n: r.length, risk: r.reduce((s, x) => s + x.risk, 0) / r.length } : null; };
+  const m = arm("M"), e = arm("E");
+  if (!m || !e) return "one of the two shifts never appeared on the roster";
+  if (m.n + e.n < 60) return `only ${m.n + e.n} M/E rolls - not enough to say anything`;
+  const ratio = e.risk > 0 ? m.risk / e.risk : (m.risk > 0 ? Infinity : 1);
+  // ~40 crab-nights an arm swings this by a third on stream order alone
+  // (measured: 0.75 to 1.12 across trajectories at 180 an arm), so the window
+  // is wide on purpose. The candidate exposure-integral rewrite read x1.43 on
+  // the full rig, which is the size of thing this is meant to stop.
+  if (!(ratio >= 0.4 && ratio <= 2.5))
+    return `shift predicts the roll: M ${m.risk.toFixed(5)} (n=${m.n}) vs E ${e.risk.toFixed(5)} (n=${e.n}), x${ratio.toFixed(2)}`;
+  return true;
+});
+
+scenario("sickness: the roll-log seam is inert (a measured town is the same town)", () => {
+  // The rollLog seam exists so this question can be re-asked with numbers
+  // instead of reasoning. It must never become a behaviour change: it consumes
+  // no RNG and touches nothing, so a town with the log armed has to be
+  // BYTE-IDENTICAL to one without. Three days of the same seed, one
+  // fingerprint - and the town has to have actually rolled for somebody, or
+  // the comparison is two empty hands.
+  const fp = (armed) => {
+    const sim = createSim({ seed: 1337 });
+    if (armed) sim.G("window._stats.rollLog = [];");
+    sim.runDays(3);
+    return { rolls: armed ? sim.G("window._stats.rollLog.length") : -1,
+      s: sim.G(`JSON.stringify({ coins: Math.round(coins * 1000), rep: Math.round(rep * 1000),
+        crabs: allCrabs().map(c => [c.p.name, Math.round(c.x), Math.round(c.p.wallet * 100),
+          Math.round((c.p.tired || 0) * 1000), !!c.p.sick].join("|")),
+        inf: window._stats.infections || 0 })`) };
+  };
+  const off = fp(false), on = fp(true);
+  if (on.rolls < 10) return `the armed town only logged ${on.rolls} rolls - nothing was compared`;
+  if (off.s !== on.s) return "arming the roll log moved the town:\n        off " + off.s + "\n        on  " + on.s;
+  return true;
+});
+
+// ===========================================================================
+// ACCOMMODATION UPGRADES - the shelter's beds and the Driftwood's cabanas
+// ===========================================================================
+scenario("shelter: the beds are finite, and the crab with no cot sleeps on the step", () => {
+  // THE MECHANISM, not a coincidence: the shelter beds exactly `shelterBeds()`
+  // crabs and the overflow sleeps rough - so the SAME town, on the SAME night,
+  // with a bed each, beds everybody. Both arms are asserted here because
+  // "somebody slept rough" on its own is true of any tired town.
+  const sim = createSim({ seed: 31 });
+  // AFTER the settlement, so the housing ladder cannot quietly rent four of
+  // them a house between the fixture and the night (it did, first time). Broke,
+  // for the same reason. They are stood at the shelter because the WALK home is
+  // the housing scenario's business; what is under test here is what happens
+  // when they get there.
+  sim.runUntil("day >= 2 && tmin > 20.5 * 60", { maxSteps: 400000 });
+  sim.G(`{ const roll = allCrabs().filter(c => !c.p.owner).slice(0, 6);
+    for (let i = 0; i < roll.length; i++) {
+      const c = roll[i];
+      c.p.homeless = true; c.p.house = null; c.p.boat = null; c.p.wallet = 5; c.p.rough = false;
+      c.p.nCot = i < 4 ? 20 - i : 0;                 // four regulars, two newcomers
+      c.x = SHELTER_X + 20; c.y = 155; setT(c, c.x, c.y);
+    }
+    for (const c of allCrabs()) if (roll.indexOf(c) < 0 && c.p.homeless) c.p.nCot = 0;
+  }`);
+  const beds = sim.G("shelterBeds()");
+  if (beds !== 4) return "a fresh shelter should stand " + 4 + " beds, not " + beds;
+  const roll = sim.G("cotRoster().length");
+  if (roll <= beds) return "the fixture did not overfill the shelter: " + roll + " crabs, " + beds + " beds";
+  if (sim.G("cotShort()") !== roll - 4) return "the waiting list is not the overflow: " + sim.G("cotShort()");
+  sim.runUntil("tmin >= 23.5 * 60", { maxSteps: 400000 });
+  const out = JSON.parse(sim.G(`JSON.stringify(cotRoster().map(c => [c.p.name, !!c.p.rough, c.p.nCot || 0]))`));
+  const rough = out.filter(r => r[1]).map(r => r[0]);
+  if (rough.length !== roll - 4) return "four beds, " + roll + " crabs, " + rough.length + " on the step: " + JSON.stringify(out);
+  // ...and it is the NEWEST arrivals who are out there, not whoever the roster
+  // happened to list last: the shelter keeps its regulars.
+  const bedded = out.slice(0, 4).map(r => r[0]);
+  for (const n of rough) if (bedded.includes(n)) return n + " is both bedded and on the step";
+  if (out.slice(0, 4).some(r => r[1])) return "a crab with tenure was turned out: " + JSON.stringify(out);
+  // THE COUNTER-ARM, and it is the whole point of the scenario: the same town,
+  // the same night, the same crabs, with the beds the mayor could have signed
+  // for. Nobody is on the step. "Somebody slept rough" on its own is true of
+  // any tired town; "somebody slept rough FOR WANT OF A BED" is this feature.
+  sim.G(`dorm.beds = cotRoster().length - 4; for (const c of allCrabs()) c.p.rough = false;`);
+  if (sim.G("shelterBeds()") !== roll) return "the bought beds did not stand";
+  sim.runUntil("tmin < 1 * 60", { maxSteps: 400000 });
+  sim.G(`{ for (const c of cotRoster()) { c.p.rough = false; c.x = SHELTER_X + 20; c.y = 155; setT(c, c.x, c.y); } }`);
+  sim.runUntil("tmin >= 23.5 * 60", { maxSteps: 400000 });
+  const out2 = JSON.parse(sim.G(`JSON.stringify(cotRoster().map(c => [c.p.name, !!c.p.rough]))`));
+  const rough2 = out2.filter(r => r[1]).map(r => r[0]);
+  if (rough2.length) return "a bed each and " + rough2.join(",") + " still slept outside";
+  return true;
+});
+
+scenario("shelter: a bed is RENT, not a purchase - the bill goes up for good, and it is remitted", () => {
+  // The whole design of the shelter half: nobody buys the building, the town
+  // rents it, so a bed is a permanent line on the fund's bill. This asserts the
+  // three things that makes true - the rent moves, the money leaves a real
+  // balance at a NAMED counterparty, and the ledger still adds up afterwards.
+  const sim = createSim({ seed: 1337 });
+  sim.G("window._auditFund = {};");
+  sim.runUntil("day >= 2 && tmin > 12 * 60", { maxSteps: 400000 });
+  const rent0 = sim.G("shelterRent()");
+  if (rent0 !== sim.G("SHELTER_RENT")) return "a shelter with no bought beds should cost the base rent";
+  sim.G("townFund.bal = 40; dorm.take = 999; townFund.arrears = 0; townFund.strikes = 0;");
+  const why = sim.G("JSON.stringify(bunkWhy())");
+  if (why !== "null") return "a solvent fund on a big purse still refused: " + why;
+  const before = sim.G("Math.round(worldMoney() * 100) / 100");
+  const bal0 = sim.G("townFund.bal");
+  if (!sim.G("buildBunk('TEST MAYOR')")) return "buildBunk refused with the gate open";
+  const after = sim.G("Math.round(worldMoney() * 100) / 100");
+  const key = sim.G("bunkKey()");
+  if (Math.abs((before - after) - key) > 0.005)
+    return "key money should leave the world exactly once: " + before + " -> " + after + " for $" + key;
+  if (Math.abs(sim.G("townFund.bal") - (bal0 - key)) > 0.005) return "the fund did not pay the key money";
+  const rent1 = sim.G("shelterRent()");
+  if (rent1 !== rent0 + sim.G("DORM_CFG.RENT")) return "the rent did not move: " + rent0 + " -> " + rent1;
+  const row = JSON.parse(sim.G(`JSON.stringify(townFund.ledger[townFund.ledger.length - 1])`));
+  if (!row || row.kind !== "remit" || !/PINCHERTON/.test(row.who || ""))
+    return "the key money has no named counterparty: " + JSON.stringify(row);
+  // ...and the ledger IS the balance, still (the town hall's own promise)
+  const sums = JSON.parse(sim.G(`JSON.stringify(townFund.ledger.reduce((a, r) =>
+    (a[r.kind] = (a[r.kind] || 0) + r.amt, a), {}))`));
+  // the ledger is capped at 24 rows, so only the SIGN of the movement is
+  // provable here - the conservation scenario owns the full-run arithmetic
+  if (!sums.remit || sums.remit <= 0) return "no remit ever reached the landlord";
+  // THE RECURRING HALF: tonight's rent is the bigger one, at the landlord
+  const paid0 = sim.G("townFund.ledger.filter(r => r.kind === 'remit' && /SHELTER RENT/.test(r.why || '')).length");
+  sim.G("townFund.bal = 200;");
+  sim.runUntil("day >= 3 && tmin > 21 * 60", { maxSteps: 400000 });
+  const rents = JSON.parse(sim.G(`JSON.stringify(townFund.ledger
+    .filter(r => r.kind === 'remit' && /SHELTER RENT/.test(r.why || '')).map(r => r.amt))`));
+  if (rents.length <= paid0) return "no shelter rent was remitted after the bed was signed for";
+  if (Math.abs(rents[rents.length - 1] - rent1) > 0.005)
+    return "the night's rent was $" + rents[rents.length - 1] + ", not the new $" + rent1;
+  return true;
+});
+
+scenario("shelter: the PURSE decides whether the town can grow it, and it says which one", () => {
+  // The fiscal gate, and it is the same one the CPU mayor sits: a purse that
+  // would not carry the bigger bill refuses, by name, and a purse that would
+  // carries it. Two arms, one town, nothing else moved.
+  const sim = createSim({ seed: 1337 });
+  sim.runUntil("day >= 2 && tmin > 19 * 60", { maxSteps: 400000 });
+  sim.G("townFund.bal = 60; townFund.arrears = 0; townFund.strikes = 0; townFund.shut = 0;");
+  sim.G("hall.policy = { mech: 'tin', rate: 0, bowls: 0 }; dorm.take = purseYield(hall.policy);");
+  const poor = sim.G("JSON.stringify(bunkWhy())");
+  if (poor === "null") return "a purse raising nothing was allowed to sign for a bed";
+  if (!/TIN/.test(poor)) return "the refusal does not name the purse the town voted for: " + poor;
+  if (sim.G("canBunk()")) return "canBunk disagrees with bunkWhy";
+  const beds0 = sim.G("shelterBeds()");
+  sim.G("hall.policy = { mech: 'levy', rate: 4, bowls: 0 }; dorm.take = 500;");
+  if (!sim.G("canBunk()")) return "a purse raising $500 a night still could not carry $13: " + sim.G("JSON.stringify(bunkWhy())");
+  if (!sim.G("buildBunk('TEST')")) return "the build refused with the gate open";
+  if (sim.G("shelterBeds()") !== beds0 + 1) return "the bed was not added";
+  // ...and the ceiling is a ceiling
+  sim.G("dorm.beds = DORM_CFG.MAX - DORM_CFG.BASE;");
+  if (sim.G("canBunk()")) return "the shelter grew past its own floor plan";
+  if (!/AS BIG AS IT GETS/.test(sim.G("JSON.stringify(bunkWhy())"))) return "the ceiling does not say so";
+  return true;
+});
+
+scenario("shelter: the BED+ chip is the mayor's, and it sits on the notice without covering it", () => {
+  // Who pays decides who chooses: the shelter is the town's bill, so the chip
+  // is live only while the player is wearing the hat. And it has to be a chip
+  // you can actually read - the notice above it carries three rows now.
+  const sim = createSim({ seed: 1337 });
+  sim.runUntil("tmin > 10 * 60", {});
+  sim.G("hall.mayor = npcs[0].p.name;");
+  if (sim.G("bunkChipLive()")) return "the chip was live while an NPC held the office";
+  sim.G("hall.mayor = crabs[0].p.name;");
+  if (!sim.G("playerMayor()")) return "the fixture did not put the player in the hat";
+  if (!sim.G("bunkChipLive()")) return "the chip is not live for the player's own mayor";
+  const g = JSON.parse(sim.G(`JSON.stringify({ r: bunkChipRect(), y: dormNoticeY(), h: dormNoticeH(),
+    top: HOME_BOTTOM - SHELTER2.h, w: SHELTER2.w })`));
+  if (g.r.y < g.y || g.r.y + g.r.h > g.y + g.h - 2)
+    return "the chip is not inside the notice it hangs on: " + JSON.stringify(g);
+  if (g.r.y < g.y + 21) return "the chip lands on the notice's own text rows: " + JSON.stringify(g);
+  if (g.y + g.h > g.top - 3) return "the notice runs onto the shelter's roof: " + JSON.stringify(g);
+  if (g.y < 40) return "the notice climbed off the top of the world: " + JSON.stringify(g);
+  if (g.r.x < 444 || g.r.x + g.r.w > 444 + 78) return "the chip hangs off the shelter";
+  // TWO TAPS, and the first one is the price of the recurring half
+  sim.G("townFund.bal = 60; townFund.arrears = 0; townFund.strikes = 0; dorm.take = 500;");
+  const beds0 = sim.G("shelterBeds()");
+  if (sim.G("tapBunkChip()")) return "one tap signed a permanent bill";
+  if (sim.G("shelterBeds()") !== beds0) return "the arming tap built a bed";
+  if (!/A NIGHT FOREVER/.test(sim.G("JSON.stringify(toast.text)"))) return "the arming toast hides the recurring cost: " + sim.G("JSON.stringify(toast.text)");
+  // ...AND IT HAS TO FIT ON THE CARD IT IS PRINTED ON (the standing rule: text
+  // is measured, not counted). drawToast clamps at 252px and the first cut ran
+  // the new rent off the end of it, which is the one thing this toast is for.
+  if (sim.G("textWidth(toast.text, 5) + 12") > 252)
+    return "the arming toast is wider than the card: " + sim.G("textWidth(toast.text, 5) + 12") + "px";
+  if (!sim.G("tapBunkChip()")) return "the second tap did not build";
+  if (sim.G("shelterBeds()") !== beds0 + 1) return "the second tap built nothing";
+  return true;
+});
+
+scenario("hotel: the annexe is real rooms - a guest sleeps in a cabana, and the lanes stay clear", () => {
+  // A cabana has to be a ROOM, not a picture of one: the same stall list, the
+  // same check-in, the same dirty-then-cleaned cycle. And the forecourt is the
+  // row the travel lanes are measured against, so a full annexe is the harshest
+  // version of the lane tripwire there is.
+  const sim = createSim({ seed: 1337 });
+  sim.G(`setHotelRooms(HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA);`);
+  const n = sim.G("hotelRooms().length");
+  if (n !== sim.G("HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA")) return "the annexe did not stand: " + n;
+  const bad = JSON.parse(sim.G(`JSON.stringify(LANES.map(l => [l, laneClear(l, 0, WORLD_W)]).filter(r => r[1] < LANE_PAD))`));
+  if (bad.length) return "a full annexe blocks a travel lane: " + JSON.stringify(bad);
+  // ...and no hut is parked on the queue, on the desk, or on another hut
+  const rooms = JSON.parse(sim.G("JSON.stringify(hotelRooms().map(r => [r.x, r.y, !!r.cabana]))"));
+  const qx = sim.G("BIZ.hotel.queueX");
+  for (const [x, y, cab] of rooms) {
+    if (x + 16 > qx) return "a room at x=" + x + " stands in the queue at " + qx;
+    if (x < sim.G("BIZ.hotel.x0") || x + 16 > sim.G("BIZ.hotel.x1")) return "a room at x=" + x + " is off the lot";
+    if (cab && y !== 158) return "a cabana is not on the forecourt row: y=" + y;
+  }
+  for (let i = 0; i < rooms.length; i++) for (let j = i + 1; j < rooms.length; j++)
+    if (rooms[i][1] === rooms[j][1] && Math.abs(rooms[i][0] - rooms[j][0]) < 18)
+      return "two rooms share a doorway: " + JSON.stringify([rooms[i], rooms[j]]);
+  // a guest takes the LAST room in the list (a cabana) and sleeps in it
+  sim.runUntil("customers.some(k => k.visitor && !k.gone)", { maxSteps: 400000 });
+  const ok = sim.runUntil(`(() => { const r = hotelRooms()[hotelRooms().length - 1];
+    const k = customers.find(c => c.visitor && !c.gone && !c.room);
+    if (k && !r.occupant && !r.dirty) { r.occupant = k; k.room = r; k.state = "toRoom"; }
+    return hotelRooms()[hotelRooms().length - 1].occupant &&
+      hotelRooms()[hotelRooms().length - 1].occupant.state === "inRoom"; })()`,
+    { maxSteps: 400000 });
+  if (!ok) return "a guest could not get into a cabana";
+  const at = JSON.parse(sim.G(`JSON.stringify((() => { const r = hotelRooms()[hotelRooms().length - 1];
+    return { rx: r.x, ry: r.y, kx: Math.round(r.occupant.x), ky: Math.round(r.occupant.wy) }; })())`));
+  if (Math.abs(at.kx - at.rx) > 14) return "the guest went to bed somewhere else: " + JSON.stringify(at);
+  // ...and checking out leaves an unmade bed that housekeeping turns over
+  sim.G(`{ const r = hotelRooms()[hotelRooms().length - 1]; checkOut(r.occupant); }`);
+  if (!sim.G("hotelRooms()[hotelRooms().length - 1].dirty")) return "a vacated cabana was not left dirty";
+  const cleaned = sim.runUntil("!hotelRooms()[hotelRooms().length - 1].dirty", { maxSteps: 400000 });
+  if (!cleaned) return "housekeeping never turned the cabana over";
+  return true;
+});
+
+scenario("hotel: a room is CAPITAL - it costs the owner's till and the landlord takes his cut", () => {
+  // The other half of the design: the hotel's rooms are bought, once, by
+  // whoever holds the lease - and the lease gets dearer, so an empty hut is a
+  // standing loss rather than a free option.
+  const sim = createSim({ seed: 1337 });
+  sim.G("coins = 4000;");
+  sim.runUntil("tmin > 10 * 60", {});
+  if (!sim.G("buyOutOwner('hotel')")) return "the fixture could not buy the hotel";
+  if (sim.G("bizOwner('hotel')") !== "player") return "the player does not hold the lease";
+  // the ROOM+ chip's own arming toast, on the same 252px card
+  sim.G("upArm = null; tapRoomChip();");
+  if (sim.G("textWidth(toast.text, 5) + 12") > 252)
+    return "the ROOM+ arming toast is wider than the card: " + sim.G("textWidth(toast.text, 5) + 12") + "px";
+  if (!/A NIGHT/.test(sim.G("JSON.stringify(toast.text)"))) return "the ROOM+ toast hides the rent it adds";
+  sim.G("upArm = null;");
+  const c0 = sim.G("Math.round(coins)"), r0 = sim.G("BIZ.hotel.rent"), n0 = sim.G("hotelRooms().length");
+  const w0 = sim.G("Math.round(worldMoney() * 100) / 100");
+  if (!sim.G("buildRoom('player')")) return "the owner could not build with the money in hand";
+  if (sim.G("hotelRooms().length") !== n0 + 1) return "no room was added";
+  if (sim.G("Math.round(coins)") !== c0 - sim.G("roomBuildCost()")) return "the till did not pay for it";
+  if (sim.G("BIZ.hotel.rent") !== r0 + sim.G("ROOM_CFG.RENT")) return "the lease did not get dearer";
+  const w1 = sim.G("Math.round(worldMoney() * 100) / 100");
+  if (Math.abs((w0 - w1) - sim.G("roomBuildCost()")) > 0.005)
+    return "the build price did not leave the world at the landlord: " + w0 + " -> " + w1;
+  // ...and a till that cannot cover it is refused, by name
+  sim.G("coins = 5;");
+  if (sim.G("buildRoom('player')")) return "a broke owner built a cabana anyway";
+  if (!/TILL/.test(sim.G("JSON.stringify(roomWhy('player'))"))) return "the refusal does not say why: " + sim.G("JSON.stringify(roomWhy('player'))");
+  // ...and the ceiling holds
+  sim.G("coins = 4000; setHotelRooms(HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA);");
+  if (sim.G("buildRoom('player')")) return "the forecourt took a room it has no space for";
+  return true;
+});
+
+scenario("hotel: a PEER owner builds off turned-away guests, and never out of tomorrow's payroll", () => {
+  // The CPU arm of the same decision, and it keys on the LEASE rather than on
+  // BRASS - so REEF builds on it too. The signal is a guest bedded down on the
+  // sand with every room LET (capacity), which is the mirror of the unmade-bed
+  // signal the hotelier answers with wages (labour).
+  const sim = createSim({ seed: 1337 });
+  sim.runUntil("day >= 2 && tmin > 10 * 60", { maxSteps: 400000 });
+  const oid = sim.G("JSON.stringify(bizOwner('hotel'))");
+  if (oid === '"player"') return "the fixture town has no peer owner on the hotel";
+  const n0 = sim.G("hotelRooms().length");
+  // ARM ONE: the signal is there, the till is not. Nothing happens.
+  sim.G(`annexe.short = ROOM_CFG.SHORT + 2; annexe.day = day - ROOM_CFG.COOL; bizStrike.hotel = 0;
+         OWNERS[bizOwner('hotel')].till = roomBuildCost() + ROOM_CFG.FLOOR - 1;`);
+  sim.G("runAnnexePolicy();");
+  if (sim.G("hotelRooms().length") !== n0) return "a hotel built a cabana out of tomorrow's wages";
+  // ARM TWO: the till is there, the signal is not.
+  sim.G(`annexe.short = 0; annexe.day = day - ROOM_CFG.COOL; OWNERS[bizOwner('hotel')].till = 2000;`);
+  sim.G("runAnnexePolicy();");
+  if (sim.G("hotelRooms().length") !== n0) return "a hotel built a cabana nobody had asked for";
+  // ARM THREE: both. It builds, once, and the cooldown holds the next one back.
+  sim.G(`annexe.short = ROOM_CFG.SHORT; annexe.day = day - ROOM_CFG.COOL;`);
+  sim.G("runAnnexePolicy();");
+  if (sim.G("hotelRooms().length") !== n0 + 1) return "a full house with money in the till built nothing";
+  if (sim.G("annexe.short") !== 0) return "the tally was not spent";
+  sim.G(`annexe.short = ROOM_CFG.SHORT + 9;`);
+  sim.G("runAnnexePolicy();");
+  if (sim.G("hotelRooms().length") !== n0 + 1) return "the cooldown did not hold the second hut back";
+  // ...and the tally itself is only rung up when the house was genuinely FULL
+  const s0 = sim.G("annexe.short");
+  sim.G(`{ for (const r of hotelRooms()) { r.occupant = null; r.dirty = false; r.cleaning = false; }
+         hotelRooms()[0].dirty = true;
+         const k = customers.find(c => c.visitor && !c.gone) || newVisitor(false);
+         k.roughFlag = false; sleepOnSand(k); }`);
+  if (sim.G("annexe.short") !== s0) return "an unmade bed was counted as a missing one";
+  if (!(sim.G("today.roomsLost") > 0)) return "...and it was not counted as an unmade one either";
+  sim.G(`{ for (const r of hotelRooms()) { r.dirty = false; r.cleaning = false; r.occupant = { visitor: true }; }
+         const k = customers.find(c => c.visitor && !c.gone) || newVisitor(false);
+         k.roughFlag = false; sleepOnSand(k); }`);
+  if (sim.G("annexe.short") !== s0 + 1) return "a guest turned away from a FULL house was not counted";
+  return true;
+});
+
+scenario("accommodation: beds, cabanas, the bills they carry and a guest asleep in one all roundtrip", () => {
+  const store = new Map();
+  const a = createSim({ seed: 1337, storage: store, fresh: false });
+  a.runUntil("day >= 2 && tmin > 12 * 60", { maxSteps: 400000 });
+  a.G(`dorm.beds = 3; dorm.take = 42; setHotelRooms(HOTEL_ROOMS_BASE + 4);`);
+  // put a guest in the LAST cabana so the room index has to survive too
+  a.runUntil("customers.some(k => k.visitor && !k.gone)", { maxSteps: 400000 });
+  a.G(`{ const r = hotelRooms()[hotelRooms().length - 1];
+         const k = customers.find(c => c.visitor && !c.gone);
+         r.occupant = k; k.room = r; k.state = "inRoom"; k.roomN = hotelRooms().length; }`);
+  const want = JSON.parse(a.G(`JSON.stringify({ beds: shelterBeds(), rent: shelterRent(), take: dorm.take,
+    rooms: hotelRooms().length, lease: BIZ.hotel.rent, guest: hotelRooms()[hotelRooms().length - 1].occupant.name })`));
+  a.G("save()");
+  const b = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!b.G("load(activeSlot)")) return "the saved town would not load";
+  const got = JSON.parse(b.G(`JSON.stringify({ beds: shelterBeds(), rent: shelterRent(), take: dorm.take,
+    rooms: hotelRooms().length, lease: BIZ.hotel.rent,
+    guest: (hotelRooms()[hotelRooms().length - 1].occupant || {}).name || null,
+    cab: !!hotelRooms()[hotelRooms().length - 1].cabana })`));
+  for (const k of ["beds", "rent", "take", "rooms", "lease"])
+    if (got[k] !== want[k]) return k + " came back as " + got[k] + ", not " + want[k];
+  if (!got.cab) return "the last room came back as something other than a cabana";
+  if (got.guest !== want.guest) return "the guest asleep in cabana " + want.rooms + " woke up outdoors (" + got.guest + ")";
+  // an OLD save - one written before any of this existed - is a four-bed
+  // shelter and a seven-room hotel, which IS the old world
+  const env = JSON.parse(store.get(a.G("slotKey(activeSlot)")));
+  delete env.dorm; delete env.annexe;
+  store.set(a.G("slotKey(activeSlot)"), JSON.stringify(env));
+  const c = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!c.G("load(activeSlot)")) return "the pre-upgrade save would not load";
+  if (c.G("shelterBeds()") !== c.G("DORM_CFG.BASE")) return "an old save came back with beds it never had";
+  if (c.G("hotelRooms().length") !== c.G("HOTEL_ROOMS_BASE")) return "an old save came back with cabanas it never had";
+  if (c.G("BIZ.hotel.rent") !== c.G("HOTEL_RENT_BASE")) return "an old save came back paying for them";
+  if (c.G("shelterRent()") !== c.G("SHELTER_RENT")) return "an old save came back on a bigger shelter bill";
+  // ...and a corrupt one is clamped rather than trusted
+  const env2 = JSON.parse(store.get(a.G("slotKey(activeSlot)")));
+  env2.dorm = { beds: 900, day: -4, short: "yes", take: -1 };
+  env2.annexe = { built: 99, day: 1, short: -3 };
+  store.set(a.G("slotKey(activeSlot)"), JSON.stringify(env2));
+  const d = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!d.G("load(activeSlot)")) return "the corrupt save would not load at all";
+  if (d.G("shelterBeds()") > d.G("DORM_CFG.MAX")) return "a nonsense bed count survived the load";
+  if (d.G("hotelRooms().length") > d.G("HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA")) return "a nonsense room count survived the load";
+  if (d.G("dorm.take") < 0 || d.G("annexe.short") < 0) return "negative counters survived the load";
+  return true;
+});
+
+scenario("accommodation: the shelter's bill is what the town votes on", () => {
+  // The reason the shelter half is RENT and not a purchase: every extra bed
+  // walks into the election, because a platform whose purse cannot cover the
+  // roof is a platform that closes the shelter (platValue's roof term). Same
+  // town, same voters, two shelter sizes.
+  const sim = createSim({ seed: 1337 });
+  sim.runUntil("day >= 2 && tmin > 19 * 60", { maxSteps: 400000 });
+  const p = JSON.stringify({ mech: "rents", rate: 2, bowls: 0 });
+  const small = sim.G(`(() => { const q = ${p}; return purseYield(q) >= shelterRent() ? 1 : 0; })()`);
+  sim.G("dorm.beds = DORM_CFG.MAX - DORM_CFG.BASE;");
+  const big = sim.G(`(() => { const q = ${p}; return purseYield(q) >= shelterRent() ? 1 : 0; })()`);
+  if (!(small === 1 && big === 0))
+    return "a twelve-bed shelter did not change what that platform can afford (" + small + "/" + big + ")";
+  // ...AND THE BEDS COMPETE WITH THE BOWLS, out of one purse. platBowls only
+  // counts the bowls a platform can pay for AFTER the roof, so a shelter with
+  // three times the beds on it is a shelter whose soup the same purse can no
+  // longer afford - which is the argument the next ballot is actually about.
+  const before = sim.G(`(dorm.beds = 0, JSON.stringify(idealPlatform(cotRoster()[0] || allCrabs()[0])))`);
+  const after = sim.G(`(dorm.beds = DORM_CFG.MAX - DORM_CFG.BASE, JSON.stringify(idealPlatform(cotRoster()[0] || allCrabs()[0])))`);
+  const A = JSON.parse(before), B = JSON.parse(after);
+  if (before === after)
+    return "the town's ideal platform did not move when its shelter tripled: " + before;
+  if (B.bowls > A.bowls)
+    return "a dearer roof bought MORE soup out of the same purse: " + before + " vs " + after;
+  // ...AND THE SAME ARITHMETIC ON A PLATFORM CHOSEN HERE, rather than on
+  // whatever this town's ideal happened to be. Derived from idealPlatform it
+  // read 0/0 the moment the empty opening day made day 2 poorer - a town too
+  // poor to want a bowl has no bowls to lose, so the assertion measured
+  // nothing. The claim is that A DEARER ROOF BUYS LESS SOUP OUT OF ONE PURSE,
+  // so the purse has to be one that could afford soup to begin with.
+  // Measured UNCAPPED - what the purse can pay for after the roof, without
+  // POT_MAX or the platform's own bowls dial clipping it. That is the quantity
+  // the claim is about ("the beds compete with the bowls, out of one purse"),
+  // and it is the one that cannot be made to pass by picking a fat enough
+  // fixture: at take 900 a levy funds six bowls either side of the beds and
+  // platBowls reads 6/6, which proves nothing about competition at all.
+  const gen = JSON.stringify({ mech: "levy", rate: 4, bowls: sim.G("POT_MAX") });
+  const maxBeds = sim.G("DORM_CFG.MAX - DORM_CFG.BASE");
+  const afford = (beds) => sim.G(`(dorm.beds = ${beds}, bizDayBook("shack").take = 900,
+    Math.floor((purseYield(${gen}) - shelterRent()) / Math.max(1, bowlCost())))`);
+  const bowlsA = afford(0), bowlsB = afford(maxBeds);
+  if (!(bowlsA > 0)) return "the generous platform could not fund a single bowl even at base beds";
+  if (!(bowlsB < bowlsA))
+    return "the same purse pays for the same soup either side of eight new beds (" + bowlsA + "/" + bowlsB + ")";
+  // ...and the platform the town would actually put on falls with it, once the
+  // beds have eaten enough of the purse to bite through POT_MAX.
+  if (sim.G(`(dorm.beds = ${maxBeds}, platBowls(${gen}))`)
+      > sim.G(`(dorm.beds = 0, platBowls(${gen}))`))
+    return "a dearer roof let the same platform serve MORE bowls";
+  return true;
+});
+
+// ===========================================================================
+// THE HALL TAB, SWEPT (2026-08-20) - the one surface neither sweep covered
+// ===========================================================================
+
+scenario("the HALL tab's text is measured, in every state it has", () => {
+  // THE GAP, reported by the onboarding pass rather than found by a test: the
+  // two general sweeps skip the management card's HALL tab, because it was
+  // being rebuilt underneath them all day and any finding would have been
+  // stale. That left the busiest card in the game - three views, a pager, a
+  // ledger, a live ballot box and a candidacy strip - checked only for
+  // "does it throw", which is the weakest question you can ask a 256px card.
+  //
+  // The polling-day sweep above covers this tab on a POLLING DAY. This covers
+  // the other six days: no ballot ever held, a full ledger, a stale roll page,
+  // the player standing, the player IN OFFICE (a different set of hot chips),
+  // and the shelter bolted. Same measured-text stub, same two questions, plus
+  // the rect-over-text one that caught the polling board.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(8, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const bad = JSON.parse(sim.G(`(() => {
+    const bad = [], T = text, S = smallText, R = rect;
+    let SURF = "?", box = [];
+    const wrap = (fn, meas, h) => (c, str, x, y, col, sz) => {
+      const w = meas(str, sz);
+      if (x < 0 || x + w > W) bad.push([SURF, "OFF CANVAS", String(str)]);
+      for (const b of box)
+        if (x < b.x1 && x + w > b.x0 && y < b.y1 && y + h > b.y0 && Math.abs(y - b.y0) > 2)
+          bad.push([SURF, "OVER " + b.s, String(str)]);
+      box.push({ x0: x, x1: x + w, y0: y, y1: y + h, s: String(str) });
+      return fn(c, str, x, y, col, sz);
+    };
+    text = wrap(T, textWidth, 7); smallText = wrap(S, smallTextWidth, 5);
+    rect = (c, x, y, w, h, col) => {
+      for (const b of box)
+        if (x < b.x1 && x + w > b.x0 && y < b.y1 && y + h > b.y0 && b.s.trim())
+          bad.push([SURF, "RECT OVER " + b.s, x + "," + y]);
+      return R(c, x, y, w, h, col);
+    };
+    manage = "shack"; manageTab = "HALL";
+    const run = (name, setup) => {
+      for (const v of HALL_VIEWS) {
+        SURF = name + "/" + v; box = [];
+        try { setup(); hallView = v; drawManage(); }
+        catch (e) { bad.push([SURF, "THREW", e.message]); }
+      }
+    };
+    // the state this town reached on its own, first - a real ballot, a real ledger
+    run("as-played", () => {});
+    run("no-ballot-yet", () => { hall.poll = null; });
+    run("full-ledger", () => { for (let i = 0; i < 16; i++) fundRow("take", 3, "PLANKTON PETE", "RENT CUT"); });
+    // A STALE PAGER is reachable: the chip pages the roll, and a later, smaller
+    // ballot leaves hallRollPage past the end of it.
+    run("roll-page-past-end", () => { hallRollPage = 3; });
+    hallRollPage = 0;
+    run("standing", () => { hall.stand = true; hall.nominee = crabs[0].p.name; });
+    // IN OFFICE is a different card: the purse chip lights, the STAND chip
+    // reads IN OFFICE, and the status line gains a clause about billing you.
+    run("in-office", () => { hall.mayor = crabs[0].p.name; });
+    run("shelter-bolted", () => { townFund.shut = 3; townFund.arrears = 41; townFund.strikes = 2; });
+    // ...and the longest name in the game through the mayor and nominee slots,
+    // which is how the onboarding pass found two real overlaps elsewhere.
+    run("longest-name", () => {
+      const c = crabs[0]; c.p.name = "PLANKTON PETE";
+      hall.mayor = c.p.name; hall.nominee = c.p.name; hall.stand = true;
+    });
+    text = T; smallText = S; rect = R;
+    return JSON.stringify(bad.slice(0, 10));
+  })()`));
+  if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
+  return true;
+});
+
+// ===========================================================================
+// THE ONBOARDING PASS - shop tooltips, the help card, a visible hire, and
+// "is my money going up?"  (off Ben Lewis's playtest; see PLAN)
+// ===========================================================================
+
+scenario("the shop tooltip promises what the button actually does", () => {
+  // THE MECHANISM, NOT THE COINCIDENCE. upEffect() reads the same functions the
+  // SIM reads - stationCap, bizTables, crabs.length, ownedBizList - and prints
+  // "N -> N+1". So the honest test is not "the string says GRILLS 1 -> 2"; it
+  // is: read the promise, BUY the thing, and check the town now holds exactly
+  // the number the promise named. A tooltip that drifted away from its button
+  // fails this even though its words never changed.
+  const sim = createSim({ seed: 5 });
+  sim.runDays(1);
+  const counters = {
+    chef: "crabs.length",
+    grill: 'stationCap("shack", "grill")',
+    board: 'stationCap("shack", "board")',
+    table: 'bizTables("shack").length',
+    juicebar: "ownedBizList().length",
+    arcade: "ownedBizList().length",
+    cadegear: 'stationCap("arcade", "claw")',
+  };
+  // the arcade has to be standing before CADE GEAR+'s counter means anything,
+  // which is why the order below is the shop grid's own order
+  for (const key of ["chef", "grill", "board", "table", "juicebar", "arcade", "cadegear"]) {
+    sim.G("coins = 40000;");
+    const promise = sim.G(`upEffect(${JSON.stringify(key)})`);
+    const m = /-> (\d+)$/.exec(promise);
+    if (!m) return `${key}: "${promise}" does not name a number it will move to`;
+    const before = sim.G(counters[key]);
+    const from = /(\d+) ->/.exec(promise);
+    if (!from || +from[1] !== before)
+      return `${key}: the tooltip opened on "${promise}" while the town held ${before}`;
+    sim.G(`tryBuy(${JSON.stringify(key)});`);
+    const after = sim.G(counters[key]);
+    if (after !== +m[1]) return `${key}: promised "${promise}" and the town went ${before} -> ${after}`;
+  }
+  return true;
+});
+
+scenario("the tooltip's nightly cost is the live setting, not a printed number", () => {
+  // The second half of what a tooltip is allowed to say (see UP_HELP): what the
+  // thing costs you EVERY night after. HIRE CRAB quotes the shack's wage and
+  // ARCADE quotes the arcade's rent, so moving the wage on the management card
+  // has to move what the button promises - otherwise the line is decoration.
+  const sim = createSim({ seed: 7 });
+  const base = sim.G('upOngoing("chef")');
+  if (!base.includes("$" + sim.G('bizWage("shack")')))
+    return `HIRE CRAB quoted "${base}" at a wage of $${sim.G('bizWage("shack")')}`;
+  sim.G('setBizWage("shack", bizWage("shack") + 7);');
+  const moved = sim.G('upOngoing("chef")');
+  if (moved === base) return `the wage moved and the tooltip still said "${base}"`;
+  if (!moved.includes("$" + sim.G('bizWage("shack")'))) return `after the raise it said "${moved}"`;
+  // ...and the rents are each shop's own, not one shared literal
+  for (const k of ["arcade", "juicebar"])
+    if (!sim.G(`upOngoing(${JSON.stringify(k)})`).includes("$" + sim.G(`BIZ.${k}.rent`)))
+      return `${k} does not quote its own rent`;
+  // a rung with no standing order has to SAY so rather than say nothing: the
+  // blank is exactly the ambiguity the whole feature exists to remove
+  for (const k of ["grill", "board", "table", "cadegear"])
+    if (!sim.G(`upOngoing(${JSON.stringify(k)})`)) return `${k} has no nightly line at all`;
+  return true;
+});
+
+scenario("a shop button reads before it buys, and hover is what makes it one tap", () => {
+  // The arming rule, both input devices, in one scenario. tapShopButton is the
+  // whole of the click path (tryBuy is left alone so the tools and the rest of
+  // this suite can still buy directly), so this drives what a tap drives.
+  const sim = createSim({ seed: 9 });
+  sim.G('tab = "shop"; shopTip = null; coins = 5000;');
+  const lvl0 = sim.G("UPS.table.lvl"), coins0 = sim.G("Math.round(coins)");
+  sim.G('tapShopButton("table")');
+  if (sim.G("shopTip") !== "table") return "the first tap did not put the tooltip up";
+  if (sim.G("UPS.table.lvl") !== lvl0) return "the first tap bought the thing";
+  if (sim.G("Math.round(coins)") !== coins0) return "the first tap moved money";
+  sim.G('tapShopButton("table")');
+  if (sim.G("UPS.table.lvl") !== lvl0 + 1) return "the second tap did not buy";
+  // A DIFFERENT BUTTON IS A FIRST TAP AGAIN - the arm belongs to the tooltip
+  // that is on screen, not to the grid.
+  const g0 = sim.G("UPS.grill.lvl");
+  sim.G('tapShopButton("grill")');
+  if (sim.G("UPS.grill.lvl") !== g0) return "moving to another button bought it outright";
+  // HOVER IS THE ARM ON A MOUSE. Pointing at a button is the same act as the
+  // first tap, which is the whole reason a desktop click buys in one.
+  sim.G("shopTip = null;");
+  const b = JSON.parse(sim.G("JSON.stringify(BUTTONS.find(b => buttonKey(b) === 'board'))"));
+  sim.G(`shopHoverAt({ x: ${b.x + 2}, y: ${b.y + 2} })`);
+  if (sim.G("shopTip") !== "board") return "hovering a button did not raise its tooltip";
+  const bd0 = sim.G("UPS.board.lvl");
+  sim.G('tapShopButton("board")');
+  if (sim.G("UPS.board.lvl") !== bd0 + 1) return "a click on a hovered button did not buy";
+  // ...and the pointer coming off the grid puts the card away rather than
+  // leaving an armed button behind it
+  sim.G("shopHoverAt({ x: 250, y: PANEL_Y + 2 })");
+  if (sim.G("shopTip")) return "the tooltip stayed up with the pointer off the grid";
+  return true;
+});
+
+scenario("the shop tooltip is drawn, and dies behind every reading surface", () => {
+  // A silent no-op proves nothing, so first: it actually prints, and it prints
+  // the four things it is allowed to (name, price, what changes, what it costs
+  // every night after).
+  const sim = createSim({ seed: 11 });
+  sim.runDays(1);
+  const drew = (setup) => JSON.parse(sim.G(`(() => {
+    ${setup}
+    const out = []; const T = text, S = smallText;
+    text = (c, s2, x, y, col, sz) => { out.push(String(s2)); return T(c, s2, x, y, col, sz); };
+    smallText = (c, s2, x, y, col) => { out.push(String(s2)); return S(c, s2, x, y, col); };
+    try { drawShopTip(); } finally { text = T; smallText = S; }
+    return JSON.stringify(out);
+  })()`));
+  const live = drew('screen = "play"; gameOver = false; helpView = false; dossier = null;'
+    + ' manage = null; boardView = false; saveView = false; reportT = 0; hireCard = null;'
+    + ' tab = "shop"; shopTip = "arcade"; coins = 5000;');
+  if (!live.includes(sim.G("UPS.arcade.name"))) return "the tooltip did not print the button's name";
+  if (!live.some(s => s.indexOf("$") === 0)) return "the tooltip did not print a price";
+  if (!live.includes(sim.G('upEffect("arcade")'))) return "the tooltip did not print what changes";
+  if (!live.includes(sim.G('upOngoing("arcade")'))) return "the tooltip did not print the nightly cost";
+  // A READING SURFACE OWNS THE SCREEN. The tooltip hangs in the world above the
+  // panel, so every card that covers the world has to kill it - including the
+  // HIRE CARD, which is what a HIRE CRAB tap puts there in its place.
+  const surfaces = {
+    dossier: "dossier = crabs[0];",
+    manage: 'dossier = null; manage = "shack";',
+    board: "manage = null; boardView = true;",
+    save: "boardView = false; saveView = true;",
+    report: "saveView = false; reportT = 3;",
+    help: "reportT = 0; helpView = true;",
+    hire: "helpView = false; hireCard = { c: crabs[0], how: 'X', t: 5 };",
+    "the crew tab": 'hireCard = null; tab = "crew";',
+    "game over": 'tab = "shop"; gameOver = true;',
+  };
+  for (const k of Object.keys(surfaces)) {
+    const n = drew(surfaces[k] + ' shopTip = "arcade";');
+    if (n.length) return `the tooltip was still drawn behind ${k}: ${JSON.stringify(n.slice(0, 2))}`;
+  }
+  return true;
+});
+
+scenario("the help card fits the card, in the font the card is printed in", () => {
+  // THE GENERAL FORM OF THE LEASE BUG, aimed at the newest and wordiest surface
+  // in the game. Measured with the game's own widths at the size drawHelp uses,
+  // against the card's OWN rect table - and the key column is checked against
+  // HELP_KEYCOL rather than a copy of 56, or the scenario would only be
+  // asserting its own constant.
+  //
+  // AND THE CHARACTER SET, which is the bug this caught for real: the 3x5 font
+  // has no bracket glyphs (font.js), so a controls page listing "[ ]" printed
+  // "?? ??" on a screen whose entire job is explaining the controls. Anything
+  // sGlyph would have to fall back on is a defect, not a typo.
+  const sim = createSim({ seed: 3 });
+  const R = JSON.parse(sim.G("JSON.stringify(helpRects())"));
+  const KEYCOL = sim.G("HELP_KEYCOL");
+  const pages = JSON.parse(sim.G("JSON.stringify(HELP_PAGES)"));
+  const charset = sim.G("Object.keys(FONT_SMALL).join('')");
+  const bigset = sim.G("Object.keys(FONT).join('')");
+  const sw = (s) => String(s).length * 4 - 1;                 // smallTextWidth
+  const bodyLimit = R.w - 16, descLimit = R.w - 16 - KEYCOL;
+  const badChar = (s, set) => {
+    for (const ch of String(s).toUpperCase()) if (ch !== " " && set.indexOf(ch) < 0) return ch;
+    return null;
+  };
+  for (const P of pages) {
+    const c0 = badChar(P.title, charset);
+    if (c0) return `page title "${P.title}" needs a "${c0}" the 3x5 font does not have`;
+    for (const L of P.lines) {
+      for (const s of L.slice(1)) {
+        const c = badChar(s, charset);
+        if (c) return `"${s}" needs a "${c}" the 3x5 font does not have`;
+      }
+      // headings are NOT trimmed by fitSmall on purpose (a clipped heading
+      // reads as a typo), so they are the ones that have to be measured here
+      if (L[0] === "h" && sw(L[1]) > bodyLimit)
+        return `heading "${L[1]}" is ${sw(L[1])}px on a ${bodyLimit}px card`;
+      if (L[0] === "k") {
+        if (sw(L[1]) >= KEYCOL) return `key label "${L[1]}" is ${sw(L[1])}px into a ${KEYCOL}px column`;
+        if (sw(L[2]) > descLimit) return `"${L[2]}" is ${sw(L[2])}px in a ${descLimit}px column`;
+      }
+      if (L[0] === "t" && sw(L[1]) > bodyLimit)
+        return `"${L[1]}" is ${sw(L[1])}px on a ${bodyLimit}px card`;
+    }
+    // ...and the whole page has to land ABOVE the footer chips, walked at the
+    // pitch drawHelp actually uses (8 a row, 4 a gap, first row at y+19)
+    let ly = R.y + 19;
+    for (const L of P.lines) ly += L[0] === "-" ? 4 : 8;
+    if (ly > R.prev.y - 2) return `page "${P.title}" runs to y${ly}, under its own footer at y${R.prev.y}`;
+  }
+  if (badChar("HOW TO PLAY", bigset)) return "the header needs a glyph the 5x7 font does not have";
+  return true;
+});
+
+scenario("the help card is reachable from play, and from a town with nothing left", () => {
+  // The whole point of the card is that it is FINDABLE, so this asserts the
+  // doors: the nav strip's chip, the chip's rect being the chip that is drawn,
+  // and the card's own paging - and that HELP lives for a player with no
+  // business left to manage, which is exactly the player most likely to want an
+  // explanation.
+  const sim = createSim({ seed: 13 });
+  sim.runDays(1);
+  const R = JSON.parse(sim.G("JSON.stringify(navRects())"));
+  const mid = (r) => `{ x: ${r.x + (r.w >> 1)}, y: ${r.y + (r.h >> 1)} }`;
+  sim.G('helpView = false; screen = "play"; gameOver = false; dossier = null; manage = null;'
+    + " boardView = false; saveView = false; reportT = 0;");
+  if (!sim.G(`navTapChip(${mid(R.help)})`) || !sim.G("helpView")) return "the HELP chip did not open the card";
+  sim.G("helpView = false;");
+  // the chip's rect IS the chip that is drawn: nothing clickable that was never
+  // painted, and nothing painted you cannot hit
+  const painted = JSON.parse(sim.G(`(() => {
+    const out = []; const S = smallText;
+    smallText = (c, s2, x, y, col) => { out.push([String(s2), x, y]); return S(c, s2, x, y, col); };
+    try { drawNav(); } finally { smallText = S; }
+    return JSON.stringify(out); })()`));
+  const chipRow = painted.find(p => p[0] === "HELP");
+  if (!chipRow) return "the HELP chip was never drawn";
+  if (chipRow[1] < R.help.x || chipRow[1] > R.help.x + R.help.w)
+    return `the HELP label prints at x${chipRow[1]}, outside its own rect x${R.help.x}..${R.help.x + R.help.w}`;
+  // A PLAYER WITH NOTHING LEFT can still ask what happened: MANAGE and TOWN go
+  // dark with the last business, HELP does not.
+  sim.G('for (const k in BIZ) if (bizOwner(k) === "player") BIZ[k].owner = "sudsy";');
+  if (sim.G("navChipsLive()")) return "the fixture did not actually strip the player's businesses";
+  if (!sim.G(`navTapChip(${mid(R.help)})`) || !sim.G("helpView")) return "HELP went dark with the last shop";
+  // the card swallows its own clicks and pages both ways off one rect table
+  const HR = JSON.parse(sim.G("JSON.stringify(helpRects())"));
+  sim.G("helpPage = 0;");
+  sim.G(`tapHelp({ x: ${HR.next.x + 2}, y: ${HR.next.y + 2} })`);
+  if (sim.G("helpPage") !== 1) return "NEXT did not turn the page";
+  sim.G(`tapHelp({ x: ${HR.prev.x + 2}, y: ${HR.prev.y + 2} })`);
+  if (sim.G("helpPage") !== 0) return "PREV did not turn it back";
+  sim.G(`tapHelp({ x: ${HR.done.x + 2}, y: ${HR.done.y + 2} })`);
+  if (sim.G("helpView")) return "DONE did not close the card";
+  // ...and it kills the strip underneath it, on the same terms every other
+  // reading surface does
+  sim.G("helpView = true;");
+  if (sim.G("navLive()")) return "the nav strip was still live behind the help card";
+  // EVERY DOOR OUT ACTUALLY CLOSES IT - DONE, a tap off the card, and the chip
+  // again - because a reading surface you cannot leave is worse than one you
+  // cannot find.
+  const doors = { "the DONE chip": `tapHelp({ x: ${HR.done.x + 2}, y: ${HR.done.y + 2} })`,
+    "a tap off the card": `tapHelp({ x: 1, y: ${HR.y + HR.h + 6} })`,
+    "the HELP chip again": "toggleHelp()" };
+  for (const d of Object.keys(doors)) {
+    sim.G("helpView = false; toggleHelp();");
+    if (!sim.G("helpView")) return `the fixture for ${d} did not open the card`;
+    sim.G(doors[d]);
+    if (sim.G("helpView")) return `${d} did not close the card`;
+  }
+  // ...AND IT DOES NOT BUY THE PLAYER TIME (owner, 2026-08-20: the pause chip
+  // is gone, "it's against the spirit of the game"). Opening the instructions
+  // must not stop the clock - the day running while you work the town out is
+  // the game, and a help screen that froze it would put the pause back under
+  // another name.
+  const t0 = sim.G("tmin"), d0 = sim.G("day");
+  sim.G("helpView = false; toggleHelp();");
+  if (!sim.runUntil(`day > ${d0} || tmin > ${t0} + 20`, { maxSteps: 40000 }))
+    return "the clock did not advance while the help card was open";
+  sim.G("closeHelp()");
+  return true;
+});
+
+scenario("the help card teaches the machine and does not spoil the ending", () => {
+  // TWO STANDING RULINGS MEET ON THIS CARD (PLAN): the town's name is embargoed
+  // until the ending, and the way out is a discovery the arcade unlocks. A help
+  // screen is the easiest place in the whole game to leak either one, and it is
+  // written once and then never read again by anybody who built it - so the
+  // guard has to be automatic.
+  const sim = createSim({ seed: 3 });
+  const all = sim.G("HELP_PAGES.map(p => p.title + ' ' + p.lines.map(l => l.slice(1).join(' ')).join(' ')).join(' ')");
+  // THE BOAT'S EXISTENCE IS NOT THE SECRET. She lands tourists four times a
+  // day in plain sight and the game's own toast says "THE FERRY IS IN" - so the
+  // word FERRY is fine and the roles page uses it. What is embargoed is the way
+  // OUT on her: the office at the pier head, the fare, and where she goes.
+  for (const word of ["FERRY OFFICE", "TICKET", "FARE", "ESCAPE", "PASSAGE", "MAINLAND"])
+    if (all.includes(word)) return `the help card says "${word}" - that is the ending`;
+  // ...and it must not do the player's arithmetic for them: no forecast, no
+  // advice, no shopping order. Economic uncertainty is the game.
+  for (const word of ["RECOMMEND", "SHOULD BUY", "PROFIT", "PAYS FOR ITSELF", "WILL EARN"])
+    if (all.includes(word)) return `the help card says "${word}" - that is the player's job`;
+  // ...NOR OFFER A WAY OUT OF THE CLOCK. The pause chip was removed on the
+  // owner's instruction - "it's against the spirit of the game" - and a help
+  // screen is exactly where it would quietly come back, either as a control or
+  // as a promise that reading is free. Neither.
+  for (const word of ["PAUSE", "SPACE BAR", "STOP THE CLOCK", "FREEZE"])
+    if (all.includes(word)) return `the help card says "${word}" - the clock cannot be stopped`;
+  // IT DOES HAVE TO SAY THE LOAD-BEARING THINGS, or it is decoration. The
+  // second half of this list is Matt's own brief (2026-08-20): "there should be
+  // a help screen for public functions and roles" - so a future edit that
+  // quietly drops the roles page or the town hall page fails here rather than
+  // being noticed by the next player who cannot tell what a fisher is.
+  for (const word of ["20:00", "RENT", "WAGES", "TIP", "CRAB SHACK", "REP",
+                      "YOUR CREW", "FISHERS", "VISITORS", "THE MAYOR", "THE LANDLORD",
+                      "SHELTER", "TOWN FUND", "SUNDAY", "MANIFESTO"])
+    if (!all.includes(word)) return `the help card never mentions ${word}`;
+  return true;
+});
+
+scenario("a hire is something you can see happen", () => {
+  // "Hired a crab. Don't even see the crab. He just joined the crew." Three
+  // things have to land, and all three are asserted off the hire itself rather
+  // than off a fixture: the CAMERA is on them, the CARD names them and what
+  // they cost, and the POINTER is over their head in the town.
+  const sim = createSim({ seed: 21 });
+  sim.runDays(1);
+  sim.G("coins = 5000; hireCard = null; followIdx = -1; sel = null; toast = null;");
+  const before = sim.G("crabs.length");
+  sim.G('tryBuy("chef")');
+  if (sim.G("crabs.length") !== before + 1) return "nobody was hired";
+  const name = sim.G("crabs[crabs.length - 1].p.name");
+  if (!sim.G("hireCard && hireCard.c === crabs[crabs.length - 1]")) return "the card is not about the crab who joined";
+  if (!sim.G("isFollowing(crabs[crabs.length - 1])")) return "the camera did not go to the new hire";
+  if (sim.G("sel !== crabs[crabs.length - 1]")) return "the new hire was not selected";
+  if (sim.G("toast")) return "a toast is competing with the card for the same moment";
+  const drew = JSON.parse(sim.G(`(() => {
+    const out = []; const T = text, S = smallText;
+    text = (c, s2, x, y, col, sz) => { out.push(String(s2)); return T(c, s2, x, y, col, sz); };
+    smallText = (c, s2, x, y, col) => { out.push(String(s2)); return S(c, s2, x, y, col); };
+    try { drawHireCard(); } finally { text = T; smallText = S; }
+    return JSON.stringify(out); })()`));
+  const joined = drew.join(" | ");
+  if (!joined.includes(name)) return "the card does not say who joined";
+  // A HIRE IS A STANDING ORDER, not a purchase, and the card has to read as one
+  for (const must of ["20:00", "SHIFT"])
+    if (!joined.includes(must)) return `the card never says ${must}`;
+  if (!/\$\d+/.test(joined)) return "the card never says what they cost";
+  // THE POINTER. Drawn in the WORLD pass, which is the whole point: it is
+  // pinned to the crab, not to a place on the screen. So the test is that
+  // panning the camera moves it by exactly as much, the other way - a pointer
+  // parked at a screen coordinate would pass "it drew" and fail this.
+  const pointerX = () => sim.G(`(() => {
+    let x0 = null; const RC = rect;
+    rect = (c, x, y, w, h, col) => { if (x0 === null) x0 = x; return RC(c, x, y, w, h, col); };
+    try { drawHirePointer(); } finally { rect = RC; }
+    return x0 === null ? -9999 : x0; })()`);
+  sim.G("camX = clampCam(crabs[crabs.length - 1].x - 128);");
+  const cam0 = sim.G("camX"), p0 = pointerX();
+  if (p0 === -9999) return "no pointer over the new hire";
+  sim.G("camX = clampCam(camX + 40);");
+  const cam1 = sim.G("camX"), p1 = pointerX();
+  if (cam1 === cam0) return "the fixture could not pan the camera at all";
+  if (p1 === -9999) return "the pointer vanished when the camera moved";
+  if (p0 - p1 !== cam1 - cam0)
+    return `the camera moved ${cam1 - cam0}px and the pointer moved ${p0 - p1}px`;
+  sim.G("hireCard = null;");
+  if (pointerX() !== -9999) return "the pointer outlived the card";
+  return true;
+});
+
+scenario("the hire card runs on the wall clock, not the game clock", () => {
+  // A card you are meant to READ must not get six times shorter because the
+  // speed chips are on - which is exactly what would happen if it burned down
+  // on dt the way the toast does. Same wall time, two speeds, same card left.
+  const burn = (ff) => {
+    const sim = createSim({ seed: 33 });
+    sim.runDays(1);
+    sim.G(`coins = 5000; ffMode = ${ff}; tryBuy("chef");`);
+    const t0 = sim.G("hireCard.t");
+    sim.runUntil("false", { maxSteps: 40 });   // 40 x 50ms of wall clock
+    return [t0, sim.G("hireCard ? hireCard.t : 0")];
+  };
+  const [a0, a1] = burn(0), [b0, b1] = burn(3);
+  if (a0 !== b0) return "the card did not open on the same timer at both speeds";
+  if (Math.abs((a0 - a1) - (b0 - b1)) > 0.25)
+    return `1x burned ${(a0 - a1).toFixed(2)}s of card and 6x burned ${(b0 - b1).toFixed(2)}s`;
+  if (a0 - a1 <= 0) return "the card never burned down at all";
+  return true;
+});
+
+scenario("TODAY is history: the panel answers is-my-money-going-up without forecasting", () => {
+  // "Is my money going up? Its too unclear!" The slot used to read "$1.1/S" -
+  // dollars per second of REAL time, a number that changes when you press a
+  // speed chip. It reads coins - dayOpen now, which is a FACT about today, and
+  // the three properties that make it one are asserted here.
+  const sim = createSim({ seed: 41 });
+  sim.runDays(1);
+  const net = () => sim.G("Math.round(coins - dayOpen)");
+  // 1. IT IS THE ARITHMETIC IT CLAIMS TO BE
+  sim.G("coins = dayOpen + 137;");
+  if (net() !== 137) return `the readout does not equal the day's movement (${net()})`;
+  // 2. IT IS NOT A FORECAST. Tonight's bill is the OTHER half of the sum and
+  // the player does the subtraction - so moving the bill must not move this.
+  const n0 = net();
+  sim.G("BIZ.shack.rent += 500;");
+  const moved = sim.G("nightlyDue() + creditDueTonight()");
+  if (net() !== n0) return "tonight's bill leaked into today's takings";
+  if (!moved) return "the fixture did not actually give the town a bill";
+  sim.G("BIZ.shack.rent -= 500;");
+  // 3. MIDNIGHT RESETS IT, off the same rollover the day log uses - otherwise
+  // it would slowly turn into "lifetime", which is a different question.
+  const d0 = sim.G("day");
+  sim.G("coins = 4000;");   // solvent enough to reach the next midnight
+  if (!sim.runUntil(`day > ${d0}`, { maxSteps: 400000 })) return "the town never reached midnight";
+  if (Math.abs(sim.G("coins - dayOpen")) > 60)
+    return `the new day opened ${net()} away from the till`;
+  // 4. AND SETTLEMENT PULLS IT DOWN, which is the loop being taught rather than
+  // hidden: at 20:00 the landlord and the crew take their cut of exactly this.
+  if (!sim.runUntil("tmin >= 19 * 60 + 50", { maxSteps: 400000 })) return "the town never reached the evening";
+  const nBefore = net();
+  if (!sim.runUntil("tmin >= 20 * 60 + 10", { maxSteps: 400000 })) return "the town never reached settlement";
+  if (net() >= nBefore) return `settlement took money and TODAY went ${nBefore} -> ${net()}`;
+  return true;
+});
+
+scenario("dayOpen survives a reload, so a returning town is not reported as rich", () => {
+  // The failure this exists to prevent: `dayOpen` defaulting to 0 on an old
+  // save, so a town with $900 in the till comes back reading "TODAY +$900".
+  const store = new Map();
+  const a = createSim({ seed: 1337, storage: store, fresh: false });
+  a.runDays(2);
+  a.G("save()");
+  const net = a.G("Math.round(coins - dayOpen)");
+  const b = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!b.G("load(activeSlot)")) return "the save would not load";
+  if (b.G("Math.round(coins - dayOpen)") !== net)
+    return `today read ${net} before the reload and ${b.G("Math.round(coins - dayOpen)")} after`;
+  // ...and a save from before this field existed opens the day at the till it
+  // came back with, which reads +$0 rather than a phantom fortune
+  const key = a.G("slotKey(activeSlot)");
+  const env = JSON.parse(store.get(key));
+  delete env.dayOpen;
+  store.set(key, JSON.stringify(env));
+  const c = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!c.G("load(activeSlot)")) return "the pre-dayOpen save would not load";
+  if (c.G("Math.round(coins - dayOpen)") !== 0)
+    return `an old save came back reading TODAY ${c.G("Math.round(coins - dayOpen)")}`;
+  return true;
+});
+
+scenario("the shack says where the money comes from, and only your shops do", () => {
+  // Matt: "maybe it's not obvious enough that the crab shack is the central
+  // place money comes from?" The board is a READING of the same day book the
+  // management card and the nav strip's flash already share - so the test is
+  // that it reads that till, on the shops you own, and never invents one.
+  const sim = createSim({ seed: 17 });
+  sim.runDays(1);
+  if (!sim.runUntil("today.biz.shack && today.biz.shack.take > 0", { maxSteps: 400000 }))
+    return "the shack never took any money to put on a board";
+  const painted = (key) => JSON.parse(sim.G(`(() => {
+    camX = clampCam((BIZ.${key}.x0 + BIZ.${key}.x1) / 2 - W / 2);
+    const out = []; const S = smallText;
+    smallText = (c, s2, x, y, col) => { out.push(String(s2)); return S(c, s2, x, y, col); };
+    try { drawBusiness(${JSON.stringify(key)}); } finally { smallText = S; }
+    return JSON.stringify(out); })()`));
+  sim.G("tmin = 12 * 60;");   // trading hours: the board and the CLOSED placard share a slot
+  const mine = painted("shack").find(s => s.indexOf("TILL TODAY") === 0);
+  if (!mine) return "the shack's own shopfront does not say what it has taken";
+  const want = "TILL TODAY $" + sim.G("fmt(today.biz.shack.take)");
+  if (mine !== want) return `the board reads "${mine}" against a day book that says "${want}"`;
+  // A PEER'S TAKINGS ARE NOT YOUR BUSINESS - the player has never had a surface
+  // that reads somebody else's till, and this must not become the first.
+  if (painted("showers").some(s => s.indexOf("TILL TODAY") === 0))
+    return "a shop the player does not own hung a till board";
+  // ...and drawing the board must not CREATE a day-book row for a shop that has
+  // not traded, which would put a phantom line in tonight's report
+  sim.G('coins = 5000; tryBuy("juicebar"); delete today.biz.juicebar;');
+  painted("juicebar");
+  if (sim.G("today.biz.juicebar != null"))
+    return "drawing the board minted a day-book row for a shop that has not traded";
+  return true;
+});
+
+scenario("no fixed sentence on a card is trimmed to a pair of dots", () => {
+  // THE THIRD SWEEP, and the one Matt's note actually asked for. Its two
+  // siblings catch a string that prints OFF a surface and a string that prints
+  // ON TOP OF another one. Neither of them can see the failure that produced
+  // "the tips slider is mushed up against other text": copy that FITS, because
+  // fitSmall quietly cut its tail off, and reads as an unfinished sentence.
+  //
+  // THE LINE THIS DRAWS is between copy that is WRITTEN and copy that is
+  // ASSEMBLED. A menu line built out of whatever the shop sells, a report line
+  // built out of whoever moved house, a ballot line built out of a crab's own
+  // name - those are genuinely unbounded and trimming is the right answer for
+  // them, which is what fitSmall is for. A sentence somebody typed into game.js
+  // has a known width and a known budget and should simply have been written to
+  // fit. Only the second kind is swept here.
+  //
+  // Every string and every budget is read out of the game's own tables and rect
+  // tables - never retyped here, or the scenario would be checking a copy of
+  // the copy and would go green the moment somebody made the real one longer.
+  const sim = createSim({ seed: 3 });
+  const over = JSON.parse(sim.G(`(() => {
+    const out = [];
+    const push = (where, s, w) => {
+      if (smallTextWidth(s) > w) out.push([where, String(s), smallTextWidth(s), w]);
+    };
+    // ---- the help card: body lines, headings and the key column's second half
+    const HR = helpRects();
+    for (const P of HELP_PAGES) for (const L of P.lines) {
+      if (L[0] === "t" || L[0] === "h") push("help/" + P.title, L[1], HR.w - 16);
+      if (L[0] === "k") push("help/" + P.title, L[2], HR.w - 16 - HELP_KEYCOL);
+    }
+    // ---- the shop tooltip: two lines of body per rung, plus both halves of
+    // the consequence line at the widest they can be
+    const SR = shopTipRect();
+    for (const k in UP_HELP) {
+      for (const line of UP_HELP[k]) push("tooltip/" + k, line, SR.w - 10);
+      push("tooltip/" + k, upEffect(k) + "  " + upOngoing(k), SR.w - 10);
+    }
+    // ---- the hire card: the two derived lines, against the column beside the
+    // portrait (the same R.w - 46 the draw uses)
+    const CR = { w: HIRE_CARD.w };
+    for (const k in HIRE_DUTY) push("hire/" + k, HIRE_DUTY[k] + " " + BIZ[k].name, CR.w - 46);
+    // ---- and the management card's roster hint, against the DONE chip it
+    // stops at, in all three states it can be in
+    const MR = manageRects(), budget = rosterHintBudget(MR);
+    push("manage/roster", rosterHint("shack", 0), budget);
+    push("manage/roster", rosterHint("shack", 9), budget);
+    BIZ.shack.autoLabor = true;
+    push("manage/roster", rosterHint("shack", 0), budget);
+    BIZ.shack.autoLabor = false;
+    return JSON.stringify(out);
+  })()`));
+  if (over.length)
+    return over.map(o => `${o[0]}: "${o[1]}" is ${o[2]}px in a ${o[3]}px slot`).slice(0, 6).join("\n        ");
   return true;
 });
 

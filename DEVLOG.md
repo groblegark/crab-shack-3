@@ -8,6 +8,347 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-20, late — The measurement was the deliverable
+
+![The illness-roll clock artifact: what the roll reads vs what comes out of it](devlog/img/2026-08-20-illness-roll-clock-artifact.png)
+
+This entry ships no gameplay change at all. Behaviour is byte-identical;
+every eviction day is exactly where it was. What shipped is a rig and a
+receipt, and it is the most useful thing anybody did today.
+
+### The fact that wasn't
+
+Written into this project's own design notes, as settled fact: the nightly
+sickness roll reads everyone's needs at 20:00, which judges morning-shift
+crabs harshly because they've been awake and hungry for hours while evening
+crabs have barely started. Morning crabs ill **9.2%**, evening crabs
+**1.9%**. A fix was designed off that number and recommended.
+
+Then somebody was asked to *reproduce it before fixing it*. Three things
+came back, and all three were unwelcome.
+
+**One: the bias is real.** The roll genuinely does judge a morning crab
+carrying 1.7× the hunger and 1.8× the thirst of an evening crab. That part
+was right, and it's the part that felt obviously true.
+
+**Two: it doesn't matter.** The evening crab walks into the same roll
+carrying 1.2× the exhaustion. The halves point opposite ways and cancel.
+Assembled risk, morning against evening, over 2,124 crab-nights:
+**×0.98.** Shift predicts nothing. The original 9.2 vs 1.9 was noise — it
+came from about 180 crab-nights an arm.
+
+**Three: the supercrab isn't a shift, it's a crab.** Swap the two founders'
+shifts and the gap follows the *crab*, not the slot. PINCHY is the sicker
+of the two on mornings and on evenings alike, because CLAWDIA is TIDY — a
+founder trait sitting in plain sight in crabs.js. That's the whole mystery.
+
+![Three candidate rules scored on the same 4,658 rolls](devlog/img/2026-08-20-illness-roll-three-rules.png)
+
+### And the fix would have made it worse
+
+The recommended fix was built anyway and measured end to end: **+116% town
+risk.** Worse at precisely the thing it was meant to improve.
+
+The reason is a detail no clock-artifact theory could have reached: a
+morning crab clocks off at 14:00 and *stays up*. An evening crab clocks off
+at 20:00 and goes to bed. Measured, a morning crab spends 2.48 hours a
+night past the exhaustion line against an evening crab's 1.41. That isn't
+an artifact of when the dice are rolled. That's a real day, lived
+differently, and the roll was reading it correctly all along.
+
+### The bit worth keeping
+
+There was a tell, and it was in the original complaint: someone said a crab
+*"still* has supercrab powers." Still. The same complaint had been raised
+and fixed once already, the day before, and that gate was holding fine. The
+word "still" was doing the work of an entire investigation and nobody
+noticed until somebody went looking.
+
+So, the headline: **the measurement was the deliverable.**
+
+And the harder version, which is the true one — a number written down in a
+project's own brain is not a fact. It's a claim, wearing a fact's clothes,
+and it gets more believable every time it's cited rather than checked. The
+person most likely to be believed without checking is whoever wrote it
+there in the first place.
+
+We've been running this whole game on measurements for three days. It was
+about time one of them turned out to be a rumour.
+
+---
+
+## 2026-08-20, evening — Polling day
+
+![The box fills through the day, and tells you nothing](devlog/img/2026-08-20-ballot-box.png)
+
+*Papers go in face down. The tally is zero all day, whatever is in there.*
+
+The brief was three sentences: voting is an action, polls have a closing
+time, and ballots are made and counted on paper. The election stopped
+being a function call and became a day.
+
+### Turnout is geography
+
+Crabs walk to a ballot table. Not teleport, not resolve — walk, scored
+through exactly the same detour machinery that decides whether lunch is
+worth the trip. Turnout across 24 polls, six seeds, twenty-nine days:
+**82%**. But the spread is the story, and it points somewhere I didn't
+expect.
+
+| by shift | | by trade | |
+|---|---|---|---|
+| M | 92% | shack | 92% |
+| E | 92% | showers | 80% |
+| D (day off) | 89% | hotel | 79% |
+| **D (working)** | **73%** | fishing | 78% |
+
+**Shift predicts turnout. Trade barely does.** By trade it's 78 to 92 and
+mostly noise — a fisher and a shower attendant vote about as well as each
+other. By shift it's 73 against 92, and it is structural: the long D shift
+runs 8:30 to 18:30, and the polls, open 07:00 to 19:00, bracket that day by
+half an hour at each end.
+
+Now look at the two D rows. Same crabs. On a working day they vote 73%; on
+their day off, **89%**. Sixteen points of turnout is not who they are, it's
+what their day is.
+
+So it isn't the fisher who struggles to vote, and it isn't the shopkeeper.
+**It's whoever's day is long.** Which makes the hours sign the lever — the
+D window is derived from a shop's opening hours, and the player sets those.
+You can, if you like, run a business whose staff can't reach a ballot box.
+Nobody will stop you, and nobody will mention it.
+
+### The seed that changed the design
+
+The first version had one ballot box, on the promenade. Seed 1337 polled
+**two crabs out of eight.**
+
+That reads like apathy until you look at a map. The fishing fleet works
+8:30 to 18:30, out at the pier, 1200 pixels from the box. Polls shut at
+19:00. They weren't uninterested; they were *at work, too far away, until
+after closing.*
+
+A bias a crab can do something about is a choice. A structural bias nobody
+can act on is just a broken vote. So there are two tables now, in the same
+idiom as the two standpipes — one where the town lives, one where the town
+works.
+
+![The second table, at the foot of the pier](devlog/img/2026-08-20-pier-head.png)
+
+*The fix, in one frame: a table at the pier head, and a crab stood at it.*
+
+And here is the part that is funnier and truer than any of the politics.
+The reason the fleet is hard to enfranchise is not ideology, it's that
+**the town has no room.** There is not one 74-pixel gap left on 2512 pixels
+of coast. Placing the second table meant fighting the furniture already on
+the boardwalk — the first attempt put it 48 pixels west of the rail and
+cost the fishing fleet seventeen points of turnout, which only showed up
+because somebody re-measured instead of assuming. Narrowing the polling
+board by four pixels bought the table its place back at the rail.
+
+Four pixels of signage was the difference between a fisher voting and not.
+
+One box on the promenade polled two of eight. Two tables took the *same
+town* to 82%. The difference between a functioning election and a broken
+one was one piece of furniture — and the only reason it could ever break is
+that this town is 2512 pixels wide and a crab walks about eleven pixels a
+second.
+
+### The ratchet
+
+A test scenario found the sharpest thing in the whole pass. Picture a town
+where everybody sleeps at the shelter. No houses, so no house rent. So a
+RENTS-funded town office has no income. So it cannot afford ballot paper.
+So it can never hold the election **that would move it off RENTS.**
+
+Locked out of its only lever by the mechanism the lever controls. A poverty
+trap with a paperwork step. The town passes the hat now — but the shape of
+that failure is worth keeping in mind, because it wasn't put there on
+purpose, and neither are the real ones.
+
+### The tally does not exist until it is counted
+
+My favourite decision in the build, and it's a refusal rather than a
+feature.
+
+Papers go into the box face down. The vote count stays at zero all day
+while the box fills. At close, a crab counts them **by hand, three minutes
+a paper**, and the HALL tab deliberately shows no running total while this
+is happening.
+
+It would have been trivial to show a live tally. It would also have
+quietly undone the entire point: a count is a thing somebody does, at a
+speed, that can be watched and waited for. If the number is already known,
+nobody is counting — the box is just a progress bar with a hat on.
+
+![The count: a second pile crossing the table](devlog/img/2026-08-20-the-count.png)
+
+*Three minutes a paper, by hand, after the polls shut.*
+
+![HALL: the box is open, and these crabs have not made it yet](devlog/img/2026-08-20-yet-to-vote.png)
+
+*YET TO VOTE names them. It does not tell you which way the room is going,
+because nobody knows that yet.*
+
+### Also: the empty opening day
+
+New towns now open empty — no tourists conjured on the beach at 8am; the
+first boat brings the first visitors. Which raised the obvious question of
+whether a brand-new town should get its first night's rent forgiven, and
+that got settled with a number instead of a feeling: the empty start costs
+you about **$34**, and a free first night would hand back **$230**. Declined,
+6.8 to 1.
+
+---
+
+## 2026-08-20, addendum — A beach ball nearly killed SUDSY
+
+We added a beach ball. Twelve seconds of crabs batting an inflatable
+around on the sand. It is the smallest feature in the entire game.
+
+It put SUDSY — who **never plays** — from 9.8% of her life dehydrated to
+**31.4%**.
+
+Here's why, and it's the best argument for measuring things we've got. The
+ball sat at y163. y163 is a travel lane. So a twelve-second beach game
+quietly walled off the southern lane in the middle of the promenade, and
+the entire town — including every crab who never touched the ball —
+rerouted around it, all day, every day. SUDSY's route to her own taps got
+longer, and a shopkeeper who is always slightly behind became a shopkeeper
+who is always thirsty.
+
+We moved the ball four pixels up the sand, to y157. Her dehydration went
+to **1.5%** — better than before the ball existed, because the pass also
+tidied the lane it had been trampling.
+
+Nobody would have found that by playing. You'd have felt a vague sense
+that the town was sluggish and blamed something else — the wage, the
+prices, the crabs. The measurement found it in one run.
+
+### The night's real lesson
+
+The beach ball was one of four corrections, and looking at all of them
+together, nearly every merge failure of the last two days had the same
+shape. **The test asserted a coincidence rather than a mechanism.**
+
+- A test checked that a crab took a house *within 500 pixels* — when the
+  rule is "the nearest free door." Those agree in a small town. They stop
+  agreeing the moment there are more doors.
+- A test checked that *one funded fisher* got paid — when the rule is
+  "whoever has the savings." Fine, until a second crab has savings.
+- A test sampled *one voter* — when the rule is "the roster." Fine, until
+  the roster is big enough to disagree with itself.
+
+Every one of those passed happily while the town was small and poor. Every
+one broke the moment the town got bigger and richer — which is to say,
+every one broke exactly when the game started working.
+
+A test that asserts what happened is a test that will lie to you later. A
+test that asserts *why* it happened keeps its word. We have rewritten the
+liars.
+
+---
+
+## 2026-08-20 — The town votes, and it does not vote for you
+
+![The nav strip: the whole town to scale, under your feet](devlog/img/2026-08-20-navstrip.png)
+
+*New this session, in the seven free rows above the panel: the entire town,
+to scale, covering not one pixel of a single crab. Exactly one word is
+printed on it — SHACK — and that block flashes every time your till takes
+money. A freighter is out on the channel, because somebody imported
+something today.*
+
+Five branches merged overnight. The headline is that this town now has
+**politics**, and they are not on your side.
+
+### The town hall
+
+The shelter pot is back, and this time it is *funded*. Bowls for the
+shelter are bought from the shack the night before. Rent gets remitted to
+Mr. Pincherton like anyone else's. The money comes out of whichever of
+four purses the town last voted for — and voting is a real action now,
+with two tables, a closing time, and paper ballots. Nothing is conjured;
+every movement is conservation-checked.
+
+Then the sim did the thing it keeps doing. On seed 1337, day 14: CLAWDIA —
+one of your founding crew, a crab you hired on day one — has lost her
+house, and votes against her own employer. By day 28 the shack has hired
+enough cot-sleepers that the shelter bloc outvotes the tills, and the town
+switches its funding to harbour dues.
+
+**Your own success builds the electorate that taxes you.** Every crab you
+hire and can't house is a vote. Nobody wrote that; it's what happens when
+you let a town have both a payroll and a ballot box.
+
+### BRASS
+
+There's a new arrival on the morning bus around day 7 to 12: red shell,
+sunglasses, beach buggy, $800 in hand, and an eye on the Driftwood. Her
+name is BRASS and she buys the hotel out from under REEF at REEF's own
+asking price — the one you were still thinking about.
+
+The price of that dithering is painted on the shopfront while you dither:
+**$552 → $581 → $608.**
+
+Once she's in, she competes properly: raises her room rate when the house
+fills, and raises her *wages* when a guest sleeps on the sand with a bed
+left unmade. And because the town wage is a mean, her raise drags
+everybody's going rate up with it. She takes about $20 a town-day more out
+of the same visitor purses, and the shack's takings do not rise to meet
+it. She is not a difficulty setting. She's a competitor with better
+instincts than you.
+
+### The guest who was in two places all night
+
+The best bug of the night was invisible and expensive. An overnighting
+visitor had no branch for "is in their room," so every single frame they
+flipped between *asleep* and *off to their room*. The body blinked. The
+card alternated. You could only click them on half the frames.
+
+That was the cosmetic half. The real half: the needs loop is skipped on
+in-room frames — so **half of every paid night was being billed as a night
+out on the promenade.** Guests were paying for beds they were only in on
+even-numbered frames. Fixing it moved the baseline's worst seed from day 6
+to day 10.
+
+### Also
+
+- **Crabs stand in line properly now.** Three separate faults, none of them
+  spacing: the queue was ordered by *which ferry you arrived on* (25.5% of
+  pairs in the wrong order), nobody could step backwards so crabs ended up
+  standing inside one another, and locals weren't in the slot system at all
+  — three crabs sharing a four-pixel span.
+- **There is a pause button.** There wasn't one. This is embarrassing and
+  it's fixed. *(Correction, a day later: no there isn't. See below.)*
+- **There is a beach ball.** It has its own story, in the next entry.
+
+167 scenarios green; baseline 0/16 at a median of day 12.
+
+### Correction: the pause button is gone again
+
+We shipped a pause button yesterday and removed it today, which is the
+shortest life any feature here has had. The owner's ruling: *"Remove the
+pause button. It's against the spirit of the game."*
+
+He's right, and the reasoning is better than the feature was. Pause got
+built because a playtester said, mid-game: *"Meanwhile there's a clock
+ticking. PAUSE ANYONE? I'm losing time here."* That reads like a complaint.
+It is actually a description of the game **working** — and it came from the
+same player who said the secret sauce is "punishing you for not
+understanding at pace."
+
+You cannot keep the second sentence and fix the first with a pause button.
+
+So the line is drawn, and everything the onboarding work does from here runs
+to it: **a player who can't tell what a button does is a bug we fix; a
+player who is losing money while they work it out is the game.** The clock
+does not stop. It's now pinned by a test that asserts there is no pause
+state and no speed of zero, and then checks the clock is actually running —
+so pause can't come back in disguise as "speed 0 by default."
+
+---
+
 ## 2026-08-19, later — ROE came over with $158
 
 ![ROE's visit, hour by hour](devlog/img/2026-08-19-roe.png)

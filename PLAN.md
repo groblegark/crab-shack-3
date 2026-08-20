@@ -33,28 +33,65 @@ landed in one night. Everything below is merged, pushed and live.
    and TOWN chips lifting both screens out from behind building-clicks.
 6. **The queue pass** — a place in line is stamped when you JOIN, the shuffle
    steps both ways, locals aim at the back. 132k pairs: zero inversions.
-7. **Mine**: PAUSE (there was none), the beach ball, the ferry canon (ONE
+7. **Mine**: the beach ball, the ferry canon (ONE
    boat), a save/load crash that bricked any town saved mid-errand, the
-   sick-day errand-window fix, and two automated UI sweeps.
+   sick-day errand-window fix, and two automated UI sweeps. (A PAUSE landed
+   here too and was **removed again on 2026-08-20** by owner ruling — see
+   THERE IS NO PAUSE below before you consider rebuilding it.)
+
+**LANDED 2026-08-20:**
+8. **POLLING DAY** — the election stopped being a function call. Two tables you
+   walk to, polls that shut at 19:00, paper ballots bought off the ferry, and a
+   hand count that is the only thing that knows the answer. Turnout 82% with a
+   real gradient by shift and trade. See the POLLING DAY section below.
+9. **The empty opening** — a new town opens deserted at 07:00 and the 08:00
+   sailing lands the first tourists you ever see. The free first night was
+   probed and DECLINED with the number: the empty start costs $34 and a rent
+   grace hands back $230.
+
+10. **THE ILLNESS ROLL — MEASURED AND DELIBERATELY NOT FIXED.** This was in
+    the queue below with a diagnosis and a recommended fix, both written by
+    me, and **both were wrong**. The full write-up is at the end of this file;
+    the short version, because it is the most useful thing anybody learned
+    today:
+    - The sampling bias is REAL and large — the roll judges a morning crab
+      carrying 1.7x the hunger and 1.8x the thirst of an evening crab, because
+      the settlement runs before an evening crab has clocked off.
+    - **The outcome does not move.** The evening crab carries 1.2x the
+      exhaustion into the same roll, the halves cancel, and assembled risk
+      comes out M/E **x0.98** over 2124 crew crab-nights. The 9.2%-vs-1.9%
+      figure I put in this file **does not reproduce in any rig.**
+    - Swap the founders' shifts and the gap follows **the crab, not the
+      shift** — PINCHY is the sicker of the two on mornings AND on evenings.
+      CLAWDIA is `TIDY`, a founder trait in crabs.js. That is the supercrab.
+    - Both obvious fixes were built and rejected on measurement. "Judge their
+      own day" — the one recommended here — is **worse on exactly the thing it
+      was for**: +116% town risk, because a morning crab clocks off at 14:00
+      and stays up while an evening crab clocks off at 20:00 and goes to bed.
+      A morning crab really does spend 2.48h a night past the exhaustion line
+      against an evening crab's 1.41h. **That is a real day, not an artifact.**
+    - What shipped is the rig (`tools/shiftill.mjs`), an inert `rollLog` seam,
+      `illRisk()` split out with the receipt, three scenarios and two charts.
+      Behaviour is byte-identical.
+
+    **The lesson, and it is the same one as the merge failures:** a
+    measurement in this file is not a fact until somebody has reproduced it.
+    I wrote 9.2/1.9 into STATE OF PLAY as settled and recommended a fix off
+    it; an agent asked to reproduce it first found it was noise at ~180
+    crab-nights an arm. Ask for the reproduction BEFORE the fix, every time.
 
 **NEXT UP (Matt's queue, in his order):**
-- **Accommodation upgrades** — *"now we have two multi accommodation places;
-  need to be able to make each pretty big by buying upgrades"* (the shelter and
-  the Driftwood).
 - ~~**The departure card**~~ — **SHIPPED 2026-08-20**: the day report's second
-  page, naming every visitor who sailed, with a quote derived from a per-visit
-  stay ledger. See "THE DEPARTURE CARD" at the foot of this file.
-- **The illness-roll clock artifact** — the nightly sickness roll reads needs
-  at 20:00 for everybody, which is late in a MORNING crab's day and early in an
-  EVENING crab's. Morning crabs are ill 9.2% of the time against evening's
-  1.9%, and CLAWDIA is on evenings in all 8 seeds — which is the whole of
-  Matt's "CLAWDIA has supercrab powers of never getting sick". The fix is to
-  judge a crab's OWN day (its peak, or its own bedtime) rather than the wall
-  clock. NOT started; it is a core-system change wanting its own matrices.
-- **The onboarding/UI pass** — off Ben Lewis's playtest, under the two-kinds-
-  of-not-knowing rule below. The wall-of-text opening, tooltips on shop
-  upgrades, seeing a hire actually arrive, and making "is my money going up?"
-  answerable at a glance.
+  page, naming every visitor who sailed on today's boats, with a quote DERIVED
+  from a per-visit stay ledger — never random. See "THE DEPARTURE CARD" at the
+  foot of this file.
+- ~~**The onboarding/UI pass**~~ — **MOSTLY SHIPPED 2026-08-20** (see THE
+  ONBOARDING PASS below): shop tooltips, a five-page HELP card with three
+  front doors, a hire you can actually see arrive, TODAY +$N in place of the
+  $/S readout, a TILL TODAY board on your own shopfront, and the tips-slider
+  mush plus the class behind it. **Still open from Ben's list: the wall-of-
+  text opening** — the lease card is the first screen and it explains terms
+  to somebody who does not yet care. It wants a hook, not more words.
 - **A surf spot mid-beach** — explicitly deferred by Matt behind the ball.
 
 **THE THREE RULINGS THAT CONSTRAIN NEW WORK** (each has its own section
@@ -361,9 +398,19 @@ compounds or collapses → the landlord collects at 20:00 either way.
   2026-08-19 on a pristine control tree. The 13-14 quoted in the older entries
   below is stale. Growth `--buy chef,table --days 40 --seeds 8` is **4/8**
   (9,10,12,13,41,41,41,41, lifetime $97,299).
-- **CURRENT (2026-08-19, after the ferry/visitor/hotel pass, RE-MEASURED ON
-  THE MERGED TREE and identical to the agent's own figures — the three merge
-  resolutions below cost the economy nothing):** baseline
+- **CURRENT (2026-08-19, after THE EMPTY START — see "THE OPENING: THE TOWN,
+  THEN THE BOAT"):** baseline `--days 30 --seeds 16` **0/16, median 11**
+  (9,9,10,10,11,11,11,11,11,12,12,12,13,14,16,17, lifetime $55,598); growth
+  `--buy chef,table --days 40 --seeds 8` **2/8** (10,11,11,11,13,26,41,41) and
+  **1/8 on the second block** (`--seedbase 8`: 8,9,9,10,11,12,18,41) — **3/16
+  across both blocks, against 5/16 on the same tree before the change**. The
+  control was measured on this worktree at `aefd7a0`, not read out of this
+  file: **0/16 median 11** (6,9,10,10,11,11,11,11,11,11,12,12,13,14,15,15) and
+  growth **3/8** then **2/8**. Lose-by-default is untouched; growth is one town
+  down in each block, which is what a day-one till $34 lighter buys you.
+- (superseded by the empty start) **after the ferry/visitor/hotel pass,
+  RE-MEASURED ON THE MERGED TREE and identical to the agent's own figures —
+  the three merge resolutions below cost the economy nothing:** baseline
   `--days 30 --seeds 16` **0/16, median 11**
   (6,8,9,9,10,11,11,11,11,12,12,13,13,13,14,15); growth
   `--buy chef,table --days 40 --seeds 8` **2/8 alive** (6,8,9,10,14,15,41,41)
@@ -403,6 +450,10 @@ compounds or collapses → the landlord collects at 20:00 either way.
   10, hires 60×2.0,
   showers 5/10, fish pay 13. **Rent is charged from night one** — you open
   with $150 in your pocket and have to trade your way to the first payment.
+  **Re-opened and re-closed 2026-08-19** when the empty start landed: a
+  rent-free first night reads 0/16 but **median eviction 16** (evictions 11-24)
+  against the documented 11-13, so it stays deleted. See "THE OPENING: THE
+  TOWN, THEN THE BOAT".
 - **Queue**: 5 slots, of which tourists may fill 4 — the 5th is reserved for
   locals (crew + neighbours). WHERE those five stand is its own thing since
   2026-08-20 — see STANDING IN LINE: a place is stamped when you JOIN a line
@@ -2981,6 +3032,311 @@ first, connect later. Don't build the network before the node is beautiful.
   easy remembering" which town is which. Validate-before-mutate on import;
   a bad file must never touch the running game.
 
+## THE OPENING: THE TOWN, THEN THE BOAT (Matt, 2026-08-19, shipped worktree)
+
+Matt, verbatim and complete: *"the game should start with no tourists present;
+might want to bring back free first day of rent for that actually"* — one
+directive and one HEDGE. The first shipped. The second was measured and
+**declined**, and the number is below.
+
+### Half one: a new town opens EMPTY
+The visitor pass gave a new town a boat-load already mid-stay on the promenade
+(`seedVisitors`, `ferryBatch() + 6`), which robbed the opening of its beat: the
+player met the trade before they met the town. Now the game opens at **07:00
+with nobody ashore**, the intro/lease card holds the clock (the sim only
+advances while `screen === "play"`), and the **08:00 sailing** — one game-hour
+after the town wakes, the fattest boat of the day at `FERRY_LOAD[0]` 1.2 —
+lands the first tourists the player ever sees. The timetable was NOT touched:
+day one starts before the first sailing, so all four boats still run and day
+one loses no trade to the beat.
+
+What changed in code is three lines and a flag:
+- the boot call is now `if (hasSave && preVisSave) seedVisitors()`;
+- `preVisSave` is set in `load()` from the absence of the save's `_vis` marker;
+- `seedVisitors()` itself is unchanged, and survives for **exactly one job**:
+  migrating a PRE-FERRY save, which has no guest list to restore and would
+  otherwise reload a fortnight-old town onto a deserted promenade.
+**Deliberately not inside `load()`**: a modern save that legitimately holds no
+visitors (saved at midnight, say) must stay empty rather than have a crowd
+conjured onto it.
+
+### Half two: the free first night, and why it is NOT back
+**The history.** CS3's first commit (`df95139`) shipped with
+`rentAmount() { return day <= 1 ? 0 : BIZ.shack.rent; }` — a rent-free opening
+night. `e6e3476` (2026-08-18) deleted it: *"No more honeymoon: rent is charged
+from night one and you open with $150 in your pocket — pressure from the first
+minute."* It was a package, not a lone deletion — the same commit cut the rent
+**255 → 230** and pinned the opening purse at **$150**. The compensation for
+losing the honeymoon was a cheaper rent, and it is still in force.
+
+**The cost of the empty start, measured (16 seeds, days 1-3):**
+
+| day-one, mean over 16 seeds | seeded crowd | empty start | delta |
+|---|---|---|---|
+| takings | **$313.1** (median 313, 290-329) | **$275.5** (median 286, 202-342) | **-$37.6** |
+| till after the 20:00 settlement | **$144.9** (median 147, 130-156) | **$111.1** (median 114, 62-165) | **-$33.8** |
+| day-2 till | $156.4 | $115.9 | -$40.5 |
+| day-3 till | $193.1 | $162.3 | -$30.8 |
+
+**So the empty opening costs about $34** — a seventh of one night's rent. No
+seed ends day one underwater (worst till $62), nobody draws credit, and the
+hole is carried forward rather than compounded.
+
+**A free first night hands back $230 — 6.8x what the change took.** Measured as
+a probe on the empty-start tree (`--days 30 --seeds 16`, buy nothing): still
+**0/16**, but **median eviction 11 → 16**, evictions **11-24**, lifetime
+**$55.6k → $72.6k**. Five extra days of life for a do-nothing town, against a
+$34 hole, and straight past the documented **median 11-13** band. That is not
+compensation, it is a different game — a quiet softening of a baseline whose
+whole promise is to lose. **Declined.** The probe was reverted; the reasoning
+sits in the comment above `rentAmount()` so nobody re-opens it from memory.
+
+### Balance — before -> after (measured on this worktree, control at `aefd7a0`)
+
+| matrix | before | after (empty start) |
+|---|---|---|
+| baseline `--days 30 --seeds 16` | **0/16, median 11** (6,9,10,10,11,11,11,11,11,11,12,12,13,14,15,15) | **0/16, median 11** (9,9,10,10,11,11,11,11,11,12,12,12,13,14,16,17) |
+| growth `--buy chef,table` 40d x 8 | **3/8** (6,8,11,11,11,41,41,41) | **2/8** (10,11,11,11,13,26,41,41) |
+| growth, second block `--seedbase 8` | **2/8** (10,11,11,13,14,15,41,41) | **1/8** (8,9,9,10,11,12,18,41) |
+| growth, both blocks (16 seeds) | **5/16** | **3/16** |
+
+**LOSE-BY-DEFAULT IS UNTOUCHED** — 0/16 and median 11 on both sides, which is
+the promise that matters. **GROWTH IS ONE TOWN DOWN IN EACH BLOCK** (two across
+sixteen), and that is the honest cost of an opening that is $34 poorer at
+exactly the moment a growth town is saving for its first chef. Attribution is
+trivial because there is only one change in this pass; the knob that would undo
+it is a $230 handout for a $34 hole, which the probe above disqualified. If
+Matt wants those two escapes back, the honest lever is one sized to $34 (the
+opening purse, say) and chosen deliberately — not the free night.
+
+### Suite 142 -> 147 (green, exit code 0, 867s on a loaded machine)
+New: `a new town opens EMPTY: nobody ashore, nobody mid-walk`; `the first ferry
+still lands, on time, and day one keeps all four sailings`; `the lease card
+holds the clock: no boat lands while Pincherton talks`; `a loaded save keeps
+its guests: the empty start is a NEW-GAME rule`; `a PRE-FERRY save still gets a
+crowd: the one branch seedVisitors keeps`.
+RE-BASELINED, with the reason written in-scenario: **the frozen day-2
+fingerprint**, which runs exactly the two days that the seeded crowd used to
+cover — serves roughly halve (66 -> 38, 61 -> 41), SUDSY's till halves with
+them, rep is 5 points lower, and the player's till is $64/$105 down at the end
+of day two. Two fixtures that used to CLEAR the opening crowd are now no-ops
+and are kept as belts, with their comments re-pointed to say so.
+
+## RUNNING A FLEET: two ways agents stand on each other (2026-08-20)
+
+Both of these cost real hours today and neither is obvious until it happens.
+
+**1. `pkill -f tools/suite.mjs` KILLS EVERY AGENT'S SUITE, NOT YOURS.** Five
+sessions were running the same command from different worktrees. I killed a run
+of mine that way twice; at least one of those took a subagent's 26-minute run
+with it, and it had no way to tell that from a crash. **Kill by PID**, from the
+`$!` of your own launch, or match on your own worktree path.
+
+**2. A SHARED `/tmp` LOG PATH TRUNCATES SOMEBODY ELSE'S RUN.** `/tmp/suite.log`
+and friends are one file on one machine. Two agents redirecting into it get one
+interleaved, truncated file and both read a false result. **Put the log inside
+your own worktree**, or name it after your branch.
+
+And the one that is not about collisions: **a detached run's log will look
+EMPTY for a long time even when the run is healthy**, because node
+block-buffers to a file. `ps aux | grep [s]uite.mjs` is how you tell "still
+running" from "died"; an empty log is not evidence of either. (`script -q`
+gives it a pty and restores line buffering if you would rather watch it.)
+
+## THERE IS NO PAUSE (Matt, 2026-08-20) — a ruling, and why it is one
+
+> "Remove the pause button tho. It's against the spirit of the game."
+
+A pause was built on 2026-08-19, off the strongest single line in the game's
+first outside playtest: *"Meanwhile theres a clock ticking. PAUSE ANYONE? I'm
+losing time here and I want to pay back my landlord!"* It shipped for one day
+and the owner took it out again.
+
+**He is right, and this is written down so nobody rebuilds it from that same
+quote.** Ben was describing the game WORKING. The clock running while you read
+the shop is not an omission, it is the cost of reading the shop — and it is the
+same thing he was praising two days later when he said the secret sauce is
+*"incomprehensible UI and punishing you for not understanding at pace"*. You
+cannot keep the second sentence and fix the first with a pause button.
+
+**The line this draws, and it is the line all onboarding work runs to:** a
+player who cannot tell WHAT A BUTTON DOES is a bug to fix. A player who is
+losing money while they work it out is the game. Tooltips, a help screen, a
+visible hire and a legible income are all on the right side of it. Anything
+that buys the player TIME is on the wrong side.
+
+Removed: the `paused` state, the chip, its click band, and the space/`p` keys.
+The speed chips slid back left into the room the chip had been given (>> at
+203, >>> at 215, >>>> at 229; bands at 202/213/227). The scenario **"the clock
+cannot be stopped: there is no pause, and no speed of zero"** pins the ruling
+as a mechanism rather than a grep — there must be no pause STATE to flip and no
+entry in `FF_SPEED` that stops time, and the clock is then checked to actually
+run, so a pause shipped as "speed 0 by default" fails it.
+
+## SCREENSHOTS: THE HANDOFF (process, 2026-08-20)
+
+`shots/` is gitignored, and it is staying that way — two of them were the
+ENDING CARD, whole closing text and town-name reveal, sitting browsable in a
+public repo. That was the right fix and it had an unintended cost nobody
+noticed for a night: **agent screenshots stopped reaching the devlog at all.**
+Five overnight branches delivered none, and two devlog entries were written
+with no visuals — the writer shot their own or went without.
+
+**THE RULE, and it belongs in every agent brief:** take shots into `shots/`
+while you work, then **harvest the two or three that matter into
+`devlog/img/`** — which IS tracked — commit them on your branch, and **list the
+paths with a one-line caption in your final report.** The gitignore already
+said this was the intent; it just was not in anybody's instructions.
+
+    devlog/img/2026-08-20-<short-slug>.png
+
+The caption is not decoration. "What it shows and why it is the shot that shows
+it" is what lets somebody who was not there write about the work.
+
+**The embargo applies to every image**: no ending card, and the town's name
+must not appear in a screenshot.
+
+**What is worth shooting**, learned the hard way: BEFORE AND AFTER of the same
+view, same seed, one change apart, beats any number of representative single
+frames — it is the only honest way to show that something changed. For a
+systems fix with no visible face, the honest artefact is a chart or a table,
+not a manufactured dramatic screen.
+
+## POLLING DAY — VOTING IS AN ACTION (Matt, 2026-08-20, shipped)
+
+> "voting is an action, polls have a closing time, and ballots are made and
+> counted on paper"
+
+### What was wrong with the first election
+
+It was a **function call**. `runElection()` ran at settlement, every crab in
+town voted their interest in one loop, in no time at all, and the result
+existed the instant it was cast. That is a poll in the sense a weather
+forecast is a poll: an aggregate of preferences nobody had to act on. Matt's
+three clauses each name one of the frictions a real one has, and each is now a
+mechanism with a scenario asserting the mechanism rather than a feeling.
+
+### 1. THE VOTE IS AN ERRAND
+
+There are tables (`POLL_PLACES`) on the promenade and at the pier head, and a
+crab has to **walk to one**. It is gathered in `pickErrand` and scored through
+the same detour machinery as a plate of food or a drink at the tap, so turnout
+is geography and shifts rather than a number somebody picked. `civicUrge` is a
+**ramp**, not a constant: for most of the day a vote is worth `VOTE_BASE` — a
+thing you do if the table is on your way — and in the last `VOTE_URGE_HRS` it
+climbs and crabs who have not got there start making a special trip. Capped
+below `DIRE` (0.9) so nobody ever walks off a shift to vote.
+
+**MEASURED, 24 polls across 6 seeds and 29 days: turnout 82%.**
+
+| by shift | | by trade | |
+|---|---|---|---|
+| M | 96% | shack | 94% |
+| E | 92% | fishing | 87% |
+| D (off) | 83% | hotel | 74% |
+| D | 76% | showers | 67% |
+
+The crab who struggles is the **owner-operator on the long D shift** — SUDSY,
+9:30 to 17:30, with the box 256px up the promenade. Not a wall (she makes it
+two times in three) and not a bias nobody can act on: the D shift derives from
+the shop's OPEN HOURS, and **the hours sign is a lever the player already
+holds**. Shorten your crew's polling-day shift and they vote.
+
+### TWO TABLES, and why — the measurement that changed the design
+
+With a single box on the promenade, **seed 1337 polled TWO of eight**. Not
+apathy: a map. A stop costs about a real second per 11px of walking, the town
+is 2512px wide, the whole D-shift fishing fleet works 8:30–18:30 at the PIER
+1200px away, and the polls shut at 19:00. A fisher could not have voted if they
+had sprinted. **A structural bias nobody can act on is not a choice**, and this
+game is about choices — so the box goes where the people are, twice, exactly
+the idiom the two standpipes already use (`WATER_TAPS`). The PAPER is still one
+supply for one election, so running out is still running out.
+
+### 2. THE POLLS SHUT
+
+`POLL_OPEN = 7:00`, `POLL_SHUT = 19:00`. The early opening is load-bearing: a
+working crab's errand window closes 30 minutes before they leave the house, so
+an owner-operator on the 8:30 D shift has **no daylight at all** between the
+town opening at 8:00 and their own front door. Polls open early in real towns
+for exactly this crab. The 19:00 close is the tension — the D-shift owner
+finishing at 18:30 has half an hour and a walk.
+
+The rule at the table is the one a returning officer uses: **standing there
+when it shuts counts; turning up at one minute past does not.** A latecomer is
+recorded in `ballotBox.late` and says so in their own diary.
+
+### 3. THE BALLOTS ARE PAPER
+
+Nominations close at the settlement the **night before** — you cannot print a
+ballot paper without knowing whose names go on it — which gives the player's
+decision to STAND a real deadline, called out on the HALL tab on the night it
+bites. The office then orders one sheet per crab plus `BALLOT_SPARE`, at
+`BALLOT_PRICE` each, **off the ferry, on the trade ledger** (`paper` joined
+`IMPORTS`), out of the town fund through `fundRemit`. Same law as everything
+else: nothing is conjured.
+
+Three things had to be fixed before that worked, each one measured:
+
+- **The purse must BUDGET for it** (`ballotBill` inside `fundNeed`), and **two
+  nights out**, not one — RENTS is taken out of each house rent on its way past
+  and DUES land with the ferry, so on the founding policy the fund's balance
+  tonight is what last night's collection left. Before: *every seed, every
+  week, "NO BALLOT PAPER"* — not because the town was poor but because nobody
+  had asked for the money.
+- **Paper comes BEFORE the soup.** The roof is statutory and so is the
+  election; the pot is what the mayor CHOSE. A budget spends its obligations
+  before its intentions. With the pot first, three seeds in four printed
+  nothing, because an $8 bowl beat $2.25 of paper every time.
+- **And if the purse is still short, the town PASSES THE HAT** (`whipRound`).
+  This kills a real **ratchet**, and a scenario found it rather than a reading
+  of the code: a town where everybody sleeps at the shelter pays no house rent,
+  so a RENTS-funded office can never print ballots, so it can never hold the
+  election that would move it off RENTS. This system's standing rule is that a
+  town can vote itself into losing the shelter and then vote itself back out —
+  *a corrective loop, never a ratchet*. The hat is the same movement the
+  collection tin already makes (`fundTake` out of a named crab's live balance,
+  audited), scoped to a statutory purchase of a few pennies. A town where
+  NOBODY has `WHIP_KEEP` in their pocket still holds no election, which is the
+  destitute case that failure was always meant to be about.
+
+### AND THE COUNT IS BY HAND
+
+`COUNT_MINS` a paper, in the order they went into the box. **The tally does not
+exist until it is counted**: `cands[].votes` stays at zero all day while the
+box fills, and the declaration comes on the promenade when the last paper is
+read — so a town that votes for a new purse at teatime is trading under it by
+nightfall (the office used to change hands at the settlement table, one day
+later). `finishCount()` at settlement is the safety net for a town big enough
+that its count runs past 20:00.
+
+### What the player sees
+
+In the world: a trestle, a box with a slot cut in the lid, and a board that
+says one of the **five states** — not yet open, open with a pile of blanks you
+can watch go down, open with the pile gone, being counted, declared. The pile
+is **one pixel a sheet**, so "the paper is running out" is legible from the
+boardwalk. The count is a second pile moving across the table.
+
+On the HALL tab: the live box on polling day — who is on the paper, how many
+have voted, how much paper is left, and the three ways a crab loses a vote,
+each by name. **No running tally, deliberately.** The papers are face down
+until the count; a live total would quietly undo the whole point.
+
+### Balance
+
+Baseline `--days 30 --seeds 16` **0/16, median day 12**; growth
+`--buy chef,table --days 40 --seeds 8` **3/8**. Both unmoved. Suite 172 → 179.
+
+### Left deliberately undone
+
+**Nobody physically counts.** The count takes real time at the box, with a
+visible pile, but there is no crab animated doing it — a returning officer who
+had to walk there would need a fallback for being asleep, at work, or dead, and
+that is a state machine for a detail. Flagged for Matt rather than hidden: if
+he wants the count to be somebody's job too, it is a contained addition on top
+of what is here.
+
 ## CANON: THERE IS ONE FERRY (Matt, 2026-08-19)
 
 **Settled by Matt selecting option (a) from a two-option picker put to him by
@@ -4312,6 +4668,271 @@ reading surface owns the screen.
 - **Hooking the flash into `creditBiz`.** It would have been one line, but the
   draw can watch the day book instead and the sim stays untouched.
 
+## THE ONBOARDING PASS (shipped 2026-08-20, worktree) — the machine says what it is
+
+**The brief, in one line:** Ben Lewis's playtest listed six defects and four of
+them are "I cannot tell what this does". This pass answers those four, and
+leaves the economy exactly as frightening as it was. Of the other two, the
+fifth (*"PAUSE ANYONE?"*) was answered by removing the idea rather than
+building it, and the sixth — the lease card's wall of text with no hook — is
+still open.
+
+**THE LINE EVERY DECISION HERE WAS TAKEN AGAINST** is the ruling above:
+*interface opacity is a bug; economic uncertainty is the game*. Restated as the
+test that was actually applied to each change: **a player who cannot tell WHAT
+A BUTTON DOES is a bug to fix; a player who is losing money while they work it
+out is the design.** Anything that would have bought the player TIME was
+rejected on those grounds — including, explicitly, an early version of the help
+card that stopped the clock while it was open. That went in the bin the same
+day the pause chip did (Matt: *"remove the pause button, it's against the
+spirit of the game"*), and a scenario now pins it: the help copy may not
+contain PAUSE, SPACE BAR, STOP THE CLOCK or FREEZE, and the clock is asserted
+to keep running with the card open.
+
+### 1. SHOP TOOLTIPS — "WHAT DO THESE THINGS DO? TOOLTIP TIME!"
+
+Every rung of the shop grid was a NAME and a PRICE and nothing else. A tooltip
+card now hangs off the bottom of the world, directly above the MANAGE/TOWN
+chips (the only band that is sky on the shop tab), and it says exactly four
+things:
+
+| | | |
+|---|---|---|
+| **NAME** | `HIRE CRAB` | the button |
+| **PRICE** | `$60`, green if you can afford it, red if not | what it costs once |
+| **WHAT CHANGES** | `CREW 2 -> 3` | derived, see below |
+| **EVERY NIGHT AFTER** | `+$23 A SHIFT ON TONIGHT'S BILL` | the standing order |
+
+The fourth row is the one that earns its keep. HIRE CRAB and ARCADE are both
+one-off prices on the button and both of them are really a commitment against
+every future 20:00, and nothing on screen said so.
+
+**WHAT IT MAY NOT SAY** is whether the thing will pay for itself. No projected
+income, no payback period, no "recommended". That decision is the game.
+
+**IT IS DERIVED, NOT TYPED.** `upEffect()` reads the same functions the sim
+reads — `stationCap`, `bizTables`, `crabs.length`, `ownedBizList` — and
+`upOngoing()` reads `bizWage()` and `BIZ[k].rent`. So dropping the shack's wage
+on the management card changes what the HIRE CRAB button promises, because it
+changes what a hire costs. The scenario tests the mechanism rather than the
+string: read the promise, buy the thing, assert the town now holds the number
+the promise named. All seven rungs.
+
+**ONE RULE, TWO INPUT DEVICES.** `tapShopButton` buys the button whose tooltip
+is ALREADY ON SCREEN and otherwise puts the tooltip on screen. On a mouse that
+is a single click, because moving the pointer over the button showed the
+tooltip on the way in — hover does the arming for free. On a touchscreen it is
+read-then-buy. Neither device has a mode the other lacks. `tryBuy` is untouched
+and is still the one function that moves money, which is why every tool and
+every existing scenario keeps driving it directly.
+
+### 2. THE HELP CARD — eight pages, and two constraints pulling against each other
+
+Matt, mid-pass: *"there should be a help screen for public functions and
+roles"* — which is the same defect Ben found from the other end (*"theres
+pinchy and claudi. What do they do?? NOBODY KNOWS"*). The town is full of
+crabs and only SOME of them are yours, and before this there was no surface
+anywhere that said which was which or who was paying them.
+
+`HELP_PAGES`, in reading order — your business, your staff, the deadline,
+everyone else, what the town does, the vote, where things are, the keys:
+
+1. **THE SHACK** — the loop in four steps, and that the shack is the only thing
+   in town that puts money in your pocket.
+2. **THE CRABS** — what they do for you, and what they need out of their own
+   wages.
+3. **THE CLOCK** — 20:00 is the only deadline; and it only runs forward.
+4. **WHO IS WHO** — the ROLES page, as a key/value table: YOUR CREW (you hire
+   them, you pay them at 20:00) / OWNERS (run their own shop, pay themselves) /
+   FISHERS (self-employed, they sell you the fish) / VISITORS (off the ferry
+   with real money) / THE MAYOR (elected, top hat, runs the shelter) / RIVAL
+   OWNERS / THE LANDLORD (Mr. Pincherton, never seen, always paid). Plus why an
+   owner-operator works the long D shift, and that any crab's own card answers
+   this for that crab.
+5. **THE TOWN HALL** — the PUBLIC FUNCTIONS page. The shelter (and that it pays
+   the landlord rent like you do), the town fund and its four purses with the
+   mayor's pick between them, why the purses falling on different crabs is what
+   makes the vote worth casting, and the iron rule underneath all of it:
+   *nothing here is free, every bowl in that pot was bought from a real shop the
+   night before.*
+6. **POLLING DAY** — Sunday. Nominations close at Saturday's settlement, two
+   ballot tables, polls 07:00-19:00, finite paper, hand count, and a long shift
+   can cost a crab its vote. Then the sentence Matt asked for by name:
+   **you cannot set the town's policy unless one of your crabs is wearing the
+   hat; until then those dials are your manifesto, nothing more.** The HALL
+   tab's mechanism was always right (the dials only ever write `hall.plat`, and
+   `hall.policy` is written only under `playerMayor()`) — the card never SAID
+   so, which made it read as an economic bug when it was an interface one.
+7. **FINDING THINGS** — the nav strip, MANAGE, TOWN, the shop tab.
+8. **CONTROLS** — right-click, the bracket keys, `f`, `m`/`n`/`b`, `esc`, `h`.
+
+- **THE EMBARGO.** The town's name is not on it and neither is the way out: a
+  scenario greps the whole card for FERRY OFFICE / TICKET / FARE / ESCAPE /
+  PASSAGE / MAINLAND and fails on any of them. The BOAT's existence is fine —
+  she lands tourists four times a day in plain sight and the game's own toast
+  says THE FERRY IS IN — it is the office at the pier head that is the reveal.
+- **THE RULING.** The same scenario fails on RECOMMEND / SHOULD BUY / PROFIT /
+  PAYS FOR ITSELF / WILL EARN — and, since 2026-08-20, on PAUSE / SPACE BAR /
+  STOP THE CLOCK / FREEZE, because a help screen is exactly where the pause
+  chip would quietly come back as a promise that reading is free.
+- **AND IT HAS TO KEEP SAYING THE LOAD-BEARING THINGS.** The same scenario
+  requires 20:00 / RENT / WAGES / TIP / CRAB SHACK / REP / YOUR CREW / FISHERS /
+  VISITORS / THE MAYOR / THE LANDLORD / SHELTER / TOWN FUND / SUNDAY /
+  MANIFESTO. That list is Matt's brief turned into a gate: an edit that quietly
+  drops the roles page fails here rather than being found by the next player who
+  cannot tell what a fisher is.
+
+**Doors in:** a HELP chip third on the nav strip's chip row (its x is a
+constant, so it does not move when a player with no shop left loses MANAGE and
+TOWN — and unlike those two it stays live for that player), the `h` and `?`
+keys, and a HOW TO PLAY button on the title screen. The chip pulses on day one
+until the card has been opened once (`helpSeen`, persisted), and fires one
+toast: *"NEW HERE? TAP HELP - OR PRESS H"*.
+
+**Doors out:** DONE, a tap off the card, `esc`, or the chip again — all four
+through one `closeHelp()`.
+
+**AND ONE OPACITY GAP CLOSED IN COPY RATHER THAN CODE:** page 5 ends with
+*"THE HELP WANTED BOARD IN THE MIDDLE OF TOWN ALSO CARRIES THE TOWN'S TRADE
+LEDGER"*, which PLAN has had on the undiscoverable list since 2026-08-19.
+
+**THE BUG THE FONT CAUGHT:** the controls page originally listed `[  ]` for the
+crab cycler. `FONT_SMALL` has no bracket glyphs, so it printed `??  ??` — on
+the one screen whose entire job is explaining the controls. The scenario now
+checks every character of every line against the font table it will be drawn
+in, in both fonts, and the keys are named ("BRACKET KEYS") instead.
+
+### 3. A HIRE YOU CAN SEE — "Don't even see the crab. He just joined the crew."
+
+Three things now happen, and the order matters: the camera **snaps** to the new
+hire (the follow lerp is `dt * 5`, so a hire across town would slide past while
+the card was already up); a green **pointer bobs over their head** in the world
+for as long as the card is up; and a **card** says who they are, how they got
+here (a tourist who stayed, or a face off the morning bus), what they will do
+all day, the shift window they are on, `$23 A SHIFT, ON TONIGHT'S BILL AT
+20:00`, and that they sleep at the shelter — because a hire starts homeless
+like everybody else in this town and nothing anywhere said so.
+
+**The card runs on the WALL clock, not the sim clock.** A card you are meant to
+read must not get six times shorter because the speed chips are on. This buys
+the player nothing: the day underneath it is running at whatever speed they
+chose. `raw` is computed beside the `dt` line rather than out of it, so the
+speed row's own arithmetic is untouched.
+
+### 4. "IS MY MONEY GOING UP?" — history, not a forecast
+
+The panel slot he was looking at read **`$1.1/S`**: dollars per second of REAL
+time, a number that changes when you press a speed chip. It reads
+**`TODAY +$159`** now — `coins - dayOpen`, green up, red down.
+
+That is a **FACT ABOUT TODAY**, and the distinction is the whole ruling. It does
+not project tonight; the BILL chip already states what is owed and whether the
+two meet is the game. After 20:00 it goes hard negative, because the landlord
+just took the rent — the loop being taught rather than hidden.
+
+`dayOpen` is set at midnight and rides the save (an old save opens the day at
+the till it came back with, which reads `+$0` rather than a phantom fortune).
+`incomeRate()` is still called for its side effect: it is the only thing that
+prunes `earnHist`.
+
+Measured, not counted: the label is dropped rather than the number when a rich
+town makes the pair too wide for the 52px between the SHOP tab and the SAVE
+chip. Worst case checked at `-$123.5K`.
+
+### 5. THE TILL BOARD — where the money comes from, said in the town
+
+Matt: *"maybe it's not obvious enough that the crab shack is the central place
+money comes from?"* The nav strip answers that on the MAP (tallest block, only
+gold one, only named one, dead centre). This answers it at STREET LEVEL: a
+board chalked **TILL TODAY $295** hung on your own shopfront, going up while
+you watch the plates go out, flashing in step with the strip off the same
+watcher.
+
+It takes the slot the CLOSED placard uses and cannot fight it (that branch is
+`!bizOpenNow`, this one is the else). It is on YOUR shops only — a peer's
+takings are not your business and have never been on any surface the player can
+read. And it reads `today.biz[key].take` through `navTill`'s **plain lookup**
+rather than `bizDayBook()`, which would CREATE a day-book row for a shop that
+has not traded and put a phantom line in tonight's report.
+
+### 6. THE MUSHED TEXT — and the third sweep
+
+Matt: *"the tips slider is mushed up with the other text; might be a couple of
+instances like that."* There was, and this is the cause: the SCHEDULE tab's
+right-hand column ran **TONIGHT $92** (y+45), **TOWN/PIER** (y+54), a
+**"TAP A ROW"** hint (y+60) and the slider's own readout (y+66) — four strings
+at a 6px pitch in a 5px font, none of them technically overlapping, all of them
+unreadable as a group. **The existing sweep cannot see this**: it fires on two
+pixels of overlap and this was one pixel of gap.
+
+The hint went, because it was already said — the foot of the same card carries
+the full sentence, next to the roster it is about. That leaves the slider's
+readout a row of its own.
+
+**AND THE OTHER TWO INSTANCES, which the sweep found once it was pointed at a
+LONG NAME.** The character card prints the crab's name at x29 and its mood
+right-aligned to x104, and nothing measured the gap - so **PLANKTON PETE
+printed straight through DOWN**, and TIDEPOOL TIM through it on the visitor's
+card. Both had a `slice(0, 9)` where a measurement belonged, which is the exact
+guess-about-a-proportional-budget this file already has a paragraph about; the
+5x7 font simply had no `fitSmall` equivalent, so **`fitText` is new**. The
+reason it survived this long is the fixture: every sweep ran the card on
+`crabs[0]`, who is PINCHY, six characters, and the row only breaks at about
+ten. The sweep now runs it on the widest name in `CRAB_NAMES.concat(
+CUSTOMER_NAMES)` against the widest mood, measured rather than typed - so a new
+name added to the roster is checked the day it lands.
+
+**AND THE OTHER CLASS.** Three of the SCHEDULE card's footer sentences were over
+budget and were being silently cut off by `fitSmall` — a line that fits because
+its tail was removed still reads as a sentence nobody finishes. New scenario
+**"no fixed sentence on a card is trimmed to a pair of dots"** sweeps the copy
+that is WRITTEN (help pages, tooltips, hire card, roster hints) against the
+game's own rect tables, and leaves alone the copy that is ASSEMBLED (menus,
+report lines, ballot lines out of crab names) — trimming is the right answer
+for those, which is what `fitSmall` is for. `rosterHint()` was hoisted out of
+the draw so the suite measures the same strings the card prints rather than a
+copy of them.
+
+### The receipts
+
+- **Two real pre-existing bugs found by the extended sweep and fixed**: a long
+  crab name printing through its own mood on both character cards. See the mush
+  section - the fix is `fitText`, and the sweep now uses the roster's widest
+  name so it cannot regress quietly.
+- **13 new scenarios** (the suite goes 167 -> 180), all mutation-tested. The three worth naming: the
+  tooltip promise is verified by BUYING the thing and re-reading the counter;
+  the hire pointer is verified by PANNING THE CAMERA and checking it moved by
+  exactly as much the other way (a pointer parked at a screen coordinate passes
+  "it drew" and fails that); and the help card's character set is checked
+  against `FONT_SMALL` itself.
+- **Both existing UI sweeps extended.** The overlap sweep gained all eight help
+  pages, all seven tooltips, the hire card, and — a class it had never been
+  pointed at — **WORLD text on a shopfront** (`drawBusiness`, at midday so the
+  till board is actually up). Mutation-tested by moving the till board onto the
+  MANAGE chip: caught, both as text-on-text and as rect-on-text. The off-canvas
+  sweep gained the same surfaces plus the nav chip row.
+- **NOT swept: the management card's HALL tab.** It was being rebuilt in
+  parallel (polling day) and a finding there would have been stale before it
+  was read. It is the one full-screen surface neither sweep covers.
+- **Balance untouched by construction.** Every line of this is draw and input.
+  The one new piece of state the sim can see is `dayOpen`, which nothing reads
+  but the panel, and the one read INTO the sim (`today.biz[k].take`) does not
+  write. `tryBuy` is unchanged; the arming lives in `tapShopButton`.
+
+### Rejected
+
+- **A help card that stops the clock.** Built, then removed the same day on the
+  ruling above. It is the pause button under another name.
+- **An advisor / projected income / "recommended" purchases.** The thing that
+  would most obviously have "fixed" *"is my money going up?"*, and the thing
+  PLAN explicitly says not to build.
+- **A tooltip in the panel under the shop grid.** Measured: the second button
+  row ends at y237 of 240. There are thirteen rows there and a tooltip needs
+  thirty-six.
+- **An edge pointer to the shack** when it is off camera. The nav strip already
+  names it and the till board already speaks; a third answer to the same
+  question is clutter.
+
 ## Backlog (rough priority)
 - **THE FIRST OUTSIDE PLAYTEST (2026-08-19), verbatim.** Matt's friend, new to
   the game, played the opening. This is the most valuable feedback the project
@@ -4332,14 +4953,19 @@ reading surface owns the screen.
      reading its own UI. This is the biggest single miss.
   2. **The lease card is a wall of text with no hook** — it is the first
      screen, and it explains terms to someone who does not yet care.
-  3. **"What do they do?? NOBODY KNOWS"** — the crew cards name PINCHY and
-     CLAWDIA and never say what a crab is FOR.
-  4. **"WHAT DO THESE THINGS DO? TOOLTIP TIME!"** — shop upgrades are priced
-     and named and otherwise unexplained.
-  5. **Hiring has no visible consequence** — "Don't even see the crab. He just
-     joined the crew." A new hire should ARRIVE, visibly, and be pointed at.
-  6. **"Is my money going up?"** — the rate readout ($/S) is not legible as
-     income. The one number a player needs, unclear.
+  3. ~~**"What do they do?? NOBODY KNOWS"**~~ — **shipped 2026-08-20**: the
+     HELP card's page 2 is exactly this question ("THE CRABS: what they do
+     for you, what they need"), and page 1 says what the shack is for.
+  4. ~~**"WHAT DO THESE THINGS DO? TOOLTIP TIME!"**~~ — **shipped
+     2026-08-20**: every rung of the shop grid now carries a tooltip with
+     what it does, what changes, and what it costs you every night after.
+     See the onboarding-pass entry.
+  5. ~~**Hiring has no visible consequence**~~ — **shipped 2026-08-20**: the
+     camera snaps to the new hire, a pointer bobs over their head, and a
+     card says who they are and what they will cost at 20:00.
+  6. ~~**"Is my money going up?"**~~ — **shipped 2026-08-20**: the $/S slot
+     now reads TODAY +$159 (coins - dayOpen), which is history rather than a
+     forecast. The BILL chip is still the other half of the sum.
   Note what he got RIGHT with no help: *"I want to pay back my landlord."* The
   rent goal lands. It is everything around it that does not.
 
@@ -4378,9 +5004,8 @@ reading surface owns the screen.
   aimed at the wrong confusion is worse than none. What is measurably
   undiscoverable today, from a build-session audit — every one of these is a
   real feature with NO on-screen affordance:
-  - **RIGHT-CLICK to redirect a crab** (`contextmenu` handler). A whole
-    interaction Matt specifically asked for, with nothing anywhere saying it
-    exists.
+  - ~~**RIGHT-CLICK to redirect a crab**~~ — **shipped 2026-08-20**: it is on
+    the HELP card's controls page, with the rest of the keys.
   - **KEYS**: `m` mute, `n` music, `b` next track, `f` fast-forward, `[` / `]`
     cycle crabs, arrows pan, `Escape` backs out. All undocumented in-game.
     (Arrow-key panning is no longer the ONLY way around town — see the nav strip
@@ -5053,7 +5678,11 @@ language is merely kept distinct so either reading still works.
   dismiss can drop you to the title); mistPeak is a day-hash so a
   clear/thick pair is chosen, not waited for (day 11 ≈ 0.25 is a good
   night, day 37 ≈ 0.8 a thick one); the crab cycler lives in the CHARACTER
-  CARD header, so shoot the card, not the top-right. Console staging:
+  CARD header, so shoot the card, not the top-right. **There is no pause
+  and no speed of zero** (ruled out on purpose), so a frame cannot be held
+  across an await: kill requestAnimationFrame on the page, then drive
+  frame() yourself with synthetic timestamps — frame(last) gives dt of
+  exactly zero, which is the only way to stop the clock for a shot. Console staging:
   `UPS.arcade.lvl = 1; coins = 20000` opens the ferry office and greens
   the fingerpost. **Re-verify a UI screenshot after any UI merge — a
   published shot of a moved control is a stale doc.**
@@ -5061,6 +5690,343 @@ language is merely kept distinct so either reading still works.
 - Big features → fork subagents in git worktrees (they don't push; the parent
   reviews screenshots + suite output, merges, re-verifies, pushes).
 - Balance work happens in the sim, not by intuition — measure, then tune.
+
+## THE ILLNESS-ROLL CLOCK ARTIFACT (investigated 2026-08-20, worktree) — MEASURED, AND DELIBERATELY NOT FIXED
+
+**Matt:** *"clawdia still has supercrab powers of never getting sick btw, she
+keeps making all the money."* The standing diagnosis (STATE OF PLAY, "NEXT UP")
+was a clock artifact in the nightly sickness roll — it reads every crab's needs
+at the **instant** of the 20:00 settlement, which is late in a MORNING crab's
+day and early in an EVENING crab's — with a measurement attached: *morning
+crabs ill 9.2% of the time against evening's 1.9%.*
+
+**The mechanism is real. The 9.2 / 1.9 is not, and did not reproduce in any rig
+this was measured in.** The pass therefore ships a MEASUREMENT and a RECEIPT,
+not a rewrite. Behaviour is byte-identical: the 16×30 matrix comes back with
+every number the same, and the frozen day-2 fingerprint was never touched.
+
+**AND THIS IS THE SECOND TIME.** Matt's "*still* has supercrab powers" is the
+giveaway: the same complaint, read the same way ("the owner read it as 'CLAWDIA
+is OP'; she was simply the E-shift founder"), was investigated and fixed on
+2026-08-19 — sleep only repaired tiredness while `darkness() > 0.7`, so a
+morning crab lost recovery an evening crab kept, and `TIRED_NAP` was added and
+tuned by an M/E shift-fairness probe. The suite gate from that pass ("tired: the
+morning and evening shifts end the week level") still holds at a mean gap of
+0.007 over six seeds. **The clock half of the shift problem was already fixed;
+what remains under the same words is CLAWDIA herself.**
+
+### What was actually measured
+
+New rig: **`node tools/shiftill.mjs [--seeds N] [--days D] [--crew N]
+[--organic] [--swap] [--dump PATH]`**, driving the real game through simlib and
+reading the roll's own view of the town through a new `window._stats.rollLog`
+seam in the settlement (armed only when a rig asks; consumes no RNG; there is a
+suite gate proving a logged town is byte-identical to an unlogged one).
+
+Only the CREW has an M/E shift — townsfolk and fishers are all `D` — so the
+default rig hires the crew to six through the game's own `hireCrew()` (which
+alternates M/E by crew size) and keeps the town solvent, the same shape
+`tools/illness.mjs` uses. 12 seeds × 30 days = **2124 crew crab-nights**, ~1060
+a side.
+
+**THE HALF THAT IS TRUE — the roll reads a systematically different crab
+depending on the shift.** What the roll actually sampled:
+
+| shift | hunger | thirst | dirt | tired |
+|---|---|---|---|---|
+| M | 0.263 | 0.483 | 0.481 | 0.579 |
+| E | 0.152 | 0.266 | 0.446 | 0.693 |
+
+A morning crab carries **1.7× the hunger and 1.8× the thirst** of an evening
+crab at the moment of judgement. It is not soft: the settlement runs at the TOP
+of `frame()`, before the crab loop, so an E-shift crab (14:00–20:00) is still
+`working` when the roll reads them, and their whole clock-off bump — hunger,
+thirst, **+0.25 dirt** — lands *after* it, every night, with the 45-minute
+last-call grace window on top (measured: an evening crab's day routinely
+finishes at 20:45 or later, a full hour on the far side of the judgement).
+
+**THE HALF THAT IS NOT — it never reaches the outcome, because the two halves
+of the artifact point in opposite directions.** The morning crab carries the
+day's hunger and thirst into the roll; the evening crab carries the day's
+EXHAUSTION into it (0.693 vs 0.579 — they are read minutes after a six-hour
+shift, where the morning crab has had an afternoon of `TIRED_NAP`). Assembled
+into risk they cancel:
+
+| | M | E | M/E |
+|---|---|---|---|
+| mean risk the roll assembled | 0.00906 | 0.00926 | **×0.98** |
+| prevalence (nights ill) | 2.96% | 2.59% | ×1.14 |
+| incidence (new illnesses/at-risk night) | 2.00% | 1.52% | ×1.32 |
+
+on 21 and 16 events respectively. **PINCHY (M) was ill on 1.94% of 360 nights
+and CLAWDIA (E) on 1.39% of hers** — and in 16 ORGANIC towns × 30d (the losing
+town the player actually meets, ~170 nights a side) it runs the *other* way:
+PINCHY 0.00%, CLAWDIA 2.41%, risk ×1.12 in M's favour. The ratio wanders
+between 0.75 and 1.12 across trajectories at ~180 crab-nights an arm, i.e. the
+whole effect is noise. There is no supercrab.
+
+### The experiment that settles it: swap the founders' shifts
+
+`--swap` exchanges PINCHY's and CLAWDIA's shifts on day 2 and changes nothing
+else, so the question becomes a clean one: does the gap follow the SHIFT or the
+CRAB? 12 seeds × 30 days, 360 nights each, both arms:
+
+| | PINCHY | CLAWDIA |
+|---|---|---|
+| **as shipped** | M — ill **1.94%**, risk 0.02123, 4 illnesses | E — ill **1.39%**, risk 0.02213, 3 illnesses |
+| **shifts swapped** | E — ill **3.61%**, risk 0.03103, 7 illnesses | M — ill **2.50%**, risk 0.02317, 4 illnesses |
+
+**The gap follows the crab.** PINCHY is the sicker of the two on mornings *and*
+on evenings; CLAWDIA is the healthier one on evenings *and* on mornings. The
+roster-wide ratio meanwhile shrugs: M/E risk ×1.01 as shipped, ×0.93 with the
+founders swapped — a shift is not a thing that happens to you. (Honest sample
+note: these are 3–7 illnesses per cell. The *direction* survives the swap; the
+*size* of it is a coin, and the number with power in it is the ×0.98 risk ratio
+above.) Mean wallet at the roll is $12 vs $11 as shipped and $12 vs $12 swapped
+— "she keeps making all the money" does not show up as a savings gap either,
+because both founders spend what they earn on the same needs.
+
+### Two candidate fixes, measured on the same 4658 rolls, both rejected
+
+Every recorded roll was re-scored under each candidate rule (`--dump` writes the
+raw roll log; a throwaway scoring script reads it), so the three rules are
+compared on **identical** crab-nights rather than on three separate
+simulations. The `hours` and `peak` columns came from a throwaway build that
+banked them per crab alongside the same seam — six lines in `tickNeglect`,
+reverted with the rest; rebuild it there if this is reopened.
+
+| rule | M/E | town-wide mean risk |
+|---|---|---|
+| **shipped**: one instant sample at 20:00 | **×0.98** | **0.01678** |
+| the crab's own-day **PEAK** | ×1.03 | 0.03632 (**+116%**) |
+| **hours banked** over each line / 6h (the exposure integral) | **×1.43** | 0.02241 (+34%) |
+
+- The **exposure integral** — the obvious "judge their own day" fix, and the one
+  the brief pointed at — is **worse on the very thing it was meant to fix**. A
+  morning crab spends **2.48 hours a night** over the exhaustion line against an
+  evening crab's **1.41**, because they finish work at 14:00 exhausted and stay
+  awake for six hours, while an evening crab finishes at 20:00 and goes to bed.
+  That is a real difference in a real day, not a clock artifact, and integrating
+  over the day *surfaces* it instead of removing it. (It was built, shipped into
+  a working build, and measured end to end: 16×30 came back 0/16 with median
+  eviction 12 but a different tail, and town-wide infections 58 → 61. Then it
+  was reverted, because ×1.43 is worse than ×0.98.)
+- The **peak** rule is as fair as what we already have and **more than doubles**
+  the town's illness. Buying nothing for a full retune of the four most
+  documented numbers in the health model is not a trade.
+
+**So the roll stays as it is, on purpose.** The bar for anyone who reopens this
+is **×0.98**, not "better than nothing".
+
+### What CLAWDIA actually has
+
+Founder identity, fixed in `crabs.js` and nothing to do with her shift.
+`FOUNDERS` is a constant: PINCHY is always index 0 (**SPEEDY**, move 1.4, work
+1.0, tip 1.0, on foot) and CLAWDIA always index 1 (**TIDY**, work 1.1, tip 1.05,
+on a **bike**), and `makeCrabPersona` alternates shifts by index, so
+CLAWDIA is on evenings in every seed there has ever been — which is exactly why
+"evening" and "CLAWDIA" are impossible to tell apart by eye. She works 10%
+faster, tips 5% better, and rides at `MODES.bike` 75 where PINCHY walks at
+`crabMove` 40 × 1.4 ≈ 56. *"She keeps making all the money"* is the observation,
+and it is about the crab, not the clock — **the `--swap` arm above is the test
+that separates them, and it is the one to re-run if this comes back.**
+
+### What shipped
+
+- `tools/shiftill.mjs` — the rig, kept, with the finding written into its head.
+- `window._stats.rollLog` in the settlement roll — the seam, off by default,
+  RNG-free, with a suite gate proving it inert.
+- `illRisk(c)` — the roll's four need lanes split into a named function so a rig
+  can read them without re-implementing them (the sim contract), carrying the
+  full receipt above it.
+- `devlog/img/2026-08-20-illness-roll-clock-artifact.png` (what the roll reads
+  vs what comes out of it) and `.../2026-08-20-illness-roll-three-rules.png`
+  (the three candidate rules on the same 4658 rolls, plus the founder swap) —
+  drawn with the game's own 5x7 font, because the honest picture of this pass
+  is a distribution that refused to move.
+- Three suite scenarios under `THE ILLNESS-ROLL CLOCK ARTIFACT`: the ordering
+  probe (an evening crab is still on shift when the roll reads them, and their
+  clock-off bump lands after — a KNOWN unfixed property, pinned so the next
+  person has to read the receipt rather than rediscover it), the roster outcome
+  gate (M/E within 0.4–2.5 on the live rule), and the seam-is-inert gate.
+
+### Left undone, on purpose
+
+- **`careLane()` is the same class of read** and was not touched: it decides the
+  cure/death lane from `hunger >= 0.5`, `dirt >= 0.66`, `thirst >= 0.5` at the
+  same 20:00 instant, and the morning crab's instant hunger (0.263 vs 0.152)
+  sits in exactly that band. It was left alone because it lives next to the
+  shelter pot, it moves deaths rather than infections, and this pass's whole
+  finding is that this shape of read is not, in fact, biasing the outcome. If it
+  is ever revisited, measure it the same way — `rollLog` is one field away from
+  carrying the lane.
+- **PLAN's STATE OF PLAY still lists the illness roll under "NEXT UP"** with the
+  9.2/1.9 numbers in it. Left for the coordinator to retire, because the top of
+  this file is being edited by several sessions at once.
+
+## ACCOMMODATION UPGRADES (shipped 2026-08-20, worktree)
+
+Matt's directive, verbatim: *"Also now we have two multi accommodation places;
+need to be able to make each pretty big by buying upgrades."*
+
+The town has two buildings that sleep more than one crab and both were frozen
+at the size they shipped. They grow now, and **the whole design is in who signs
+for the growth, because that is who pays for it.**
+
+### THE TWO HALVES ARE DELIBERATELY DIFFERENT
+| | THE SHELTER | THE DRIFTWOOD |
+|---|---|---|
+| what it is | town property, RENTED off Mr. Pincherton | a commercial lease with an owner |
+| who decides | the MAYOR (the player's chip when they hold the office, a policy when they don't) | the OWNER (the player's chip when they hold the lease, a policy when BRASS/REEF/a fisher does) |
+| what it costs | **$3 a night, forever**, out of the town fund - plus the first night as key money on the day | **$80 once** out of the till, **plus $4 a night on the lease, forever** |
+| what gates it | THE PURSE THE TOWN VOTED FOR | the till, tonight, with a payroll floor left in it |
+| how big | 4 beds -> 12 | 7 rooms -> 13 |
+
+### THE SHELTER HAD NO WALL AT ALL, and that is the fault this pass found
+`homeSpot` cycled four cot positions with `index % 4`, so the fifth homeless
+crab slept inside the first and the twentieth slept inside the fourth. The one
+building the entire town hall exists to pay for had **infinite capacity**. It
+has four beds now - the four the sprite has drawn since the day it shipped -
+and the crab who finds them taken **sleeps rough on the step**, through
+`sleepRough()`, the state the bolted-door path already models and prices (no
+rest banked at all, which arms the next morning's sickness roll).
+
+**Who gets a bed is TENURE**, off `p.nCot`, the nights-at-the-shelter counter
+`logNightly` has always kept. Two reasons, both load-bearing:
+- roster order would hand every bed to the player's crew (crabs come before
+  npcs in `allCrabs`), so the player would never once feel the wall they are
+  being asked to pay to move. **The pinch has to land on the hire.**
+- everybody's counter ticks on the same nights, so the ORDER never churns:
+  "the crab who has slept here longest keeps their cot" is stable, testable and
+  arguable from the dossier.
+
+### THE PURSE IS THE GATE, and that is the politics
+The fund **cannot save up** - `fundNeed()` strikes the purse to one night's
+bill and nothing more, by design - so a capital cost for a bed would simply
+mean the shelter could never grow. What gates a bed instead is a forward test:
+**would the purse the town voted for still cover the shelter's bill with this
+bed on it?** (`dormTake()` - a whole day's `purseYield`, recorded once at
+settlement so the player's chip and the CPU mayor's policy read the identical
+number rather than a half-finished morning's levy).
+
+Measured on four 40-day growth towns: a town on **RENTS 20%** raises about the
+rent and no more, and cannot add a single bed; the refusal says so by name
+(*"THE RENTS WON'T CARRY $16 A NIGHT"*). A town on a **LEVY** can carry three
+or four. Three of the four towns got to five beds and stalled there, which is
+the honest answer: **the shelter is as big as the town's politics.** The player
+who wants a twelve-bed dormitory has to win the office AND set a purse that
+bills their own shack for it - the conflict of interest the mayor pass built,
+now with something to buy.
+
+**AND THE BEDS COMPETE WITH THE BOWLS.** `platBowls` only counts the soup a
+platform can pay for AFTER the roof, and `platValue`'s roof term is binary
+(`purseYield >= shelterRent()`), so every bed walks into the next election:
+suite-pinned, a twelve-bed shelter makes a platform that used to cover the roof
+stop covering it, and the ideal platform of a homeless voter moves with it.
+
+### THE DRIFTWOOD GROWS INTO ITS OWN FORECOURT
+The back wall is FULL (the linen press at 2206, the last door ending at 2428,
+the queue standing at 2432) and **there is no upstairs**: `FLOOR_MIN` is 126,
+so a crab cannot walk to a landing and a room a guest cannot reach is scenery.
+What the hotel does have is a forecourt - the front row at **y158**, the row
+the shack keeps its tables in, on the same solid band (149-164) that leaves
+both travel lanes their daylight by construction. So it puts up **CABANAS**,
+six of them at a 26px pitch from x2266, and you can count them from the
+promenade. They are `stalls` like the rooms are, so the housekeeping dispatch,
+`freeRoom`, the wedge guards, the asking price's per-fixture term and the
+save's room index all grew with them and none of them had to be told.
+
+**The CPU owner's signal is the mirror of the hotelier's.** BRASS answers an
+unmade bed (`today.roomsLost`) with a WAGE, because that is a bed her laundry
+cost her. A guest bedded down on the sand with **every room LET** is a bed the
+house does not HAVE, and that is answered with a cabana (`annexe.short`, a
+running tally of guests rather than a nightly reading - a guest beds down at
+21:00 and the books close at 20:00, so a nightly counter would be read a day
+late or not at all). Keyed on the LEASE, so REEF builds on it too.
+
+### BALANCE - measured before and after on this tree
+| matrix | before | after |
+|---|---|---|
+| baseline `--days 30 --seeds 16` | 0/16, median **12** (7,10,11,11,11,11,11,12,12,12,12,13,13,13,14,14) | **0/16, median 11** (7,9,10,11,11,11,11,11,11,12,12,13,13,13,18,18) |
+| growth `--buy chef,table` 40d x 8 | **3/8** (10,10,11,13,14,41,41,41) | **4/8** (9,10,12,14,41,41,41,41) |
+| growth, second block `--seedbase 8` | **1/8** (6,11,12,12,13,14,14,41) | **2/8** (6,8,9,11,14,15,41,41) |
+| growth, BOTH blocks (16 seeds) | **4/16** | **6/16** |
+| lifetime, baseline | $57,468 | $57,725 |
+| lifetime, growth (block 1 / block 2) | $85,551 / $48,232 | $98,480 / $59,390 |
+
+Lose-by-default is untouched (0/16, median inside CLAUDE.md's 11-13 band).
+Growth is up by **two towns in sixteen** - inside the band PLAN already
+documents for that curve (5/16 and 6/16 either side of the visitor pass), and
+the second block was run precisely because CLAUDE.md says eight growth seeds is
+a coin. The movement is not free money, it is the hotel's own book: **room-lets
+1,051 -> 1,471** on block one and **703 -> 949** on block two, with **visitors
+sleeping on the sand 635 -> 458** and **385 -> 363**. A thirteen-room Driftwood
+turns fewer people away, which is reputation, which is what fills the boat.
+If the escape rate ever needs to come back down, the honest lever is
+`ROOM_CFG.RENT` (the landlord's cut of the annexe), not the capacity.
+
+**Rough nights roughly double in a long growth town** (2-19 before, 10-44
+after) and that is the new pressure, landing exactly where it was aimed: on the
+crabs a growing shack keeps hiring, who all start homeless.
+
+### WHAT IT COSTS THE SAVE
+Two small keys: `dorm` (beds, the last build day, the streak, the recorded
+purse) and `annexe` (the count, the last build day, the tally). The ANNEXE is
+written as a **count** and the stalls are rebuilt from it on load - the rooms
+are geometry, and a saved array of x's would let a reload land a hut somewhere
+a fresh build never would. Loaded BEFORE the visitors, because a guest is
+re-hung on their room by index and a guest asleep in cabana 3 must not wake up
+outdoors. An old save is a four-bed shelter and a seven-room hotel, which IS
+the old world.
+
+### THE ONE SEAM WITH THE TOWN HALL
+`SHELTER_RENT` stays a const and gains **`shelterRent()`** beside it; six call
+sites read the function instead (`fundNeed`, `platTake`, `platBowls`,
+`platValue`'s roof term, `runTownHall`'s `owed`, and the HALL tab's RENT line).
+`runTownHall` is otherwise untouched.
+
+### SUITE +9, and every one of them mutation-tested
+`shelter: the beds are finite, and the crab with no cot sleeps on the step`
+(both arms in one town: four beds and six crabs puts two on the step, the same
+night with the beds bought puts nobody there); `shelter: a bed is RENT, not a
+purchase` (world money falls by exactly the key money at a NAMED counterparty,
+and the next night's remit is the bigger number); `shelter: the PURSE decides`;
+`shelter: the BED+ chip is the mayor's, and it sits on the notice without
+covering it`; `hotel: the annexe is real rooms` (a guest sleeps in a cabana and
+housekeeping turns it over; a FULL annexe leaves both travel lanes clear - the
+harshest version of the lane tripwire there is); `hotel: a room is CAPITAL`;
+`hotel: a PEER owner builds off turned-away guests, and never out of tomorrow's
+payroll` (three arms: signal without money, money without signal, both);
+`accommodation: beds, cabanas, the bills they carry and a guest asleep in one
+all roundtrip` (plus an old save and a corrupt one); `accommodation: the
+shelter's bill is what the town votes on`.
+
+**Mutation tests, all five caught by the intended scenario:** an infinite
+shelter (`hasCot` always true), a free bed (`shelterRent` ignoring them), a peer
+owner with no till floor, a landlord who takes no cut of the annexe, and a
+cabana parked on the boardwalk lane.
+
+### WHAT WAS NOT BUILT, AND WHY
+- **No building materials on the trade ledger.** The rule is that resources are
+  never conjured, and they are not: the money leaves a real balance and is
+  destroyed at Mr. Pincherton, exactly the way every rent in this game already
+  leaves the world. The town is not buying timber, it is renting more of a
+  building that already stands, and inventing a freighter for it would be a
+  fiction the ledger does not need. (`IMPORTS` was also mid-edit in another
+  worktree; a table row is the worst-shaped hunk to land twice.)
+- **No third row of cot ART.** `cotSpot` stands three rows of four inside the
+  footprint (155/145/135 - `FLOOR_MIN` 126 is the ceiling) and draws a bed at
+  every one of them, but the crabs are painted over the back rows by the
+  y-sorted pass, so a twelve-bed dormitory reads as a full room rather than as
+  twelve distinct beds. The LOFT STOREYS above the roofline are what actually
+  say "this building got bigger" - one band per row of beds bought, a lit
+  window for each bed up there, and the mayor's notice rides up with it.
+- **No way to give a bed BACK.** A mayor can commit the town to a bill the next
+  mayor inherits and cannot undo, which is a feature: it is the sharpest thing
+  an office with two dials can do to a town.
+- **No HOURS lever on the annexe**, no per-cabana price (one price on the
+  hotel's sign is a suite-pinned invariant), and the player still cannot own
+  the hotel and meet BRASS - that is the hotelier entry's own deferral.
 
 ## THE DEPARTURE CARD (shipped 2026-08-20, worktree)
 

@@ -193,6 +193,14 @@ const labour = G(`JSON.stringify({
       + " room$" + roomPrice() + " wage$" + bizWage("hotel")
       + " x" + window._stats.hotelier.moves.length : "-",
   roomLets: window._stats.roomLets || 0, unhoused: window._stats.unhoused || 0,
+  // ACCOMMODATION UPGRADES: what the town BUILT, and the two shortages that
+  // asked for it - beds the mayor signed for, cabanas the hotel's owner put up,
+  // nights a crab spent on the step and guests turned away from a full house.
+  // Without these the matrix cannot tell a town that solved its housing from a
+  // town that never had the problem.
+  beds: shelterBeds(), cabanas: hotelRooms().length - HOTEL_ROOMS_BASE,
+  bunks: window._stats.bunks || 0, roughNights: window._stats.roughNights || 0,
+  roomShort: window._stats.roomShort || 0,
 })`);
 return { dayRows, wall, labour, lifetime: G("Math.round(lifetime)"), stats: G("JSON.stringify(window._stats)"),
   over: G("gameOver"), bankrupt: G("bankrupt"), debt: G("Math.round(credit.bal)"), day: G("day"), rent: G("rentAmount()"), rep: G("Math.round(rep)"), wal: G("JSON.stringify(window._wal)"),
@@ -261,6 +269,8 @@ if (SEEDS > 1) {
     + `; crew housed ${sum(l => l.crewHoused)}/${sum(l => l.crewN)}`
     + `; purse $${sum(l => l.purse)}; walkouts ${sum(l => l.walkouts)}; quits ${sum(l => l.quits)}`
     + `; roomLets ${sum(l => l.roomLets)}; unhoused ${sum(l => l.unhoused)}`
-    + `; hotelier ${L.filter(l => l.hotelier !== "-").length}/${SEEDS}`);
+    + `; hotelier ${L.filter(l => l.hotelier !== "-").length}/${SEEDS}`
+    + `; beds ${sum(l => l.beds)} (+${sum(l => l.bunks)}); cabanas ${sum(l => l.cabanas)}`
+    + `; rough ${sum(l => l.roughNights)}; roomShort ${sum(l => l.roomShort)}`);
 }
 console.log(`(${results.reduce((s, r) => s + r.wall, 0)}ms total)`);
