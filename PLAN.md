@@ -2070,6 +2070,18 @@ first, connect later. Don't build the network before the node is beautiful.
   easy remembering" which town is which. Validate-before-mutate on import;
   a bad file must never touch the running game.
 
+## SPOILER EMBARGO — the town's name (Matt, 2026-08-19)
+Matt: "don't put the town's name out there, it's going to be a cheeky
+reveal near the end." The name renders in exactly two places, both in the
+winning frame: the ferry's hull as she comes alongside, and the ending
+card. Everywhere else the game says TO THE MAINLAND / THE PIER / THE
+FERRY / "YOUR TOWN - SLOT N".
+RULE: DEVLOG.md must never name the town, and no screenshot of the ending
+card may be published. Write around it — "the far shore", "the mainland",
+"somewhere else". The player is never told where they live; they work it
+out from being able to see the other side. (Coordinator verifies with a
+grep before every devlog push.)
+
 ## CLOSING ACT — CS3 is feature-complete (Matt, 2026-08-18)
 Matt, verbatim: "I feel spiritually that once this stuff rolls and is
 quality crab shack 3 will be complete. Crab shack 4 we will work on the
