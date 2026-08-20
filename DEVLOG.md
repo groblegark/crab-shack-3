@@ -13,7 +13,8 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 ![The ferry office: TO THE MAINLAND, $20,000, BUY HER](devlog/img/2026-08-19-ferry-office.png)
 
 *East end of the beach, past the pier. A ticket office, a price, and a
-button. Behind it, across the water: ridges, a lighthouse, and a city.*
+button. Behind it, across the water: ridges, a lighthouse, a city — and a
+freighter working the channel, because this town imported something today.*
 
 Yesterday we published a capstone declaring CRAB SHACK 3 finished. The
 town has since acquired a horizon, a rival, a win condition and a ferry,
@@ -29,9 +30,14 @@ geography instead of scenery.
 
 Most evenings you can't see it. Mist rolls in from about six, thick and
 day-specific, and it does not lift at midnight; the small hours belong to
-last night's weather. Roughly one night in five comes up genuinely clear,
-and that's the whole design: **on a clear night you can see where you are
-not.**
+last night's weather. Roughly one night in five comes up clear enough to
+count as clear, and that's the whole design: **on a clear night you can see
+where you are not.**
+
+There is never a *perfectly* clear night, either — the haze has a floor
+baked into it, so the far shore is never crisp. On the best nights it's
+only close enough to count the town lights. You are, after all, on an
+island.
 
 ![A clear evening: the far shore reads sharp](devlog/img/2026-08-19-clear-night.png)
 ![A thick evening: the same shore, nearly gone](devlog/img/2026-08-19-thick-night.png)
@@ -103,10 +109,12 @@ three make an offer; one runs the whole arc.
 - **Wages are per crab.** Town standard, then per business, then per
   individual — which is precisely what gives the rival's wage war
   something to bite.
-- **A < crab > cycler** under the sun button steps selection and camera
-  through everyone in town ([ and ] on a keyboard). Tourists are excluded
-  on purpose: they go home mid-cycle, and a list that changes length under
-  your thumb isn't a list.
+- **A < crab > cycler** steps selection and camera through everyone in
+  town — two small chevrons in the character card's own header, so it
+  costs no screen when nobody's selected ([ and ] work regardless). A
+  tourist's card gets them too, as the way back into the roster. Tourists
+  are excluded from the cycle on purpose: they go home mid-loop, and a
+  list that changes length under your thumb isn't a list.
 - **Every crab keeps a diary** — a ring buffer of what they've been doing,
   in their detail view, with a FOLLOW button. And walkouts now record
   *why*: a crab who quits over money says so; one who quit from boredom
