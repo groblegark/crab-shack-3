@@ -125,12 +125,13 @@ three of them were asked for and all four are good.
     crab-nights an arm. Ask for the reproduction BEFORE the fix, every time.
 
 **NEXT UP:**
-- **THE GROWTH PILLAR** — the decision above. Nothing else should be measured
-  against a moving number until it is settled.
-- **The departure card** — the last of Matt's queue, in flight as of this
-  writing: built, screenshotted, rebasing onto main. End-of-day view of who is
-  leaving on the ferry and how they feel, with a quote DERIVED from their
-  stats.
+- **THE GROWTH PILLAR** — the decision at the top of this section. It is now
+  the ONLY thing on this list, and nothing else should be measured against a
+  moving number until it is settled.
+- ~~**The departure card**~~ — **SHIPPED 2026-08-20**: the day report's second
+  page, naming every visitor who sailed on today's boats, with a quote DERIVED
+  from a per-visit stay ledger — never random. See "THE DEPARTURE CARD" at the
+  foot of this file.
 - ~~**The onboarding/UI pass**~~ — **MOSTLY SHIPPED 2026-08-20** (see THE
   ONBOARDING PASS below): shop tooltips, a five-page HELP card with three
   front doors, a hire you can actually see arrive, TODAY +$N in place of the
@@ -5145,7 +5146,9 @@ copy of them.
   The last point is the constraint that makes this interesting: the game hides
   its ending ON PURPOSE, so "explain the game" and "keep the reveal" have to be
   satisfied at once.
-- **THE DEPARTURE CARD (Matt, 2026-08-19):** *"we should also have a view at
+- ~~**THE DEPARTURE CARD (Matt, 2026-08-19)**~~ — **SHIPPED 2026-08-20**, see
+  the feature section "THE DEPARTURE CARD" at the foot of this file. The
+  original entry, kept because it called the design exactly right: *"we should also have a view at
   end of day of folks leaving on the ferry and how they are feeling, with a
   'quote' based on stats."* The visitors already carry everything this needs —
   purse and spend, buys, nights, `roughNights`/`unhoused`, the rage-quit path,
@@ -6188,3 +6191,323 @@ cabana parked on the boardwalk lane.
 - **No HOURS lever on the annexe**, no per-cabana price (one price on the
   hotel's sign is a suite-pinned invariant), and the player still cannot own
   the hotel and meet BRASS - that is the hotelier entry's own deferral.
+
+## THE DEPARTURE CARD (shipped 2026-08-20, worktree)
+
+Matt, verbatim: *"we should also have a view at end of day of folks leaving on
+the ferry and how they are feeling, with a 'quote' based on stats."*
+
+The day report is the money. This is the PEOPLE: at the 20:00 settlement, when
+the report goes down, a second card comes up naming every visitor who sailed
+today, how they felt, and one sentence each in their own words.
+
+### THE ONE RULE: THE QUOTE IS DERIVED, NEVER RANDOM
+
+A random flavour-text generator is exactly what this must not be. It would be
+interface opacity dressed up as personality, and PLAN's second ruling says
+opacity is a bug while economic uncertainty is the game. So every sentence is a
+reading of something that happened to that guest and that the player could have
+stood on the promenade and watched:
+
+> `SLEPT ON THE SAND` ← `roughNights` (and `sandWhy`, asked at the moment they
+> lay down) · `$96 OF MY $141 WENT HOME UNSPENT - EVERY LINE WAS FULL` ←
+> `wallet`/`purse` and the `full` counter `visPick` writes when it turns them
+> away from a four-deep queue · `WAITED 5 HOURS AT THE CRAB SHACK, THEN LEFT` ←
+> the wait stamped between `queueJoin` and the rage-quit · `GETTING ON THIS BOAT
+> HUNGRIER THAN I GOT OFF IT` ← `hunger` at the gangway **and** `meals === 0`.
+
+Open that guest's diary (`visLog` already writes every one of these events) and
+the line is there.
+
+### THE STAY LEDGER — accumulated as the visit HAPPENS
+
+`k.stay` is minted with the purse in `newVisitor` and destroyed with it. It has
+to be per-visitor and it has to be live, because **most of what makes a stay
+worth quoting leaves no trace in a town-wide counter.** `today.rage` knows three
+guests walked out; it does not know MISTY walked out of two lines herself. And
+the queue a visitor never joined *because it already held its four tourists* is
+recorded nowhere at all — which is the commonest reason a purse goes home half
+full, i.e. the single most informative thing the card can say.
+
+| field | written at | what it buys the card |
+|---|---|---|
+| `waitMin` / `worstMin` / `worstBiz` | `queueJoin` → the serve | "GOT SERVED - AFTER 5 HOURS AT THE CRAB SHACK." |
+| `quits` / `quitMin` / `quitBiz` | `visAfterCounter`, unserved | the loudest single act a visitor has (-3 rep) |
+| `serves` / `tables` / `meals` `drinks` `washes` `games` `rooms` | `visBenefit` | what they actually bought, and whether they SAT DOWN for it |
+| `topItem` / `topBiz` / `topPaid` | `visBenefit` | the dearest thing they went home happy about |
+| `tips` | `payAndBenefit` + the table tip | |
+| `dues` | `ferryDock`, next to `harbourDues` | "CHARGED ME $3 JUST TO STEP OFF THE PLANK." |
+| **`shut` / `full` / `broke`** | **inside `visPick`'s own guards** | **why a want went unanswered** |
+| `sandWhy` | `sleepOnSand` | why there was no bed |
+| `mistMin` | `visTick`, outdoors after 16:30 | "THE MIST CAME IN AND I NEVER DID SEE THE FAR SHORE." |
+| `missed` | `ferryGo`'s last-boat sweep | |
+
+**The two split counters are the load-bearing design.** `visPick` is the only
+place in the game that can tell a SHUT door from a FULL line from a board priced
+past what this guest is carrying — afterwards the town looks identical in all
+three cases. Same argument for `sandWhy`: a full house, a dark hotel desk, a
+pile of linen still on the floor and a guest who could not raise the board price
+all present afterwards as "an empty room nobody got", and they are four
+different problems with four different answers (build / staff the desk / turn
+the linen / nothing, they were never yours to lose). Rolled into one number the
+card could only ever say *no*, never *why*, and "why" is the whole point of
+showing it.
+
+At the gangway `departRecord(k)` freezes the ledger into a **plain row**, which
+is the last frame in which anything can be asked of that visitor (`visBoard`
+destroys the wallet on the next line). `visQuote(row)` is then a pure function
+of a plain object — which is what makes this testable at all: a scenario builds
+the stay it wants to talk about and asserts the CLASS of quote, instead of
+asserting that seed 1337 happens to produce a particular sentence.
+
+### THE TABLE IS SCORED, NOT LADDERED
+
+Twenty-one rules, each a WEIGHT computed from the row and a LINE. The heaviest
+rule speaks. Two guests with the same *shape* of stay but different magnitudes
+get different headlines out of the same table, and a rule only outranks another
+rule because the thing it describes was actually bigger.
+
+| band | what lives there |
+|---|---|
+| 120+ | a night on the sand — the only departure that costs the town reputation, and the fix is entirely the player's |
+| 80+ | a line they walked out of (-3 rep, the loudest number in the demand model) |
+| 70+ | they bought nothing at all, with the sub-line naming which of the three failures it was |
+| 40+ | **the purse that went home**, weighted by how much of it did |
+| 20+ | the good day: waited on at a table, slept at the Driftwood, spent up, one good plate |
+| 1 | nothing happened. Say so honestly rather than inventing colour. |
+
+### THREE CALIBRATIONS, ALL MEASURED, ALL OF WHICH WERE WRONG FIRST
+
+Written down because each was a *plausible* threshold that the data killed —
+this is the same "coincidence vs mechanism" trap PLAN records for scenarios,
+turned on a display rule.
+
+1. **The long-wait rule shipped at `worstMin >= 20` and had to go to 240.**
+   Patience is spent in REAL seconds (`VIS_PATIENCE` 100 at 1/s, six times that
+   at an unstaffed counter) and `TS` is 4 game-minutes to the second, so a
+   staffed line sat out to the end is **400 game-minutes**. Measured over 266
+   departures in three do-nothing towns: the median served guest's longest wait
+   is **173 minutes**. A 20-minute bar was the normal service time in this town
+   and the rule spoke for nine guests in ten. 240 is "spent three fifths of
+   their patience and stayed anyway".
+2. **The four need bars each needed a SECOND condition.** `hunger >= 0.8` at the
+   gangway is a fact about the clock, not about the town: `VIS_RATE.hunger` is
+   0.115/hour, so a guest fed at noon is back over 0.8 by the last boat.
+   Measured, "hungry at departure" spoke for a quarter of ALL departures. Paired
+   with `meals === 0` — *this guest wanted a meal, and this town never sold them
+   one* — it becomes a finding. Same shape for the drink, the wash and the bed.
+3. **The unspent purse is TWO rules.** A purse that went home because a door was
+   shut, a line was full or a board was out of reach is a town failure with a
+   fix attached (`unspent`, MIXED, 40-84). A purse that went home because the
+   guest simply stopped wanting anything is a different finding — the town has
+   nothing left to *sell* them, which is the standing "better sources of limited
+   fun" argument — and it is a shrug (`idle`, FLAT, 22-42). Before the split the
+   unreasoned half spoke for 26% of all departures and **drowned every good
+   outcome in the table**: SLEPT AT THE DRIFTWOOD was literally unreachable, so
+   a well-run town had no way to show green.
+
+And one more that only showed up on the drawn card: **a night on the sand had
+ONE sentence**, and on a bad day-2 town (7 of 15 departures) the card printed it
+four times on one page — which reads as flavour text however derived it is.
+`sandWhy` is the fix, and it is why it exists.
+
+### THE UNSPENT HALF, PRINTED AT LAST
+
+PLAN, the visitor pass: average spend **$29.19 of an ~$85 purse**, and *"the
+town is leaving half of every purse on the table because a two-crab shack cannot
+serve it, and that is exactly the incentive the growth strategy is supposed to
+feel."* Until now the player was never told. The card's money band —
+`BROUGHT $1,482   SPENT $673   TOOK HOME $809` — is the first surface in the
+game where that number appears, and it appears every single night.
+
+Measured on this tree, and it is the card doing its job: three do-nothing towns
+take home **0.55** of every purse; the same three towns played as growth towns
+take home **0.38**, `rough` falls from 33% of departures to 17%, `quit` from
+13% to 2.5%, and DELIGHTED (a table serve) rises from 2% to 20%. **A good day
+and a bad day are different pictures before a word is read** — which is what the
+mood strip along the top is for: one pip per guest, sorted into mood order, red
+through gold.
+
+### THE CARD
+
+248x158 at x4/y8 (the widest derived line is 58 characters of 3x5 = 231px, and
+it has to land inside the margins), the report's second page rather than a rival
+to it: the report closes (by its click or its own timer) and this takes its
+place, so the end of the day is ONE moment with one gesture through it. Four
+guests to a page at 26px — a name, a mood tag, a fact line
+(`2 DAYS - SPENT $60 OF $62 - 1 STOP`) and the sentence. Left alone it turns its
+own pages and then lets go, on the report's own "nothing is missed" rule: 11
+seconds for the first page and **6 for one it turned itself**, because a
+measured day sends about twelve people home, which is three pages — 23 seconds
+for the whole manifest against the 42 a flat dwell would have cost. A tap gets
+the full dwell back, because a page you asked for is a page you meant to read.
+Rows are in BOARDING ORDER, not sorted, so the player can match the card to the boats they
+watched. The nav strip, the crab cycler and the follow card are all dead behind
+it, exactly as they are behind the report.
+
+**The report itself was not touched.** Two surfaces, two subjects; folding the
+people into the money card would have cost the report the thing it is good at.
+
+### THE EMBARGO
+
+This is the one surface in the game where the town is described out loud, by
+strangers, every night. Nobody on the boat names the island — asserted over the
+whole rule table and over everything a full card prints.
+
+### Balance: NOTHING MOVED, and it is proved rather than asserted
+
+A display card must not move the sim. `node tools/headless.mjs --days 14
+--seeds 6` is **byte-identical** before and after the whole pass (0/6, eviction
+11,11,11,12,14,14, lifetime $22566, roomLets 402, unhoused 256 on both trees).
+The only edit inside a hot path is `visPick`'s `add`, which was split from
+`if (!visOpen(b) || !visRoomFor(k, b)) return;` into three guarded returns — the
+same control flow, no RNG consumed differently. Full matrix on this tree:
+`--days 30 --seeds 16` → **0/16, median 12** (7,10,11,11,11,11,11,12,12,12,12,
+13,13,13,14,14), which is the documented baseline.
+
+### Suite 207 -> 220, ZERO re-pointings
+
+Thirteen new scenarios, plus the card added to the two canonical sweeps.
+(167 -> 180 at the branch point; 207 -> 220 once merged onto `d0c0e0c`.)
+
+**The merged run is 217/220, and all three reds are INHERITED.** Each one
+reproduces on a clean `git archive main` export with **byte-identical numbers**:
+
+| scenario | on this branch | on clean main |
+|---|---|---|
+| `fish market: scarcity walks the price to the ceiling` | `$324.5 for 46` | `$324.5 for 46` |
+| `the beach ball is LIMITED fun` | `chose null instead of the ball` | `chose null instead of the ball` |
+| `rivalry: after a refusal she competes...` | dear 46.1% / level 48.3% / cut 44.5% | dear 46.1% / level 48.3% / cut 44.5% |
+
+The rivalry line is worth reading twice: it reports its raw sample counts (bar
+190/199/207, showers 222/213/258) and **every one of those integers is the same
+on both trees.** That is a stronger statement than "the card changed nothing" -
+it says this branch's demand model is bit-for-bit the same simulation as main's,
+measured over three 40-day towns, which is exactly what a display card should be
+able to claim. The three reds are main's to triage; none is this card's.
+
+`departures: every character the card prints exists in the font` — see below,
+it is the one defect here that no assertion could have found first;
+`departures: every quote is DERIVED` (a stay built to say X says X, for all 21
+rules, plus every rule is reachable — a dead rule is a sentence no player can
+earn, which is the same defect as a random one); `the quote's mutation arms`
+(fourteen counter-arms: take away the one field the rule is about and it must
+stop firing — this is what catches a rule that is really keying on something
+else); `the mood on the card is the mood of the rule that spoke`; `three ways to
+be turned away are three different counters` (the arms driven through the real
+`visPick`: shut hours, a queue stuffed to `TOURIST_QUEUE_MAX`, an empty wallet,
+and a control that blames nobody); `the stay ledger is what actually happened`;
+`the manifest is the day's own boat-load, and the money adds up`; `the card
+waits behind the day report, then pages itself`; `left alone, the card turns its
+own pages`; `the card prints inside the canvas and never on top of itself` (an
+adversarial manifest — one row per rule, longest name, three-figure money,
+longest business name — in BOTH screen heights, every page, with the deepest box
+required to land above `PANEL_Y`); `nobody on the boat knows the town's name`;
+`a stay survives a save and a reload` (including a ledger-less save, which is
+every file written before this pass); `a display card moves nothing in the
+town`. The card is also added to the two canonical sweeps (`no card prints text
+on top of its own text`, `no surface prints off the canvas`), which is the only
+edit this pass makes to somebody else's scenario — two `run(...)` blocks, both
+additive.
+
+### THE ONE BUG A SCREENSHOT FOUND, AND WHY IT COULD ONLY BE FOUND THAT WAY
+
+`sGlyph` falls back to `FONT_SMALL["?"]` for any character it does not have,
+**silently**. `FONT_SMALL` has an apostrophe and no double quote. So the card
+shipped every one of its sentences wrapped in double quotes and drew them as
+
+> `?COULDN'T AFFORD A BED. I SLEPT ON THE BEACH.?`
+
+which reads as a typo in the writing, not as a missing glyph — nothing about it
+looks like a rendering fault until you hold it against the source. Two off-canvas
+sweeps, an overlap sweep and twelve assertions all passed it, because every one
+of them measures strings rather than pixels.
+
+Fixed (single quotes, which the font has) and **closed**: `departures: every
+character the card prints exists in the font` walks the whole rule table across
+every branch its lines can take, plus everything the drawn card actually puts on
+the glass, and checks each character against the font that will print it.
+Mutation-tested — put the double quotes back and it fails with
+`no small-font glyph for "\""`.
+
+The general lesson for the next card, and it belongs next to the off-canvas
+sweep in anybody's head: **a text assertion cannot see a glyph the font does not
+have.** Look at the picture.
+
+### The two shots
+
+`devlog/img/2026-08-20-departures-bad-day.png` and `-good-day.png`, and they are
+the argument for the whole feature: the same card, the same code, two towns.
+
+| | bad day (seed 42, day 4, `chef:2`) | good day (seed 1337, day 6, `chef:6 table:4`) |
+|---|---|---|
+| money band | BROUGHT $1190 · SPENT $368 · **TOOK HOME $822** | BROUGHT $1309 · SPENT $898 · **TOOK HOME $411** |
+| summary | 6 in beds, **3 on the sand, 4 gave up in a line** | 8 in beds, 4 on the sand, **1 gave up in a line** |
+| mood strip | 7 red, 2 grey, 4 amber, **no gold** | 7 red, 3 grey, **1 green, 4 gold** |
+| a guest says | *'THE HOTEL DESK WAS DARK. I SLEPT ON THE BEACH.'* | *'WAITED ON AT A TABLE TWICE. A PROPER HOLIDAY.'* |
+
+Neither card was posed: the rows are the real `departQ.rows` from a real
+settlement, and the only difference between the two towns is that one of them
+bought a chef, tables and a server.
+
+### Shooting notes, for whoever shoots the next card
+
+Four traps, all of which cost an hour each:
+1. **`frame()` schedules itself.** Driving the loop by hand queues one rAF
+   callback per step; nine thousand full renders fire the moment the loop
+   yields and the page never comes back. Stub `requestAnimationFrame` to a
+   no-op and be the loop.
+2. **The page's own autosave overwrites an injected town** between the write and
+   the reload. Stub `save` first.
+3. **Headless Chrome only spends its `--virtual-time-budget` while the page is
+   IDLE.** An endless paint loop means the screenshot is never taken at all —
+   the process just hangs until something kills it. Paint a bounded number of
+   frames and stop.
+4. **The browser re-serves `game.js` from memory** whatever `Cache-Control` the
+   dev server sends, so you shoot the build you already fixed. Cache-bust the
+   script URLs themselves (`document.write` keeps the load order).
+The manifest is DAY state, so it is not in a save file: build the town in
+`simlib`, and carry `departQ.rows` alongside the save envelope.
+
+### Merging it onto main, and the one place the standing rule needs a footnote
+
+Landed on `d0c0e0c` (polling day, the empty opening, the illness pass,
+accommodation upgrades, the onboarding pass, the pause removal). Four conflicts,
+and **not one of them was safe to resolve by union alone**:
+
+- **`navLive`** — both sides added a reading surface to the same guard. The help
+  card and this card are both full-screen; both terms stay.
+- **Three of the onboarding pass's new surfaces are drawn AFTER this card and
+  had never heard of it**: the shop tooltip, the hire card (y78) and the toast
+  band (y62..75) all land in the middle of a 158px card. Each already listed
+  every other reading surface, so `departT > 0` simply joins the list — the
+  same fix main had just made for `helpView`, one card later. The toast is
+  HELD, not dropped, so nothing is lost behind it.
+- **`reading` gained `helpView`.** It is the thing that pauses the day's two
+  cards rather than burning them down behind something you opened. `departT` is
+  deliberately NOT in it: `departTick` is gated on `!reading`, so a card that
+  counted itself as "being read" would never close.
+- **PAUSE** cost nothing — nothing here ever referenced it.
+
+**THE APPENDED-BLOCK RULE NEEDS A FOOTNOTE.** The standing rule is right: the
+shared text after the conflict marker closes only the LAST block, so the block
+that goes first needs its own `return true; });`. What bit me is that **the two
+blocks did not end the same way** — main's last scenario ended inside a `for`
+loop and needed a `}` first, mine ended on a bare `return` and did not. A
+blanket tail applied to both produced a clean `node --check` failure at the
+seam, which is the GOOD outcome; a subtler pair would have produced a
+*swallowed scenario that still parses*. **Count the registered scenarios after
+the merge** — 207 + 13 = 220 is the only cheap proof that nothing was eaten.
+
+### Left undone, on purpose
+
+- **No way to re-open last night's card.** It is an end-of-day beat, and a
+  history of manifests wants a home (the census? a TOWN tab?) that the
+  onboarding/UI pass is actively rearranging. One `depart` object and one timer;
+  a re-open chip is a line of click routing whenever somebody wants it.
+- **The card is not in the save.** Reload after 20:00 and last night's manifest
+  is gone. The stay LEDGERS are saved (that is the part that would otherwise
+  lie); the card is a moment, not a record.
+- **`visLog` was not extended.** Every quote already has its matching diary
+  line, because the events the ledger counts are the events `visLog` was already
+  writing. Nothing needed adding to make a quote checkable.

@@ -4722,6 +4722,15 @@ scenario("no card prints text on top of its own text", () => {
     run("board", () => { manage = null; boardView = true; }, () => drawJobBoard());
     run("save", () => { boardView = false; saveView = true; }, () => drawSaveScreen());
     run("report", () => { saveView = false; }, () => drawReport());
+    // ...and the DEPARTURE CARD, built from whoever is actually in town (its
+    // own scenario runs the adversarial manifest; this is the canonical sweep
+    // seeing it at all). A town with nobody ashore draws nothing and proves
+    // nothing, so it is stocked from the live visitor list.
+    run("departures", () => { 
+      today.left = customers.filter(k => k.visitor && !k.gone).slice(0, 6).map(departRecord);
+      if (!today.left.length) throw new Error("no visitors in town to build a manifest from");
+      depart = departBuild(); departT = 11; departPage = 0; },
+      () => { drawDepart(); depart = null; departT = 0; });
     // ---- THE ONBOARDING PASS'S OWN SURFACES, and one class this sweep had
     // never been pointed at. reportT has to come down first: the sim was run
     // UNTIL a report exists, and every one of these is gated on nothing being
@@ -4823,6 +4832,15 @@ scenario("no surface prints off the canvas", () => {
     run("manage-sched", () => { manage = "shack"; manageTab = "SCHEDULE"; }, () => drawManage());
     run("census", () => { manage = "shack"; manageTab = "TOWN"; }, () => drawManage());
     run("report", () => { manage = null; }, () => drawReport());
+    // ...and the DEPARTURE CARD, built from whoever is actually in town (its
+    // own scenario runs the adversarial manifest; this is the canonical sweep
+    // seeing it at all). A town with nobody ashore draws nothing and proves
+    // nothing, so it is stocked from the live visitor list.
+    run("departures", () => { manage = null; reportT = 0;
+      today.left = customers.filter(k => k.visitor && !k.gone).slice(0, 6).map(departRecord);
+      if (!today.left.length) throw new Error("no visitors in town to build a manifest from");
+      depart = departBuild(); departT = 11; departPage = 0; },
+      () => { drawDepart(); depart = null; departT = 0; });
     run("toast", () => { toast = { text: "THE FARE IS $20,000 - YOU HAVE $412", t: 3 }; },
       () => drawToast());
     // the job board card carries the TRADE LEDGER under the openings
@@ -6813,6 +6831,568 @@ scenario("a corrupt town hall in a save is clamped, not trusted", () => {
   if (!okMech(got.pmech) || got.pbowls > 6) return `the platform came back as ${got.pmech}/${got.pbowls}`;
   if (!got.seated) return "the office was left vacant by a corrupt save";
   if (got.poll !== null) return "a poll that was a string came back as something";
+  return true;
+});
+
+
+// ===========================================================================
+// THE DEPARTURE CARD  (2026-08-20)
+// End-of-day manifest of who sailed and how they felt, with a quote DERIVED
+// from the stay. The whole risk in this feature is a quote that reads like
+// flavour text, so every scenario below asserts the RULE - a constructed stay
+// produces its own class of line - and never that some seed yields some
+// sentence. Where a rule has a counter-arm it is mutation-tested: remove the
+// field that drives it and the class must change.
+// ===========================================================================
+
+// A quiet, unremarkable stay. Every derivation scenario starts here and turns
+// ONE thing on, so what the quote engine reacts to is never in doubt.
+const DEP_BASE = `{
+  name: "MISTY", color: 0, acc: "cap", days: 1, nights: 0, nightsBed: 0, rough: 0,
+  purse: 100, left: 20, spent: 80, buys: 1, serves: 1, tables: 0,
+  meals: 1, drinks: 0, washes: 0, games: 0, rooms: 0,
+  topItem: null, topBiz: null, topPaid: 0, tips: 0, dues: 0,
+  waitMin: 10, worstMin: 10, worstBiz: "CRAB SHACK",
+  quits: 0, quitMin: 0, quitBiz: null,
+  shut: 0, full: 0, broke: 0, blocked: null, mistMin: 0, missed: 0,
+  hunger: 0.1, thirst: 0.1, dirt: 0.1, bored: 0.1, tired: 0.1 }`;
+
+scenario("departures: every quote is DERIVED - one changed fact, one changed line", () => {
+  const sim = createSim({ seed: 7 });
+  // Each case: what we turn on, and the rule it must produce. The point is not
+  // the sentence, it is that THIS stay and no other stay produces THIS class.
+  const cases = [
+    ["rough", `{ rough: 1 }`],
+    ["rough", `{ rough: 2 }`],
+    ["quits", `{ quits: 3, quitBiz: "CRAB SHACK", quitMin: 300 }`],
+    ["quit", `{ quits: 1, quitBiz: "CRAB SHACK", quitMin: 300 }`],
+    ["nothing", `{ buys: 0, serves: 0, meals: 0, left: 100, spent: 0 }`],
+    ["unspent", `{ left: 70, spent: 30, blocked: "full", full: 9 }`],
+    ["idle", `{ left: 70, spent: 30 }`],
+    ["hungry", `{ hunger: 1, meals: 0, buys: 1, serves: 1, drinks: 1 }`],
+    ["parched", `{ thirst: 1, drinks: 0 }`],
+    ["grubby", `{ dirt: 1, washes: 0 }`],
+    ["weary", `{ tired: 1, nightsBed: 0 }`],
+    ["bored", `{ bored: 1, games: 0 }`],
+    ["wait", `{ worstMin: 380, worstBiz: "CRAB SHACK", serves: 1 }`],
+    ["dues", `{ dues: 4 }`],
+    ["missed", `{ missed: 1 }`],
+    ["mist", `{ mistMin: 300 }`],
+    ["table", `{ tables: 1 }`],
+    ["bed", `{ nightsBed: 1, nights: 1, days: 2 }`],
+    ["spentup", `{ left: 4, spent: 96 }`],
+    ["top", `{ topItem: "FISH TACO", topBiz: "CRAB SHACK", topPaid: 24 }`],
+    ["regular", `{ buys: 3, serves: 3, meals: 2, drinks: 1 }`],
+    ["quiet", `{}`],
+  ];
+  const got = JSON.parse(sim.G(`JSON.stringify(${JSON.stringify(cases)}.map(([want, over]) => {
+    const r = Object.assign(${DEP_BASE}, eval("(" + over + ")"));
+    const q = visQuote(r);
+    return [want, q.id, q.mood, q.line];
+  }))`));
+  for (const [want, id, mood, line] of got) {
+    if (id !== want) return `a stay built to say "${want}" said "${id}" instead ("${line}")`;
+    if (!line || line.length < 12) return `rule ${id} produced no sentence: ${JSON.stringify(line)}`;
+  }
+  // A NIGHT ON THE SAND IS FOUR DIFFERENT FINDINGS. It is the commonest sour
+  // class on a bad night (measured: 7 of 15 departures on a day-2 town), so if
+  // it had one sentence the card would print that sentence four times a page
+  // and read as flavour text. Four causes, four fixes, four sentences.
+  const sand = JSON.parse(sim.G(`JSON.stringify(["broke", "shut", "unmade", "full", null].map(w => {
+    const q = visQuote(Object.assign(${DEP_BASE}, { rough: 1, sandWhy: w }));
+    return [w, q.id, q.line];
+  }).concat([(() => { const q = visQuote(Object.assign(${DEP_BASE},
+    { rough: 1, sandWhy: "broke", missed: 1 })); return ["broke+missed", q.id, q.line]; })()]))`));
+  const seenSand = new Set();
+  for (const [w, id, line] of sand) {
+    if (id !== "rough") return `a night on the sand (${w}) said "${id}"`;
+    if (w !== null && seenSand.has(line)) return `two different causes say the same thing: "${line}"`;
+    seenSand.add(line);
+  }
+  if (seenSand.size < 5) return `the four causes collapse to ${seenSand.size} sentences`;
+
+  // ...and EVERY rule in the table is reachable. A dead rule is a sentence no
+  // player can ever earn, which is the same defect as a random one.
+  const ids = JSON.parse(sim.G(`JSON.stringify(DEPART_RULES.map(r => r.id))`));
+  const covered = new Set(got.map(g => g[1]));
+  const dead = ids.filter(i => !covered.has(i));
+  if (dead.length) return `rules no constructed stay can reach: ${dead.join(", ")}`;
+  if (covered.size !== ids.length) return `the table has duplicate ids: ${ids.join(",")}`;
+  return true;
+});
+
+scenario("departures: the quote's mutation arms - drop the fact, lose the line", () => {
+  // The failure this guards against is a rule that fires on something OTHER
+  // than the thing it names - the coincidence-vs-mechanism trap. For each arm:
+  // the stay says X; take away the one field X is about; it must stop saying X.
+  const sim = createSim({ seed: 7 });
+  const arms = [
+    ["rough", `{ rough: 2 }`, `{ rough: 0 }`],
+    ["quit", `{ quits: 1, quitBiz: "CRAB SHACK", quitMin: 300 }`, `{ quits: 0 }`],
+    ["nothing", `{ buys: 0, serves: 0, meals: 0 }`, `{ buys: 1 }`],
+    ["table", `{ tables: 2 }`, `{ tables: 0 }`],
+    ["bed", `{ nightsBed: 1 }`, `{ nightsBed: 0 }`],
+    ["dues", `{ dues: 4 }`, `{ dues: 0 }`],
+    ["wait", `{ worstMin: 380 }`, `{ worstMin: 10 }`],
+    ["mist", `{ mistMin: 300 }`, `{ mistMin: 0 }`],
+    // THE NEED ARMS ARE TWO-CONDITION RULES ON PURPOSE. A bar at the gangway on
+    // its own is a fact about the clock (VIS_RATE.hunger refills in seven
+    // hours); it only becomes a finding when the town also never sold them one.
+    ["hungry", `{ hunger: 1, meals: 0 }`, `{ meals: 1 }`],
+    ["parched", `{ thirst: 1, drinks: 0 }`, `{ drinks: 1 }`],
+    ["grubby", `{ dirt: 1, washes: 0 }`, `{ washes: 1 }`],
+    ["bored", `{ bored: 1, games: 0 }`, `{ games: 1 }`],
+    ["weary", `{ tired: 1, nightsBed: 0 }`, `{ nightsBed: 1 }`],
+    // ...and the purse's two halves are two DIFFERENT findings: a blocked door
+    // is a town failure, an unblocked one is a town with nothing left to sell.
+    ["unspent", `{ left: 70, spent: 30, blocked: "full", full: 9 }`, `{ blocked: null, full: 0 }`],
+  ];
+  const got = JSON.parse(sim.G(`JSON.stringify(${JSON.stringify(arms)}.map(([want, on, off]) => {
+    const a = Object.assign(${DEP_BASE}, eval("(" + on + ")"));
+    const b = Object.assign(Object.assign({}, a), eval("(" + off + ")"));
+    return [want, visQuote(a).id, visQuote(b).id];
+  }))`));
+  for (const [want, on, off] of got) {
+    if (on !== want) return `the ARMED stay for "${want}" said "${on}"`;
+    if (off === want) return `"${want}" survived having its own fact removed - it is firing on something else`;
+  }
+  return true;
+});
+
+scenario("departures: the mood on the card is the mood of the rule that spoke", () => {
+  // Honesty rule: the tag beside a name and the sentence under it are the same
+  // opinion. A card that tagged a guest GLAD over a sentence about sleeping on
+  // the sand would be worse than no card.
+  const sim = createSim({ seed: 7 });
+  const bad = JSON.parse(sim.G(`(() => {
+    const out = [];
+    for (const rule of DEPART_RULES) {
+      if (!DEP_MOODS[rule.mood]) out.push([rule.id, rule.mood, "not a mood"]);
+      if (DEP_ORDER.indexOf(rule.mood) < 0) out.push([rule.id, rule.mood, "not in the pip order"]);
+    }
+    // the two loudest classes must never read as anything but SOUR
+    for (const over of [{ rough: 1 }, { quits: 2 }, { quits: 1 }]) {
+      const q = visQuote(Object.assign(${DEP_BASE}, over));
+      if (q.mood !== "sour") out.push([q.id, q.mood, "a bad stay read as " + q.mood]);
+    }
+    // ...and being waited on at a table is never anything but good news
+    const good = visQuote(Object.assign(${DEP_BASE}, { tables: 2 }));
+    if (good.mood !== "made" && good.mood !== "glad") out.push([good.id, good.mood, "a table serve read as " + good.mood]);
+    return JSON.stringify(out);
+  })()`));
+  if (bad.length) return JSON.stringify(bad);
+  return true;
+});
+
+scenario("departures: three ways to be turned away are three different counters", () => {
+  // THIS is the derivation the card's most useful line rests on. `visPick` is
+  // the only place in the game that can tell a SHUT door from a FULL line from
+  // a board priced past what the guest is carrying - afterwards the town looks
+  // identical in all three cases. So the counters are asserted at the source:
+  // set up each cause in turn and check that exactly one counter moves.
+  const sim = createSim({ seed: 21 });
+  sim.runUntil(`tmin > 12 * 60 && bizStaffed("shack")`, { maxSteps: 400000 });
+  if (!sim.G(`bizStaffed("shack")`)) return "could not get the shack staffed to run the arms against";
+  const got = JSON.parse(sim.G(`(() => {
+    const mk = () => { const k = newVisitor(false);
+      k.state = "roam"; k.x = BIZ.shack.queueX; k.wallet = 500; k.purse = 500;
+      k.hunger = 1; k.thirst = 0; k.dirt = 0; k.bored = 0; k.nights = 0;
+      return k; };
+    const read = (k) => [k.stay.shut, k.stay.full, k.stay.broke];
+    const out = {};
+    const hrs = { open: BIZ.shack.hours.open, close: BIZ.shack.hours.close };
+
+    // 1. SHUT: the shack's own hours put it outside trading, nothing else moves
+    { const k = mk(); BIZ.shack.hours = { open: 0, close: 1 };
+      visPick(k); out.shut = read(k); BIZ.shack.hours = hrs; }
+
+    // 2. FULL: the line already holds its four tourists (TOURIST_QUEUE_MAX),
+    //    which PLAN measures as the commonest reason a purse goes home unspent
+    { const k = mk();
+      const stuffed = [];
+      for (let i = 0; i < TOURIST_QUEUE_MAX; i++) {
+        const d = newVisitor(false);
+        d.state = "waiting"; d.biz = "shack"; d.recipe = BIZ.shack.recipes[0];
+        customers.push(d); stuffed.push(d);
+      }
+      visPick(k); out.full = read(k);
+      customers = customers.filter(c => stuffed.indexOf(c) < 0); }
+
+    // 3. BROKE: open, room in the line, and not a dollar in the purse
+    { const k = mk(); k.wallet = 0;
+      visPick(k); out.broke = read(k); }
+
+    // ...and the control: open, room, and money. Nothing is blamed on anybody.
+    { const k = mk(); visPick(k); out.ok = read(k); }
+    return JSON.stringify(out);
+  })()`));
+  const named = ["shut", "full", "broke"];
+  for (let i = 0; i < 3; i++) {
+    const row = got[named[i]];
+    if (!row) return `arm ${named[i]} did not run`;
+    for (let j = 0; j < 3; j++) {
+      if (i === j && row[j] < 1) return `a ${named[i]} door did not raise the ${named[i]} counter (${row})`;
+      if (i !== j && row[j] > 0) return `a ${named[i]} door also raised the ${named[j]} counter (${row})`;
+    }
+  }
+  if (got.ok.some(v => v > 0)) return `an open, staffed, affordable counter still blamed somebody: ${got.ok}`;
+  return true;
+});
+
+scenario("departures: the stay ledger is what actually happened, not a tally of the town", () => {
+  // Every number the card quotes is per-VISITOR. These are the invariants that
+  // say so: a serve is a serve on both books, the categories add up to the
+  // serves, and a line walked out of names a real counter.
+  const sim = createSim({ seed: 33 });
+  sim.runDays(4);
+  const bad = JSON.parse(sim.G(`(() => {
+    const out = [];
+    let sawServe = 0, sawQuit = 0;
+    for (const k of customers) {
+      if (!k.visitor || !k.stay) continue;
+      const s = k.stay;
+      const cats = s.meals + s.drinks + s.washes + s.games + s.rooms;
+      if (cats !== s.serves) out.push([k.name, "categories " + cats + " != serves " + s.serves]);
+      if (s.serves !== k.buys) out.push([k.name, "ledger serves " + s.serves + " != buys " + k.buys]);
+      if (s.serves > 0) sawServe++;
+      if (s.quits > 0) {
+        sawQuit++;
+        if (!s.quitBiz) out.push([k.name, "gave up at nowhere in particular"]);
+        if (!(s.quitMin >= 0)) out.push([k.name, "gave up after a nonsense wait " + s.quitMin]);
+      }
+      if (s.tables > s.serves) out.push([k.name, "sat at more tables than it bought plates"]);
+      if (k.wallet > k.purse + 0.5) out.push([k.name, "went home with more than they brought"]);
+    }
+    return JSON.stringify({ out, sawServe, sawQuit,
+      departed: (window._stats && window._stats.visDepart) || 0 });
+  })()`));
+  if (bad.out.length) return JSON.stringify(bad.out.slice(0, 4));
+  // ...and the sim must actually have exercised the paths, or this proves nothing
+  if (!bad.sawServe) return "four days and not one visitor in town had bought anything - the ledger was never written to";
+  return true;
+});
+
+scenario("departures: the manifest is the day's own boat-load, and the money adds up", () => {
+  const sim = createSim({ seed: 42 });
+  sim.runUntil(`report && reportT > 0 && (today.left || []).length > 0`, { maxSteps: 800000 });
+  if (!sim.G(`report && reportT > 0`)) return "never reached a settlement with a manifest";
+  const got = JSON.parse(sim.G(`(() => {
+    const q = departQ;
+    if (!q) return JSON.stringify({ err: "settlement built no manifest with " + today.left.length + " departures" });
+    let purse = 0, left = 0;
+    const moods = [], badMood = [];
+    for (const r of q.rows) {
+      purse += r.purse; left += r.left;
+      if (r.spent + r.left !== r.purse) badMood.push([r.name, "spent+left != purse"]);
+      if (!r.q || !DEP_MOODS[r.q.mood]) badMood.push([r.name, "no mood"]);
+      else moods.push(r.q.mood);
+    }
+    return JSON.stringify({ n: q.rows.length, left: today.left.length, day: q.day, today: day,
+      purse, left2: left, cardPurse: q.purse, cardLeft: q.left, cardSpent: q.spent,
+      bed: q.bed, rough: q.rough, quit: q.quit,
+      bedReal: q.rows.filter(r => r.nightsBed > 0).length,
+      roughReal: q.rows.filter(r => r.rough > 0).length,
+      quitReal: q.rows.filter(r => r.quits > 0).length,
+      badMood, moods: [...new Set(moods)] });
+  })()`));
+  if (got.err) return got.err;
+  if (got.badMood.length) return JSON.stringify(got.badMood.slice(0, 3));
+  if (got.n !== got.left) return `the card carries ${got.n} of ${got.left} departures`;
+  if (got.day !== got.today) return `the card is dated day ${got.day} on day ${got.today}`;
+  if (got.cardPurse !== got.purse || got.cardLeft !== got.left2)
+    return `the money band does not add up: ${got.cardPurse}/${got.purse}, ${got.cardLeft}/${got.left2}`;
+  if (got.cardSpent + got.cardLeft !== got.cardPurse) return "BROUGHT != SPENT + TOOK HOME";
+  if (got.bed !== got.bedReal || got.rough !== got.roughReal || got.quit !== got.quitReal)
+    return `the summary counts disagree with the rows (${got.bed}/${got.bedReal}, ${got.rough}/${got.roughReal}, ${got.quit}/${got.quitReal})`;
+  return true;
+});
+
+scenario("departures: the card waits behind the day report, then pages itself", () => {
+  const sim = createSim({ seed: 42 });
+  sim.runUntil(`report && reportT > 0 && (today.left || []).length > 4`, { maxSteps: 800000 });
+  if (!sim.G(`departQ`)) return "no manifest was queued at settlement";
+  // A READING SURFACE OWNS THE SCREEN: while the report is up, this is queued
+  // and not shown - never two cards on the glass at once.
+  if (sim.G(`departT`) > 0 || sim.G(`depart`)) return "the departure card came up on top of the day report";
+  // close the report the way the click handler does (the canvas listener is
+  // not reachable from the headless sim, so the STATE the tap sets is what is
+  // driven here) and the manifest takes its place on the next frame
+  sim.G(`reportT = 0`);
+  sim.runUntil(`departT > 0`, { maxSteps: 20000 });
+  if (!(sim.G(`departT`) > 0)) return "closing the report did not bring the manifest up";
+  const st = JSON.parse(sim.G(`JSON.stringify({ pages: departPages(), rows: depart.rows.length,
+    page: departPage, live: navLive(), cyc: cyclerLive() })`));
+  if (st.pages < 2) return `expected a manifest that pages (${st.rows} rows, ${st.pages} pages)`;
+  // nothing behind it is live while it is up - same rule the report runs on
+  if (st.live || st.cyc) return "the nav strip or the crab cycler was still live behind the card";
+  // a tap turns the page; the last tap closes
+  for (let p = 1; p < st.pages; p++) {
+    sim.G(`departTapped()`);
+    if (sim.G(`departPage`) !== p) return `tap ${p} did not turn to page ${p}`;
+    if (!(sim.G(`departT`) > 0)) return `tap ${p} closed the card early`;
+  }
+  sim.G(`departTapped()`);
+  if (sim.G(`departT`) > 0 || sim.G(`depart`)) return "the last page would not close";
+  return true;
+});
+
+scenario("departures: left alone, the card turns its own pages and then goes away", () => {
+  // A player who walks away must still get the whole manifest rather than page
+  // one and a timeout - the report's "nothing is missed" rule, applied to a
+  // surface that has more than one page of it.
+  const sim = createSim({ seed: 7 });
+  const out = JSON.parse(sim.G(`(() => {
+    today.left = [];
+    for (let i = 0; i < 9; i++) today.left.push(Object.assign(${DEP_BASE}, { name: "GUEST" + i }));
+    depart = departBuild(); departPage = 0; departT = DEPART_T;
+    const pages = departPages(), seen = [departPage];
+    for (let i = 0; i < 400 && departT > 0; i++) { departTick(0.5); if (seen[seen.length - 1] !== departPage) seen.push(departPage); }
+    return JSON.stringify({ pages, seen, open: departT > 0, card: !!depart });
+  })()`));
+  if (out.pages !== 3) return `9 guests at 4 to a page should be 3 pages, got ${out.pages}`;
+  if (out.seen.join(",") !== "0,1,2") return `it did not walk the pages in order: ${out.seen.join(",")}`;
+  if (out.open || out.card) return "it never let go of the screen";
+  return true;
+});
+
+scenario("departures: the card prints inside the canvas and never on top of itself", () => {
+  // The two standing card guard-rails, run against an ADVERSARIAL manifest
+  // rather than whatever a seed happened to produce: one row per rule in the
+  // table, on the longest name in CUSTOMER_NAMES, with three-figure money and
+  // the longest business name in the game interpolated into the sentence. Run
+  // in BOTH screen heights, on every page, and the deepest text box has to
+  // land above PANEL_Y - a card that runs under the panel is off-canvas too.
+  for (const screenH of [0, 288]) {
+    const sim = createSim({ seed: 11, screenH });
+    sim.runDays(2);
+    const out = JSON.parse(sim.G(`(() => {
+      const worst = { name: "PLANKTON PETE", color: 0, acc: "cap", days: 3, nights: 2,
+        nightsBed: 2, rough: 0, purse: 248, left: 196, spent: 52, buys: 7, serves: 7,
+        tables: 2, meals: 2, drinks: 2, washes: 1, games: 1, rooms: 2,
+        topItem: "DELUXE SOAK", topBiz: "DRIFTWOOD HOTEL", topPaid: 248,
+        tips: 9, dues: 44, waitMin: 900, worstMin: 442, worstBiz: "DRIFTWOOD HOTEL",
+        quits: 0, quitMin: 442, quitBiz: "DRIFTWOOD HOTEL",
+        shut: 0, full: 0, broke: 0, blocked: null, mistMin: 400, missed: 1,
+        hunger: 0, thirst: 0, dirt: 0, bored: 0, tired: 0 };
+      const mk = (over) => Object.assign({}, worst, over);
+      // one row forced onto each rule, so every sentence gets measured, plus
+      // enough padding to overflow the mood strip's cap and the page count
+      const rows = [];
+      for (const rule of DEPART_RULES) rows.push(mk({ _want: rule.id }));
+      rows.push(mk({ rough: 3 }), mk({ quits: 4 }), mk({ quits: 1 }),
+        mk({ buys: 0, blocked: "shut" }), mk({ buys: 0, blocked: "full" }),
+        mk({ buys: 0, blocked: "broke" }), mk({ buys: 0 }),
+        mk({ blocked: "full" }), mk({ blocked: "shut" }), mk({ blocked: "broke" }),
+        mk({ hunger: 1, meals: 0 }), mk({ thirst: 1, drinks: 0 }),
+        mk({ dirt: 1, washes: 0 }), mk({ tired: 1, nightsBed: 0 }),
+        mk({ bored: 1, games: 0 }));
+      for (let i = 0; i < 20; i++) rows.push(mk({}));
+      today.left = rows;
+      depart = departBuild(); departT = 11; departPage = 0;
+
+      const bad = [], hits = [];
+      const T = text, S = smallText, RC = rect;
+      let BOXES = [], maxY = 0;
+      const wrap = (fn, meas, h) => (c, str, x, y, col, sz) => {
+        const w = meas(str, sz);
+        if (x < 0 || x + w > W) bad.push([String(str), Math.round(x), Math.round(x + w)]);
+        for (const b of BOXES) {
+          if (b.s === String(str) && Math.abs(b.x - x) <= 2 && Math.abs(b.y - y) <= 2) continue;   // a drop shadow
+          const ox = Math.min(b.x + b.w, x + w) - Math.max(b.x, x);
+          const oy = Math.min(b.y + b.h, y + h) - Math.max(b.y, y);
+          if (ox > 1 && oy > 1) hits.push([String(str), b.s, Math.round(ox), Math.round(oy)]);
+        }
+        BOXES.push({ x, y, w, h, s: String(str) });
+        maxY = Math.max(maxY, y + h);
+        return fn(c, str, x, y, col, sz);
+      };
+      text = wrap(T, textWidth, 7); smallText = wrap(S, smallTextWidth, 5);
+      rect = (c, x, y, w, h, col) => {   // a rect drawn ON TOP of text already there
+        for (const b of BOXES) {
+          const ox = Math.min(b.x + b.w, x + w) - Math.max(b.x, x);
+          const oy = Math.min(b.y + b.h, y + h) - Math.max(b.y, y);
+          if (ox > 2 && oy > 2) hits.push(["a filled rect", b.s, Math.round(ox), Math.round(oy)]);
+        }
+        return RC(c, x, y, w, h, col);
+      };
+      const pages = departPages();
+      for (let p = 0; p < pages; p++) { departPage = p; BOXES = []; drawDepart(); }
+      text = T; smallText = S; rect = RC;
+      return JSON.stringify({ bad, hits, maxY, pages, PANEL_Y, H });
+    })()`));
+    if (out.pages < 2) return `the adversarial manifest did not page (${out.pages})`;
+    if (out.bad.length)
+      return `H=${out.H}: "${out.bad[0][0]}" runs x${out.bad[0][1]}..${out.bad[0][2]}`
+        + (out.bad.length > 1 ? ` (+${out.bad.length - 1} more)` : "");
+    if (out.hits.length) {
+      const seen = new Set(), lines = [];
+      for (const [a, b, ox, oy] of out.hits) {
+        const k = a + "|" + b;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        lines.push(`${a === "a filled rect" ? a : '"' + a + '"'} lands on "${b}" (${ox}x${oy}px)`);
+      }
+      return `H=${out.H}: ` + lines.slice(0, 4).join("\n        ");
+    }
+    if (out.maxY > out.PANEL_Y) return `H=${out.H}: the card reaches y${out.maxY}, under the panel at ${out.PANEL_Y}`;
+  }
+  return true;
+});
+
+scenario("departures: every character the card prints exists in the font", () => {
+  // FOUND BY LOOKING AT A SCREENSHOT, which is the only way it could be found:
+  // `sGlyph` falls back to FONT_SMALL["?"] for any character it does not have,
+  // silently. The card shipped its quotes in double quotes, FONT_SMALL has an
+  // apostrophe and no double quote, and every sentence on the card rendered as
+  //     ?COULDN'T AFFORD A BED. I SLEPT ON THE BEACH.?
+  // - which reads as a typo in the writing rather than as a missing glyph, so
+  // nothing about it looks like a bug until you compare it to the source.
+  //
+  // The sweep is over EVERY string the card can print: the whole rule table
+  // (with the blocked/sand causes crossed against it, since those change the
+  // sentence), the summary band, the header, the fact lines and the footer.
+  const sim = createSim({ seed: 11 });
+  sim.runDays(2);
+  const bad = JSON.parse(sim.G(`(() => {
+    const missing = {}, note = (where, str, font) => {
+      const table = font === "small" ? FONT_SMALL : FONT;
+      for (const ch of String(str).toUpperCase())
+        if (ch !== " " && !table[ch]) (missing[font + " " + ch] = missing[font + " " + ch] || [])
+          .push(where + ": " + str);
+    };
+    // 1. the rule table, over every branch its lines can take
+    const base = ${DEP_BASE};
+    for (const rule of DEPART_RULES)
+      for (const blocked of ["shut", "full", "broke", null])
+        for (const sandWhy of ["broke", "shut", "unmade", "full", null])
+          for (const missed of [0, 1])
+            for (const n of [1, 2, 3])
+              note("rule " + rule.id, rule.line(Object.assign({}, base, {
+                blocked, sandWhy, missed, rough: n, quits: n, quitMin: n * 137,
+                nightsBed: n, tables: n, days: n, buys: n + 1, worstMin: 380,
+                topItem: "DELUXE SOAK", topBiz: "DRIFTWOOD HOTEL", topPaid: 24,
+                quitBiz: "SUDS SHOWERS", worstBiz: "DRIFTWOOD HOTEL",
+                meals: n, drinks: n, washes: 1, games: 1, rooms: 1 })), "small");
+    // 2. ...and everything the drawn card actually puts on the glass, at the
+    //    size it puts it there
+    today.left = [Object.assign({}, base, { name: "PLANKTON PETE" })];
+    depart = departBuild(); departT = 11; departPage = 0;
+    const T = text, S = smallText;
+    text = (c, s2, x, y, col, sz) => { note("card", s2, "big"); return T(c, s2, x, y, col, sz); };
+    smallText = (c, s2, x, y, col) => { note("card", s2, "small"); return S(c, s2, x, y, col); };
+    try { drawDepart(); } finally { text = T; smallText = S; }
+    return JSON.stringify(missing);
+  })()`));
+  const keys = Object.keys(bad);
+  if (keys.length)
+    return keys.slice(0, 4).map(k => `no ${k.split(" ")[0]}-font glyph for ${JSON.stringify(k.split(" ")[1])}`
+      + ` (e.g. ${bad[k][0]})`).join("\n        ");
+  return true;
+});
+
+scenario("departures: nobody on the boat knows the town's name", () => {
+  // THE EMBARGO. The name is the ending's to give, and this card is the one
+  // surface in the game where the town is described out loud, by strangers,
+  // every single night. Checked against the whole table AND against everything
+  // a full card actually prints.
+  const sim = createSim({ seed: 11 });
+  sim.runDays(2);
+  const said = JSON.parse(sim.G(`(() => {
+    const seen = [];
+    const worst = Object.assign(${DEP_BASE}, { name: "PLANKTON PETE" });
+    for (const rule of DEPART_RULES)
+      for (const b of ["shut", "full", "broke", null])
+        seen.push(rule.line(Object.assign({}, worst, { blocked: b, rough: 2, quits: 2,
+          nightsBed: 2, tables: 2, days: 3, buys: 5, topItem: "FISH TACO",
+          topBiz: "CRAB SHACK", quitBiz: "CRAB SHACK", worstBiz: "CRAB SHACK" })));
+    today.left = [worst];
+    depart = departBuild(); departT = 11; departPage = 0;
+    const T = text, S = smallText;
+    text = (c, s2, x, y, col, sz) => { seen.push(String(s2)); return T(c, s2, x, y, col, sz); };
+    smallText = (c, s2, x, y, col) => { seen.push(String(s2)); return S(c, s2, x, y, col); };
+    try { drawDepart(); } finally { text = T; smallText = S; }
+    return JSON.stringify(seen);
+  })()`));
+  const named = said.filter(s => String(s).includes("CRABALINA"));
+  if (named.length) return "a departing visitor named the island: " + JSON.stringify(named);
+  return true;
+});
+
+scenario("departures: a stay survives a save and a reload", () => {
+  // A visit spans nights. If the ledger did not come back, the card would
+  // quietly describe a SHORTER visit than the one that happened - which is
+  // worse than saying nothing, because it would still sound specific.
+  const store = new Map();
+  const a = createSim({ seed: 55, storage: store, fresh: false });
+  a.runDays(3);
+  // pin a known stay on a real visitor so the assertion is about THIS ledger
+  const name = a.G(`(() => {
+    const k = customers.find(c => c.visitor && !c.gone);
+    if (!k) return "";
+    k.stay.serves = 4; k.stay.meals = 2; k.stay.drinks = 1; k.stay.rooms = 1;
+    k.stay.quits = 2; k.stay.quitBiz = "SUDS SHOWERS"; k.stay.quitMin = 137;
+    k.stay.worstMin = 288; k.stay.worstBiz = "CRAB SHACK";
+    k.stay.full = 9; k.stay.shut = 1; k.stay.dues = 3; k.stay.mistMin = 240;
+    k.stay.topItem = "FISH TACO"; k.stay.topBiz = "CRAB SHACK"; k.stay.topPaid = 17;
+    k.buys = 4;
+    return k.name; })()`);
+  if (!name) return "no visitor in town to save";
+  a.G("save()");
+  const b = createSim({ seed: 55, storage: store, fresh: false });
+  if (!b.G("load(activeSlot)")) return "the save would not load";
+  const got = JSON.parse(b.G(`(() => { const k = customers.find(c => c.visitor && c.name === ${JSON.stringify(name)});
+    return JSON.stringify(k ? k.stay : null); })()`));
+  if (!got) return `${name} did not come back from the save`;
+  const want = { serves: 4, meals: 2, drinks: 1, rooms: 1, quits: 2, quitBiz: "SUDS SHOWERS",
+    quitMin: 137, worstMin: 288, worstBiz: "CRAB SHACK", full: 9, shut: 1, dues: 3,
+    mistMin: 240, topItem: "FISH TACO", topBiz: "CRAB SHACK", topPaid: 17 };
+  for (const k of Object.keys(want))
+    if (got[k] !== want[k]) return `${k} came back as ${JSON.stringify(got[k])}, not ${JSON.stringify(want[k])}`;
+  // ...and a save with no ledger at all (anything written before this pass, or
+  // an imported file) must load into an empty one rather than throwing
+  const store2 = new Map();
+  const c = createSim({ seed: 55, storage: store2, fresh: false });
+  c.runDays(2); c.G("save()");
+  const key = c.G("slotKey(activeSlot)");
+  const env = JSON.parse(store2.get(key));
+  for (const v of (env.visitors || [])) delete v.st;
+  env.visitors && env.visitors.length && (env.visitors[0].st = "nonsense");
+  store2.set(key, JSON.stringify(env));
+  const d = createSim({ seed: 55, storage: store2, fresh: false });
+  if (!d.G("load(activeSlot)")) return "a save with no stay ledgers would not load";
+  const clean = d.G(`customers.filter(k => k.visitor).every(k => k.stay && k.stay.serves === 0 && k.stay.quits === 0)`);
+  if (!clean) return "a ledger-less save came back with numbers it never had";
+  // and the card still builds off it without throwing
+  if (d.G(`(() => { try { today.left = customers.filter(k => k.visitor).slice(0, 3).map(departRecord);
+    const q = departBuild(); return !q || q.rows.some(r => !r.q); } catch (e) { return "threw: " + e.message; } })()`))
+    return "the card could not be built from a restored save";
+  return true;
+});
+
+scenario("departures: a display card moves nothing in the town", () => {
+  // The standing rule for any reading surface: it reads state, it never writes
+  // it. Building and drawing the card twenty times over must not move a dollar,
+  // a reputation point, a room or a wallet.
+  const sim = createSim({ seed: 66 });
+  sim.runDays(3);
+  const before = sim.G(`JSON.stringify([Math.round(coins), Math.round(rep), Math.round(worldMoney()),
+    customers.filter(k => k.visitor && !k.gone).length,
+    hotelRooms().filter(r => r.occupant).length,
+    Math.round(customers.reduce((s, k) => s + (k.visitor ? k.wallet : 0), 0))])`);
+  sim.G(`(() => {
+    today.left = customers.filter(k => k.visitor && !k.gone).slice(0, 6).map(departRecord);
+    for (let i = 0; i < 20; i++) {
+      depart = departBuild(); departT = DEPART_T; departPage = 0;
+      for (let p = 0; p < departPages(); p++) { departPage = p; drawDepart(); }
+      visQuote(depart.rows[0]);
+    }
+    depart = null; departT = 0; today.left = [];
+  })()`);
+  const after = sim.G(`JSON.stringify([Math.round(coins), Math.round(rep), Math.round(worldMoney()),
+    customers.filter(k => k.visitor && !k.gone).length,
+    hotelRooms().filter(r => r.occupant).length,
+    Math.round(customers.reduce((s, k) => s + (k.visitor ? k.wallet : 0), 0))])`);
+  if (before !== after) return `the card moved the town: ${before} -> ${after}`;
   return true;
 });
 

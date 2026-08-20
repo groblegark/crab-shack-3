@@ -4576,7 +4576,13 @@ let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
   return { served: 0, revenue: 0, rage: 0, sick: [], died: [], recovered: [],
     critical: [], walked: [], moved: [], rival: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {},
-    tipsShared: 0, bused: 0, heads: 0 };   // heads: visitors the ferry landed today (the dues base)
+    tipsShared: 0, bused: 0, heads: 0,   // heads: visitors the ferry landed today (the dues base)
+    // ...and `left`: one frozen row per visitor who BOARDED today, for the
+    // departure card. Rows, not a count, because the card quotes people by
+    // name - see THE DEPARTURE CARD. The day book is minted at midnight and
+    // read at the 20:00 settlement, and all four sailings are inside that
+    // window, so a day's manifest is always whole.
+    left: [] };
 }
 let screen = "title", hasSave = false, wiping = false;
 // SAVED TOWNS screen state (its own overlay, its own rect table)
@@ -5721,6 +5727,22 @@ function save() {
       rm: k.room ? hotelRooms().indexOf(k.room) : -1,
       hu: k.hunger, th: k.thirst, di: k.dirt, bo: k.bored, ti: k.tired,
       log: k.log || [],
+      // THE STAY LEDGER RIDES ALONG. A visit spans nights, so if this did not
+      // survive a reload the departure card would quietly forget the half of
+      // the stay that happened before you closed the tab - and would then say
+      // something true of a shorter visit than the one that actually
+      // happened, which is worse than saying nothing. Rounded on the way out
+      // (these are display numbers, never money) and clamped on the way in.
+      st: (() => { const s = stayOf(k); return {
+        wm: Math.round(s.waitMin), xm: Math.round(s.worstMin), xb: s.worstBiz,
+        qm: Math.round(s.quitMin), qb: s.quitBiz, q: s.quits,
+        sv: s.serves, tb: s.tables,
+        me: s.meals, dr: s.drinks, wa: s.washes, ga: s.games, ro: s.rooms,
+        ti: s.topItem, tz: s.topBiz, tp: Math.round(s.topPaid),
+        tp2: Math.round(s.tips), du: Math.round(s.dues),
+        sh: s.shut, fu: s.full, br: s.broke,
+        mi: Math.round(s.mistMin), ms: s.missed, sw: s.sandWhy };
+      })(),
     })),
     ferry: { t: Math.round(ferryT), sail: ferrySail, d: ferryDay },
     _vis: 1,   // "this save knows about the ferry" - see load()'s founder guard
@@ -6042,6 +6064,25 @@ function load(slot) {
     k.roughNights = Math.max(0, +v.rn || 0); k.unhoused = Math.max(0, +v.un || 0);
     k.arrived = Math.max(1, +v.ar || day); k.leaveT = +v.lt || (gnow() + 600);
     k.buys = Math.max(0, +v.b || 0);
+    // the stay ledger, clamped like everything else that comes out of a file:
+    // a save is untrusted input (the importer exists), and every one of these
+    // numbers ends up in a sentence a crab says out loud
+    {
+      const st = v.st && typeof v.st === "object" ? v.st : {};
+      const s = k.stay = newStay();
+      const num = (x, hi) => Math.max(0, Math.min(hi, Math.round(+x || 0)));
+      const nm = (x) => typeof x === "string" ? x.slice(0, 24) : null;
+      s.waitMin = num(st.wm, 99999); s.worstMin = num(st.xm, 99999); s.worstBiz = nm(st.xb);
+      s.quitMin = num(st.qm, 99999); s.quitBiz = nm(st.qb); s.quits = num(st.q, 99);
+      s.serves = num(st.sv, 99); s.tables = num(st.tb, 99);
+      s.meals = num(st.me, 99); s.drinks = num(st.dr, 99); s.washes = num(st.wa, 99);
+      s.games = num(st.ga, 99); s.rooms = num(st.ro, 99);
+      s.topItem = nm(st.ti); s.topBiz = nm(st.tz); s.topPaid = num(st.tp, 9999);
+      s.tips = num(st.tp2, 9999); s.dues = num(st.du, 9999);
+      s.shut = num(st.sh, 9999); s.full = num(st.fu, 9999); s.broke = num(st.br, 9999);
+      s.mistMin = num(st.mi, 99999); s.missed = num(st.ms, 99);
+      s.sandWhy = ["broke", "shut", "unmade", "full"].indexOf(st.sw) >= 0 ? st.sw : null;
+    }
     for (const [key, sk] of [["hunger", "hu"], ["thirst", "th"], ["dirt", "di"], ["bored", "bo"], ["tired", "ti"]])
       k[key] = Math.max(0, Math.min(1, +v[sk] || 0));
     k.log = Array.isArray(v.log) ? v.log.filter(e => Array.isArray(e) && e.length >= 4
@@ -8304,6 +8345,7 @@ function payAndBenefit(c, cust) {
       tip = Math.max(0, Math.min(tip, cust.wallet));
       cust.wallet -= tip; cust.spent += tip;
       visBenefit(cust);
+      stayOf(cust).tips += tip;   // what they left on top, on their own ledger
     }
     // one price on the menu, one price on the pop: the base. The tip is its
     // own little moment (Matt: 'are tacos 17 or 23? there are discrepancies')
@@ -8326,6 +8368,11 @@ function payAndBenefit(c, cust) {
 function visBenefit(k) {
   const r = k.recipe;
   if (!r) return;
+  // ...and the same moment, recorded on the VISIT: what it was, what it cost,
+  // and whether they were sat down for it. This is the one instant at which
+  // the table/counter distinction is still readable - serve() flips a seated
+  // guest to `dining` on the line after payAndBenefit returns.
+  stayBought(k, menuPrice(k.biz, r));
   if (k.need === "room") return;                       // paid at the desk; the bed is the benefit
   if (DRINKS[r.id]) k.thirst = 0;
   if (k.need === "food" || (!DRINKS[r.id] && k.biz === "shack")) k.hunger = 0;
@@ -8609,6 +8656,8 @@ function newVisitor(overnightOnly) {
     nights, nightsHad: 0, rough: false, roughNights: 0, unhoused: 0,
     arrived: day, leaveT, room: null, buys: 0, thinkT: Math.random() * VIS_THINK,
     idleT: 0, target: null, log: [],
+    // the visit's own ledger, minted with the purse - see THE DEPARTURE CARD
+    stay: newStay(), qJoin: null,
     hunger: n.hunger, thirst: n.thirst, dirt: n.dirt, bored: n.bored, tired: n.tired,
   };
 }
@@ -8667,7 +8716,10 @@ function ferryDock(n, idx) {
     // appearing, and the money they hand over is money the counters never see.
     today.heads = (today.heads || 0) + 1;
     const due = harbourDues(v);
-    if (due > 0) visLog(v, "money", "PAID $" + Math.round(due) + " HARBOUR DUE");
+    if (due > 0) {
+      visLog(v, "money", "PAID $" + Math.round(due) + " HARBOUR DUE");
+      stayOf(v).dues += due;   // ...and they will mention it on the way out
+    }
     landed.push(v.name);
   }
   if (window._stats) {
@@ -8742,12 +8794,18 @@ function ferryGo() {
   if (last) for (const k of visitorsInTown()) {
     if (k.gone || k.nights > 0) continue;
     k.nights = 1; k.leaveT = nearestSail(gnow() + 900);
+    stayOf(k).missed++;
     visLog(k, "life", "MISSED THE LAST BOAT - STAYING OVER");
   }
   ferryNotify("sail");
 }
 function visBoard(k) {
   k.gone = true;
+  // THE MANIFEST. The visit is frozen into a plain row on its way up the plank,
+  // because a second later the wallet is destroyed and the visitor is gone from
+  // `customers` - this is the last frame in which anything can be asked of
+  // them. See THE DEPARTURE CARD; the row is what the quote is derived from.
+  if (today.left && today.left.length < 40) today.left.push(departRecord(k));
   if (k.room) { k.room.occupant = null; k.room.dirty = true; k.room = null; }
   // WORD OF MOUTH IS THE WHOLE POINT OF A VISIT. A guest who ate, washed and
   // slept somewhere talks the town up; one who spent the night on the sand
@@ -8771,6 +8829,20 @@ function visBoard(k) {
     s.visNights = (s.visNights || 0) + k.nightsHad;
     s.visRough = (s.visRough || 0) + k.roughNights;
     if (rough) s.visRoughGuests = (s.visRoughGuests || 0) + 1;
+    // ...and the three reasons a want went unanswered, totalled across the run.
+    // They have to be banked HERE because a departed visitor is pruned out of
+    // `customers` on the next pass, so a snapshot of the town can only ever see
+    // the stays still in progress. These are the numbers that answer "is
+    // pricing to the ceiling free?" - a dear town turns wants into `visBroke`
+    // rather than into sales, and nothing else in _stats can see that.
+    const st = k.stay;
+    if (st) {
+      s.visShut = (s.visShut || 0) + st.shut;
+      s.visFull = (s.visFull || 0) + st.full;
+      s.visBroke = (s.visBroke || 0) + st.broke;
+      s.visQuits = (s.visQuits || 0) + st.quits;
+      s.visTables = (s.visTables || 0) + st.tables;
+    }
   }
   if (followCust === k) followCust = null;
   if (sel === k) sel = null;
@@ -8851,6 +8923,15 @@ function sleepOnSand(k) {
   if (!k.roughFlag) {
     k.roughFlag = true; k.roughNights++;
     k.unhoused++;
+    // Asked HERE, because this is the only frame in which the answer exists.
+    // The order is the order of the FIXES: a guest who could not raise the
+    // board price was never the hotel's to lose, a dark desk is hours and
+    // staffing, linen on the floor is housekeeping (the same signal the
+    // hotelier answers with money - see today.roomsLost below), and anything
+    // else is a genuinely full house, which is the one that says BUILD.
+    stayOf(k).sandWhy = k.wallet < roomPrice() ? "broke"
+      : !visOpen("hotel") ? "shut"
+      : hotelRooms().some(r => r.dirty || r.cleaning) ? "unmade" : "full";
     // they came for two nights; one on the sand is enough - the next boat will do
     k.leaveT = Math.min(k.leaveT, nearestSail(gnow() + 540));
     visLog(k, "peril", "NO ROOM AT THE HOTEL - SLEPT ON THE BEACH");
@@ -8913,10 +8994,20 @@ function visPick(k) {
   // pickErrand has always read localPrice - this was the one check that did
   // not, and the hotel is the shop most likely to move its board.)
   const afford = (b) => (r) => k.wallet >= menuPrice(b, r) + res;
+  // WHY A WANT WENT UNANSWERED IS RECORDED HERE AND NOWHERE ELSE. Each of
+  // these three guards is a different failure with a different fix, and this
+  // is the only place in the game that can tell them apart: afterwards the
+  // town looks the same whether the shop was dark, the line was already four
+  // tourists deep, or the board was priced past what this guest was carrying.
+  // The counters ride on the visitor (see THE DEPARTURE CARD) and are what
+  // lets a departing guest say WHICH of the three sent them home with money.
+  // Nothing here changes what the scorer picks - `visOpen` already implies
+  // `bizUnlocked`, so an un-built lot is silent rather than blamed.
   const add = (b, need, pickR) => {
-    if (!visOpen(b) || !visRoomFor(k, b)) return;
+    if (!visOpen(b)) { if (bizUnlocked(b)) stayBlocked(k, "shut"); return; }
+    if (!visRoomFor(k, b)) { stayBlocked(k, "full"); return; }
     const rs = BIZ[b].recipes.filter(afford(b));
-    if (!rs.length) return;
+    if (!rs.length) { stayBlocked(k, "broke"); return; }
     cand.push({ biz: b, need, recipe: pickR(rs) });
   };
   const cheap = (rs) => rs.slice().sort((a, b) => a.pay - b.pay)[0];
@@ -8991,6 +9082,13 @@ function visStep(k, tx, ty, dt) {
 // whatever state they are in, so a visitor stood in a queue still gets hungry
 function visTick(k, dt) {
   const hrs = dt * TS / 60;
+  // THE ONLY WEATHER THIS TOWN HAS, and it is a fact about the CALENDAR:
+  // mistPeak is an integer hash of the day, the same on every machine, so a
+  // guest who spent their evening out in a thick one is a guest whose stay the
+  // player can go back and check. Indoors does not count - a paid bed is
+  // exactly what buys you out of it, which is the whole point of saying so.
+  if (k.state !== "inRoom" && tmin >= 16.5 * 60 && mistNow() > 0.6)
+    stayOf(k).mistMin += dt * TS;
   if (k.state === "inRoom") {
     k.tired = Math.max(0, k.tired - VIS_BED_DRAIN * hrs);
     if (tmin >= WAKE_HOUR && tmin < 12 * 60) checkOut(k);
@@ -9061,6 +9159,7 @@ function updateVisitor(k, dt) {
     k.wy = FLOOR_Y;
     k.patience = VIS_PATIENCE; k.maxPatience = VIS_PATIENCE;
     queueJoin(k);   // the ticket is stamped HERE, not when their ferry docked
+    stayQueued(k);  // ...and so is the clock the departure card quotes
     noteArrival(k.biz);
     return;
   }
@@ -9103,6 +9202,7 @@ function visAfterCounter(k) {
     if (k.need === "room") checkIn(k);
   } else {
     visLog(k, "peril", "GAVE UP WAITING AT THE " + (BIZ[k.biz] ? BIZ[k.biz].short : "COUNTER"));
+    stayQuit(k);   // the loudest thing in a stay: they will say so on the boat
     k.bored = Math.min(1, k.bored + 0.05);
   }
   k.state = "roam"; k.biz = null; k.recipe = null; k.need = null;
@@ -9272,7 +9372,7 @@ function updateCustomers(dt) {
           // the table tip comes out of the same pocket the plate did: a guest
           // who has spent down to their last dollar leaves what they have
           const tt = k.visitor ? Math.max(0, Math.min(tableTipOf(k.biz), k.wallet)) : tableTipOf(k.biz);
-          if (k.visitor) { k.wallet -= tt; k.spent += tt; }
+          if (k.visitor) { k.wallet -= tt; k.spent += tt; stayOf(k).tips += tt; }
           payTip(k.biz, k.server, tt, k.x, 130);   // table tip on the way out (tourists), split like any other
           if (window._stats) window._stats.tableTip = (window._stats.tableTip || 0) + tt;
           // (payTip pops the gold "+$N TIP" - a second label here was the
@@ -9639,6 +9739,7 @@ function winFerry() {
     hand: (town.find(k => k.p.job === "fishing") || town[0] || { p: { name: "SOMEBODY" } }).p.name,
   };
   gameOver = true; toast = null; report = null; reportT = 0;
+  depart = null; departT = 0; departQ = null;   // the ending owns the screen; the manifest does not follow it up
   camX = clampCam(FERRY.hull - W / 2 + 14);   // she is at her own berth; go and look at her
   followIdx = -1; followNpc = null; followCust = null;
   manage = null; dossier = null; boardView = false; saveView = false;
@@ -9992,6 +10093,7 @@ cv.addEventListener("click", (ev) => {
     boardView = false; return;
   }
   if (reportT > 0) { reportT = 0; return; }
+  if (departT > 0) { departTapped(); return; }   // ...and the day's second page pages, then closes
   startMusic();
   const p = evPos(ev);
   if (dragMoved) return;
@@ -10179,7 +10281,7 @@ cv.addEventListener("click", (ev) => {
 cv.addEventListener("contextmenu", (ev) => {
   ev.preventDefault();
   if (screen !== "play" || gameOver) return;
-  if (dossier || boardView || manage || reportT > 0) return;
+  if (dossier || boardView || manage || reportT > 0 || departT > 0) return;
   if (window.MergeMode && MergeMode.active()) return;
   const p = evPos(ev);
   if (p.y >= PANEL_Y) return;   // the panel is left-click country
@@ -11359,8 +11461,9 @@ function drawCustCard(k) {
 }
 function drawFollowCard() {
   // any full-screen card owns the view: the little crab card must never sit on
-  // top of the ledger, the census, the save screen or the day report
-  if (dossier || manage || boardView || saveView || reportT > 0) return;
+  // top of the ledger, the census, the save screen or either page of the day's
+  // reckoning (the report, then the departures)
+  if (dossier || manage || boardView || saveView || reportT > 0 || departT > 0) return;
   if (tab === "menu") return;      // the MENU tab is a reading surface too
   if (sel && !sel.p) { drawCustCard(sel); return; }
   const c = sel;
@@ -11516,8 +11619,11 @@ function navMarks() {
 // the strip is live on exactly the terms the crab cycler is: the town is on
 // screen and nothing is being read on top of it
 function navLive() {
+  // BOTH SIDES OF THE MERGE ADDED A READING SURFACE HERE, and both are real:
+  // the help card (onboarding pass) and the departure card (the day report's
+  // second page). Every full-screen surface owns the screen while it is up.
   return screen === "play" && !gameOver && !helpView
-    && !(dossier || manage || boardView || saveView || reportT > 0)
+    && !(dossier || manage || boardView || saveView || reportT > 0 || departT > 0)
     && !(window.MergeMode && MergeMode.active());
 }
 // ...and the two chips need somewhere to go: a player with no shop left has no
@@ -12130,7 +12236,7 @@ function cyclerRects() {
 // being read...
 function cyclerLive() {
   return screen === "play" && !gameOver
-    && !(dossier || manage || boardView || saveView || reportT > 0) && tab !== "menu"
+    && !(dossier || manage || boardView || saveView || reportT > 0 || departT > 0) && tab !== "menu"
     && cycleList().length > 0;
 }
 // ...and SHOWN (chevrons drawn, tappable) only where they live: on the card,
@@ -13440,6 +13546,480 @@ function drawReport() {
   for (const m of report.moved) smallText(ctx, m, x + 6, ly, [110, 100, 110]), ly += 7;
   if (((time * 1.5) | 0) % 2) smallText(ctx, "CLICK TO CARRY ON", x + 52, y + h2 - 9, [150, 130, 120]);
 }
+
+// ===========================================================================
+// THE DEPARTURE CARD  (owner directive, 2026-08-19)
+//
+// Matt: "we should also have a view at end of day of folks leaving on the
+// ferry and how they are feeling, with a 'quote' based on stats."
+//
+// THE ONE RULE: THE QUOTE IS DERIVED, NEVER RANDOM. Every line a departing
+// visitor speaks is traceable to something that happened to them and that the
+// player could have gone and watched: what they paid, what they ate, how long
+// they stood in a line, whether the town put them on a bed or on the sand,
+// whether they went home with money they never got to spend. A player who
+// reads "$96 OF MY $141 CAME HOME WITH ME - EVERY LINE WAS FULL" can open
+// that guest's diary and find the times they turned away from a full counter.
+// A flavour-text generator is exactly what this must NOT be: it would be
+// interface opacity dressed up as personality, and PLAN's second ruling says
+// opacity is a bug while economic uncertainty is the game.
+//
+// WHY THE STATS ARE ACCUMULATED AS THE VISIT HAPPENS rather than reconstructed
+// at the gangway: most of what makes a stay worth quoting leaves no trace in a
+// town-wide counter. `today.rage` knows THREE guests walked out; it does not
+// know MISTY walked out of two lines herself. And the queue a visitor never
+// joined because it already held its four tourists is recorded NOWHERE at all
+// - which PLAN's own measurement says is the commonest reason a purse goes
+// home half full, i.e. the single most informative thing this card can say.
+// So every visitor carries a `stay` ledger from the moment their wallet is
+// minted, and `departRecord` freezes it into a plain row when they board.
+//
+// THAT ROW IS THE WHOLE INTERFACE. `visQuote(row)` is a pure function of a
+// plain object, which is what makes the mechanism testable: a scenario builds
+// the stay it wants to talk about and asserts the CLASS of quote it produces,
+// rather than asserting that some seed happens to yield some sentence.
+//
+// THE UNSPENT HALF IS THE POINT. PLAN, the visitor pass: average spend $29.19
+// of an ~$85 purse - "the town is leaving half of every purse on the table
+// because a two-crab shack cannot serve it, and that is exactly the incentive
+// the growth strategy is supposed to feel." Until now the player was never
+// told. The card's money band prints BROUGHT / SPENT / TOOK HOME every single
+// night, and it is the first surface in the game where that number appears.
+//
+// THE EMBARGO holds here like everywhere else: a departing visitor never names
+// the island. They talk about the shack, the showers, the Driftwood, the mist
+// and the boat, all of which they can see.
+
+// A visit's own ledger. Minted with the purse and destroyed with it - nothing
+// in here is town state, so nothing in here can be double-counted or leak.
+function newStay() {
+  return {
+    waitMin: 0,        // total game-minutes stood in a line, served or not
+    worstMin: 0, worstBiz: null,   // ...and the longest single one, and where
+    quitMin: 0, quitBiz: null,     // the wait they abandoned, and where
+    quits: 0,          // lines walked away from (a rage-quit is a visitor's loudest act)
+    serves: 0,         // counters cleared
+    tables: 0,         // ...of which were served AT A TABLE
+    meals: 0, drinks: 0, washes: 0, games: 0, rooms: 0,
+    topItem: null, topBiz: null, topPaid: 0,   // the dearest single thing they bought
+    tips: 0,           // what they left on top of the price
+    dues: 0,           // what the harbour took at the plank, if the town charges it
+    // WHY A WANT WENT UNANSWERED, counted in think-ticks (one per VIS_THINK, so
+    // roughly six game-minutes of wanting a thing and not getting it). Three
+    // separate counters because they are three separate problems with three
+    // separate fixes: SHUT is hours and staffing, FULL is capacity, BROKE is
+    // prices. Rolled into one number the card could only say "no", never why.
+    shut: 0, full: 0, broke: 0,
+    mistMin: 0,        // game-minutes spent outdoors in a thick evening mist
+    missed: 0,         // last boats missed
+    // ...and WHY there was no bed, asked at the moment they lay down on the
+    // sand. Same argument as shut/full/broke one shelf up: four causes with
+    // four different fixes, and afterwards a full house, a dark desk and a
+    // pile of unwashed linen all look identical - an empty room nobody got.
+    // Without it every rough sleeper on a bad night says the SAME SENTENCE on
+    // the same card, which is the exact failure this feature must not have.
+    sandWhy: null,     // "broke" | "shut" | "unmade" | "full"
+  };
+}
+// Defensive accessor: a visitor restored from a save written before this pass
+// has no ledger, and starting them an empty one is honest (it says nothing
+// about the part of the visit that happened in another build) where throwing
+// would not be.
+function stayOf(k) { return k.stay || (k.stay = newStay()); }
+
+// ---- the hooks, one function each, so every call site stays one line -------
+function stayQueued(k) { k.qJoin = gnow(); }
+function stayWait(k) {
+  if (k.qJoin == null) return 0;
+  const w = Math.max(0, gnow() - k.qJoin);
+  k.qJoin = null;
+  const s = stayOf(k);
+  s.waitMin += w;
+  if (w > s.worstMin) { s.worstMin = w; s.worstBiz = BIZ[k.biz] ? BIZ[k.biz].name : "COUNTER"; }
+  return w;
+}
+// SERVED. Called from visBenefit, i.e. at the instant the money moves, which
+// is also the only instant at which the seated/counter distinction is still
+// readable (serve() flips a table guest to `dining` on the very next line).
+function stayBought(k, paid) {
+  const s = stayOf(k);
+  stayWait(k);
+  s.serves++;
+  if (k.state === "seatedWaiting") s.tables++;
+  if (k.need === "room") { s.rooms++; return; }
+  if (!k.recipe) return;
+  if (k.need === "clean") s.washes++;
+  else if (k.need === "fun" || k.biz === "arcade") s.games++;
+  else if (k.need === "drink" || DRINKS[k.recipe.id]) s.drinks++;
+  else s.meals++;
+  if (paid > s.topPaid) {
+    s.topPaid = Math.round(paid);
+    s.topItem = ITEM_NAMES[k.recipe.icon] || "SOMETHING";
+    s.topBiz = BIZ[k.biz] ? BIZ[k.biz].name : "COUNTER";
+  }
+}
+// GAVE UP. The wait is stamped where it ENDED rather than counted forward, so
+// the number in the quote is the number the queue actually cost them.
+function stayQuit(k) {
+  const s = stayOf(k);
+  const w = stayWait(k);
+  s.quits++;
+  s.quitMin = Math.round(w);
+  s.quitBiz = BIZ[k.biz] ? BIZ[k.biz].name : "COUNTER";
+}
+// A WANT WITH NOWHERE TO GO. Recorded inside visPick's own guards, so the
+// reason is the reason the scorer actually rejected the shop for - never a
+// guess made afterwards from the state of the town.
+function stayBlocked(k, why) { const s = stayOf(k); s[why] = (s[why] || 0) + 1; }
+
+// THE ROW. Everything the card and the quote engine are allowed to see, frozen
+// at the gangway out of the live visitor. Plain data on purpose: `visQuote` is
+// then a pure function, and a scenario can hand it a stay it built by hand.
+function departRecord(k) {
+  const s = stayOf(k);
+  const purse = Math.max(1, Math.round(k.purse));
+  const left = Math.max(0, Math.min(purse, Math.round(k.wallet)));
+  // WHICH SHUT DOOR MATTERED MOST. Ties and near-ties say nothing, so a reason
+  // is only named when one of the three clearly dominates: 3 ticks is about
+  // twenty game-minutes of wanting a thing and being turned away, and it has
+  // to beat the other two outright.
+  const blk = [["shut", s.shut], ["full", s.full], ["broke", s.broke]].sort((a, b) => b[1] - a[1]);
+  const blocked = blk[0][1] >= 3 && blk[0][1] > blk[1][1] ? blk[0][0] : null;
+  return {
+    name: k.name, color: k.color, acc: k.acc,
+    days: Math.max(1, day - k.arrived + 1),
+    nights: k.nights, nightsBed: k.nightsHad, rough: k.roughNights,
+    purse, left, spent: Math.max(0, purse - left), buys: k.buys,
+    serves: s.serves, tables: s.tables,
+    meals: s.meals, drinks: s.drinks, washes: s.washes, games: s.games, rooms: s.rooms,
+    topItem: s.topItem, topBiz: s.topBiz, topPaid: s.topPaid,
+    tips: Math.round(s.tips), dues: Math.round(s.dues),
+    waitMin: Math.round(s.waitMin), worstMin: Math.round(s.worstMin),
+    worstBiz: s.worstBiz || "COUNTER",
+    quits: s.quits, quitMin: Math.round(s.quitMin), quitBiz: s.quitBiz || "COUNTER",
+    shut: s.shut, full: s.full, broke: s.broke, blocked,
+    mistMin: Math.round(s.mistMin), missed: s.missed, sandWhy: s.sandWhy,
+    hunger: k.hunger, thirst: k.thirst, dirt: k.dirt, bored: k.bored, tired: k.tired,
+  };
+}
+
+// ---- MOOD ------------------------------------------------------------------
+// Five moods, and THE QUOTE OWNS THE MOOD: the tag beside a name is the mood of
+// the rule that spoke, never a second opinion computed from a different number.
+// If the card says SOUR, the sentence underneath it says why it says SOUR.
+const DEP_MOODS = {
+  sour:  { tag: "SOUR",      col: [190, 70, 70],   pip: [214, 84, 78] },
+  flat:  { tag: "FLAT",      col: [118, 110, 126], pip: [152, 144, 160] },
+  mixed: { tag: "MIXED",     col: [196, 126, 40],  pip: [226, 160, 60] },
+  glad:  { tag: "GLAD",      col: [40, 140, 70],   pip: [80, 190, 110] },
+  made:  { tag: "DELIGHTED", col: [176, 132, 30],  pip: [244, 206, 90] },
+};
+const DEP_ORDER = ["sour", "flat", "mixed", "glad", "made"];
+// A DURATION A CRAB WOULD SAY OUT LOUD. Patience is spent in REAL seconds
+// (VIS_PATIENCE 100 at 1/s, six times that at an unstaffed counter) and TS is
+// 4 game-minutes to the second, so a staffed line a guest sits out to the very
+// end is most of a game afternoon while a dark shopfront is about an hour.
+// Both are true; only the units change, and nothing is scaled to flatter.
+function depMins(m) {
+  const n = Math.max(0, Math.round(m));
+  if (n < 90) return n + (n === 1 ? " MINUTE" : " MINUTES");
+  const h = Math.round(n / 60);
+  return h + (h === 1 ? " HOUR" : " HOURS");
+}
+function depList(r) {
+  const bits = [];
+  if (r.meals) bits.push(r.meals > 1 ? r.meals + " MEALS" : "ATE");
+  if (r.drinks) bits.push(r.drinks > 1 ? r.drinks + " DRINKS" : "DRANK");
+  if (r.washes) bits.push("WASHED");
+  if (r.games) bits.push("PLAYED");
+  if (r.rooms) bits.push("SLEPT");
+  // three is what the card's width carries with the tail of the sentence still
+  // on it - a guest who did five things says the first three and the count
+  return bits.length ? bits.slice(0, 3).join(", ") : "SPENT UP";
+}
+
+// ---- THE QUOTE TABLE -------------------------------------------------------
+// Every rule is a WEIGHT and a LINE. The weight is computed FROM THE ROW -
+// bigger thing, bigger number - and the heaviest rule speaks. That is the
+// mechanism, and it is why this is a scored table rather than an if-ladder:
+// two guests with the same shape of stay but different magnitudes get
+// different headlines out of the same table, and a rule only ever outranks
+// another rule because the thing it describes was actually bigger.
+//
+// The bands, and why they sit where they do:
+//   120+  SOMETHING WENT WRONG AND THE PLAYER CAUSED IT. A night on the sand
+//         is the loudest thing that can happen to a visitor - it is the only
+//         departure that costs the town reputation (-1.2), and the fix (rooms
+//         free, meaning staffing and housekeeping) is entirely in the
+//         player's hands.
+//    80+  A LINE THEY WALKED OUT OF. -3 reputation each: the loudest single
+//         number anywhere in the demand model.
+//    70+  THEY BOUGHT NOTHING AT ALL. Whatever else happened, that is the
+//         headline, and the sub-line names WHICH of the three failures it was
+//         so the player knows whether to open longer, hire, or drop a price.
+//    40+  THE PURSE THAT WENT HOME, weighted by how much of it went home - so
+//         a guest who spent nine tenths never says this and one who spent a
+//         fifth always does. This is the card's economic argument.
+//    20+  THE GOOD DAY, read in order: waited on at a table, slept at the
+//         Driftwood, spent up, one good plate, a few honest stops.
+//     1   Nothing happened. Say so, honestly, rather than inventing colour.
+const DEPART_RULES = [
+  { id: "rough", mood: "sour",
+    w: (r) => r.rough > 0 ? 120 + 30 * r.rough : 0,
+    line: (r) => {
+      // THE CAUSE LEADS, because the cause is the part the player can act on -
+      // and "spent up" is only ever the whole story when they also MISSED THE
+      // LAST BOAT, which is the one way a day-tripper ends up needing a bed
+      // they never budgeted for (ferryGo turns a dawdler into an overnighter).
+      const why = r.sandWhy === "broke"
+          ? (r.missed > 0 ? "MISSED THE LAST BOAT AND SPENT UP" : "COULDN'T AFFORD A BED")
+        : r.sandWhy === "shut" ? "THE HOTEL DESK WAS DARK"
+        : r.sandWhy === "unmade" ? "BEDS STANDING THERE UNMADE"
+        : "NOT A ROOM LEFT IN TOWN";
+      return r.rough > 1 ? why + ". " + r.rough + " NIGHTS ON THE SAND."
+        : why + ". I SLEPT ON THE BEACH.";
+    } },
+  { id: "quits", mood: "sour",
+    w: (r) => r.quits >= 2 ? 100 + 8 * r.quits : 0,
+    line: (r) => "WALKED OUT OF " + r.quits + " LINES. NOBODY EVER CAME." },
+  { id: "quit", mood: "sour",
+    w: (r) => r.quits === 1 ? 82 : 0,
+    line: (r) => r.quitMin >= 1
+      ? "WAITED " + depMins(r.quitMin) + " AT THE " + r.quitBiz + ", THEN LEFT."
+      : "GAVE UP AT THE " + r.quitBiz + ". NOBODY WAS COMING." },
+  { id: "nothing", mood: "flat",
+    w: (r) => r.buys === 0 ? 74 : 0,
+    line: (r) => r.blocked === "shut" ? "CAME ALL THIS WAY AND FOUND THE PLACE SHUT."
+      : r.blocked === "full" ? "NEVER GOT NEAR A COUNTER. EVERY LINE WAS FULL."
+      : r.blocked === "broke" ? "NOTHING HERE I COULD AFFORD. NOT ONE THING."
+      : "DIDN'T SPEND A DOLLAR. NOTHING TOOK MY FANCY." },
+  // THE UNSPENT PURSE, WITH ITS REASON ATTACHED. Half of every purse has gone
+  // home unspent since the visitor pass shipped, and the reason clause is what
+  // turns that from a complaint into something the player can act on.
+  //
+  // IT IS TWO RULES, NOT ONE, AND THE SPLIT IS THE WHOLE POINT. A purse that
+  // went home because a door was shut, a line was full or a board was priced
+  // out of reach is a TOWN FAILURE with a fix attached, and it outranks
+  // everything except a night on the sand and a line walked out of. A purse
+  // that went home because the guest simply stopped wanting anything is a
+  // different finding - the town has nothing left to SELL them, which is the
+  // standing "better sources of limited fun" argument - and it is a shrug, not
+  // a grievance. Measured before the split, the unreasoned half spoke for 26%
+  // of all departures and drowned every good outcome in the table: SLEPT AT
+  // THE DRIFTWOOD could not be reached at all, so a well-run town had no way
+  // to show green. Same numbers, two weights, two moods.
+  { id: "unspent", mood: "mixed",
+    w: (r) => (r.buys >= 1 && r.blocked && r.left / r.purse >= 0.5) ? 40 + 44 * (r.left / r.purse) : 0,
+    line: (r) => "$" + r.left + " OF MY $" + r.purse + " WENT HOME UNSPENT - "
+      + (r.blocked === "full" ? "EVERY LINE WAS FULL."
+        : r.blocked === "shut" ? "THE TOWN WAS SHUT."
+        : "I COULDN'T AFFORD IT.") },
+  { id: "idle", mood: "flat",
+    w: (r) => (r.buys >= 1 && !r.blocked && r.left / r.purse >= 0.5) ? 22 + 20 * (r.left / r.purse) : 0,
+    line: (r) => "TOOK $" + r.left + " OF MY $" + r.purse
+      + " HOME AGAIN. NOTHING ELSE I FANCIED." },
+  // THE FOUR NEEDS THEY LEFT WITH, and each one is TWO conditions, not one.
+  // A high bar at the gangway on its own says almost nothing: VIS_RATE.hunger
+  // is 0.115 an hour, so a guest who ate at noon is back over 0.8 by the last
+  // boat and, measured, "hungry at departure" spoke for a quarter of ALL
+  // departures - a fact about the clock, not about the town. Pairing the bar
+  // with "and never bought one" is what makes it a finding: this guest wanted
+  // a meal, and this town never sold them a meal, and here they are getting on
+  // the boat starving. Same shape for the drink, the wash and the bed.
+  { id: "hungry", mood: "sour",
+    w: (r) => r.hunger >= 0.85 && r.meals === 0 ? 44 + 20 * r.hunger : 0,
+    line: () => "GETTING ON THIS BOAT HUNGRIER THAN I GOT OFF IT." },
+  { id: "parched", mood: "sour",
+    w: (r) => r.thirst >= 0.85 && r.drinks === 0 ? 40 + 16 * r.thirst : 0,
+    line: () => "NOT ONE COLD DRINK IN THE WHOLE PLACE. PARCHED." },
+  { id: "grubby", mood: "sour",
+    w: (r) => r.dirt >= 0.85 && r.washes === 0 ? 38 + 16 * r.dirt : 0,
+    line: (r) => r.days + (r.days === 1 ? " DAY" : " DAYS")
+      + " OF SALT AND SAND AND NOWHERE TO WASH IT OFF." },
+  { id: "weary", mood: "flat",
+    w: (r) => r.tired >= 0.85 && r.nightsBed === 0 ? 34 + 12 * r.tired : 0,
+    line: () => "WORN RIGHT OUT. NOWHERE IN THIS TOWN TO SIT DOWN." },
+  { id: "bored", mood: "flat",
+    w: (r) => r.bored >= 0.85 && r.games === 0 ? 32 + 10 * r.bored : 0,
+    line: () => "ONCE YOU'VE WALKED THE PROMENADE, THAT'S THE LOT." },
+  // A LINE THEY NEARLY WALKED OUT OF. The threshold is MEASURED, not guessed:
+  // over 266 departures in three do-nothing towns the median served guest's
+  // longest wait is 173 game-minutes, so 20 minutes would have been the normal
+  // service time in this town and this rule would have spoken for nine guests
+  // in ten. VIS_PATIENCE is 400 game-minutes at a staffed counter, so 240 is
+  // "spent three fifths of their patience and stayed anyway".
+  { id: "wait", mood: "mixed",
+    w: (r) => r.worstMin >= 240 && r.serves > 0 ? 24 + Math.min(14, (r.worstMin - 240) / 12) : 0,
+    line: (r) => "GOT SERVED - AFTER " + depMins(r.worstMin) + " AT THE " + r.worstBiz + "." },
+  { id: "dues", mood: "mixed",
+    w: (r) => r.dues > 0 ? 22 + r.dues : 0,
+    line: (r) => "CHARGED ME $" + r.dues + " JUST TO STEP OFF THE PLANK." },
+  { id: "missed", mood: "mixed",
+    w: (r) => r.missed > 0 ? 25 : 0,
+    line: () => "MISSED THE LAST BOAT. THAT WASN'T THE PLAN AT ALL." },
+  { id: "mist", mood: "flat",
+    w: (r) => r.mistMin >= 100 ? 20 + Math.min(12, r.mistMin / 30) : 0,
+    line: () => "THE MIST CAME IN AND I NEVER DID SEE THE FAR SHORE." },
+  { id: "table", mood: "made",
+    w: (r) => r.tables >= 1 ? 30 + 8 * r.tables : 0,
+    line: (r) => r.tables > 1
+      ? "WAITED ON AT A TABLE " + (r.tables === 2 ? "TWICE" : r.tables + " TIMES")
+        + ". A PROPER HOLIDAY."
+      : "SAT DOWN AND WAS WAITED ON. THAT'S A PROPER HOLIDAY." },
+  { id: "bed", mood: "glad",
+    w: (r) => r.nightsBed >= 1 ? 26 + 6 * r.nightsBed : 0,
+    line: (r) => r.nightsBed > 1 ? r.nightsBed + " NIGHTS AT THE DRIFTWOOD. SLEPT LIKE A STONE."
+      : "SLEPT AT THE DRIFTWOOD. BEST BED ON THE COAST." },
+  { id: "spentup", mood: "made",
+    w: (r) => (r.buys >= 1 && r.left <= r.purse * 0.12) ? 24 + 18 * (1 - r.left / r.purse) : 0,
+    line: (r) => "SPENT EVERY DOLLAR OF MY $" + r.purse + ". WORTH THE CROSSING." },
+  { id: "top", mood: "glad",
+    w: (r) => r.topItem && r.topPaid >= 10 ? 17 + Math.min(16, r.topPaid * 0.5) : 0,
+    line: (r) => "$" + r.topPaid + " ON A " + r.topItem + " AT THE " + r.topBiz + ". NO REGRETS." },
+  { id: "regular", mood: "glad",
+    w: (r) => r.buys >= 2 ? 15 + 3 * r.buys : 0,
+    line: (r) => depList(r) + " - " + r.buys + " STOPS IN "
+      + r.days + (r.days === 1 ? " DAY." : " DAYS.") },
+  { id: "quiet", mood: "flat", w: () => 1,
+    line: () => "A DAY BY THE SEA. I'VE HAD WORSE." },
+];
+// THE HEAVIEST RULE SPEAKS. Ties go to the earlier rule, which is the only
+// place the table's ORDER matters at all - and it is written loudest-first, so
+// a tie resolves toward the thing the player most needs to know.
+function visQuote(r) {
+  let best = DEPART_RULES[DEPART_RULES.length - 1], bw = 0;
+  for (const rule of DEPART_RULES) {
+    const w = rule.w(r) || 0;
+    if (w > bw) { bw = w; best = rule; }
+  }
+  return { id: best.id, mood: best.mood, weight: bw, line: best.line(r) };
+}
+
+// ---- THE CARD --------------------------------------------------------------
+// It is the day report's SECOND PAGE, not a rival to it: the report closes and
+// this comes up in its place, so the end of the day stays ONE moment with one
+// click through it. The report itself is untouched - the money is its subject
+// and the people are this card's, and mixing them would have cost the report
+// the thing it is good at.
+const DEPART_ROWS = 4;        // guests to a page: 26px each is the tightest a name,
+                              // a fact line and a whole sentence will read at 3x5
+const DEPART_T = 11;          // seconds the FIRST page holds, matching the report's own
+// ...and a shorter dwell for a page the card turned by itself. A measured day
+// lands 12 visitors and sends about as many home, which is three pages: 11 + 6
+// + 6 is twenty-three seconds of screen for the whole manifest, against the
+// forty-two a flat dwell would have cost. The cap is 40 departures (ten pages)
+// and even that self-plays in about a minute, which a tap skips through at any
+// point. A tap gets the FULL dwell back - a page you asked for is a page you
+// meant to read.
+const DEPART_T2 = 6;
+let depart = null, departT = 0, departPage = 0, departQ = null;
+function departPages() { return depart ? Math.max(1, Math.ceil(depart.rows.length / DEPART_ROWS)) : 1; }
+// Built at settlement out of the day's boarding records, so it says what
+// happened TODAY and nothing else. An empty manifest is NO CARD AT ALL - a
+// town whose boats all sailed empty should not be handed a blank sheet.
+function departBuild() {
+  const rows = (today.left || []).slice(0, 40);
+  if (!rows.length) return null;
+  let purse = 0, left = 0, rough = 0, bed = 0, quit = 0;
+  const moods = {};
+  for (const r of rows) {
+    r.q = visQuote(r);
+    purse += r.purse; left += r.left;
+    if (r.rough > 0) rough++;
+    if (r.nightsBed > 0) bed++;
+    if (r.quits > 0) quit++;
+    moods[r.q.mood] = (moods[r.q.mood] || 0) + 1;
+  }
+  return { day, rows, purse, left, spent: purse - left, rough, bed, quit, moods };
+}
+function drawDepart() {
+  if (!depart || departT <= 0 || gameOver) return;
+  const D = depart;
+  const x = 4, y = 8, w2 = 248, h2 = 158;
+  ctx.fillStyle = "rgba(16,12,30,0.55)";
+  ctx.fillRect(0, 0, W, PANEL_Y);
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 11, [96, 170, 220]);
+  const ttl = "DAY " + D.day + " DEPARTURES - " + D.rows.length + " SAILED";
+  text(ctx, ttl, x + ((w2 - textWidth(ttl)) >> 1), y + 2, [20, 40, 60]);
+  // THE MOOD STRIP, and it is the reason the card reads from across the room:
+  // one pip per guest who went home today, sorted into mood order, so a wall of
+  // red and a wall of green are different PICTURES before a word is read.
+  {
+    const n = D.rows.length, pitch = n > 20 ? 8 : 9, cap = 26;
+    let i = 0;
+    for (const key of DEP_ORDER) {
+      for (let j = 0; j < (D.moods[key] || 0) && i < cap; j++, i++)
+        rect(ctx, x + 6 + i * pitch, y + 15, pitch - 2, 6, DEP_MOODS[key].pip);
+    }
+    if (n > cap) smallText(ctx, "+" + (n - cap), x + 8 + cap * pitch, y + 16, [130, 120, 135]);
+  }
+  // THE MONEY BAND. The unspent half of every purse has been the growth
+  // incentive since the visitor pass and has never once been printed anywhere.
+  // Here it is, every night, in the player's own arithmetic.
+  {
+    const a = "BROUGHT $" + fmt(D.purse), b = "SPENT $" + fmt(D.spent),
+      c = "TOOK HOME $" + fmt(D.left);
+    smallText(ctx, a, x + 6, y + 25, [110, 100, 110]);
+    smallText(ctx, b, x + 86, y + 25, [40, 110, 60]);
+    smallText(ctx, c, x + w2 - 6 - smallTextWidth(c), y + 25,
+      D.left > D.spent ? [196, 126, 40] : [110, 100, 110]);
+  }
+  {
+    const bits = [D.bed + (D.bed === 1 ? " SLEPT IN A BED" : " SLEPT IN BEDS")];
+    if (D.rough) bits.push(D.rough + " ON THE SAND");
+    if (D.quit) bits.push(D.quit + " GAVE UP IN A LINE");
+    smallText(ctx, fitSmall(bits.join("   "), w2 - 12), x + 6, y + 33,
+      D.rough || D.quit ? [190, 70, 70] : [70, 130, 90]);
+  }
+  rect(ctx, x + 4, y + 41, w2 - 8, 1, [222, 212, 196]);
+  // ...and the guests themselves, DEPART_ROWS to a page
+  const page = Math.max(0, Math.min(departPages() - 1, departPage));
+  const shown = D.rows.slice(page * DEPART_ROWS, page * DEPART_ROWS + DEPART_ROWS);
+  let gy = y + 46;
+  for (const r of shown) {
+    const m = DEP_MOODS[r.q.mood] || DEP_MOODS.flat;
+    const nm = r.name.slice(0, 12);
+    text(ctx, nm, x + 6, gy, [40, 30, 40]);
+    smallText(ctx, m.tag, x + w2 - 6 - smallTextWidth(m.tag), gy + 1, m.col);
+    const facts = r.days + (r.days === 1 ? " DAY - " : " DAYS - ")
+      + "SPENT $" + r.spent + " OF $" + r.purse
+      + (r.buys ? " - " + r.buys + (r.buys === 1 ? " STOP" : " STOPS") : " - NO STOPS");
+    smallText(ctx, fitSmall(facts, w2 - 12), x + 6, gy + 9, [140, 128, 145]);
+    // SINGLE quotes, and it is not a style choice: FONT_SMALL has an
+    // apostrophe and no double quote, and `sGlyph` silently substitutes "?"
+    // for anything it does not have - so a double-quoted line shipped as
+    // ?COULDN'T AFFORD A BED. I SLEPT ON THE BEACH.? and looked like a bug in
+    // the writing rather than a missing glyph. The suite now checks every
+    // character this card can print against the font that prints it.
+    smallText(ctx, fitSmall("'" + r.q.line + "'", w2 - 12), x + 6, gy + 17, m.col);
+    gy += 26;
+  }
+  const more = page < departPages() - 1;
+  const foot = more ? "CLICK FOR MORE   " + (page + 1) + "/" + departPages() : "CLICK TO CARRY ON";
+  if (more || ((time * 1.5) | 0) % 2)
+    smallText(ctx, foot, x + ((w2 - smallTextWidth(foot)) >> 1), y + h2 - 8, [150, 130, 120]);
+}
+// One click: turn the page, and close on the last one. No chips, because the
+// report next door has none either and the end of the day is one gesture.
+function departTapped() {
+  if (departT <= 0) return false;
+  if (departPage < departPages() - 1) { departPage++; departT = DEPART_T; sfx.ding(); return true; }
+  departT = 0; depart = null;
+  return true;
+}
+// ...and left alone it turns its own pages, so a player who walked away gets
+// the whole manifest rather than page one and a timeout. Same rule the report
+// runs on: it is PAUSED behind anything you open rather than burned down, so
+// nothing is ever missed - it just arrives when you close what you opened.
+function departTick(dt) {
+  if (departT <= 0) return;
+  departT -= dt;
+  if (departT > 0) return;
+  if (departPage < departPages() - 1) { departPage++; departT = DEPART_T2; }
+  else { departT = 0; depart = null; }
+}
 function drawToast() {
   if (!toast) return;
   const sp = textWidth(toast.text) + 12 > 252 ? 5 : 6;
@@ -13772,7 +14352,7 @@ function shopTipRect() {
 // draw asks the same question with a key already in hand.
 function shopTipLive(probe) {
   return (probe || !!shopTip) && tab === "shop" && screen === "play" && !gameOver && !helpView
-    && !(dossier || manage || boardView || saveView || reportT > 0)
+    && !(dossier || manage || boardView || saveView || reportT > 0 || departT > 0)
     && !hireCardLive()   // buying a crab REPLACES the tooltip with the crab: one voice at a time
     && !(window.MergeMode && MergeMode.active());
 }
@@ -13822,7 +14402,7 @@ const HIRE_CARD = { w: 210, h: 62 };
 function hireCardRect() { return { x: ((W - HIRE_CARD.w) / 2) | 0, y: 78, w: HIRE_CARD.w, h: HIRE_CARD.h }; }
 function hireCardLive() {
   return !!(hireCard && hireCard.t > 0 && hireCard.c && screen === "play" && !gameOver && !helpView
-    && !(dossier || manage || boardView || saveView || reportT > 0));
+    && !(dossier || manage || boardView || saveView || reportT > 0 || departT > 0));
 }
 function drawHireCard() {
   if (!hireCardLive()) return;
@@ -14244,6 +14824,9 @@ function frame(now) {
       };
       if (report.best) report.bestN = today.byCrab[report.best];
       reportT = 11;
+      // ...and the day's OTHER page, queued rather than shown: the report is up
+      // and this waits its turn behind it (see departTick in the frame loop).
+      departQ = departBuild();
       const dl = (window.dayLog || [])[(window.dayLog || []).length - 1];
       if (dl) dl.after = Math.round(coins);   // forecaster: post-settlement till
       if (rent > 0) popText("-$" + rent + " RENT", BIZ.shack.door, 110, [255, 120, 120]);
@@ -14323,9 +14906,14 @@ function frame(now) {
     const t = clampCam(followed.x - W / 2 + 8);
     camX += (t - camX) * Math.min(1, dt * 5);
   }
-  const reading = boardView || manage || saveView || dossier;
+  const reading = boardView || manage || saveView || dossier || helpView;
   if (reportT > 0 && !ffSleep && !reading) reportT -= dt;   // waits out a sun-skip, and waits behind an open card
-  if (toast && reading) toast.t = Math.max(toast.t, 0.4);   // a toast holds while you read, then plays out
+  // THE DAY'S SECOND PAGE. It comes up when the report goes down - by the click
+  // that closed it or by its own timer - so the end of the day is one moment
+  // with one gesture through it rather than two cards fighting for the screen.
+  if (departQ && reportT <= 0) { depart = departQ; departQ = null; departPage = 0; departT = DEPART_T; }
+  if (departT > 0 && !ffSleep && !reading) departTick(dt);
+  if (toast && (reading || departT > 0)) toast.t = Math.max(toast.t, 0.4);   // a toast holds while you read, then plays out
   if (newConfirmT > 0) newConfirmT -= dt;
   if (toast) { toast.t -= dt; if (toast.t <= 0) toast = null; }
   saveT += dt; if (saveT > 5) { saveT = 0; save(); }
@@ -14467,6 +15055,7 @@ function frame(now) {
   // turn - reportT is paused below rather than burned down behind the card,
   // so nothing is missed, it just arrives when you close what you opened.
   if (!boardView && !manage && !saveView && !dossier) drawReport();
+  if (!boardView && !manage && !saveView && !dossier && reportT <= 0) drawDepart();
   drawManage();
   drawDossier();   // above the management card: a census row opens a dossier ON TOP of it
   drawFollowCard();
@@ -14510,7 +15099,7 @@ function frame(now) {
   drawPanel();
   drawShopTip();       // hangs off the bottom of the world, pointing at the grid it explains
   drawHireCard();
-  if (!boardView && !manage && !saveView && !dossier && !helpView) drawToast();   // reading surfaces own the screen
+  if (!boardView && !manage && !saveView && !dossier && !helpView && departT <= 0) drawToast();   // reading surfaces own the screen
   if (gameOver) drawGameOver();
   drawSaveScreen();
   drawHelp();          // the last word: HOW TO PLAY sits over everything, including game over
