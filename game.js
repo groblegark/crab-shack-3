@@ -322,6 +322,17 @@ const clampPrice = (v) => Math.max(PRICE_MIN, Math.min(PRICE_MAX,
 function bizPriceMul(b) { const m = BIZ[b] && BIZ[b].priceMul; return m == null ? 1 : m; }
 function setBizPrice(b, v) { if (BIZ[b]) BIZ[b].priceMul = clampPrice(v); }
 function menuPrice(b, r) { return Math.max(1, Math.round(r.pay * bizPriceMul(b))); }   // what it says on the board
+// TRIM TO FIT, MEASURED. A character count is a guess about a proportional
+// budget: "FISH TACO $17  JUICE $10  GRILL FI" is 34 characters, which someone
+// sized for a 100px slot and is actually 135 - it printed 13px past the right
+// edge of the canvas. Trim by WIDTH, so a long line loses its tail rather than
+// the screen losing its margin.
+function fitSmall(str, maxW) {
+  if (smallTextWidth(str) <= maxW) return str;
+  let out = String(str);
+  while (out.length && smallTextWidth(out + "..") > maxW) out = out.slice(0, -1);
+  return out.replace(/[\s,]+$/, "") + "..";
+}
 function localPrice(b, r) { return Math.ceil(menuPrice(b, r) * 1.25); }                // ...and locals pay +25% of that
 // How attractive this shop's board looks to somebody walking past. Cheap pulls,
 // dear pushes, and the curve is flat enough that a 30% cut is worth about a
@@ -8078,8 +8089,8 @@ function drawManage() {
       text(ctx, pTxt, x + 58 + ((38 - textWidth(pTxt)) >> 1), y + 97,
         pct === 100 ? [40, 30, 40] : pct < 100 ? [190, 110, 40] : [40, 110, 60]);
       const menu = b.recipes.slice(0, 3).map(r => (ITEM_NAMES[r.icon] || "?") + " $" + menuPrice(key, r)).join("  ");
-      smallText(ctx, menu.slice(0, 34), x + 118, y + 92, [110, 100, 110]);
-      // 100px of card between here and the right edge: ~25 characters of 3x5
+      // the card ends at x + w2; leave 6px of margin and trim to what is left
+      smallText(ctx, fitSmall(menu, w2 - 124), x + 118, y + 92, [110, 100, 110]);
       smallText(ctx, pct === 100 ? "THE BOARD PRICE"
         : pct < 100 ? "MORE FEET, THIN MARGIN"
         : "FEWER FEET, FAT MARGIN", x + 118, y + 101,

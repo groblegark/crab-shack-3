@@ -4012,6 +4012,62 @@ scenario("ferry: the win saves, and a reloaded town shows the same ending", () =
   return true;
 });
 
+scenario("no surface prints off the canvas", () => {
+  // THE GENERAL FORM OF THE LEASE BUG. Every full-screen surface is drawn with
+  // text/smallText stubbed to MEASURE what it prints, at the size it prints it,
+  // and anything crossing x=0 or x=W is a defect. This caught the management
+  // card's menu line (34 characters sized for a 100px slot, actually 135px,
+  // printing 13px past the right edge of the screen) after the lease terms had
+  // already shown the same mistake in a different card.
+  const sim = createSim({ seed: 11 });
+  sim.runDays(2);
+  const bad = JSON.parse(sim.G(`(() => {
+    const bad = [];
+    const T = text, S = smallText;
+    globalThis.SURF = "?";
+    const wrap = (fn, meas) => (c, str, x, y, col, sz) => {
+      const w = meas(str, sz);
+      if (x < 0 || x + w > W) bad.push([SURF, String(str), Math.round(x), Math.round(x + w)]);
+      return fn(c, str, x, y, col, sz);
+    };
+    text = wrap(T, textWidth); smallText = wrap(S, smallTextWidth);
+    const run = (name, setup, fn) => {
+      SURF = name;
+      try { if (setup) setup(); fn(); } catch (e) { bad.push([name, "THREW " + e.message, 0, 0]); }
+    };
+    const c0 = crabs[0];
+    run("intro", null, () => drawIntro());
+    run("title", null, () => drawTitle());
+    run("card", () => { sel = c0; dossier = null; manage = null; boardView = false;
+      saveView = false; reportT = 0; tab = "crew"; }, () => drawFollowCard());
+    run("panel", null, () => drawPanel());
+    run("dossier", () => { dossier = c0; dossierTab = "STATS"; }, () => drawDossier());
+    run("diary", () => { dossier = c0; dossierTab = "DIARY"; }, () => drawDossier());
+    run("manage-hours", () => { dossier = null; manage = "shack"; manageTab = "HOURS"; }, () => drawManage());
+    run("manage-sched", () => { manage = "shack"; manageTab = "SCHEDULE"; }, () => drawManage());
+    run("census", () => { manage = "shack"; manageTab = "TOWN"; }, () => drawManage());
+    run("board", () => { manage = null; boardView = true; }, () => drawJobBoard());
+    run("save", () => { boardView = false; saveView = true; }, () => drawSaveScreen());
+    run("gameover", () => { saveView = false; gameOver = true; bankrupt = false; }, () => drawGameOver());
+    run("ending", () => { won = true; winT = 99; winRec = { day: 40, lifetime: 99999,
+      crew: ["PINCHY", "CLAWDIA", "SHELDON", "BARNACLE", "REEF"], pop: 9, housed: 7,
+      hand: "BARNACLE" }; }, () => drawEnding());
+    text = T; smallText = S;
+    return JSON.stringify(bad);
+  })()`));
+  if (bad.length) {
+    const seen = new Set(), lines = [];
+    for (const [surf, str, x0, x1] of bad) {
+      const k = surf + "|" + str;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      lines.push(`${surf}: "${str}" runs x${x0}..${x1}`);
+    }
+    return lines.slice(0, 6).join("\n        ") + (lines.length > 6 ? `\n        (+${lines.length - 6} more)` : "");
+  }
+  return true;
+});
+
 scenario("the lease card: every term fits on the card it is printed on", () => {
   const sim = createSim({ seed: 3 });
   // The card is 200px wide at x28, terms start at x34, so a line has 190px.
