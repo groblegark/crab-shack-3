@@ -8,6 +8,84 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-20 — The town votes, and it does not vote for you
+
+![The nav strip: the whole town to scale, under your feet](devlog/img/2026-08-20-navstrip.png)
+
+*New this session, in the seven free rows above the panel: the entire town,
+to scale, covering not one pixel of a single crab. Exactly one word is
+printed on it — SHACK — and that block flashes every time your till takes
+money. A freighter is out on the channel, because somebody imported
+something today.*
+
+Five branches merged overnight. The headline is that this town now has
+**politics**, and they are not on your side.
+
+### The town hall
+
+The shelter pot is back, and this time it is *funded*. Bowls for the
+shelter are bought from the shack the night before. Rent gets remitted to
+Mr. Pincherton like anyone else's. The money comes out of whichever of
+four purses the town last voted for — and voting is a real action now,
+with two tables, a closing time, and paper ballots. Nothing is conjured;
+every movement is conservation-checked.
+
+Then the sim did the thing it keeps doing. On seed 1337, day 14: CLAWDIA —
+one of your founding crew, a crab you hired on day one — has lost her
+house, and votes against her own employer. By day 28 the shack has hired
+enough cot-sleepers that the shelter bloc outvotes the tills, and the town
+switches its funding to harbour dues.
+
+**Your own success builds the electorate that taxes you.** Every crab you
+hire and can't house is a vote. Nobody wrote that; it's what happens when
+you let a town have both a payroll and a ballot box.
+
+### BRASS
+
+There's a new arrival on the morning bus around day 7 to 12: red shell,
+sunglasses, beach buggy, $800 in hand, and an eye on the Driftwood. Her
+name is BRASS and she buys the hotel out from under REEF at REEF's own
+asking price — the one you were still thinking about.
+
+The price of that dithering is painted on the shopfront while you dither:
+**$552 → $581 → $608.**
+
+Once she's in, she competes properly: raises her room rate when the house
+fills, and raises her *wages* when a guest sleeps on the sand with a bed
+left unmade. And because the town wage is a mean, her raise drags
+everybody's going rate up with it. She takes about $20 a town-day more out
+of the same visitor purses, and the shack's takings do not rise to meet
+it. She is not a difficulty setting. She's a competitor with better
+instincts than you.
+
+### The guest who was in two places all night
+
+The best bug of the night was invisible and expensive. An overnighting
+visitor had no branch for "is in their room," so every single frame they
+flipped between *asleep* and *off to their room*. The body blinked. The
+card alternated. You could only click them on half the frames.
+
+That was the cosmetic half. The real half: the needs loop is skipped on
+in-room frames — so **half of every paid night was being billed as a night
+out on the promenade.** Guests were paying for beds they were only in on
+even-numbered frames. Fixing it moved the baseline's worst seed from day 6
+to day 10.
+
+### Also
+
+- **Crabs stand in line properly now.** Three separate faults, none of them
+  spacing: the queue was ordered by *which ferry you arrived on* (25.5% of
+  pairs in the wrong order), nobody could step backwards so crabs ended up
+  standing inside one another, and locals weren't in the slot system at all
+  — three crabs sharing a four-pixel span.
+- **There is a pause button.** There wasn't one. This is embarrassing and
+  it's fixed.
+- **There is a beach ball.** It has its own story, in the next entry.
+
+167 scenarios green; baseline 0/16 at a median of day 12.
+
+---
+
 ## 2026-08-19, later — ROE came over with $158
 
 ![ROE's visit, hour by hour](devlog/img/2026-08-19-roe.png)
