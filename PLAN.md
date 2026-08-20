@@ -3333,6 +3333,19 @@ unit economics.
   follow card / dossier.
 
 ## Conventions
+- **TEXT IS MEASURED, NOT COUNTED (2026-08-19).** Two bugs in one evening had
+  the same shape: a string budgeted in CHARACTERS against a slot measured in
+  PIXELS. The intro lease printed four of its six terms past the card and one
+  clean off the canvas; the management card's menu line was 34 characters
+  sliced for a "100px" slot and was actually 135px, printing 13px past the
+  right edge of the screen. Both were invisible to 132 scenarios and obvious in
+  one screenshot. The receipt is now general: scenario **"no surface prints off
+  the canvas"** stubs `text`/`smallText`, draws every full-screen surface
+  (intro, title, character card, panel, dossier, diary, all three management
+  tabs, job board, save, game over, ending) and fails on anything crossing x=0
+  or x=W. Trim with **`fitSmall(str, maxW)`**, which trims by width and appends
+  ".." — never with `.slice(0, n)`. And take a screenshot: the sim cannot see
+  a layout, only a measurement you thought to make.
 - **Devlog** (DEVLOG.md + devlog/img/, owned by the coordinator session):
   patch-notes-as-little-stories in the Minecraft-notes voice — bugs and
   features framed as things that happened to the town. Each entry carries
