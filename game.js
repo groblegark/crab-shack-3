@@ -9101,8 +9101,30 @@ cv.addEventListener("click", (ev) => {
         // policy - so a change bills the whole town at tonight's settlement,
         // your own till first - and it is also the record you defend at the
         // next ballot, because an incumbent runs on what they actually did.
+        //
+        // ...AND WHEN YOU ARE NOT MAYOR, IT SAYS SO OUT LOUD (Matt, 2026-08-20:
+        // "shouldn't be able to change town policy if not mayor"). You never
+        // could - `apply` has always been gated on playerMayor() and a probe
+        // confirms a non-mayor moves `hall.plat` and nothing else. But the card
+        // never SAID which of the two things these dials were touching, so they
+        // read as the town's policy sitting under a row of steppers. That is an
+        // interface bug by this project's own rule (opacity is a bug, economic
+        // uncertainty is the game), and a player being unable to tell whether
+        // they just taxed the whole town is exactly the kind it is about.
+        //
+        // The fix costs no pixels on a row that has none to give: the chips are
+        // only lit while they ARE the policy, and every poke says which of the
+        // two you just did, naming the crab who does have the power.
         const ed = hall.plat;
-        const apply = () => { if (playerMayor()) hall.policy = Object.assign({}, ed); sfx.buy(); save(); };
+        const apply = () => {
+          const mine = playerMayor();
+          if (mine) hall.policy = Object.assign({}, ed);
+          toast = mine
+            ? { text: "THE TOWN IS ON " + policyLine(ed) + " - AND IT BILLS YOU", t: 5 }
+            : { text: "YOUR PLATFORM: " + policyLine(ed) + " - "
+                + (hall.mayor || "THE OFFICE") + " SETS THE TOWN'S", t: 5 };
+          sfx.buy(); save();
+        };
         const bump = (k, d, lo, hi) => { ed[k] = Math.max(lo, Math.min(hi, (ed[k] | 0) + d)); apply(); };
         if (hit(R.pmech)) {
           ed.mech = PURSE_KEYS[(PURSE_KEYS.indexOf(ed.mech) + 1) % PURSE_KEYS.length];
@@ -11913,12 +11935,16 @@ function drawHall(R, chip) {
   // ---- THE PLAYER'S OWN CANDIDACY. Matt: the player can stand and win, "with
   // the conflict of interest that follows: set the levy and you pay it too."
   // While one of your crew wears the hat these three dials ARE the town's
-  // policy and take effect at tonight's settlement, levy and all.
+  // policy and take effect at tonight's settlement, levy and all. While they
+  // are NOT, the same dials are a manifesto and touch nothing.
   const mine = playerMayor();
   chip(R.stand, mine ? "IN OFFICE" : hall.stand ? "STANDING" : "STAND?", null, mine || hall.stand);
   chip(R.nom, nom0.slice(0, 8), null, false);
   const ed = hall.plat, EP = purseOf(ed);   // one set of dials; mirrored onto policy while in office
-  chip(R.pmech, EP.short + " " + (ed.mech === "rents" || ed.mech === "levy" ? purseRate(ed) + "%" : "$" + purseRate(ed)), null, true);
+  // LIT ONLY WHILE IT IS THE TOWN'S POLICY. It used to be hot unconditionally,
+  // which is what made a manifesto look like a lever on the town - see the
+  // note beside `apply` in the click handler.
+  chip(R.pmech, EP.short + " " + (ed.mech === "rents" || ed.mech === "levy" ? purseRate(ed) + "%" : "$" + purseRate(ed)), null, mine);
   chip(R.prm, "-", null, false); chip(R.prp, "+", null, false);
   smallText(ctx, "RATE " + (ed.rate | 0), R.prm.x + 20, R.prm.y + 4, [40, 30, 40]);
   chip(R.pbm, "-", null, false); chip(R.pbp, "+", null, false);

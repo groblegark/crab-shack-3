@@ -7160,6 +7160,58 @@ scenario("the clock cannot be stopped: there is no pause, and no speed of zero",
   return true;
 });
 
+// ===========================================================================
+// YOU DO NOT SET THE TOWN'S POLICY UNLESS YOU HOLD THE OFFICE (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("a crab who is not mayor cannot move the town's policy one step", () => {
+  // Matt: "shouldn't be able to change town policy if not mayor". The gate has
+  // always been there - `apply` is conditioned on playerMayor() - and what was
+  // actually wrong was that the card never SAID so, which is a different bug
+  // and fixed in drawHall. This pins the gate itself, because a legibility fix
+  // that quietly loosened the rule underneath it would be the worst outcome of
+  // the two.
+  //
+  // Driven through the SAME code path the click handler uses, not through a
+  // convenience setter: the dials write `hall.plat` and `apply` decides
+  // whether any of that reaches the town.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(3, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    const dial = (mech, rate, bowls) => {
+      const ed = hall.plat;
+      ed.mech = mech; ed.rate = rate; ed.bowls = bowls;
+      if (playerMayor()) hall.policy = Object.assign({}, ed);   // the handler's own apply()
+    };
+    // 1. THE OFFICE IS SOMEBODY ELSE'S. Turn every dial to the far end.
+    hall.mayor = allCrabs().filter(c => c.p.npc)[0].p.name;
+    const held = policyLine(hall.policy), wasMine = playerMayor();
+    dial("levy", 4, 6);
+    const after = policyLine(hall.policy), plat = policyLine(hall.plat);
+    // ...and a settlement must not launder it either: the purse struck tonight
+    // is the MAYOR's, not the platform of whoever was poking the card.
+    const bal0 = townFund.bal, you0 = townFund.youPaid;
+    runTownHall();
+    const billed = townFund.youPaid - you0;
+    // 2. NOW PUT ONE OF YOUR OWN CREW IN THE HAT and turn the same dial.
+    hall.mayor = crabs[0].p.name;
+    dial("dues", 3, 1);
+    return JSON.stringify({ wasMine, held, after, plat, billed,
+      asMayor: policyLine(hall.policy), mineNow: playerMayor() });
+  })()`));
+  if (got.wasMine) return "the fixture started with the player already in office";
+  if (got.after !== got.held)
+    return `a non-mayor moved the town from "${got.held}" to "${got.after}"`;
+  if (got.plat === got.held)
+    return "the dials did not even move the player's own platform - the fixture proves nothing";
+  if (got.billed > 0.005)
+    return `a non-mayor's platform billed the player $${got.billed} at settlement`;
+  if (!got.mineNow) return "putting a crew crab in the hat did not make the player mayor";
+  if (got.asMayor !== "DUES $3 / 1 BOWL")
+    return `in office the same dial did NOT take effect: policy reads "${got.asMayor}"`;
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
