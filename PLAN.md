@@ -3168,6 +3168,43 @@ them, rep is 5 points lower, and the player's till is $64/$105 down at the end
 of day two. Two fixtures that used to CLEAR the opening crowd are now no-ops
 and are kept as belts, with their comments re-pointed to say so.
 
+## THE PROMENADE IS NOT ZERO SUM (measured 2026-08-20)
+
+Written down because the rivalry arm asserted the opposite for a week, and
+because it changes how any future pricing work should be measured.
+
+**Footfall is fixed** — `priceAppeal` decides whose door a visitor walks
+through, never how many land. That is true and it is the design. It does NOT
+follow that the town's trade is zero sum, and it is not:
+
+|                     | board x1.3 | x1.0 | x0.7 |
+|---------------------|---|---|---|
+| player's drinks sold | 190 | 199 | 207 |
+| rival's showers sold | 222 | 213 | 258 |
+| **total visitor buys** | **810** | **835** | **851** |
+
+**A visitor's purse is finite, so a cheaper town lets the same money buy MORE
+THINGS.** Cutting your own price grows the whole promenade's transaction count
+— the rival's trade rose 16% in the arm where the player's rose 9%, so the
+player's SHARE FELL while their lever worked perfectly. **Never assert a
+pricing claim as a share of a rival's business.** Assert it on your own
+numbers.
+
+### ...and the price lever is REDUNDANT, which matters for mutation testing
+
+It reaches trade two independent ways: **appeal** (whose door) and
+**affordability** (whether the purse stretches). Kill either alone and the
+monotonic trend survives on the other — measured both ways. So a single-channel
+mutation cannot fail the rivalry arm, and a mutation test that "passes" against
+one channel proves nothing. The mutation that bites is making the PLAYER'S OWN
+board inert while the rival's still moves: 199/199/199, flat, caught.
+
+**The general lesson, which cost four mutation runs to learn:** when a lever
+has more than one path to its effect, mutation-testing one path and seeing the
+test still pass does not mean the test is weak — it may mean the mechanism is
+redundant. Find the mutation that severs *all* paths for the actor under test,
+or you will either trust a weak test or discard a good one.
+
 ## RUNNING A FLEET: two ways agents stand on each other (2026-08-20)
 
 Both of these cost real hours today and neither is obvious until it happens.

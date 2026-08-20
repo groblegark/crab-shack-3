@@ -4323,6 +4323,13 @@ const IMPORTS = {
 };
 let trade = { total: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 },
   day: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 }, spent: 0,
+  // ...AND WHAT WE SPENT IT ON. `spent` was a single number back when FISH was
+  // the only import that actually charged money, and "spent / fish landed = the
+  // world price" was a fair thing for a test to assert. BALLOT PAPER is the
+  // second priced import and it broke that assumption immediately - 46 fish and
+  // ten sheets read as $7.05 a fish. The ledger should be able to answer "what
+  // did the town spend on WHAT", so it does.
+  spentBy: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 },
   landedDay: 0, landed: 0,   // pier production - NOT an import
   // the fish market: today's price, fish eaten today (demand), 3-day
   // supply/demand windows, days pinned at the ceiling, and the price series
@@ -4330,7 +4337,10 @@ let trade = { total: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 
   price: FISH_START, useDay: 0, landH: [], useH: [], ceilDays: 0, series: [] };
 function tradeImport(kind, qty, dollars) {
   trade.total[kind] += qty; trade.day[kind] += qty;
-  if (dollars) trade.spent += dollars;
+  if (dollars) {
+    trade.spent += dollars;
+    trade.spentBy[kind] = (trade.spentBy[kind] || 0) + dollars;
+  }
 }
 // One clearing a day, at midnight: the last 3 days' landings vs the fish the
 // town actually ate (local, shipped-in, and beach roasts alike - an import IS
@@ -5954,6 +5964,7 @@ function load(slot) {
   }
   if (s.trade && s.trade.total) trade = { total: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 }, s.trade.total),
     day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 }, s.trade.day), spent: s.trade.spent || 0,
+    spentBy: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 }, s.trade.spentBy),
     landed: s.trade.landed || 0, landedDay: s.trade.landedDay || 0,
     // fish market state; pre-market saves open at the old $4 with a blank chart
     price: typeof s.trade.price === "number"

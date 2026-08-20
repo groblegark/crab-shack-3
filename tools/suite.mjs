@@ -2295,7 +2295,10 @@ scenario("fish market: scarcity walks the price to the ceiling; the world suppli
     if (i && Math.abs(t.series[i] - t.series[i - 1]) > 1) return "price jumped a step: " + t.series;
   }
   if (!(t.total.fish > 0)) return "no imports flowed with a dry pier";
-  if (t.spent !== t.total.fish * 7) return "imports not charged at the flat $7 world price: $" + t.spent + " for " + t.total.fish;
+  // FISH's OWN spend, not the whole import bill. `spent` covers every priced
+  // import and ballot paper is now one of them, so this used to read $7.05 a
+  // fish the week an election was held.
+  if (t.spentBy.fish !== t.total.fish * 7) return "imports not charged at the flat $7 world price: $" + t.spentBy.fish + " for " + t.total.fish;
   return t.ceilDays >= 1 ? true : "ceilDays not counting at the ceiling";
 });
 
@@ -4459,8 +4462,17 @@ scenario("the beach ball is LIMITED fun", () => {
   const played = JSON.parse(sim.G(`(() => {
     for (const k of allCrabs()) { k.dayState = "home"; k.ballT = 0; }
     const c = crabs[0];
-    c.p.bored = 0.95; c.p.hunger = 0.1; c.p.thirst = 0.1; c.p.tired = 0.1;
-    c.ballCd = 0; c.errandCd = 0; c.dayState = "home"; tmin = 11 * 60;
+    c.p.bored = 0.95; c.p.hunger = 0.1; c.p.thirst = 0.1; c.p.tired = 0.1; c.p.dirt = 0.1;
+    c.ballCd = 0; c.errandCd = 0; c.dayState = "home";
+    // THE CLOCK IS SET FROM THIS CRAB'S OWN SHIFT, not to 11:00 and a hope.
+    // "You do not play ball on the clock" is one of the ball's own rules
+    // (ballFree, added the day it landed), so a fixture that pins the hour has
+    // to pin it somewhere the crab is actually at leisure. At a flat 11:00 this
+    // passed only while seed 11's PINCHY happened to be off duty on day 2; the
+    // empty opening day changed what day 2 looks like, he is now mid-M-shift at
+    // eleven, and the ball refused him CORRECTLY. An hour after he clocks off
+    // is the state the scenario always meant.
+    tmin = Math.min(23 * 60, effShift(c).end + 60);
     const e = pickErrand(c);
     if (!e || !e.ball) return JSON.stringify({ picked: e ? (e.biz || e.need) : null });
     const before = c.p.bored;
@@ -5360,8 +5372,31 @@ scenario("rivalry: after a refusal she competes with the PLAYER'S OWN levers, an
   if (!retreats.length) return `a rival who missed her own rent never backed off a single move`;
   if (!(sim.G(`bizPriceMul("showers")`) > now.price)) return `the retreat did not put her price back up`;
 
-  // ---- THE COUNTER. The promenade is ZERO SUM: her cut takes footfall off
-  // the bar, and the player's own price stepper takes it back.
+  // ---- THE COUNTER. Her cut takes trade off the bar, and the player's own
+  // price stepper takes it back.
+  //
+  // THE PROMENADE IS *NOT* ZERO SUM, and this arm used to assert that it was.
+  // Footfall is fixed - priceAppeal decides whose door a visitor walks through,
+  // never how many land - so "share of the two shops" looked like the way to
+  // control for a busy week. It is not, and the measurement says why:
+  //
+  //     player's board      x1.3     x1.0     x0.7
+  //     drinks sold          190      199      207     <- the lever, working
+  //     showers sold         222      213      258
+  //     TOTAL visitor buys   810      835      851
+  //
+  // A VISITOR'S PURSE IS FINITE, so a cheaper town lets the same money buy MORE
+  // THINGS - total purchases climb 810 -> 851 as the player cuts. The rival's
+  // trade rose 16% in the arm where the player's rose 9%, so the player's SHARE
+  // fell while their lever worked perfectly. Cutting your price can grow your
+  // neighbour's business, and that is a real property of this economy rather
+  // than a bug in it.
+  //
+  // So the claim asserted here is the one that is actually true and actually
+  // the player's: THEIR OWN BOARD MOVES THEIR OWN TRADE, monotonically, across
+  // three prices pooled over three towns. That is strictly stronger than the
+  // two-arm comparison this replaced, and it does not depend on a denominator
+  // that belongs to somebody else.
   //
   // MEASURED AS A SWEEP ACROSS THREE BOARDS, POOLED OVER THREE TOWNS, in a
   // fixture that holds everything else still. Every earlier version of this
@@ -5396,13 +5431,27 @@ scenario("rivalry: after a refusal she competes with the PLAYER'S OWN levers, an
     return { bar, shwr, share: bar / Math.max(1, bar + shwr) };
   };
   const dear = barShare(1.3), mid = barShare(1.0), cheap = barShare(0.7);
-  if (!(cheap.share > mid.share && mid.share > dear.share))
-    return `the player's board does not move the promenade: dear ${(100 * dear.share).toFixed(1)}%, `
-      + `level ${(100 * mid.share).toFixed(1)}%, cut ${(100 * cheap.share).toFixed(1)}% `
+  // MONOTONIC IN THE PLAYER'S OWN TRADE, across all three boards. A working
+  // lever looks like a trend, not like one comparison that came out the right
+  // way; and unlike a share, every number in it is the player's own.
+  //
+  // MUTATION-TESTED, and it took four goes to find one that bites - which is
+  // the finding. THE PRICE LEVER HAS TWO INDEPENDENT CHANNELS:
+  //   * APPEAL - priceAppeal decides whose door a visitor walks through;
+  //   * AFFORDABILITY - a cheaper drink is one a thinner purse can still buy.
+  // Kill EITHER alone and the trend survives on the other (measured: appeal
+  // removed -> 190/199/207, still monotonic; the board moving but charging
+  // nobody -> 179/197/210, still monotonic). So a single-channel mutation
+  // cannot fail this arm, and the old note in PLAN claiming it could was
+  // describing the SHARE metric, which is gone.
+  // The mutation that DOES bite is the honest one: make the PLAYER'S OWN board
+  // inert while the rival's still moves, so every earlier assertion here still
+  // holds and only the counter-lever is dead. That reads dear 199, level 199,
+  // cut 199 - flat, and caught.
+  if (!(cheap.bar > mid.bar && mid.bar > dear.bar))
+    return `the player's own board does not move their own trade: `
+      + `dear ${dear.bar}, level ${mid.bar}, cut ${cheap.bar} drinks `
       + `(${JSON.stringify({ dear, mid, cheap })})`;
-  // ...and undercutting must WIN TRADE, not just win share of a shrinking town
-  if (!(cheap.bar > dear.bar))
-    return `cutting the price sold FEWER drinks (${dear.bar} at x1.3 vs ${cheap.bar} at x0.7)`;
   return true;
 });
 
