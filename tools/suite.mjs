@@ -6800,6 +6800,320 @@ scenario("a PRE-FERRY save still gets a crowd: the one branch seedVisitors keeps
   return true;
 });
 
+// ===========================================================================
+// POLLING DAY - VOTING IS AN ACTION (2026-08-20)
+// ===========================================================================
+// Matt: "voting is an action, polls have a closing time, and ballots are made
+// and counted on paper." Three claims, and each one is a mechanism rather than
+// a feeling, so each one gets asserted as a mechanism.
+
+scenario("voting is an ACTION: crabs walk to a table, and nothing is counted until the count", () => {
+  // THE THREE THINGS THAT SEPARATE A POLL FROM A FUNCTION CALL:
+  //   1. crabs are physically AT a table, in the atTap stop state, during the
+  //      day - not teleported at settlement;
+  //   2. the TALLY DOES NOT EXIST while the box is filling. Papers go in face
+  //      down and cands[].votes stays at zero until the count reads them out.
+  //      This is the one that would silently rot back into an aggregate, so it
+  //      is sampled on every tick the polls are open rather than once;
+  //   3. PAPER IS CONSERVED - blanks left plus papers in the box equals what
+  //      was printed, always. Same law the town fund lives under.
+  const sim = createSim({ seed: 1337 });
+  const seen = { atTable: 0, boxFilling: 0, tallyEarly: 0, leak: 0, shutCast: -1, lastCast: -1 };
+  sim.runDays(7, { tickEvery: 20, onTick: (G) => {
+    if (G("coins") < 400) G("coins = 900");
+    const r = G(`JSON.stringify(pollCalled() && ballotBox.printed > 0 ? {
+      open: pollOpen(), shut: ballotBox.shut, declared: ballotBox.declared,
+      at: allCrabs().filter(k => k.dayState === "atTap" && k.tapStop && k.tapStop.vote).length,
+      cast: ballotBox.cast.length, papers: ballotBox.papers, printed: ballotBox.printed,
+      votes: ballotBox.cands.reduce((a, k) => a + k.votes, 0) } : null)`);
+    if (!r || r === "null") return;
+    const g = JSON.parse(r);
+    if (g.at > 0) seen.atTable++;
+    if (g.papers + g.cast !== g.printed) seen.leak++;
+    if (g.open && g.cast > 0) { seen.boxFilling++; if (g.votes > 0) seen.tallyEarly++; }
+    if (g.shut && seen.shutCast < 0) seen.shutCast = g.cast;
+    seen.lastCast = g.cast;
+  } });
+  const p = JSON.parse(sim.G("JSON.stringify(hall.poll)"));
+  if (!p) return "no ballot was declared by the end of day 7";
+  if (!seen.atTable) return "nobody was ever stood at a polling table - the vote is not an errand";
+  if (seen.leak) return `paper stopped adding up on ${seen.leak} ticks (blanks + box != printed)`;
+  if (!seen.boxFilling) return "the box never had a paper in it while the polls were open";
+  if (seen.tallyEarly) return `the tally moved ${seen.tallyEarly} times while the polls were still open`;
+  if (seen.shutCast !== seen.lastCast)
+    return `${seen.lastCast - seen.shutCast} papers went in after the polls shut`;
+  const cast = p.cands.reduce((a, k) => a + k.votes, 0);
+  if (cast !== p.turnout) return `${cast} votes counted, ${p.turnout} papers in the box`;
+  if (!(p.turnout > 0 && p.turnout <= p.roll)) return `turnout of ${p.turnout} against a roll of ${p.roll}`;
+  if (p.lines.length !== Math.min(p.turnout, sim.G("POLL_LINES")))
+    return `${p.lines.length} written reasons for ${p.turnout} voters`;
+  if (sim.G("hall.mayor") !== p.winner) return "the winner did not take the office";
+  return true;
+});
+
+scenario("the polls have a CLOSING TIME, and a crab who misses it loses their vote", () => {
+  // THE MECHANISM, not a coincidence: a crab who reaches the table after
+  // POLL_SHUT is turned away and SAID SO, and a crab already standing there
+  // when it shuts is not. Both halves are constructed rather than waited for -
+  // waiting for a natural latecomer would pass on the seed that happened to
+  // produce one and quietly stop testing anything on the seed that did not.
+  const sim = createSim({ seed: 909 });
+  sim.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  // ...into polling day, with the polls open and paper on the table
+  sim.runUntil(`pollOpen() && ballotBox.printed > 0`, { maxSteps: 400000 });
+  const got = JSON.parse(sim.G(`(() => {
+    const B = ballotBox, c = allCrabs().find(k => !B.voters[k.p.name]);
+    if (!c) return JSON.stringify({ err: "the whole town had already voted" });
+    // ONE MINUTE PAST THE HOUR, standing at the table. The stop is started by
+    // hand at the table's own x so the walk is not what is under test here -
+    // the CLOCK is.
+    tmin = POLL_SHUT + 1;
+    const cast0 = B.cast.length, late0 = B.late.length;
+    c.x = POLL_PLACES[0].x + 4; c.errandCd = 0; c.duty = false;
+    startTapStop(c, { vote: true, poll: 0, need: "vote" });
+    for (let i = 0; i < 600 && c.dayState === "atTap"; i++) updateTap(c, 0.25);
+    return JSON.stringify({ name: c.p.name, state: c.dayState,
+      voted: !!B.voters[c.p.name], dCast: B.cast.length - cast0, dLate: B.late.length - late0,
+      open: pollOpen(), diary: (c.p.log || []).slice(-3).map(e => e[3]) });
+  })()`));
+  if (got.err) return got.err;
+  if (got.open) return "the polls were still open a minute after POLL_SHUT";
+  if (got.voted || got.dCast !== 0) return `${got.name} voted after the polls had shut`;
+  if (got.dLate !== 1) return `${got.name} was not recorded as a latecomer (late went up by ${got.dLate})`;
+  if (!got.diary.some(l => /SHUT/.test(l))) return `${got.name}'s diary does not say what happened: ${got.diary.join(" | ")}`;
+  if (got.state === "atTap") return `${got.name} is still stood at a shut polling table`;
+  return true;
+});
+
+scenario("ballots are PAPER: bought off the ferry, on the ledger, and they run out", () => {
+  // NOTHING IS CONJURED, and paper is not an exception. The office orders one
+  // sheet per crab plus BALLOT_SPARE, the money leaves the fund through the
+  // one door that destroys it at a named supplier, and the sheets land on the
+  // trade ledger like every other import. Then: a box with one sheet left
+  // serves exactly one more crab and turns the rest away BY NAME.
+  const sim = createSim({ seed: 4242 });
+  sim.runDays(5, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const buy = JSON.parse(sim.G(`(() => {
+    const paper0 = trade.total.paper || 0, w0 = worldMoney(), rows0 = townFund.ledger.length;
+    // run the office's own printing pass, exactly as the eve settlement does
+    const roll = allCrabs().length;
+    printBallots();
+    const rows = townFund.ledger.slice(rows0);
+    return JSON.stringify({ roll, spare: BALLOT_SPARE, price: BALLOT_PRICE,
+      printed: ballotBox ? ballotBox.printed : -1, papers: ballotBox ? ballotBox.papers : -1,
+      dPaper: (trade.total.paper || 0) - paper0, dWorld: Math.round((worldMoney() - w0) * 1000) / 1000,
+      ferry: rows.filter(r => r.kind === "remit" && r.who === "THE FERRY")
+        .reduce((a, r) => a + r.amt, 0),
+      whip: rows.filter(r => r.why === "PAPER WHIP-ROUND").length });
+  })()`));
+  if (buy.printed !== buy.roll + buy.spare)
+    return `printed ${buy.printed} papers for a roll of ${buy.roll} (+${buy.spare} spare)`;
+  if (buy.papers !== buy.printed) return "the box did not start full";
+  if (buy.dPaper !== buy.printed) return `${buy.dPaper} sheets reached the trade ledger, ${buy.printed} were printed`;
+  const cost = Math.round(buy.printed * buy.price * 1000) / 1000;
+  if (Math.abs(buy.ferry - cost) > 0.005) return `the ferry was paid ${buy.ferry} for ${cost} of paper`;
+  // the money LEFT THE WORLD at the supplier - less whatever the whip-round
+  // moved between live balances, which is a transfer and not a destruction
+  if (Math.abs(buy.dWorld + cost) > 0.005)
+    return `the world's money moved by ${buy.dWorld} buying ${cost} of paper`;
+  // ---- AND NOW THE PILE RUNS OUT.
+  const out = JSON.parse(sim.G(`(() => {
+    const B = ballotBox;
+    B.day = day; B.papers = 1; B.printed = 1; B.cast = []; B.voters = {}; B.turnedAway = [];
+    B.shut = false; B.declared = false; B.counted = 0;
+    tmin = POLL_OPEN + 120;
+    const town = allCrabs().slice(0, 4), res = town.map(c => castVote(c));
+    return JSON.stringify({ res, cast: B.cast.length, papers: B.papers,
+      away: B.turnedAway, tally: B.cands.reduce((a, k) => a + k.votes, 0) });
+  })()`));
+  if (out.cast !== 1) return `${out.cast} papers went into a box that held one`;
+  if (out.papers !== 0) return "the pile did not empty";
+  if (out.away.length !== 3) return `${out.away.length} crabs were turned away, expected 3`;
+  if (out.res[0] !== "cast" || out.res.slice(1).some(r => r !== "nopaper"))
+    return `the outcomes read ${out.res.join(",")}`;
+  if (out.tally !== 0) return "a vote was tallied before the count";
+  return true;
+});
+
+scenario("the count is BY HAND: the result appears one paper at a time", () => {
+  // COUNT_MINS a paper, in the order they went into the box, and the office is
+  // not allowed to know the answer before the last one is read. The clock is
+  // what is under test, so it is driven directly rather than waited on.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  sim.runUntil(`pollOpen() && ballotBox.printed > 0`, { maxSteps: 400000 });
+  const got = JSON.parse(sim.G(`(() => {
+    const B = ballotBox;
+    // five papers in the box, by hand, so the count has a known length
+    B.cast = []; B.voters = {}; B.counted = 0; B.countT = 0; B.shut = false; B.declared = false;
+    for (const k of B.cands) k.votes = 0;
+    const town = allCrabs().slice(0, 5);
+    for (const c of town) { delete B.voters[c.p.name]; castVote(c); }
+    const n = B.cast.length;
+    tmin = POLL_SHUT;
+    const trace = [];
+    // one COUNT_MINS of game time per step (dt is real seconds; TS minutes a second)
+    for (let i = 0; i < n + 4; i++) {
+      updatePoll(COUNT_MINS / TS);
+      trace.push([B.counted, B.cands.reduce((a, k) => a + k.votes, 0), B.declared ? 1 : 0]);
+    }
+    return JSON.stringify({ n, trace, mayor: hall.mayor, pollDay: hall.poll && hall.poll.day });
+  })()`));
+  if (got.n < 3) return `only ${got.n} papers went in - not enough to watch a count`;
+  let last = 0;
+  for (let i = 0; i < got.trace.length; i++) {
+    const [counted, votes, declared] = got.trace[i];
+    if (counted !== votes) return `step ${i}: ${counted} papers read but ${votes} votes on the board`;
+    if (counted < last) return "the count went backwards";
+    if (counted - last > 1) return `step ${i} read ${counted - last} papers in one COUNT_MINS`;
+    if (declared && counted < got.n) return `declared with ${counted} of ${got.n} papers read`;
+    last = counted;
+  }
+  if (last !== got.n) return `the count stopped at ${last} of ${got.n}`;
+  if (!got.trace[got.trace.length - 1][2]) return "the count finished and nothing was declared";
+  return true;
+});
+
+scenario("a town with no rent roll still holds its election - the hat gets passed", () => {
+  // THE RATCHET THIS KILLS, and it was a real one. On the founding RENTS
+  // policy the purse is a cut of the HOUSE RENTS; a town where everybody
+  // sleeps at the shelter pays none, so the office could not afford paper, so
+  // there was no election - and an election was the only thing that could have
+  // moved that town off RENTS. PLAN's rule for this whole system is that a
+  // town can vote itself into losing the shelter and then vote itself back
+  // out: a corrective loop, never a ratchet.
+  //
+  // MUTATION-TESTED: with whipRound() returning 0, this scenario fails on the
+  // first assertion - no paper is printed at all.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(4, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    // NOBODY OWNS A ROOF, so the rents purse raises exactly nothing, and the
+    // fund is empty besides.
+    for (const c of allCrabs()) { c.p.homeless = true; c.p.house = null; c.p.boat = null;
+      c.p.wallet = Math.max(c.p.wallet, 20); }
+    hall.policy = { mech: "rents", rate: 4, bowls: 2 };
+    townFund.bal = 0; townFund.arrears = 0; townFund.ledger = [];
+    const w0 = worldMoney(), rows0 = townFund.ledger.length;
+    printBallots();
+    const rows = townFund.ledger.slice(rows0);
+    const whip = rows.filter(r => r.why === "PAPER WHIP-ROUND");
+    return JSON.stringify({ printed: ballotBox ? ballotBox.printed : -1,
+      whipRows: whip.length, whipTotal: Math.round(whip.reduce((a, r) => a + r.amt, 0) * 100) / 100,
+      whipWho: whip.map(r => r.who),
+      ferry: rows.filter(r => r.who === "THE FERRY").reduce((a, r) => a + r.amt, 0),
+      dWorld: Math.round((worldMoney() - w0) * 1000) / 1000 });
+  })()`));
+  if (!(got.printed > 0)) return "a town with no rent roll printed no ballot paper at all";
+  if (!got.whipRows) return "the paper was found without anybody being asked for it";
+  if (got.whipWho.some(w => !w || w === "?")) return `a whip-round row names nobody: ${got.whipWho.join(",")}`;
+  // CONSERVATION. The whip-round is a TRANSFER between live balances and the
+  // ferry payment is a DESTRUCTION, so the world is exactly the ferry poorer.
+  if (Math.abs(got.dWorld + got.ferry) > 0.01)
+    return `the world moved ${got.dWorld} while ${got.ferry} went to the ferry`;
+  if (!(got.whipTotal > 0)) return "the whip-round raised nothing but was recorded anyway";
+  return true;
+});
+
+scenario("the ballot box roundtrips save/load, and a reload conjures no paper and no second vote", () => {
+  // A town saved at noon on polling day has real paper in a real box. Without
+  // this the reload would hand the whole town a second vote and a fresh pile
+  // nobody paid for - the same class of bug as the fund minting money.
+  const store = new Map();
+  const a = createSim({ seed: 909, storage: store, fresh: false });
+  a.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const reached = a.runUntil(`pollOpen() && ballotBox.printed > 0 && ballotBox.cast.length >= 2`,
+    { maxSteps: 600000, tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  if (!reached) return "the town never got two papers into a box on polling day: "
+    + a.G(`JSON.stringify({ day, tmin: Math.round(tmin), over: gameOver,
+        box: ballotBox && { day: ballotBox.day, printed: ballotBox.printed, cast: ballotBox.cast.length } })`);
+  const before = a.G(`JSON.stringify({ day: ballotBox.day, printed: ballotBox.printed,
+    papers: ballotBox.papers, cast: ballotBox.cast.map(v => v.voter + ">" + v.pick),
+    voters: Object.keys(ballotBox.voters).sort(), lines: ballotBox.lines.length,
+    cands: ballotBox.cands.map(k => k.name + "|" + policyLine(k.plat)) })`);
+  a.G("save();");
+  const b = createSim({ seed: 909, storage: store, fresh: false });
+  const after = b.G(`JSON.stringify({ day: ballotBox.day, printed: ballotBox.printed,
+    papers: ballotBox.papers, cast: ballotBox.cast.map(v => v.voter + ">" + v.pick),
+    voters: Object.keys(ballotBox.voters).sort(), lines: ballotBox.lines.length,
+    cands: ballotBox.cands.map(k => k.name + "|" + policyLine(k.plat)) })`);
+  if (before !== after) return `the box changed across a reload:\n  ${before}\n  ${after}`;
+  // ...and a crab who already voted cannot vote again on the far side
+  const twice = b.G(`(() => { const n = Object.keys(ballotBox.voters)[0];
+    const c = allCrabs().find(k => k.p.name === n);
+    return c ? castVote(c) + ":" + hasVoted(c) : "nobody"; })()`);
+  if (twice !== "twice:true") return `a reloaded crab who had voted got "${twice}"`;
+  // A CORRUPT BOX IS CLAMPED, NOT TRUSTED - and specifically it can never hold
+  // more paper than was printed less what is already in it.
+  const c = createSim({ seed: 909, storage: store, fresh: false });
+  c.G(`(() => { const k = slotKey(activeSlot), d = JSON.parse(localStorage.getItem(k));
+    d.box.papers = 9999; d.box.printed = 4; d.box.cands = d.box.cands.concat([{ name: "", plat: null }]);
+    localStorage.setItem(k, JSON.stringify(d)); })()`);
+  const d = createSim({ seed: 909, storage: store, fresh: false });
+  const clamp = JSON.parse(d.G(`JSON.stringify({ papers: ballotBox.papers, printed: ballotBox.printed,
+    cast: ballotBox.cast.length, blank: ballotBox.cands.filter(k => !k.name).length })`));
+  if (clamp.papers > clamp.printed - clamp.cast)
+    return `a corrupt save conjured paper: ${clamp.papers} blanks against ${clamp.printed} printed and ${clamp.cast} cast`;
+  if (clamp.blank) return "a candidate with no name survived the load";
+  return true;
+});
+
+scenario("polling day draws in every state, on the canvas and never over itself", () => {
+  // The two general sweeps upstream drive the ordinary surfaces. Polling day
+  // has FIVE states that only exist for one day a week, and every one of them
+  // paints a board in the world and a page on the HALL tab - so they get the
+  // same two checks, applied to the same measured-text stub.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  sim.runUntil(`pollCalled()`, { maxSteps: 400000 });
+  const bad = JSON.parse(sim.G(`(() => {
+    const bad = [], T = text, S = smallText;
+    let SURF = "?", box = [];
+    const wrap = (fn, meas, h) => (c, str, x, y, col, sz) => {
+      const w = meas(str, sz);
+      if (x < 0 || x + w > W) bad.push([SURF, "OFF CANVAS", String(str)]);
+      for (const b of box)
+        if (x < b.x1 && x + w > b.x0 && y < b.y1 && y + h > b.y0 && Math.abs(y - b.y0) > 2)
+          bad.push([SURF, "OVER " + b.s, String(str)]);
+      box.push({ x0: x, x1: x + w, y0: y, y1: y + h, s: String(str) });
+      return fn(c, str, x, y, col, sz);
+    };
+    text = wrap(T, textWidth, 7); smallText = wrap(S, smallTextWidth, 5);
+    const run = (name, setup) => {
+      SURF = name; box = [];
+      try {
+        setup();
+        camX = clampCam(POLL_PLACES[0].x - 100);
+        drawTown();
+        box = [];
+        manage = "shack"; manageTab = "HALL"; hallView = "BALLOT"; drawManage();
+        box = []; hallView = "BOOKS"; drawManage();
+        box = []; hallView = "ROLL"; drawManage();
+      } catch (e) { bad.push([name, "THREW", e.message]); }
+    };
+    const B = ballotBox;
+    const reset = (n) => { B.day = day; B.printed = n; B.papers = n; B.cast = []; B.voters = {};
+      B.lines = []; B.turnedAway = []; B.late = []; B.counted = 0; B.countT = 0;
+      B.shut = false; B.declared = false; for (const k of B.cands) k.votes = 0; };
+    run("before-open", () => { reset(9); tmin = POLL_OPEN - 30; });
+    run("open", () => { reset(9); tmin = POLL_OPEN + 200; castVote(allCrabs()[0]); });
+    run("no-paper-left", () => { reset(9); tmin = POLL_OPEN + 600;
+      for (const c of allCrabs()) castVote(c);
+      B.papers = 0; B.turnedAway = allCrabs().map(c => c.p.name); B.late = allCrabs().map(c => c.p.name); });
+    run("counting", () => { reset(9); tmin = POLL_SHUT + 10;
+      for (const c of allCrabs()) castVote(c);
+      B.shut = true; B.counted = 1; B.cands[0].votes = 1; });
+    run("declared", () => { reset(9); tmin = POLL_SHUT + 90;
+      for (const c of allCrabs()) castVote(c);
+      B.shut = true; finishCount(); });
+    run("no-poll-at-all", () => { reset(0); tmin = POLL_OPEN + 200; });
+    text = T; smallText = S;
+    return JSON.stringify(bad.slice(0, 8));
+  })()`));
+  if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

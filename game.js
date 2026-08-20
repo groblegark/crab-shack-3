@@ -5139,6 +5139,9 @@ function load(slot) {
       day: Math.max(1, Math.round(+H.poll.day || 1)),
       winner: String(H.poll.winner || "").slice(0, 14), you: !!H.poll.you,
       turnout: Math.max(0, Math.round(+H.poll.turnout || 0)),
+      roll: Math.max(0, Math.round(+H.poll.roll || 0)),
+      printed: Math.max(0, Math.round(+H.poll.printed || 0)),
+      away: Math.max(0, Math.round(+H.poll.away || 0)),
       cands: H.poll.cands.slice(0, 6).map(k => ({ name: String((k && k.name) || "").slice(0, 14),
         line: String((k && k.line) || "").slice(0, 28), votes: Math.max(0, Math.round(+(k && k.votes) || 0)) })),
       lines: (Array.isArray(H.poll.lines) ? H.poll.lines : []).slice(0, POLL_LINES).map(l => String(l).slice(0, 72)),
@@ -9766,6 +9769,52 @@ function drawTown() {
     if (allCrabs().some(c => c.dayState === "atTap" && c.tapStop && !c.tapStop.soup && c.tapStop.tap === i && c.tapT > 0))
       wblit(TAP_FLOW[((time * 6) | 0) % 2], t.x + 15, HOME_BOTTOM - STANDPIPE2.h + 12);
   }
+  drawPollingPlaces();
+// THE POLLING PLACE. A trestle, a box with a slot cut in the lid, and a board
+// saying when it shuts. It is set up on polling day and gone by morning, which
+// is the right amount of permanence for a thing this town does once a week.
+//
+// The board says one of five things and they are exactly the five states this
+// whole feature has, so a player who never opens the HALL tab still watches
+// the election happen: not yet open, open with a pile you can WATCH GO DOWN,
+// open with the pile gone, being counted, and declared. The pile is one pixel
+// per sheet, capped at ten, because "the paper is running out" has to be
+// legible from the boardwalk rather than from a card.
+function drawPollingPlaces() {
+  if (!pollCalled()) return;
+  const B = ballotBox;
+  for (let i = 0; i < POLL_PLACES.length; i++) {
+    const px = POLL_PLACES[i].x;
+    if (px - camX < -80 || px - camX > W + 10) continue;
+    const top = HOME_BOTTOM - 12;
+    wrect(px - 2, top, 40, 3, [150, 110, 70]);        // the trestle top
+    wrect(px + 1, top + 3, 3, 9, [110, 80, 52]);      // ...and its legs
+    wrect(px + 32, top + 3, 3, 9, [110, 80, 52]);
+    if (B.printed > 0) {
+      wrect(px + 12, top - 8, 14, 8, [58, 42, 38]);   // the box
+      wrect(px + 13, top - 7, 12, 6, [82, 60, 52]);
+      wrect(px + 17, top - 6, 4, 1, [20, 14, 18]);    // the slot
+      const pile = Math.max(0, Math.min(10, B.papers));
+      for (let k = 0; k < pile; k++) wrect(px + 3, top - 1 - k, 7, 1, [252, 248, 240]);
+      // A COUNT IS A PILE MOVING FROM ONE SIDE OF THE TABLE TO THE OTHER.
+      if (B.shut) {
+        const done = Math.max(0, Math.min(10, B.counted));
+        for (let k = 0; k < done; k++) wrect(px + 27, top - 1 - k, 7, 1, [255, 216, 96]);
+      }
+    }
+    const shut = !B.printed ? ["NO BALLOT PAPER", "NO POLL TODAY", [255, 190, 190]]
+      : B.declared ? ["DECLARED", fitSmall(hall.mayor || "-", 58), [255, 216, 96]]
+      : B.shut ? ["COUNTING", B.counted + " OF " + B.cast.length, [255, 216, 96]]
+      : tmin < POLL_OPEN ? ["POLLING DAY", "OPENS " + fmtHr(POLL_OPEN), [200, 235, 200]]
+      : B.papers > 0 ? ["VOTE HERE", B.papers + " PAPERS - SHUTS " + fmtHr(POLL_SHUT), [200, 235, 200]]
+      : ["NO PAPER LEFT", "SHUTS " + fmtHr(POLL_SHUT), [255, 190, 150]];
+    const sx = px + 1 - camX, sy = top - 30;
+    wrect(px - 1, sy - 2, 66, 18, [30, 20, 36]);
+    wrect(px, sy - 1, 64, 16, [58, 42, 38]);
+    smallText(ctx, fitSmall(shut[0], 60), sx + 1, sy + 1, [255, 250, 235]);
+    smallText(ctx, fitSmall(shut[1], 60), sx + 1, sy + 8, shut[2]);
+  }
+}
   // the crab shelter
   wblit(SHELTER2, SHELTER_X, HOME_BOTTOM - SHELTER2.h);
   if (SHELTER_X - camX > -80 && SHELTER_X - camX < W) {
@@ -11699,9 +11748,27 @@ function drawHall(R, chip) {
   // counted"): "RENTS 40% / 2 BOWLS - MR. PINCHERTON, OFF HIS OWN BOOK" is 55
   // characters and 214px, and it printed its last word off the card.
   smallText(ctx, fitSmall(policyLine(p) + " - " + P.who, w2 - 16), x + 8, y + 44, [70, 90, 130]);
-  smallText(ctx, fitSmall("NEXT BALLOT: DAY " + nextPoll + " (" + WEEKDAYS[POLL_WEEKDAY] + ")"
-    + (mine0 ? " - YOU HOLD IT, AND IT BILLS YOU" : hall.stand ? " - " + nom0 + " IS STANDING" : ""), w2 - 16),
-    x + 8, y + 53, mine0 || hall.stand ? [190, 110, 40] : [110, 100, 110]);
+  // WHERE THE ELECTION IS UP TO, in one line, and it says something different
+  // five times a week - because a poll that takes a whole day to happen has
+  // five states and a player who cannot see which one they are in has an
+  // interface bug rather than an interesting uncertainty.
+  //
+  // NOMINATIONS CLOSING is called out on the night it happens. That deadline
+  // is real - printBallots fixes the slate at that settlement, and a player
+  // who nominates on Sunday morning has missed it - so it cannot be something
+  // you find out about afterwards.
+  const B0 = pollCalled() ? ballotBox : null;
+  const st = B0 && !B0.printed ? ["POLLING DAY - NO PAPER, SO NO POLL", [190, 80, 80]]
+    : B0 && B0.declared ? ["DECLARED - " + B0.cast.length + " OF " + B0.roll + " VOTED", [190, 110, 40]]
+    : B0 && B0.shut ? ["POLLS SHUT - COUNTING " + B0.counted + " OF " + B0.cast.length, [190, 110, 40]]
+    : B0 && tmin < POLL_OPEN ? ["POLLING DAY - OPENS " + fmtHr(POLL_OPEN) + ", " + B0.printed + " PAPERS", [40, 150, 70]]
+    : B0 ? ["POLLS SHUT " + fmtHr(POLL_SHUT) + " - " + B0.cast.length + " VOTED, " + B0.papers + " PAPERS LEFT",
+        B0.papers > 0 ? [40, 150, 70] : [200, 110, 40]]
+    : pollWeekday(day + 1) ? ["NOMINATIONS CLOSE TONIGHT - BALLOT TOMORROW", [190, 110, 40]]
+    : ["NEXT BALLOT: DAY " + nextPoll + " (" + WEEKDAYS[POLL_WEEKDAY] + ")",
+        mine0 || hall.stand ? [190, 110, 40] : [110, 100, 110]];
+  smallText(ctx, fitSmall(st[0] + (mine0 ? " - YOU HOLD IT, AND IT BILLS YOU"
+    : hall.stand ? " - " + nom0 + " IS STANDING" : ""), w2 - 16), x + 8, y + 53, st[1]);
   if (hallView === "BOOKS") {
     // THE FUND, AND WHERE ITS MONEY CAME FROM. Every row names a counterparty
     // because that is the whole promise of this feature: nothing is conjured.
@@ -11758,11 +11825,39 @@ function drawHall(R, chip) {
         ly += 7;
       }
     }
+  } else if (B0 && B0.printed > 0 && !B0.declared) {
+    // THE BOX AS IT STANDS, and there is NO TALLY on this page ON PURPOSE.
+    // The papers are face down until the count reads them out tonight, so what
+    // the player sees here is exactly what a crab walking past the table sees:
+    // who is on the paper, how many have voted, and how much paper is left.
+    // A running total would quietly undo the whole point of counting by hand.
+    smallText(ctx, "TODAY'S BALLOT - " + B0.printed + " PAPERS PRINTED", x + 8, y + 66, [58, 42, 38]);
+    let ly = y + 76;
+    for (const k of B0.cands.slice(0, 4)) {
+      const you = !!k.you;
+      smallText(ctx, fitSmall((k.inc ? "* " : "  ") + k.name + (you ? " (YOURS)" : ""), 76), x + 8, ly,
+        you ? [190, 110, 40] : [40, 30, 40]);
+      smallText(ctx, fitSmall(policyLine(k.plat), w2 - 100), x + 86, ly, [110, 100, 110]);
+      ly += 8;
+    }
+    ly += 2;
+    smallText(ctx, B0.shut ? "THE POLLS HAVE SHUT" : "IN THE BOX  " + B0.cast.length
+      + "        ON THE TABLE  " + B0.papers, x + 8, ly, [58, 42, 38]); ly += 8;
+    // THE THREE WAYS A CRAB LOSES A VOTE, each of them by name, because every
+    // one of them is a thing the player could have prevented.
+    const missed = allCrabs().filter(c => !B0.voters[c.p.name]).map(c => c.p.name);
+    if (B0.turnedAway.length)
+      smallText(ctx, fitSmall("FOUND NO PAPER: " + B0.turnedAway.join(", "), w2 - 16), x + 8, ly, [190, 80, 80]), ly += 7;
+    if (B0.late.length)
+      smallText(ctx, fitSmall("ARRIVED TOO LATE: " + B0.late.join(", "), w2 - 16), x + 8, ly, [190, 80, 80]), ly += 7;
+    if (missed.length && ly < y + h2 - 46)
+      smallText(ctx, fitSmall("YET TO VOTE: " + missed.join(", "), w2 - 16), x + 8, ly, [110, 100, 110]);
   } else {
     const poll = hall.poll;
     if (!poll) smallText(ctx, "NO BALLOT HAS BEEN HELD YET", x + 8, y + 68, [150, 140, 160]);
     else {
-      smallText(ctx, "DAY " + poll.day + " - " + poll.turnout + " VOTED", x + 8, y + 66, [58, 42, 38]);
+      smallText(ctx, "DAY " + poll.day + " - " + poll.turnout + " OF " + (poll.roll || poll.turnout) + " VOTED"
+        + (poll.away ? ", " + poll.away + " FOUND NO PAPER" : ""), x + 8, y + 66, [58, 42, 38]);
       let ly = y + 76;
       for (const k of poll.cands.slice(0, 3)) {
         const won = k.name === poll.winner;
