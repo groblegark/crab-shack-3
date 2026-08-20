@@ -170,11 +170,19 @@ compounds or collapses → the landlord collects at 20:00 either way.
   `gameOver`), snapshotted into `winRec` and saved. Price measured, not felt:
   a strong `--buy chef,table` town crosses it around day 105-130 and no
   documented run comes within 5x. See the feature entry.
-- **CYCLE THE FOCUS** (`cyclerRects` / `cycleSel`, 2026-08-19): a pictorial
-  `< crab >` under the little sun that steps the SELECTION through the town's
-  roster and takes the CAMERA with it (crew first, then townsfolk; tourists
-  deliberately out; wraps both ways; `[` / `]` too). Same world rows in both
-  canvas modes, hides behind any full-screen card.
+- **CYCLE THE FOCUS** (`cyclerRects` / `cycleSel`, 2026-08-19): two chevrons
+  **in the character card's own header** that step the SELECTION through the
+  town's roster and take the CAMERA with them (crew first, then townsfolk;
+  tourists deliberately out; wraps both ways; `[` / `]` too). It shipped as a
+  48x17 `< crab >` chip under the sun and Matt cut it the same day — *"the new
+  character selector thing takes up too much room: make it just little buttons
+  on the character info window"* — so it now costs the HUD nothing and lives
+  on the thing it steps. Two consequences, both deliberate: **no card, no
+  chevrons** (you click a crab first, then flick — `cyclerLive()` keeps the
+  keys working with nothing selected), and a **tourist's card gets them too**,
+  since tourists are outside the cycle and the chevrons are the way back into
+  the roster. Hides behind any full-screen card. The card grew 52 -> 58px in
+  the same pass so `MORE>` stops landing on top of the ZZZ need bar.
 - **UI**: title → lease-signing intro (Mr. Pincherton) → play. CREW / SHOP /
   MENU tabs, a three-tab management card (HOURS / SCHEDULE / TOWN census),
   BILL chip (itemized nightly bill), follow-cam on ANY crab

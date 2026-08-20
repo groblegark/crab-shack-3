@@ -4180,11 +4180,21 @@ scenario("cycler: < crab > steps the selection AND the camera, and wraps", () =>
   // GEOMETRY: one rect table feeds the draw and the hit-test, it sits in the
   // world rows both canvas modes share, and it clears the sun above it
   const R = JSON.parse(sim.G(`JSON.stringify(cyclerRects())`));
-  if (R.y < 28) return `the cycler at y=${R.y} overlaps the little sun (ends at y=28)`;
-  if (R.y + R.h > 176) return `the cycler runs into the panel (y=${R.y}+${R.h})`;
-  if (R.x + R.w > 256) return `the cycler runs off the right edge`;
-  for (const part of ["prev", "glyph", "next"])
-    if (R[part].w < 12 || R[part].h < 12) return `${part} is ${R[part].w}x${R[part].h} - too small for a thumb`;
+  // GEOMETRY: the chevrons live INSIDE the character card's header (the card is
+  // x2..130, y2..54), clear of the portrait (x5..26) and of the card's edges,
+  // and they take no room anywhere else on the HUD.
+  if (R.x < 26) return `the cycler at x=${R.x} sits on the card portrait`;
+  if (R.x + R.w > 129 || R.y < 3 || R.y + R.h > 15)
+    return `the cycler is outside the card header (${R.x},${R.y} ${R.w}x${R.h})`;
+  for (const part of ["prev", "next"])
+    if (R[part].w < 9 || R[part].h < 10) return `${part} is ${R[part].w}x${R[part].h} - too small to hit`;
+  if (R.glyph) return "the cycler still carries the old crab glyph chip";
+  // NO CARD, NO CHEVRONS - but the keys still cycle, and take the first crab
+  sim.G(`sel = null`);
+  if (sim.G(`cyclerShown()`)) return "the chevrons draw with no card under them";
+  if (sim.G(`tapCycler({ x: cyclerRects().next.x + 4, y: cyclerRects().next.y + 6 })`))
+    return "a tap where the chevrons would be moved the selection with no card up";
+  if (!sim.G(`cyclerLive()`)) return "the keys stopped cycling when the card closed";
   // ...and a tap on the chevrons drives exactly what a click drives
   sim.G(`followCrab(cycleList()[0])`);
   const before = sim.G(`sel.p.name`);

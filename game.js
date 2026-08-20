@@ -6175,14 +6175,16 @@ cv.addEventListener("click", (ev) => {
     popText("NEW JOB: " + BIZ[c.p.job].name, c.x - 20, FLOOR_Y - 34, [140, 255, 160]);
     return;
   }
-  // a click on the follow card itself opens the crab's full record
+  // a click on the follow card itself opens the crab's full record - but the
+  // cycler chevrons live IN its header, so they get first refusal
+  if (tapCycler(p)) return;
   {
     if (sel && p.x >= 5 && p.x < 26 && p.y >= 6 && p.y < 33) {   // portrait: bring the camera back
       if (sel.p) { if (sel.p.npc) { followNpc = sel; followIdx = -1; } else { followIdx = crabs.indexOf(sel); followNpc = null; } followCust = null; }
       else { followCust = sel; followIdx = -1; followNpc = null; }
       sfx.ding(); return;
     }
-    if (sel && p.x >= 2 && p.x < 130 && p.y >= 2 && p.y < 54) { dossier = sel; sfx.ding(); return; }
+    if (sel && p.x >= 2 && p.x < 130 && p.y >= 2 && p.y < 60) { dossier = sel; sfx.ding(); return; }
   }
   // the little sun: fast-forward to morning
   if (p.x >= W - 26 && p.x < W - 1 && p.y >= 13 && p.y < 28) {
@@ -6190,8 +6192,6 @@ cv.addEventListener("click", (ev) => {
     if (ffSleep) ffSleepDay = tmin < 6.5 * 60 ? day : day + 1;
     sfx.ding(); return;
   }
-  // ...and directly under it, the crab cycler: < crab >
-  if (tapCycler(p)) return;
   const wx = p.x + camX;
   // the job board is readable
   if (wx >= JOB_BOARD_X - 2 && wx < JOB_BOARD_X + 28 && p.y >= HOME_BOTTOM - 40 && p.y < HOME_BOTTOM + 4) {
@@ -6286,8 +6286,8 @@ addEventListener("keydown", (e) => {
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
   // [ and ] step the selection through the town, exactly what the little crab
   // cycler's chevrons do - the camera comes along, unlike an arrow-key pan
-  if (e.key === "[" && cyclerShown()) { cycleSel(-1); sfx.ding(); return; }
-  if (e.key === "]" && cyclerShown()) { cycleSel(1); sfx.ding(); return; }
+  if (e.key === "[" && cyclerLive()) { cycleSel(-1); sfx.ding(); return; }
+  if (e.key === "]" && cyclerLive()) { cycleSel(1); sfx.ding(); return; }
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "Escape") { if (saveView) { closeSaveView(); return; } if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } sel = null; followIdx = -1; followNpc = null; followCust = null; }
@@ -7170,8 +7170,8 @@ function custStatus(k) {
 }
 function drawCustCard(k) {
   const wcard = 128;
-  rect(ctx, 2, 2, wcard, 52, [30, 20, 36]);
-  rect(ctx, 3, 3, wcard - 2, 50, [255, 250, 235]);
+  rect(ctx, 2, 2, wcard, 58, [30, 20, 36]);
+  rect(ctx, 3, 3, wcard - 2, 56, [255, 250, 235]);
   rect(ctx, 5, 6, 20, 26, [245, 225, 200]);
   blit(ctx, CRAB_ARTS[k.color].a, 7, 14);
   const acc = ACCESSORIES[k.acc];
@@ -7179,7 +7179,7 @@ function drawCustCard(k) {
   text(ctx, k.name.split(" ")[0].slice(0, 9), 29, 5, [40, 30, 40]);
   const mood = !k.served && k.patience < 15 ? ["STEAMED", [190, 80, 80]]
     : k.happy || k.served ? ["HAPPY", [40, 150, 70]] : ["VISITING", [110, 110, 130]];
-  smallText(ctx, mood[0], 126 - smallTextWidth(mood[0]), 6, mood[1]);
+  smallText(ctx, mood[0], 104 - smallTextWidth(mood[0]), 6, mood[1]);
   smallText(ctx, "TOURIST - IN TOWN FOR THE DAY", 29, 13, [120, 90, 60]);
   smallText(ctx, custStatus(k).slice(0, 26), 29, 21, [30, 110, 60]);
   smallText(ctx, "WANTS: " + (ITEM_NAMES[k.recipe.icon] || "?") + " $" + menuPrice(k.biz, k.recipe), 29, 28, [140, 110, 40]);
@@ -7187,7 +7187,7 @@ function drawCustCard(k) {
   rect(ctx, 40, 45, 60, 4, [30, 20, 36]);
   const pf = Math.max(0, Math.min(1, k.patience / (k.maxPatience || 50)));
   rect(ctx, 41, 46, Math.round(58 * pf), 2, pf > 0.5 ? [96, 200, 120] : pf > 0.25 ? [235, 200, 90] : [235, 90, 90]);
-  smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
+  smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 52, [150, 140, 160]);   // its own row: the need bars own y44-49
 }
 function drawFollowCard() {
   // any full-screen card owns the view: the little crab card must never sit on
@@ -7199,16 +7199,16 @@ function drawFollowCard() {
   if (!c || !c.p) return;
   const p = c.p;
   const wcard = 128;
-  rect(ctx, 2, 2, wcard, 52, [30, 20, 36]);
-  rect(ctx, 3, 3, wcard - 2, 50, [255, 250, 235]);
+  rect(ctx, 2, 2, wcard, 58, [30, 20, 36]);
+  rect(ctx, 3, 3, wcard - 2, 56, [255, 250, 235]);
   rect(ctx, 5, 6, 20, 26, [200, 230, 245]);
   blit(ctx, CRAB_ARTS[p.color].a, 7, 14);
   const acc = ACCESSORIES[crabHat(c)];
   if (acc) blit(ctx, acc.art, 7 + acc.dx, 14 + acc.dy);
   text(ctx, p.name, 29, 5, [40, 30, 40]);
   const [mood, mcol] = crabMood(c);
-  smallText(ctx, mood, 126 - smallTextWidth(mood), 6, mcol);
-  smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
+  smallText(ctx, mood, 104 - smallTextWidth(mood), 6, mcol);   // 104: the cycler chevrons own 106..127
+  smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 52, [150, 140, 160]);   // its own row: the need bars own y44-49
   smallText(ctx, TRAITS[p.trait].label + " " + MODES[p.mode].label, 29, 13, [120, 90, 60]);
   smallText(ctx, crabStatus(c).slice(0, 26), 29, 21, [30, 110, 60]);
   // SHIFT reads the hours they ACTUALLY work today, so an OT day shows the
@@ -7618,26 +7618,38 @@ function followCrab(c) {
 // anything. You can still click a tourist to follow one; the cycler then treats
 // them as "nothing selected" and steps to the first (or last) crab in town.
 //
-// WHERE IT LIVES: top-right, directly under the little sun, in the world area
-// rows 0..PANEL_Y that BOTH canvas modes share - so it is pixel-identical on
-// 240 and 288 and never fights the follow card (top-left) or the BILL/DEBT
-// chips (bottom-right). It hides behind any full-screen reading surface on
-// exactly the same terms the follow card does: the ledger, the management
-// card, the census, the save screen and the day report own the screen.
+// WHERE IT LIVES: ON THE CHARACTER CARD (Matt, 2026-08-19: "the new character
+// selector thing takes up too much room: make it just little buttons on the
+// character info window"). Two 9x11 chevrons in the card's own header, right
+// of the name, costing the HUD nothing - it was a 48x17 chip under the sun and
+// now it is part of the thing it steps. Consequences, both deliberate:
+//   - no card, no chevrons. You pick a crab first (click any crab), and THEN
+//     you flick through them, which is the order a player does it in anyway.
+//     The [ and ] keys still cycle with nothing selected, and take the first
+//     or last crab in town - that is what cyclerLive() is for.
+//   - a TOURIST's card gets them too. Tourists are not in the cycle list, so
+//     the chevrons are the way back out of one and into the town roster.
+// It hides behind any full-screen reading surface on exactly the same terms
+// the card does: the ledger, the management card, the census, the save screen
+// and the day report own the screen.
 function cycleList() { return allCrabs(); }
-const CYCLE_W = 48, CYCLE_H = 17;
+const CYCLE_W = 21, CYCLE_H = 12;
 function cyclerRects() {
-  const x = W - CYCLE_W - 2, y = 29;
+  const x = 106, y = 3;          // the card's own header row, right of the name
   return { x, y, w: CYCLE_W, h: CYCLE_H,
-    prev:  { x, y, w: 14, h: CYCLE_H },
-    glyph: { x: x + 14, y, w: 20, h: CYCLE_H },
-    next:  { x: x + 34, y, w: 14, h: CYCLE_H } };
+    prev: { x, y, w: 10, h: CYCLE_H },
+    next: { x: x + 11, y, w: 10, h: CYCLE_H } };
 }
-function cyclerShown() {
+// the cycle is LIVE (keyboard) whenever the town is on screen and nothing is
+// being read...
+function cyclerLive() {
   return screen === "play" && !gameOver
     && !(dossier || manage || boardView || saveView || reportT > 0) && tab !== "menu"
     && cycleList().length > 0;
 }
+// ...and SHOWN (chevrons drawn, tappable) only where they live: on the card,
+// which is only up when something is selected.
+function cyclerShown() { return cyclerLive() && !!sel; }
 // step the selection (and the camera with it) by dir, wrapping at both ends.
 // With nothing selected - or with a tourist selected, who is not in the list -
 // `>` takes the first crab in town and `<` takes the last.
@@ -7656,36 +7668,25 @@ function tapCycler(p) {
   const hit = (r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
   if (hit(R.prev)) { cycleSel(-1); sfx.ding(); return true; }
   if (hit(R.next)) { cycleSel(1); sfx.ding(); return true; }
-  // the crab in the middle is a target too: it re-engages the camera on the
-  // crab you already picked, the same job the follow card's portrait does
-  if (hit(R.glyph)) { if (sel) followCrab(sel); else cycleSel(1); sfx.ding(); return true; }
   return false;
 }
 function drawCycler() {
   if (!cyclerShown()) return;
   const R = cyclerRects();
-  rect(ctx, R.x, R.y, R.w, R.h, [30, 20, 36]);
-  rect(ctx, R.x + 1, R.y + 1, R.w - 2, R.h - 2, [255, 250, 235]);
-  // the two chevrons, drawn as pixels rather than typed: no words anywhere
-  const chev = (cx, cy, dir) => {
-    for (let i = 0; i < 4; i++) {
+  const chip = (r, dir) => {
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [235, 225, 205]);
+    // the chevron, drawn as pixels rather than typed: no words anywhere
+    const cx = r.x + (dir > 0 ? 3 : 6), cy = r.y + 6;
+    for (let i = 0; i < 3; i++) {
       px(ctx, cx + i * dir, cy - i, [90, 60, 40]);
       px(ctx, cx + i * dir, cy + i, [90, 60, 40]);
       px(ctx, cx + i * dir + dir, cy - i, [90, 60, 40]);
       px(ctx, cx + i * dir + dir, cy + i, [90, 60, 40]);
     }
   };
-  chev(R.prev.x + 4, R.y + 8, 1);    // "<" : apex on the left, arms opening right
-  chev(R.next.x + 9, R.y + 8, -1);   // ">" : apex on the right
-  // ...and the crab itself, wearing the selected shell so you can see whose
-  // it is. Nothing selected: the first crab in town, which is exactly who a
-  // tap is about to give you.
-  const who = cycleList().indexOf(sel) >= 0 ? sel : cycleList()[0];
-  const col = who && who.p ? who.p.color : 0;
-  rect(ctx, R.glyph.x, R.y + 1, R.glyph.w, R.h - 2, [200, 230, 245]);
-  blit(ctx, CRAB_ARTS[col].a, R.glyph.x + 2, R.y + 3);   // 16x12 art, centred in the 20x17 chip
-  const acc = who && who.p ? ACCESSORIES[crabHat(who)] : null;
-  if (acc) blit(ctx, acc.art, R.glyph.x + 2 + acc.dx, R.y + 3 + acc.dy);
+  chip(R.prev, 1);    // "<" : apex on the left, arms opening right
+  chip(R.next, -1);   // ">" : apex on the right
 }
 function dossierBar(R, c, diary) {
   const chip = (r, label, hot, dim) => {
