@@ -3510,33 +3510,50 @@ scenario("shortcut home: sleeping rough banks nothing - and the player can break
   return true;
 });
 
-scenario("boredom has NO free cure: only a conversation, and it never pays for itself", () => {
-  // THE CURE LEDGER, asserted. In a town with no arcade the ONLY thing in the
-  // whole game that lowers a boredom bar is two crabs standing still talking
-  // to each other, and it costs them exactly the time it takes. A crab with
-  // nobody to talk to has no way down at all - boredom as a loneliness need.
+scenario("boredom's free cures are LIMITED, and neither pays for itself", () => {
+  // RE-BASELINED 2026-08-20, deliberately, on the owner's instruction: "we
+  // should also have some better sources of limited fun, e.g. throwing a beach
+  // ball". This scenario used to assert that a CONVERSATION was the only free
+  // cure in the game and that a crab with nobody to talk to had no way down at
+  // all - boredom as a loneliness need. The beach ball is a second free cure
+  // and a SOLO one, so both of those clauses are gone by intent, not by
+  // accident.
+  //
+  // What is kept is the half that still matters, and it is the half that
+  // protects the $650 arcade rung: every free cure must be ATTRIBUTABLE (no
+  // boredom moves down for reasons nobody wrote) and none of them may PAY FOR
+  // ITSELF over a working week. A game of catch takes the edge off; only the
+  // arcade zeroes the bar.
   const sim = createSim({ seed: 41 });
   idleTown(sim, 4);
   if (sim.G(`bizUnlocked("arcade")`)) return "the fixture town has an arcade - it cannot prove anything";
   const start = {}, last = {}, chatSamples = {}, drops = [];
-  const prev = {}, wasChat = {};
-  let chatting = 0;
+  const prev = {}, wasChat = {}, wasBall = {};
+  let chatting = 0, playing = 0;
   sim.runDays(8, { tickEvery: 2, onTick: (G) => {
     G(`coins = Math.max(coins, 1500);`);
-    for (const r of JSON.parse(G(`JSON.stringify(allCrabs().map(c => [c.p.name, c.p.bored || 0, c.dayState === "chat"]))`))) {
-      const [n, bored, inChat] = r;
+    for (const r of JSON.parse(G(`JSON.stringify(allCrabs().map(c => [c.p.name, c.p.bored || 0,
+        c.dayState === "chat", c.dayState === "atBall"]))`))) {
+      const [n, bored, inChat, atBall] = r;
       if (start[n] == null) start[n] = bored;
       last[n] = bored;
       if (inChat) { chatting++; chatSamples[n] = (chatSamples[n] || 0) + 1; }
-      if (prev[n] != null && bored < prev[n] - 1e-6) drops.push({ n, by: prev[n] - bored, chat: !!wasChat[n] });
-      prev[n] = bored; wasChat[n] = inChat;
+      if (atBall) playing++;
+      if (prev[n] != null && bored < prev[n] - 1e-6)
+        drops.push({ n, by: prev[n] - bored, chat: !!wasChat[n], ball: !!wasBall[n] });
+      prev[n] = bored; wasChat[n] = inChat; wasBall[n] = atBall;
     }
   } });
   if (!drops.length) return "boredom never moved down at all - the chatter cure is not firing";
-  const rogue = drops.filter(d => !d.chat || d.by > CHAT_RELIEF_MAX);
+  // EVERY DROP IS ONE OF THE TWO, AND WITHIN ITS OWN CEILING.
+  const ballMax = sim.G(`BALL_PAIR`) + 1e-6;
+  const rogue = drops.filter(d => (d.chat ? d.by > CHAT_RELIEF_MAX
+    : d.ball ? d.by > ballMax : true));
   if (rogue.length)
-    return `${rogue.length} boredom drop(s) came from something other than a finished conversation, e.g. ${JSON.stringify(rogue[0])}`;
+    return `${rogue.length} boredom drop(s) came from neither a finished conversation nor a game, `
+      + `or exceeded its ceiling, e.g. ${JSON.stringify(rogue[0])}`;
   if (!(chatting > 0)) return "nobody in a bored town ever stopped to talk";
+  if (!(playing > 0)) return "nobody in a bored town ever went and played with the ball";
   // IT CANNOT SELF-SUSTAIN. Across a working week every crab - the chattiest
   // included - still ends MORE bored than they started, or the $650 arcade
   // rung stops mattering. (0.06 of relief, at most twice a day against a
@@ -3546,11 +3563,15 @@ scenario("boredom has NO free cure: only a conversation, and it never pays for i
   if (held.length)
     return "a talkative crew kept itself topped up over a working week: "
       + held.map((n) => `${n} ${start[n].toFixed(2)}->${last[n].toFixed(2)} (${chatSamples[n] || 0} chat samples)`).join(", ");
-  // THE LONELY CRAB. Somebody in this town never found company, and their bar
-  // never took a single step down: no solo cure exists.
-  const talkers = new Set(drops.map((d) => d.n));
-  const alone = Object.keys(start).filter((n) => !talkers.has(n));
-  if (!alone.length) return "every crab in the fixture found company - the lonely case went untested";
+  // THE SOLO CURE IS STRICTLY THE WORSE ONE. A crab alone at the ball still
+  // gets something - that is the point of adding it - but a game with somebody
+  // is worth more, so company is still the better answer to being bored.
+  if (!(sim.G(`BALL_PAIR`) > sim.G(`BALL_SOLO`)))
+    return "playing alone is worth as much as playing with somebody";
+  // (The old "lonely crab" clause lived here: it required somebody in the
+  // fixture whose bar never stepped down at all, which was the proof that no
+  // solo cure existed. A solo cure is exactly what was asked for, so the
+  // clause is gone rather than left standing with its reason removed.)
   return true;
 });
 
@@ -4164,6 +4185,145 @@ scenario("ferry: the win saves, and a reloaded town shows the same ending", () =
   return true;
 });
 
+scenario("the beach ball is LIMITED fun", () => {
+  // Matt: "we should also have some better sources of limited fun, e.g.
+  // throwing a beach ball". LIMITED is the word this scenario polices, in all
+  // three of the ways the ball is limited: one ball (so two players), a
+  // partial cure, and never at the arcade's expense.
+  const sim = createSim({ seed: 11 });
+  sim.runDays(1);
+  // ONE BALL, TWO PLAYERS. A third crab is not offered a game.
+  const room = JSON.parse(sim.G(`(() => {
+    while (crabs.length < 3) hireCrew();   // a REAL third crab, not one of the two playing
+    const a = crabs[0], b = crabs[1], c2 = crabs[2];
+    a.dayState = "atBall"; a.ballT = 5; b.dayState = "atBall"; b.ballT = 5;
+    return JSON.stringify({ players: ballPlayers().length, roomForThird: ballHasRoom(c2) });
+  })()`));
+  if (room.players !== 2) return `staged ${room.players} players, expected 2`;
+  if (room.roomForThird) return "a third crab was offered a game with one ball";
+  // A GAME TOGETHER IS WORTH MORE THAN A GAME ALONE, and the difference is
+  // what makes it social rather than a vending machine.
+  const relief = JSON.parse(sim.G(`(() => {
+    const pair = BALL_PAIR, solo = BALL_SOLO, chat = CHAT_RELIEF;
+    return JSON.stringify({ pair, solo, chat });
+  })()`));
+  if (!(relief.pair > relief.solo)) return `playing alone (${relief.solo}) is as good as playing together (${relief.pair})`;
+  if (!(relief.solo >= relief.chat)) return "a solo throw is worth less than standing about talking";
+  if (relief.pair >= 1) return "a game of catch cures boredom outright - that is the arcade's job";
+  // IT ACTUALLY WORKS: a bored crab with no arcade in town walks out and plays,
+  // and comes back measurably less bored.
+  const played = JSON.parse(sim.G(`(() => {
+    for (const k of allCrabs()) { k.dayState = "home"; k.ballT = 0; }
+    const c = crabs[0];
+    c.p.bored = 0.95; c.p.hunger = 0.1; c.p.thirst = 0.1; c.p.tired = 0.1;
+    c.ballCd = 0; c.errandCd = 0; c.dayState = "home"; tmin = 11 * 60;
+    const e = pickErrand(c);
+    if (!e || !e.ball) return JSON.stringify({ picked: e ? (e.biz || e.need) : null });
+    const before = c.p.bored;
+    beginErrand(c, e, true);
+    for (let i = 0; i < 40000 && c.dayState === "atBall"; i++) frame(performance.now() + i * 100);
+    return JSON.stringify({ picked: "ball", before, after: c.p.bored, cd: c.ballCd });
+  })()`));
+  if (played.picked !== "ball") return `a very bored crab with no arcade chose ${played.picked} instead of the ball`;
+  if (!(played.after < played.before - 0.05)) return `the game relieved nothing (${played.before} -> ${played.after})`;
+  if (!(played.cd > 0)) return "no cooldown - a crab could live at the ball";
+  // AND IT NEVER TAKES THE ARCADE'S MONEY. With an arcade open, staffed and
+  // affordable, a bored crab buys fun instead of playing for free. This is the
+  // lesson the shelter pot cost us: a free option beside a paid one takes the
+  // takings rather than the need.
+  const arcade = sim.G(`(() => {
+    UPS.arcade.lvl = 1; BIZ.arcade.bought = true;
+    const c = crabs[1];
+    c.p.bored = 0.95; c.p.wallet = 300; c.ballCd = 0; c.errandCd = 0;
+    c.dayState = "home"; tmin = 13 * 60;
+    while (!bizStaffed("arcade") && crabs.length < 8) hireCrew();
+    for (const k of allCrabs()) if (k !== c && bizUnlocked("arcade")) { k.p.job = "arcade"; k.duty = true; k.workBiz = "arcade"; }
+    const e = pickErrand(c);
+    return e ? (e.ball ? "ball" : e.biz || "other") : "none";
+  })()`);
+  if (arcade === "ball") return "a crab with money walked past a staffed arcade to play for free";
+  return true;
+});
+
+scenario("no card prints text on top of its own text", () => {
+  // Matt: "the tips slider is mushed up with the other text; might be a couple
+  // of instances like that." There were: the SCHEDULE tab had three strings in
+  // one band - the slider's explanation sat on top of the slider's own track
+  // AND on top of the roster hint. The rect table had already been rearranged
+  // to fit the slider in and the TEXT was never moved with it.
+  //
+  // "A couple of instances like that" is the phrase that asks for a sweep
+  // rather than a fix, so this is the off-canvas sweep's sibling: every
+  // full-screen surface is drawn with the text calls measured, and any two
+  // strings whose boxes overlap by more than a pixel in both axes is a defect.
+  // DROP SHADOWS ARE NOT DEFECTS: textShadow draws the same string twice, one
+  // pixel apart, on purpose - so an identical string within 2px is ignored.
+  const sim = createSim({ seed: 11 });
+  sim.runDays(2);
+  sim.runUntil(`report && reportT > 0`, { maxSteps: 400000 });
+  const hits = JSON.parse(sim.G(`(() => {
+    const hits = [];
+    const T = text, S = smallText;
+    globalThis.SURF = "?"; globalThis.BOXES = [];
+    const rec = (str, x, y, h, meas, sz) => {
+      const w = meas(str, sz);
+      for (const b of BOXES) {
+        if (b.s === String(str) && Math.abs(b.x - x) <= 2 && Math.abs(b.y - y) <= 2) continue;   // a shadow
+        const ox = Math.min(b.x + b.w, x + w) - Math.max(b.x, x);
+        const oy = Math.min(b.y + b.h, y + h) - Math.max(b.y, y);
+        if (ox > 1 && oy > 1) hits.push([SURF, String(str), b.s, Math.round(ox), Math.round(oy)]);
+      }
+      BOXES.push({ x, y, w, h, s: String(str) });
+    };
+    text = (c, s2, x, y, col, sz) => { rec(s2, x, y, 7, textWidth, sz); return T(c, s2, x, y, col, sz); };
+    smallText = (c, s2, x, y, col) => { rec(s2, x, y, 5, smallTextWidth); return S(c, s2, x, y, col); };
+    // ...AND A FILLED RECT DRAWN OVER TEXT THAT IS ALREADY THERE. This is the
+    // class the text-vs-text half cannot see, and it is not hypothetical: the
+    // pause chip shipped at x191 straight on top of the "SND" label, painting
+    // it out completely. A rect drawn BEFORE text is a background and is
+    // fine - only a rect that lands on text already drawn is a defect.
+    const RC = rect;
+    rect = (c, x, y, w, h, col) => {
+      for (const b2 of BOXES) {
+        const ox = Math.min(b2.x + b2.w, x + w) - Math.max(b2.x, x);
+        const oy = Math.min(b2.y + b2.h, y + h) - Math.max(b2.y, y);
+        if (ox > 2 && oy > 2) hits.push([SURF, "a filled rect", b2.s, Math.round(ox), Math.round(oy)]);
+      }
+      return RC(c, x, y, w, h, col);
+    };
+    const run = (name, setup, fn) => { SURF = name; BOXES = [];
+      try { if (setup) setup(); fn(); } catch (e) { hits.push([name, "THREW", e.message, 0, 0]); } };
+    const c0 = crabs[0];
+    run("intro", null, () => drawIntro());
+    run("card", () => { sel = c0; dossier = null; manage = null; boardView = false;
+      saveView = false; reportT = 0; tab = "crew"; }, () => drawFollowCard());
+    run("panel-crew", () => { tab = "crew"; }, () => drawPanel());
+    run("panel-shop", () => { tab = "shop"; }, () => drawPanel());
+    run("panel-menu", () => { tab = "menu"; }, () => drawPanel());
+    run("dossier", () => { tab = "crew"; dossier = c0; dossierTab = "STATS"; }, () => drawDossier());
+    run("diary", () => { dossier = c0; dossierTab = "DIARY"; }, () => drawDossier());
+    run("manage-hours", () => { dossier = null; manage = "shack"; manageTab = "HOURS"; }, () => drawManage());
+    run("manage-sched", () => { manage = "shack"; manageTab = "SCHEDULE"; }, () => drawManage());
+    run("census", () => { manage = "shack"; manageTab = "TOWN"; }, () => drawManage());
+    run("board", () => { manage = null; boardView = true; }, () => drawJobBoard());
+    run("save", () => { boardView = false; saveView = true; }, () => drawSaveScreen());
+    run("report", () => { saveView = false; }, () => drawReport());
+    text = T; smallText = S; rect = RC;
+    return JSON.stringify(hits);
+  })()`));
+  if (hits.length) {
+    const seen = new Set(), lines = [];
+    for (const [surf, a, b, ox, oy] of hits) {
+      const k = surf + "|" + a + "|" + b;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      lines.push(`${surf}: ${a === "a filled rect" ? a : '"' + a + '"'} lands on "${b}" (${ox}x${oy}px)`);
+    }
+    return lines.slice(0, 6).join("\n        ") + (lines.length > 6 ? `\n        (+${lines.length - 6} more)` : "");
+  }
+  return true;
+});
+
 scenario("no surface prints off the canvas", () => {
   // THE GENERAL FORM OF THE LEASE BUG. Every full-screen surface is drawn with
   // text/smallText stubbed to MEASURE what it prints, at the size it prints it,
@@ -4747,12 +4907,36 @@ scenario("rivalry: after a refusal she competes with the PLAYER'S OWN levers, an
   // ---- THE COUNTER. The promenade is ZERO SUM: her cut takes footfall off the
   // bar, and the player's own price stepper takes it back. Two paired towns,
   // same seed, same props, differing only in what is written on the boards.
+  // MEASURED OVER THREE TOWNS, NOT ONE. A single nine-day town is one sample
+  // of an emergent share, and the noise floor is bigger than the signal: the
+  // beach ball (which never touches a visitor) flipped this arm on seed 909
+  // purely by making crabs less bored, so fewer took an "I'VE HAD ENOUGH" day
+  // and the juice bar went from 88.3% staffed to 96.5%. The mechanism under
+  // test is the PRICE, so the fixture has to be quiet enough to hear it - the
+  // same lesson the shift-fairness scenario learned when a two-seed version
+  // caught an outlier and called it a regression.
   const share = (mul) => {
-    const s2 = rivalTown(909);
-    s2.G(`setBizPrice("showers", 0.7); setBizPrice("juicebar", ${mul});`);
-    for (let i = 0; i < 9; i++) rivalDay(s2);
-    return JSON.parse(s2.G(`JSON.stringify({ shwr: window._stats.showersDone || 0,
-      bar: window._stats.drinkServes || 0, all: (window._stats.tourServes || 0) })`));
+    const acc = { shwr: 0, bar: 0, all: 0 };
+    for (const seed of [909, 1337, 4242]) {
+      const s2 = rivalTown(seed);
+      // HOLD STAFFING STILL SO PRICE IS WHAT VARIES. Boredom walkouts are the
+      // loudest thing in this fixture: anything that changes how bored the
+      // crew gets changes how many hours the two shops are open, and shop
+      // AVAILABILITY dominates shop PRICE. The beach ball found this the hard
+      // way - it never touches a visitor, but by relieving boredom it took the
+      // juice bar from 88.3% staffed to 96.5% and buried the price signal
+      // under it. Turning walkouts off is not weakening the test: the arms
+      // still differ in exactly one thing, the board price, which is the
+      // mechanism under test.
+      s2.G(`window._failOff = Object.assign({}, window._failOff, { walkout: 1 });`);
+      s2.G(`setBizPrice("showers", 0.7); setBizPrice("juicebar", ${mul});`);
+      for (let i = 0; i < 9; i++) rivalDay(s2);
+      // TOURIST serves only: what the board price actually competes for.
+      const r = JSON.parse(s2.G(`JSON.stringify({ shwr: window._stats.showersDoneTour || 0,
+        bar: window._stats.drinkServesTour || 0, all: (window._stats.tourServes || 0) })`));
+      acc.shwr += r.shwr; acc.bar += r.bar; acc.all += r.all;
+    }
+    return acc;
   };
   const undercut = share(1), matched = share(0.7);
   const rShe = undercut.bar / Math.max(1, undercut.shwr);

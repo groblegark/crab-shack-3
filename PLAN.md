@@ -3216,6 +3216,63 @@ payroll-scaled limit 90 + 70/crew, both inert); the collapse is growth-town
 unit economics.
 
 ## Backlog (rough priority)
+- **THE FIRST OUTSIDE PLAYTEST (2026-08-19), verbatim.** Matt's friend, new to
+  the game, played the opening. This is the most valuable feedback the project
+  has ever had and it is quoted in full because paraphrasing would sand off the
+  specifics:
+
+  > *"press new game. wall of text. whats going on!? I need a hook, but click
+  > on anyway. click through and theres pinchy and claudi. What do they do??
+  > NOBODY KNOWS. Meanwhile theres a clock ticking. PAUSE ANYONE? I'm losing
+  > time here and I want to pay back my landlord! Go to the shop. WHAT DO THESE
+  > THINGS DO? TOOLTIP TIME! Hired a crab. Don't even see the crab. He just
+  > joined the crew. WHAT DOES IT MEAN? Is my money going up? Its too
+  > unclear!"*
+
+  Broken out, every one of these is a real defect and not a taste question:
+  1. **THERE IS NO PAUSE.** `ffMode` cycles 1x/2x/3x/6x and never stops. A
+     simulation whose clock cannot be stopped punishes a new player for
+     reading its own UI. This is the biggest single miss.
+  2. **The lease card is a wall of text with no hook** — it is the first
+     screen, and it explains terms to someone who does not yet care.
+  3. **"What do they do?? NOBODY KNOWS"** — the crew cards name PINCHY and
+     CLAWDIA and never say what a crab is FOR.
+  4. **"WHAT DO THESE THINGS DO? TOOLTIP TIME!"** — shop upgrades are priced
+     and named and otherwise unexplained.
+  5. **Hiring has no visible consequence** — "Don't even see the crab. He just
+     joined the crew." A new hire should ARRIVE, visibly, and be pointed at.
+  6. **"Is my money going up?"** — the rate readout ($/S) is not legible as
+     income. The one number a player needs, unclear.
+  Note what he got RIGHT with no help: *"I want to pay back my landlord."* The
+  rent goal lands. It is everything around it that does not.
+
+- **THE SAME PLAYTESTER, AFTER PLAYING ON (Ben Lewis, 2026-08-20), verbatim:**
+
+  > *"strangely compelling"*
+  > *"the secret sauce is incomprehensible UI and punishing you for not
+  > understanding at pace"*
+
+  Half a joke, and the most useful sentence anyone has said about this game.
+  He stayed. The pressure is doing real work — so the UI pass has to be built
+  around a distinction the earlier notes did not draw:
+
+  **TWO KINDS OF NOT-KNOWING, and only one of them is a bug.**
+  - **INTERFACE OPACITY IS A BUG.** Not knowing that right-click redirects a
+    crab, that `[` and `]` cycle, that the trade ledger hides inside the job
+    board, or what a shop upgrade actually does. Nobody learns anything from
+    this; they just lose. Fix all of it.
+  - **ECONOMIC UNCERTAINTY IS THE GAME.** Not knowing whether a third crab
+    pays for herself, whether tonight's rent clears, whether to buy the grill
+    or the tables. That tension IS the compulsion he is describing, and a UI
+    pass that resolves it — projected income, "recommended" purchases, an
+    advisor telling you what to do — would sand off the thing that made him
+    stay. **Do not build that.**
+
+  The PAUSE added 2026-08-20 is the shape of the right fix: it does not remove
+  the pressure (rent still falls at 20:00, the day still runs out) — it removes
+  the PUNISHMENT FOR READING THE INTERFACE. Aim every UI change at that line:
+  make the machine legible, leave the economy frightening.
+
 - **A UI PASS AND A HELP SCREEN (Matt, 2026-08-19):** *"need a pass at the UI
   and perhaps a help screen; my friend says the UI isn't so intuitive."* This
   is the project's FIRST outside playtest signal — a person who did not build

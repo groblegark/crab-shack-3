@@ -2460,6 +2460,16 @@ function bizTables(key) {
 let coins = 0, lifetime = 0, time = 0;
 let crabs = [], customers = [], floaters = [];
 let toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x, 3=6x
+// PAUSE. From the game's first outside playtest (2026-08-19): "Meanwhile
+// theres a clock ticking. PAUSE ANYONE? I'm losing time here". He is right and
+// it was a straight omission - the speed chips went 1x/2x/3x/6x and never
+// stopped, so a new player reading the shop or a crab's dossier was being
+// charged rent for the privilege. Pausing freezes the SIM (dt is zeroed) and
+// nothing else: the frame still draws, every card still opens, and every chip
+// still takes a click, because half the reason to pause is to go and read
+// something. `last` is still advanced, so unpausing does not fast-forward the
+// hours you spent paused.
+let paused = false;
 const FF_SPEED = [1, 2, 3, 6];
 let camX = 1180, followIdx = -1, followNpc = null, followCust = null, tab = "crew";
 // SELECTION is not the camera. Click a crab to select (and focus) them; pan
@@ -2794,6 +2804,86 @@ function walkoutToday(c) { return c.p.walkout === day; }
 // the cover-shift promotion keys on it, and nobody covers a walk-out.
 function awayToday(c) { return offToday(c) || walkoutToday(c); }
 
+// ---- THE BEACH BALL (Matt, 2026-08-19: "we should also have a better sources
+// of limited fun, e.g. throwing a beach ball") ------------------------------
+// LIMITED is the load-bearing word in that request, and it is limited three
+// different ways, on purpose:
+//   1. THERE IS ONE BALL. Two crabs can play, a third cannot - the cap is a
+//      physical object lying on the sand rather than a rule in a table.
+//   2. IT ONLY TAKES THE EDGE OFF. A game of catch is 0.22 of boredom where
+//      the arcade ZEROES it. You cannot live out here.
+//   3. IT COSTS THE DAY. You walk to the middle of the beach and stand there
+//      throwing for twelve seconds - which is the standing rule for every free
+//      cure in this game: TIME, never money (see THE SELF-HEALING RULE).
+// And it is offered LAST, after any arcade the crab could actually afford,
+// because of what the shelter pot taught us the hard way: a free option
+// standing beside a paid one does not relieve the need, it takes the takings.
+// Early on there IS no arcade, which is exactly the hole Matt was pointing at.
+//
+// ALONE IS WORSE THAN TOGETHER, and that falls out of the geometry rather than
+// a special case: relief is decided when the timer ends by looking at who else
+// is standing at the ball. Nobody there, you were bouncing it off your own
+// claw and it shows.
+const BALL_X = 1290;          // open sand between the showers and the shack
+const BALL_AT = 0.66;         // you'd BUY fun at 0.45; you walk out here when properly bored
+const BALL_JOIN = 0.48;       // ...but a game already going is worth joining at much less
+const BALL_YIELD = 0.55;      // ...and any real need outranks it well before boredYields' 0.8
+const BALL_LEAD = 90;         // game-minutes of clear air needed before a shift: the game is ~48
+const BALL_Y = 157;           // up the sand, clear of BOTH travel lanes (146/168, 9px of blocking each)
+const BALL_SECS = 12;         // real seconds stood throwing - ~48 game-minutes
+const BALL_PAIR = 0.22;       // a real game of catch
+const BALL_SOLO = 0.08;       // ...and knocking it about on your own
+const BALL_CD = 300;          // game minutes: not a career
+const BALL_PX = 30;           // close enough to be in the same game
+const BALL_LINES = ["OVER HERE!", "MY CLAW!", "NICE ONE", "TOO HIGH!", "AGAIN!"];
+function ballPlayers() { return allCrabs().filter(k => k.dayState === "atBall"); }
+function ballHasRoom(c) { return ballPlayers().filter(k => k !== c).length < 2; }
+function startBallStop(c) {
+  c.dayState = "atBall"; c.ballT = 0;
+  // NO TIRED_ERRAND HERE, and that is measured rather than sentimental. That
+  // charge models a chore - the trudge out and back with the shopping - and
+  // adding it to a game of catch pushed the MORNING/EVENING fatigue gap from
+  // level (-0.007 as shipped) to 0.054, past the 0.04 the shift-fairness
+  // scenario allows. Which shift you happen to draw must not decide how tired
+  // you are, and an optional game must not be what decides it. The ball still
+  // costs the thing every free cure in this game costs: the walk, and twelve
+  // seconds of a working day.
+  // UP THE BEACH, CLEAR OF BOTH TRAVEL LANES. LANES are y146 and y168 and a
+  // parked crab blocks a lane within 9px of it, so a game at the tap stops'
+  // y163 walls off the southern lane in the middle of the promenade for
+  // twelve seconds at a time - and the whole town has to route around it.
+  // That is not theoretical: it took SUDSY, who never plays, from 9.8% of her
+  // life on the dehydration line to 31.4%, because the ball sat between her
+  // showers and the pier tap. y157 clears 146 by 11 and 168 by 11.
+  setT(c, BALL_X + (ballPlayers().length ? 18 : -6), BALL_Y);
+}
+function updateBall(c, dt) {
+  if (c.ballT <= 0) {                       // still walking out to it
+    if (routedStep(c, crabMove(c), dt)) {
+      c.ballT = BALL_SECS + Math.random() * 4;
+      c.quip = { text: BALL_LINES[(Math.random() * BALL_LINES.length) | 0], t: 2.4 };
+    }
+    return;
+  }
+  c.ballT -= dt;
+  if (((c.ballT * 2) | 0) % 7 === 0 && Math.random() < 0.02)
+    c.quip = { text: BALL_LINES[(Math.random() * BALL_LINES.length) | 0], t: 2.0 };
+  if (c.ballT > 0) return;
+  // WHO ELSE IS OUT HERE decides what it was worth
+  const mate = ballPlayers().find(k => k !== c && k.ballT > 0 && Math.abs(k.x - c.x) <= BALL_PX);
+  const relief = mate ? BALL_PAIR : BALL_SOLO;
+  c.p.bored = Math.max(0, (c.p.bored || 0) - relief);
+  crabLog(c, "need", mate ? "PLAYED CATCH WITH " + mate.p.name : "KNOCKED THE BEACH BALL ABOUT", 0);
+  popText(mate ? "GAME OF CATCH" : "A FEW THROWS", c.x - 16, FLOOR_Y - 30, [255, 210, 140]);
+  c.quip = { text: mate ? "SAME TIME TOMORROW" : "NEEDED A PARTNER", t: 2.4 };
+  if (window._stats) {
+    window._stats.ballGames = (window._stats.ballGames || 0) + 1;
+    if (mate) window._stats.ballPairs = (window._stats.ballPairs || 0) + 1;
+  }
+  c.ballT = 0; c.errandCd = 4; c.ballCd = BALL_CD;
+  c.dayState = "home";
+  afterErrand(c, true);
+}
 // ---- CHATTER (the time-priced cure) ---------------------------------------
 const CHAT_AT = 0.55;         // both parties have to actually want the company
 const CHAT_PX = 26;           // close enough to fall into step
@@ -2861,7 +2951,10 @@ function updateChat(c, dt) {
 // folded into collide(), which belongs to the locomotion layer.
 function runChatter(dt) {
   const all = allCrabs();
-  for (const c of all) if ((c.chatCd || 0) > 0) c.chatCd -= dt * TS;
+  for (const c of all) {
+    if ((c.chatCd || 0) > 0) c.chatCd -= dt * TS;
+    if ((c.ballCd || 0) > 0) c.ballCd -= dt * TS;
+  }
   for (let i = 0; i < all.length; i++) {
     const a = all[i];
     if (!chatReady(a)) continue;
@@ -4366,6 +4459,7 @@ function anchorX(c) {
 // where a candidate stop physically is: a tap post, a shop's own door (staff
 // self-serve) or the public side of its counter
 function errandStopX(e) {
+  if (e.ball) return BALL_X;
   if (e.tap != null) return WATER_TAPS[e.tap].x;
   const b = e.biz || "shack";
   return e.selfCook ? BIZ[b].door : BIZ[b].queueX;
@@ -4422,6 +4516,56 @@ function pickErrand(c) {
   // thirst sits between food and clean: cheap, casual, frequent. The juice
   // bar is the spot when staffed; the shack pours its own juice otherwise -
   // and staff can pour their own at a dark bar, charged retail like meals
+  // THE BALL IS THE LAST WORD ON FUN. Gathered after any arcade this crab
+  // could actually afford and get into, for the reason the shelter pot proved:
+  // a free option beside a paid one takes the takings rather than the need.
+  // Before the arcade is built - which is most of the early game - it is the
+  // only answer boredom has that is not a very expensive chat.
+  // ...and the bar to JOIN one is lower than the bar to start one. A crab who
+  // would not walk out to the middle of the beach on their own will absolutely
+  // wander over to a game already happening, which is both true to life and
+  // the only way pairs stop being a coincidence.
+  const ballAt = ballPlayers().some(k => k.ballT > 0) ? BALL_JOIN : BALL_AT;
+  // NOBODY PLAYS BALL PARCHED. `boredYields` defers at 0.8, which is the right
+  // bar for a 10-second chat you fall into on the way home and much too lax
+  // for twelve seconds stood in the middle of the beach: measured, 447 of
+  // ~3100 ticks at the ball were crabs already past 0.6 thirst, and SUDSY
+  // spent 31% of her life on the dehydration line because of it. A game is
+  // what you do when nothing else is wrong.
+  // FUN IS THE LOWEST NEED, so the ball yields to each of the others AT THAT
+  // NEED'S OWN BAR - the exact point the crab would have gone and dealt with
+  // it. Thirst 0.45 is where a drink becomes an errand, hunger 0.50 where a
+  // plate does, dirt 0.66 where the showers do. Tuning these as one number
+  // (0.55 for everything) still left SUDSY 27% of her life on the dehydration
+  // line, because 0.45-0.55 thirst is precisely the window where she wanted a
+  // drink and went to play instead.
+  const ballYields = (c.p.thirst || 0) >= 0.45 || (c.p.hunger || 0) >= 0.50
+    || (c.p.tired || 0) >= BALL_YIELD || (c.p.dirt || 0) >= 0.66;
+  // AND YOU DO NOT PLAY BALL ON THE CLOCK. pickErrand also serves the
+  // on-shift paths - the fisher's break, the walk home past the counter - and
+  // letting a game in there took its twelve seconds out of the working day of
+  // whoever had the least to spare. Measured: SUDSY, an owner-operator on a
+  // ten-hour day, went from 18.7% of her life on the dehydration line to 25%,
+  // because the minutes the ball spent were the same minutes she drinks in.
+  // Leisure is for crabs who are actually off.
+  // ...AND NOT WITH A SHIFT COMING UP. A game is ~48 game-minutes once you
+  // count the walk out and back, and the errand window only holds errands off
+  // for the last 30 - so a crab could start one 35 minutes before leaving and
+  // turn up late. That is not a cosmetic problem: a late crab is an UNSTAFFED
+  // COUNTER, and the rivalry scenario measures exactly that (matching a
+  // rival's price cut stopped winning share back, because the bar kept opening
+  // late). Play when your day is actually done, or on a day off.
+  const shEnd = effShift(c).end;
+  const ballFree = !c.duty && c.dayState !== "working"
+    && (awayToday(c) || tmin >= shEnd || tmin + BALL_LEAD < leaveGmin(c));
+  if ((c.p.bored || 0) >= ballAt && (c.ballCd || 0) <= 0 && !boredYields(c) && !ballYields
+      && ballFree && !c.p.sick && ballHasRoom(c) && !cand.some(e2 => e2.need === "fun"))
+    take({ ball: true, need: "fun",
+      // A GAME IN PROGRESS PULLS. Left to pure coincidence only 3 of 22 games
+      // had two crabs in them; somebody already out there throwing is the
+      // whole difference between 0.22 of relief and 0.08, so it should be
+      // worth crossing the beach for.
+      appeal: TAP_APPEAL * (ballPlayers().length ? 2.4 : 1) });
   if ((c.p.thirst || 0) >= 0.45) {
     const drinkAt = staffed("juicebar") ? "juicebar" : staffed("shack") ? "shack" : null;
     if (drinkAt) {
@@ -4582,6 +4726,7 @@ function updateTap(c, dt) {
 // at-home dispatch checks the shop's hours. A tap has neither.)
 function beginErrand(c, e, requireOpen) {
   if (!e) return false;
+  if (e.ball) { startBallStop(c); return true; }
   if (e.tap != null) { startTapStop(c, e); return true; }
   if (e.selfCook) { startSelfCook(c, e); return true; }
   if (requireOpen && !bizOpenNow(e.biz)) return false;
@@ -4604,11 +4749,11 @@ function afterErrand(c, chain) {
   const sh = effShift(c);
   if (chain && !c.p.sick && (c.chainN || 0) < 2) {
     const e = pickErrand(c);
-    const sameStop = e && (e.tap != null ? false : e.biz === c.errandBiz);
-    if (e && !e.selfCook && !sameStop && (e.tap != null || bizOpenNow(e.biz))
+    const sameStop = e && (e.ball || e.tap != null ? false : e.biz === c.errandBiz);
+    if (e && !e.selfCook && !sameStop && (e.ball || e.tap != null || bizOpenNow(e.biz))
         && errandDetour(c, e) <= CHAIN_PX) {
       c.chainN = (c.chainN || 0) + 1; c.errandCd = 0;
-      if (e.tap != null) startTapStop(c, e); else startErrand(c, e);
+      if (e.ball) startBallStop(c); else if (e.tap != null) startTapStop(c, e); else startErrand(c, e);
       return;
     }
   }
@@ -5586,7 +5731,15 @@ function payAndBenefit(c, cust) {
   logServe(c, cust);   // DIARY: one line for the whole plate, rate-limited in the rush
   if (cust.isCrab) logTreat(cust);   // DIARY: ...and the crab on the other side of the counter
   if (cust.biz === "juicebar") {
-    if (window._stats) window._stats.drinkServes = (window._stats.drinkServes || 0) + 1;
+    if (window._stats) {
+      window._stats.drinkServes = (window._stats.drinkServes || 0) + 1;
+      // ...and split by WHO, because the price war is about the promenade's
+      // tourist footfall. Measured on the whole number, a crab's own errands
+      // drown the signal: the beach ball (which never touches a visitor)
+      // moved crab drink errands enough to flip the rivalry's counter-arm.
+      const kk = cust.isCrab ? "drinkServesCrab" : "drinkServesTour";
+      window._stats[kk] = (window._stats[kk] || 0) + 1;
+    }
     if (!firstPour && c && c.p) {   // the bar's first drink is town news
       firstPour = true;
       toast = { text: c.p.name + " POURED THE JUICE BAR'S FIRST " + ITEM_NAMES[cust.recipe.icon] + "!", t: 6 };
@@ -6435,7 +6588,11 @@ function updateCustomers(dt) {
             + " AT THE " + BIZ[k.biz].name, 0);
           k.crab.quip = { text: "SQUEAKY CLEAN!", t: 2.4 };
         }
-        if (window._stats) window._stats.showersDone = (window._stats.showersDone || 0) + 1;
+        if (window._stats) {
+          window._stats.showersDone = (window._stats.showersDone || 0) + 1;
+          const kk = k.crab ? "showersDoneCrab" : "showersDoneTour";   // same split, same reason
+          window._stats[kk] = (window._stats[kk] || 0) + 1;
+        }
         tradeImport("water", k.recipe.deep ? 14 : 8);
         popText("AHHH", k.x, 126, [140, 220, 255]);
         k.state = "outStall";
@@ -6540,6 +6697,7 @@ function crabStatus(c) {
     if (c.dayState === "toErrand") return "DAY OFF - OFF TO " + BIZ[c.errandBiz].short;
     if (c.dayState === "errand") return "DAY OFF - AT " + BIZ[c.errandBiz].name;
     if (c.dayState === "selfCook") return "DAY OFF - RAIDING THE PANTRY";
+    if (c.dayState === "atBall") return "DAY OFF - BEACH BALL";
     if (c.dayState === "atTap") return "DAY OFF - " + tapStatus(c);
     if (c.dayState === "toHome") return "DAY OFF - STROLLING HOME";
     if (c.dayState === "home") {
@@ -6575,6 +6733,7 @@ function crabStatus(c) {
   }
   if (c.dayState === "toErrand") return "OFF TO " + BIZ[c.errandBiz].name;
   if (c.dayState === "errand") return "IN LINE AT " + BIZ[c.errandBiz].name;
+  if (c.dayState === "atBall") return c.ballT > 0 ? "PLAYING BEACH BALL" : "OFF TO THE BEACH BALL";
   if (c.dayState === "atTap") return tapStatus(c);
   const toWork = c.dayState === "toWork";
   if (c.cstate === "waitBus") return "WAITING FOR THE BUS";
@@ -7076,12 +7235,18 @@ cv.addEventListener("click", (ev) => {
   // panel
   if (p.y >= PANEL_Y) {
     if (p.y < TAB_Y - 1) {
-      if (p.x > 233) { ffMode = ffMode === 3 ? 0 : 3; sfx.ding(); return; }
-      if (p.x > 217) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }
-      if (p.x > 203) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }
-      if (p.x > 188) { soundOn = !soundOn; if (soundOn) sfx.ding(); return; }
-      if (p.x > 168) { toggleMusic(); return; }
-      if (p.x >= 145 && p.x <= 166) { toggleMute(); if (!muted) sfx.ding(); return; }
+      // ONE UNBROKEN CHAIN, HIGHEST x FIRST, and every band matches the thing
+      // drawn in it. Written out as boundaries rather than a `>` ladder with a
+      // new case wedged in at the top: that is how the pause chip ended up
+      // eating SND's clicks, because a band inserted above the chain silently
+      // takes its pixels from whatever was underneath.
+      if (p.x >= 238) { ffMode = ffMode === 3 ? 0 : 3; sfx.ding(); return; }   // >>>>
+      if (p.x >= 224) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }   // >>>
+      if (p.x >= 213) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }   // >>
+      if (p.x >= 202) { paused = !paused; sfx.ding(); return; }                // the pause chip
+      if (p.x >= 189) { soundOn = !soundOn; if (soundOn) sfx.ding(); return; } // SND
+      if (p.x >= 168) { toggleMusic(); return; }                               // MUS
+      if (p.x >= 145) { toggleMute(); if (!muted) sfx.ding(); return; }        // the speaker
     }
     if (p.y >= TAB_Y && p.y < TAB_Y + TAB_H) {
       if (p.x >= 4 && p.x < 36) { tab = "crew"; return; }
@@ -7234,6 +7399,10 @@ addEventListener("keydown", (e) => {
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
+  if (e.key === " " || e.key === "p") {                    // the key everybody tries first
+    paused = !paused; sfx.ding();
+    if (e.key === " " && e.preventDefault) e.preventDefault();   // space must not scroll the page
+  }
   // [ and ] step the selection through the town, exactly what the little crab
   // cycler's chevrons do - the camera comes along, unlike an arrow-key pan
   if (e.key === "[" && cyclerLive()) { cycleSel(-1); sfx.ding(); return; }
@@ -7566,6 +7735,34 @@ function drawFerry() {
   }
 }
 
+// THE BALL ON THE SAND. It lies where it was left until somebody wants it,
+// and during a game it arcs between the two of them - a parabola on a 1.4s
+// cycle, drawn from the game's own timer so it is not a separate animation
+// that can drift out of step with the thing it represents.
+function drawBeachBall() {
+  const players = ballPlayers().filter(k => k.ballT > 0);
+  let bx = BALL_X, by = BALL_Y + 3;
+  if (players.length >= 2) {
+    const a = players[0], b = players[1];
+    const t = (time % 1.4) / 1.4;
+    bx = a.x + 8 + (b.x - a.x) * t;
+    by = BALL_Y + 1 - Math.sin(t * Math.PI) * 22;   // up and over
+  } else if (players.length === 1) {
+    const a = players[0];
+    const t = (time % 0.8) / 0.8;
+    bx = a.x + 10;
+    by = BALL_Y - 1 - Math.sin(t * Math.PI) * 10;   // bounced off your own claw
+  }
+  const sx = Math.round(bx) - camX;
+  if (sx < -8 || sx > W + 8) return;
+  const y = Math.round(by);
+  rect(ctx, sx - 2, y - 3, 5, 7, [252, 248, 240]);      // the ball
+  rect(ctx, sx - 3, y - 2, 7, 5, [252, 248, 240]);
+  rect(ctx, sx - 1, y - 3, 1, 7, [230, 90, 80]);        // stripes
+  rect(ctx, sx + 1, y - 3, 1, 7, [96, 170, 220]);
+  px(ctx, sx - 2, y - 2, [255, 255, 255]);
+  if (!players.length) rect(ctx, sx - 3, BALL_Y + 5, 7, 1, [214, 196, 156]);   // a little shadow at rest
+}
 function drawBoats() {
   // moored live-aboards ride the surf band off the seaward rail, bobbing on
   // their own beat; hull trim wears the owner's color like the house roofs do
@@ -7652,6 +7849,7 @@ function drawTown() {
   wrect(0, ROAD_Y1, WORLD_W, 3, [214, 196, 156]);   // shoulder
   drawPier();
   drawFerry();
+  drawBeachBall();
   drawBoats();
   // houses face the promenade - ALL nine lots stand, always: an occupied
   // house wears its tenant's roof color, an empty one sits weathered-grey
@@ -8304,9 +8502,24 @@ function drawPanel() {
     }
   }
   smallText(ctx, "SND", 190, PANEL_Y + 3, !muted && soundOn ? [140, 220, 140] : [140, 120, 110]);
-  smallText(ctx, ">>", 206, PANEL_Y + 3, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
-  smallText(ctx, ">>>", 219, PANEL_Y + 3, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
-  smallText(ctx, ">>>>", 236, PANEL_Y + 3, ffMode === 3 ? [255, 230, 120] : [150, 132, 122]);
+  // the pause chip sits FIRST in the speed row, because it is the same
+  // question the row answers: how fast is time going?
+  // IT LIVES AT THE HEAD OF THE SPEED GROUP, and the speeds shifted right to
+  // make the room. The first cut put it at x191, which is ON TOP OF "SND" -
+  // the label draws at 190..201 and the chip painted over it, while the click
+  // band (`p.x >= 191`, tested before sound's) left SND two live pixels. That
+  // row has NO free space: mute, music and sound own every pixel from 145 to
+  // 203 in one unbroken `>` chain, so the only honest fix is to move the
+  // speeds along rather than squat in a gap that only LOOKS empty.
+  {
+    const on = paused;
+    rect(ctx, 203, PANEL_Y + 1, 9, 9, on ? [255, 230, 120] : [70, 58, 54]);
+    rect(ctx, 205, PANEL_Y + 3, 2, 5, on ? [40, 24, 16] : [190, 176, 166]);
+    rect(ctx, 208, PANEL_Y + 3, 2, 5, on ? [40, 24, 16] : [190, 176, 166]);
+  }
+  smallText(ctx, ">>", 214, PANEL_Y + 3, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
+  smallText(ctx, ">>>", 226, PANEL_Y + 3, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
+  smallText(ctx, ">>>>", 240, PANEL_Y + 3, ffMode === 3 ? [255, 230, 120] : [150, 132, 122]);
   // tabs
   for (const [i, t] of [["crew", 0], ["shop", 1]].map((v, i) => [i, v[0]])) {
     const x = 4 + i * 34, active = tab === t;
@@ -9201,14 +9414,15 @@ function drawManage() {
     const th = tr.x + Math.round((tr.w - 7) * share);
     rect(ctx, th, tr.y - 1, 7, tr.h + 2, [58, 42, 38]);                                        // the thumb
     rect(ctx, th + 1, tr.y, 5, tr.h, [255, 250, 235]);
-    smallText(ctx, pct + "%", tr.x + tr.w + 5, tr.y + 4, pct ? [190, 110, 40] : [150, 140, 160]);
-    smallText(ctx, "CREW", tr.x + tr.w + 26, tr.y + 4, [110, 100, 110]);
-    // both hints share this line, so the long one has to leave room for
-    // "TAP A ROW" on the right at the 3x5 font's ~4px a character
-    const hint = pct === 0 ? "EVERY TIP GOES TO THE TILL"
-      : pct === 100 ? "THE TILL KEEPS NONE OF IT"
-      : "CREW POCKET " + pct + "% OF EVERY TIP";
-    smallText(ctx, hint, x + 6, y + 60, pct ? [190, 110, 40] : [150, 140, 160]);
+    // THE SLIDER SAYS IT ITSELF. Matt: "the tips slider is mushed up with the
+    // other text". It was: a separate sentence explaining the slider sat at
+    // y+60 - on top of the slider's own track at y+62 AND on top of the
+    // roster hint at y+61, three strings in one band. The rect table above
+    // already records that the wage steppers and this slider "both claimed
+    // this band"; the RECTS were rearranged for it and the text never was.
+    // The explanation is now the readout, which is where it belonged.
+    const cut = pct === 0 ? "ALL TO THE TILL" : pct === 100 ? "ALL TO THE CREW" : pct + "% TO CREW";
+    smallText(ctx, cut, tr.x + tr.w + 5, tr.y + 4, pct ? [190, 110, 40] : [110, 100, 110]);
     const rowHint = auto ? "AUTO ROTA" : "TAP A ROW";
     smallText(ctx, rowHint, x + w2 - 6 - smallTextWidth(rowHint), y + 60, [110, 100, 110]);
     const staff = allCrabs().filter(c => c.p.job === key);
@@ -9225,9 +9439,15 @@ function drawManage() {
     smallText(ctx, "TONIGHT $" + fmt(bill), x + 152, y + 45, [190, 80, 80]);
     smallText(ctx, "TOWN $" + townWage(key).toFixed(0) + "  PIER $" + Math.round(pierDay()),
       x + 152, y + 54, [110, 100, 110]);
-    smallText(ctx, deals ? deals + " ON A PRIVATE DEAL - ALL PUTS THEM BACK ON $" + bizWage(key)
+    // ...and the roster's own hint goes UNDER THE ROSTER, at the foot of the
+    // card, where there is a whole free row and where it is next to the thing
+    // it describes. Trimmed by WIDTH (fitSmall), not by character count: the
+    // AUTO line is 216px of 3x5 against 170px of card, and a slice(0, n) is a
+    // guess about a proportional budget - see the Conventions note in PLAN.
+    smallText(ctx, fitSmall(deals ? deals + " ON A PRIVATE DEAL - ALL PUTS THEM BACK ON $" + bizWage(key)
       : auto ? "AUTO: SICK DAYS GRANTED, OT CALLED WHEN COVER IS SHORT"
-      : "TAP A ROW: SHIFT, OT, SICK, OR - / + ON THE WAGE", x + 6, y + 61, [110, 100, 110]);
+      : "TAP A ROW: SHIFT, OT, SICK, OR - / + ON THE WAGE", R.done.x - (x + 6) - 6),
+      x + 6, y + h2 - 13, [110, 100, 110]);
     if (!staff.length) smallText(ctx, "NOBODY ASSIGNED - REASSIGN FROM A DOSSIER", x + 8, y + 70, [190, 80, 80]);
     for (let i = 0; i < Math.min(staff.length, R.rows.length); i++) {
       const c = staff[i], cell = R.cells[i], ry = R.rows[i].y;
@@ -9756,7 +9976,8 @@ function drawToast() {
 // ---------------------------------------------------------------- main loop
 let last = performance.now(), saveT = 0;
 function frame(now) {
-  const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
+  const dt = paused ? 0
+    : Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
   last = now; time += dt;
   if (saveConfirmT > 0) { saveConfirmT -= dt; if (saveConfirmT <= 0) saveConfirm = null; }
   if (saleArmT > 0) { saleArmT -= dt; if (saleArmT <= 0) saleArm = null; }
@@ -10038,7 +10259,14 @@ function frame(now) {
       today.walked.push(k.p.name);
       toast = { text: k.p.name + " HAS HAD ENOUGH - TAKING TOMORROW OFF", t: 8 };
       popText("I NEED A DAY", k.x - 14, FLOOR_Y - 34, [150, 150, 210]);
-      if (window._stats) window._stats.walkouts = (window._stats.walkouts || 0) + 1;
+      // A DIFFERENT COUNTER, A DIFFERENT KEY. This used to increment
+      // `_stats.walkouts`, which the WAGE walkout above builds as an ARRAY of
+      // {day, name, rate} - so whichever fired first decided the type and the
+      // other one threw. It only bites instrumented runs (`_stats` is
+      // undefined in the shipped game), which is exactly why it survived: it
+      // could only ever break the measurements, and it did, crashing a
+      // balance scenario outright.
+      if (window._stats) window._stats.boredWalkouts = (window._stats.boredWalkouts || 0) + 1;
     }
     // the day's labor policy: peer owners (and delegating players) make at
     // most one move each, on the same convergent-rules pattern as SUDSY's hours
@@ -10127,6 +10355,7 @@ function frame(now) {
     if (c.dayState === "toWork" || c.dayState === "toHome") updateCommute(c, dt);
     else if (c.dayState === "toErrand" || c.dayState === "errand") updateErrand(c, dt);
     else if (c.dayState === "atTap") updateTap(c, dt);
+    else if (c.dayState === "atBall") updateBall(c, dt);
     else if (c.dayState === "selfCook") updateSelfCook(c, dt);
     else if (c.dayState === "working" && c.p.job === "fishing") updateFishing(c, dt);
     else if (c.dayState === "working") updateKitchen(c, dt);
