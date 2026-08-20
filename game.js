@@ -15139,17 +15139,18 @@ function frame(now) {
   drawHirePointer();   // the new hire, pointed at, in the town rather than on a list
   drawNight();
   drawNav();      // HUD, so: after the night wash - the map never goes dark
-  drawJobBoard();
-  // A READING SURFACE OWNS THE SCREEN (owner report: "events appear at same
-  // time as ledger and block it out"). The day report and toasts wait their
-  // turn - reportT is paused below rather than burned down behind the card,
-  // so nothing is missed, it just arrives when you close what you opened.
-  if (!boardView && !manage && !saveView && !dossier) drawReport();
-  if (!boardView && !manage && !saveView && !dossier && reportT <= 0) drawDepart();
-  drawManage();
-  drawDossier();   // above the management card: a census row opens a dossier ON TOP of it
-  drawFollowCard();
-  drawCycler();   // < crab > : step the selection (and the camera) through the town
+  // ---- THE WORLD'S OWN CHIPS, AND THEY GO UNDER EVERY CARD (Matt, 2026-08-20:
+  // "the warning messages need to be painted under the menu please; too much
+  // stuff pops up over menus"). These three used to be drawn AFTER drawManage
+  // and drawDossier, which put the REP chip through the top-right corner of the
+  // management card, the skip-to-morning sun inside it, and a BLINKING RED
+  // BANKRUPT warning across its bottom edge - on a card the player had opened
+  // precisely to do something about being bankrupt.
+  //
+  // Painting them here does not hide them: with no card open the frame is
+  // identical, because nothing else is drawn over that part of the world. It
+  // only means a card the player opened OWNS THE SCREEN while it is open, which
+  // is the same rule drawToast and drawFollowCard already follow.
   {  // town reputation chip, top-right of the world
     const rTxt = "REP " + Math.round(rep);
     const rw = smallTextWidth(rTxt) + 8;
@@ -15186,6 +15187,18 @@ function frame(now) {
       smallText(ctx, dTxt, W - dw + 2, cy + 2, [255, 190, 90]);
     }
   }
+
+  drawJobBoard();
+  // A READING SURFACE OWNS THE SCREEN (owner report: "events appear at same
+  // time as ledger and block it out"). The day report and toasts wait their
+  // turn - reportT is paused below rather than burned down behind the card,
+  // so nothing is missed, it just arrives when you close what you opened.
+  if (!boardView && !manage && !saveView && !dossier) drawReport();
+  if (!boardView && !manage && !saveView && !dossier && reportT <= 0) drawDepart();
+  drawManage();
+  drawDossier();   // above the management card: a census row opens a dossier ON TOP of it
+  drawFollowCard();
+  drawCycler();   // < crab > : step the selection (and the camera) through the town
   drawPanel();
   drawShopTip();       // hangs off the bottom of the world, pointing at the grid it explains
   drawHireCard();

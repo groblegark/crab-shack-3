@@ -9347,6 +9347,78 @@ scenario("the beach ball is drawn where you can see it, not behind a building", 
   return true;
 });
 
+// ===========================================================================
+// AN OPEN CARD OWNS THE SCREEN (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("nothing paints over an open card except another card", () => {
+  // Matt: "the warning messages need to be painted under the menu please; too
+  // much stuff pops up over menus."
+  //
+  // Three of the world's own chips were drawn AFTER drawManage and
+  // drawDossier: the REP chip through the card's top-right corner, the
+  // skip-to-morning sun inside it, and a BLINKING RED BANKRUPT warning across
+  // its bottom edge - on a card the player had opened precisely to do
+  // something about being bankrupt.
+  //
+  // The rule this pins is more general than those three, because "too much
+  // stuff" is the complaint: with one card open and nothing else, NOTHING may
+  // paint inside its bounds after it has been drawn. Other cards are exempt -
+  // a census row opens a dossier ON TOP of the management card on purpose, and
+  // HOW TO PLAY is deliberately the last word - so the fixture opens exactly
+  // one and leaves the rest shut.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(2);
+  const bad = JSON.parse(sim.G(`(() => {
+    const out = [];
+    const R = rect, P = px, T = text, S = smallText, B = blit;
+    const wasHeadless = window._headless;
+    for (const [what, open] of [
+      ["manage", () => { manage = "shack"; manageTab = "HOURS"; }],
+      ["census", () => { manage = "shack"; manageTab = "TOWN"; }],
+      ["board",  () => { boardView = true; }],
+      ["dossier", () => { dossier = crabs[0]; dossierTab = "STATS"; }],
+    ]) {
+      // one card, nothing else, and the two states that make chips appear
+      manage = null; dossier = null; boardView = false; saveView = false;
+      helpView = false; reportT = 0; departT = 0; toast = null;
+      credit.bal = 180; bankHorizon = 0;            // DEBT + BANKRUPT TONIGHT
+      open();
+      const card = (what === "board") ? { x: 28, y: 20, w: 200, h: 162 }
+        : (what === "dossier") ? null : (() => { const r = manageRects(); return { x: r.x, y: r.y, w: r.w, h: r.h }; })();
+      if (!card) continue;   // the dossier sits over manage by design; skip its bounds
+      // THE PANEL IS NOT A POPUP. It is the persistent HUD below PANEL_Y and it
+      // is drawn every frame by design, so only the part of a card ABOVE it is
+      // under test - a card has no business down there in the first place.
+      card.h = Math.min(card.h, PANEL_Y - card.y);
+      let phase = "before";
+      const note = (x, y, w, h, who) => {
+        if (phase !== "after") return;
+        if (x < card.x + card.w && x + w > card.x && y < card.y + card.h && y + h > card.y)
+          out.push([what, who, Math.round(x) + "," + Math.round(y) + " " + w + "x" + h]);
+      };
+      rect = (c, x, y, w, h, col) => { note(x, y, w, h, "rect"); return R(c, x, y, w, h, col); };
+      px = (c, x, y, col) => { note(x, y, 1, 1, "px"); return P(c, x, y, col); };
+      text = (c, str, x, y, col, sz) => { note(x, y, textWidth(String(str)), 7, "text:" + str); return T(c, str, x, y, col, sz); };
+      smallText = (c, str, x, y, col, sz) => { note(x, y, smallTextWidth(String(str)), 5, "small:" + str); return S(c, str, x, y, col, sz); };
+      const mark = what === "board" ? "drawJobBoard" : "drawManage";
+      const RM = window[mark] || (mark === "drawManage" ? drawManage : drawJobBoard);
+      const wrapName = mark;
+      const orig = eval(wrapName);
+      eval(wrapName + " = (...a) => { phase = 'in'; const r = orig(...a); phase = 'after'; return r; }");
+      window._headless = false;
+      try { frame(performance.now() + 16); } catch (e) { out.push([what, "THREW", e.message]); }
+      window._headless = wasHeadless;
+      eval(wrapName + " = orig");
+      rect = R; px = P; text = T; smallText = S;
+    }
+    manage = null; dossier = null; boardView = false; credit.bal = 0;
+    return JSON.stringify(out.slice(0, 8));
+  })()`));
+  if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

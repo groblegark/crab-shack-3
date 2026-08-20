@@ -3344,6 +3344,19 @@ crab island feel like a place with its own way of doing things".
   and it means the office, the ballot, the purse and the count are the CENTRAL
   cultural institution rather than a side system. Anything that deepens how the
   town governs itself is on-brief.
+- **...AND IT IS LOCAL GOVERNMENT. THEY ARE NOT GODS.** (Matt, verbatim:
+  *"it's local government, they're not gods."*) This is the constraint on every
+  future crabocracy idea, and it is the one that will be tempting to break,
+  because a mayor with more levers is easier to build than a mayor with better
+  ones. The office already models this correctly and should keep doing so: ONE
+  REMIT (the shelter — its roof and its pot), a purse the town votes on, a
+  ballot that runs on paper and can run out of it, and NOTHING about hours,
+  wages, prices or who works where. The drama comes from a small office with a
+  real bill, not from an office that can reach into the shops.
+  **Test for a proposal: could a real seaside town council do this?** Setting
+  the levy, arguing about the soup, failing to pay the landlord, printing too
+  few ballot papers — yes. Directing labour, fixing prices, overriding an
+  owner — no, and that is CS4's "build your own cultureway" territory anyway.
 - **THERE IS A MAINLAND, AND PIGS LIVE ON IT.** Pigs and crabs have a lot in
   common. The far shore already exists in pixels — hills behind hills, a light
   on the point, a scatter of blocks that comes on after dark — and the trade
