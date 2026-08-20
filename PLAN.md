@@ -3491,6 +3491,34 @@ What that forced in code (2026-08-19, same day):
   unnamed before the win and named after, that the winning camera is looking at
   her berth, and that the far-channel crossing carries no text at all.
 
+## UX BUG — selling to an NPC is undiscoverable (Matt, 2026-08-20)
+Matt, playing: "we need to make selling to an NPC more intuitive... I saw
+that an NPC was interested but couldn't sell." He is not missing a step —
+**there is nothing to click during EYEING.** What the code actually does:
+- The player CANNOT initiate a sale. There is no "list my business". The
+  only sale path is ACCEPTING a rival's offer.
+- `rival.stage` runs none → eyeing → offer → compete → done. During
+  **eyeing** she is still saving; the manage line reads "X IS EYEING THE
+  BAR — CAN RAISE $N OF $M" and no accept affordance exists anywhere.
+- She only offers when she can raise ≥ `LOWBALL` (0.35) of what it's
+  worth. Then a toast says "TAP ITS SIGN", and TAKE / NO chips appear at
+  y=133 on **the prize business's own shopfront sign** (`rivalChipRects`).
+So the player sees interest for days with no way to act, and when the
+offer does land the affordance is a shopfront sign, not the management
+screen they're already looking at.
+**Worse, there is a trap**: she banks the offer out of her SHOWERS till,
+and a successful player juice bar next door collapses that till from
+$150-220 to $0-45 (measured, in RIVAL_CFG's own comment). Run the bar well
+and she may NEVER afford it — "EYEING" becomes a permanent state with no
+feedback saying so.
+FIX DIRECTION (UX agent): make the state legible and the action reachable.
+At minimum, say what is actually true — "EYEING — CANNOT AFFORD IT YET,
+HAS $N OF $M" and, when she can't close the gap, say that. Put the
+accept/refuse action on the management screen as well as the sign, since
+that is where an owner goes to do owner things. Consider whether the
+player should be able to invite an offer at all (a real "FOR SALE" listing
+by the owner) — that is a design question for Matt, not a UX patch.
+
 ## SPOILER EMBARGO — the town's name (Matt, 2026-08-19)
 Matt: "don't put the town's name out there, it's going to be a cheeky
 reveal near the end." The name renders in exactly two places, both in the
