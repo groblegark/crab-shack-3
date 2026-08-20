@@ -7,3 +7,4 @@
 # Anything the devlog actually needs gets harvested into devlog/img/ and
 # committed deliberately.
 shots/
+.measure/

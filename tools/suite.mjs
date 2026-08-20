@@ -7746,6 +7746,78 @@ scenario("accommodation: the shelter's bill is what the town votes on", () => {
   return true;
 });
 
+// ===========================================================================
+// THE HALL TAB, SWEPT (2026-08-20) - the one surface neither sweep covered
+// ===========================================================================
+
+scenario("the HALL tab's text is measured, in every state it has", () => {
+  // THE GAP, reported by the onboarding pass rather than found by a test: the
+  // two general sweeps skip the management card's HALL tab, because it was
+  // being rebuilt underneath them all day and any finding would have been
+  // stale. That left the busiest card in the game - three views, a pager, a
+  // ledger, a live ballot box and a candidacy strip - checked only for
+  // "does it throw", which is the weakest question you can ask a 256px card.
+  //
+  // The polling-day sweep above covers this tab on a POLLING DAY. This covers
+  // the other six days: no ballot ever held, a full ledger, a stale roll page,
+  // the player standing, the player IN OFFICE (a different set of hot chips),
+  // and the shelter bolted. Same measured-text stub, same two questions, plus
+  // the rect-over-text one that caught the polling board.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(8, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const bad = JSON.parse(sim.G(`(() => {
+    const bad = [], T = text, S = smallText, R = rect;
+    let SURF = "?", box = [];
+    const wrap = (fn, meas, h) => (c, str, x, y, col, sz) => {
+      const w = meas(str, sz);
+      if (x < 0 || x + w > W) bad.push([SURF, "OFF CANVAS", String(str)]);
+      for (const b of box)
+        if (x < b.x1 && x + w > b.x0 && y < b.y1 && y + h > b.y0 && Math.abs(y - b.y0) > 2)
+          bad.push([SURF, "OVER " + b.s, String(str)]);
+      box.push({ x0: x, x1: x + w, y0: y, y1: y + h, s: String(str) });
+      return fn(c, str, x, y, col, sz);
+    };
+    text = wrap(T, textWidth, 7); smallText = wrap(S, smallTextWidth, 5);
+    rect = (c, x, y, w, h, col) => {
+      for (const b of box)
+        if (x < b.x1 && x + w > b.x0 && y < b.y1 && y + h > b.y0 && b.s.trim())
+          bad.push([SURF, "RECT OVER " + b.s, x + "," + y]);
+      return R(c, x, y, w, h, col);
+    };
+    manage = "shack"; manageTab = "HALL";
+    const run = (name, setup) => {
+      for (const v of HALL_VIEWS) {
+        SURF = name + "/" + v; box = [];
+        try { setup(); hallView = v; drawManage(); }
+        catch (e) { bad.push([SURF, "THREW", e.message]); }
+      }
+    };
+    // the state this town reached on its own, first - a real ballot, a real ledger
+    run("as-played", () => {});
+    run("no-ballot-yet", () => { hall.poll = null; });
+    run("full-ledger", () => { for (let i = 0; i < 16; i++) fundRow("take", 3, "PLANKTON PETE", "RENT CUT"); });
+    // A STALE PAGER is reachable: the chip pages the roll, and a later, smaller
+    // ballot leaves hallRollPage past the end of it.
+    run("roll-page-past-end", () => { hallRollPage = 3; });
+    hallRollPage = 0;
+    run("standing", () => { hall.stand = true; hall.nominee = crabs[0].p.name; });
+    // IN OFFICE is a different card: the purse chip lights, the STAND chip
+    // reads IN OFFICE, and the status line gains a clause about billing you.
+    run("in-office", () => { hall.mayor = crabs[0].p.name; });
+    run("shelter-bolted", () => { townFund.shut = 3; townFund.arrears = 41; townFund.strikes = 2; });
+    // ...and the longest name in the game through the mayor and nominee slots,
+    // which is how the onboarding pass found two real overlaps elsewhere.
+    run("longest-name", () => {
+      const c = crabs[0]; c.p.name = "PLANKTON PETE";
+      hall.mayor = c.p.name; hall.nominee = c.p.name; hall.stand = true;
+    });
+    text = T; smallText = S; rect = R;
+    return JSON.stringify(bad.slice(0, 10));
+  })()`));
+  if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
