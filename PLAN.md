@@ -38,6 +38,22 @@ compounds or collapses → the landlord collects at 20:00 either way.
   pier. Any crab with the savings buys it (the player through the shopfront's
   BUY chip); a new NPC owner runs the same policy tables, because those tables
   key on the BUSINESS. See the feature entry below for the numbers.
+- **THE RIVALRY** (`RIVAL_CFG` + the `THE RIVALRY` block in game.js,
+  2026-08-19): a peer owner comes for a business that is doing FINE. It keys on
+  the LEASE NEXT DOOR (`rivalOwnerId()` = whoever holds SUDS SHOWERS), not on
+  SUDSY, because her shop fails in most long runs and a fisher buys it - the
+  new holder inherits the ambition, exactly the way the policy tables key on
+  the business. What she can RAISE (a war chest, her till, her pocket, her
+  credit line) over what the bar is WORTH (the succession pricer plus a
+  going-concern premium, smoothed) is the intent, and it walks EYEING -> OFFER
+  -> COMPETE with a warning at every step. See the feature entry below.
+- **THE PRICE IS A SETTING** (`BIZ[k].priceMul` / `menuPrice` / `localPrice`,
+  2026-08-19): the last frozen business number. 0.70-1.30 in 5% steps, a
+  stepper on the management screen, and tourists read boards - `bizPull(b)` is
+  the shop's base weight times `priceAppeal`. The spawn INTERVAL is computed
+  from the UNPRICED weights, so the promenade is ZERO SUM: undercutting takes
+  trade off the shop next door and never conjures guests out of the sea.
+  Default 1 is bit-identical to the frozen build.
 - **Crabs**: personas (name, trait, commute mode, accessory, shift, wallet,
   house), needs FED/THIRST/CLN/FUN/SPA, homes they live inside, the shelter for the
   homeless, disease + contagion + death with beach memorials. **Every crab is
@@ -154,6 +170,11 @@ compounds or collapses → the landlord collects at 20:00 either way.
   `gameOver`), snapshotted into `winRec` and saved. Price measured, not felt:
   a strong `--buy chef,table` town crosses it around day 105-130 and no
   documented run comes within 5x. See the feature entry.
+- **CYCLE THE FOCUS** (`cyclerRects` / `cycleSel`, 2026-08-19): a pictorial
+  `< crab >` under the little sun that steps the SELECTION through the town's
+  roster and takes the CAMERA with it (crew first, then townsfolk; tourists
+  deliberately out; wraps both ways; `[` / `]` too). Same world rows in both
+  canvas modes, hides behind any full-screen card.
 - **UI**: title → lease-signing intro (Mr. Pincherton) → play. CREW / SHOP /
   MENU tabs, a three-tab management card (HOURS / SCHEDULE / TOWN census),
   BILL chip (itemized nightly bill), follow-cam on ANY crab
@@ -290,6 +311,11 @@ vm — never fork game logic into tools/) and perf expectations live there.
 
 - (count above is the live one; the two older figures in this file are historic.)
   (116 + 6). THIS is the live count.
+- `node tools/suite.mjs` — **124 scenarios, must stay green before any push.**
+- (count above is the live one; the older figures in this file are historic.)
+- `--norival` on `tools/headless.mjs` switches THE RIVALRY off (game.js reads
+  `window._noRival` through `rivalOn()` and never sets it), which is how the
+  paired arms behind the rivalry numbers were measured.
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
@@ -351,6 +377,230 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+<<<<<<< HEAD
+=======
+- **CYCLE THE FOCUS + SUDSY WANTS THE JUICE BAR** (two owner directives, built
+  2026-08-19, worktree — verbatim: *"need a single small pictorial next/prev
+  crab button to cycle focus"* and *"sudsy needs to want to buy the juice shop,
+  that's a major antagonism that could develop"*).
+
+  ### 1. THE CYCLER — `< 🦀 >`, and nothing else
+  A pictorial next/prev under the little sun: a chevron, the selected crab's own
+  shell, a chevron. No words, so it reads the same in any language.
+  - **WHAT IT CYCLES**: `cycleList()` is literally `allCrabs()` — crew first,
+    then townsfolk, the town's own roster order. Visiting TOURISTS are
+    deliberately OUT: they are customer objects that arrive and go home
+    mid-cycle, so a list containing them has no stable length and "wrap around"
+    stops meaning anything. You can still click a tourist to follow one; the
+    cycler then treats them as "nothing selected" and `>` steps to the first
+    crab in town, `<` to the last.
+  - **IT TAKES THE CAMERA WITH IT.** Selection and camera are separate in this
+    game (a drag drops the camera and keeps the selection), so the cycler goes
+    through `followCrab()` and sets BOTH — the same call the dossier's FOLLOW
+    chip makes. Suite-pinned: the camera converges on the cycled crab from a
+    panned-away start (626px → 4px in four sim-seconds).
+  - **WHERE IT LIVES**: top-right, `y=29..46`, directly under the sun and clear
+    of the REP chip above it and the BILL/DEBT chips at the bottom. Rows
+    `0..PANEL_Y` are the world area in BOTH canvas modes, so the geometry is
+    H-independent and 240 and 288 get the identical control (shot in both). It
+    is deliberately NOT beside the follow card: the card only exists when
+    something is selected, and the whole point of the control is to work when
+    nothing is. It hides behind the ledger, the management card, the census,
+    the save screen and the day report on exactly the terms the follow card
+    does — those cards own the screen when they are open.
+  - **THUMB-SIZED**: 48x17 in three targets, the smallest 14x17 — bigger than
+    the SCHEDULE tab's 16x15 wage steppers. Tapping the crab in the middle
+    re-engages the camera on the crab you already have, the same job the follow
+    card's portrait does. `[` and `]` do the same from the keyboard.
+  - **BEHAVIOUR-NEUTRAL**: it reads no sim state and writes none. The frozen
+    day-2 fingerprint passes **untouched**.
+
+  ### 2. THE RIVALRY — a peer owner comes for a business that is doing FINE
+  Peer owners already ran shops, set hours, set wages, hired, and bought a
+  FAILED business off the market. Nobody ever came for one that was WORKING.
+  - **IT KEYS ON THE LEASE NEXT DOOR, NOT ON SUDSY** (`rivalOwnerId()` =
+    `bizOwner("showers")`). This is the single most load-bearing decision in
+    the pass and it was forced by measurement: **SUDS SHOWERS fails in most
+    long runs** and a fisher buys it off the market, so a rivalry hard-wired to
+    `"sudsy"` was dead content from the day her lease changed hands. Keyed on
+    the BUSINESS — exactly the way `HOURS_POLICY` and `WAGE_POLICY` are — the
+    new holder inherits the ambition, and the war chest goes back to whoever
+    saved it. A lease in the PLAYER's hands has no rival behind it at all.
+  - **AMBITION IS ARITHMETIC YOU CAN DO YOURSELF.** `rivalIntent()` is
+    *derived, never accumulated*: what she can RAISE over what the bar is
+    WORTH. Raise = a war chest she banks out of her own till on clean nights
+    (`BANK_KEEP 100 / BANK_FRAC 0.5 / BANK_MAX 60`, raided back before she
+    misses a rent) + the till + her own pocket + the headroom on the SAME line
+    of credit the player draws on (a business line: a crab with no lease has
+    none, which is what makes "starve her shop of trade" a real counter).
+    Worth = the succession layer's own `askingPrice` — lease + fixtures +
+    goodwill — plus `PREMIUM 0.35 x (0.5 + 2 x health)` for a going concern,
+    then SMOOTHED (`SMOOTH 0.3`): a three-day takings book on a small shop
+    swings 2x overnight and a number that moves like that cannot be the basis
+    of an offer.
+  - **THE STAGES, and you feel every one of them coming.**
+    | | gate | what the town sees |
+    |---|---|---|
+    | EYEING | raise ≥ **0.35** of worth (hysteresis: drops out under **0.18**) | a toast, a **day-report line every single night** with the two numbers in it, a diary entry, a line on the management screen and the job board — and she takes her idle-hands break standing outside the bar ("SIZING UP THE JUICE BAR") |
+    | OFFER | ≥ **0.45** of worth AND **≥ 3 settlements** of being seen there (the warning is guaranteed by the CLOCK, not by money crossing two lines in the right order) | a banner over the bar's roofline, TAKE IT / NO chips at counter height, the price AND what the place is worth |
+    | COMPETE | refused, or ignored for `ANSWER_DAYS 3` | one lever every `STEP_DAYS 2`, each one announced by name |
+    | ...and back | `REOFFER 5` days after a NO | a fresh number, usually a different one |
+  - **THE OFFER IS WHAT SHE CAN PUT ON THE TABLE**, capped at what the place is
+    worth and floored at `LOWBALL 0.35` of it, keeping `FLOAT_NIGHTS 1` of the
+    bar's rent back so she can open it in the morning. A lowball is a real
+    outcome and the card shows both numbers, so refusing a lowball is easy and
+    refusing a fair one is a genuine decision.
+  - **ACCEPT**: the whole price moves from her pots to yours. A sale between two
+    owners is a TRANSFER, not the lease re-letting that destroys half at a FOR
+    SALE sign — there is a seller here and the seller is you. It does NOT go
+    through `earn()`: a business sale is not trading revenue and must not
+    inflate `lifetime` or the income-rate chip. Your crew come back to your
+    kitchen (they are under contract to you); she runs the bar off the same
+    `HOURS_POLICY` / `WAGE_POLICY` / `autoLabor` tables and posts for staff on
+    the same job board. Suite-measured: the bar takes $150+/day under her.
+  - **REFUSE**: nothing punitive. She competes, on three levers the player also
+    holds and that already existed:
+    1. **PRICE** — `setBizPrice("showers", -10%)` down to the stepper's own
+       floor. Tourists read boards (see THE PRICE below).
+    2. **HOURS** — `setBizHours` +1h at the close, then earlier at the open.
+    3. **WAGE** — `setBizWage` to $2 over the best rate in town, which moves
+       `townWage()`, which moves your crew's `payRatio`, which is the existing
+       grievance ladder. She poaches by moving the market, not by a special case.
+    Her own quiet-hours shrink rule **stands down while she is fighting** — one
+    lever must not have two owners pulling it opposite ways.
+  - **SURVIVABLE, and the trigger is a MISSED RENT.** When her lease takes a
+    strike she walks the last move BACK in public ("PUTS THE SHWR PRICE BACK TO
+    100% - SHE CAN'T CARRY THE FIGHT"). Reading her TILL instead was tried and
+    measured **inert**: a shower house settles most nights on $0-45 whatever it
+    is doing, so a till gate meant a rival who never made a single move.
+  - **FIRST IN THE QUEUE.** If the bar ever FAILS, `runSuccession` asks her
+    before the deepest pocket in town — she still pays the market price out of
+    her own money. The antagonism paying off.
+  - **AND THE OTHER WAY ROUND.** The ownership layer is symmetric: a peer
+    owner's shopfront carries their **ASK**, in the exact slot a player-owned
+    shop's MANAGE chip uses, because it is the same thing — the door into that
+    owner's office. Two taps buys it, the SELLER IS PAID, and the owner-operator
+    steps down (to another counter if they hold one). There is no haggling
+    minigame because **the number IS the negotiation**: the ask is
+    `goingConcern` + `HOLD 0.35 x` how much she fancies her chances + `ONLY 0.4`
+    for the only shop she has, so out-competing her walks the price down.
+  - **Fixed en route, a latent fault this pass made reachable**: `listForSale`
+    laid off the owner-operator unconditionally, clearing `p.owner` — which
+    ORPHANS that owner's OTHER shop at the next settlement, because the death
+    seam reads exactly that field. `stepDownOwner()` moves them to the counter
+    they still hold instead. Suite-pinned.
+
+  ### 3. THE PRICE IS A SETTING (the last business lever)
+  Hours, wages, tip share and staff meals were all data; the MENU PRICE was the
+  one number still frozen into the recipe table. `BIZ[k].priceMul`, bounds
+  **0.70–1.30** in 5% steps, a stepper on the management screen's HOURS tab
+  beside the takings it changes, with the board it implies printed next to it.
+  `menuPrice()` / `localPrice()` are the only two ways a price is ever read, so
+  every charge site, every affordability check in `pickErrand`, the staff-meal
+  policy, the MENU tab and the tourist card all move together.
+  - **A setting is only real if somebody responds**, and two things do.
+    TOURISTS read boards (`bizPull(b)` = the shop's base weight x
+    `priceAppeal` = `(1/mul)^1.2`, clamped 0.6–1.6), and LOCALS can suddenly
+    afford a counter that was out of reach.
+  - **THE PROMENADE IS ZERO SUM, by construction.** The spawn INTERVAL is
+    computed from the UNPRICED weights, so a price cut takes trade off the shop
+    next door and never conjures guests out of the sea. That is what makes a
+    price war a war and not a growth strategy — for the player and the rival
+    alike.
+  - **DEFAULT 1 IS BIT-IDENTICAL**: `Math.round(pay * 1) === pay` for every
+    integer price in BIZ and `Math.pow(1, 1.2) === 1` exactly, so the RNG stream
+    is untouched. Receipts below.
+
+  ### Balance — three matrices, and defaults are BYTE-IDENTICAL
+  | | before | after |
+  |---|---|---|
+  | baseline `--days 30 --seeds 16` | 0/16, 9,9,9,9,9,10,10,10,10,11,11,12,12,12,12,13, **median 10**, lifetime **$49,354** | **byte-identical** |
+  | growth `--buy chef,table --days 40 --seeds 8` | **4/8**, 9,10,12,13,41,41,41,41, lifetime **$97,299** | **byte-identical** |
+
+  Neither documented curve can move, because the rivalry cannot fire until the
+  player OWNS a juice bar and the price lever is inert at its default. The arm
+  where it CAN fire is its own matrix:
+
+  | `--buy chef,table,juicebar --days 40 --seeds 8` | alive | lifetime | drinks | tourist serves |
+  |---|---|---|---|---|
+  | `--norival` | 4/8 | $95,657 | 1,183 | 4,390 |
+  | rivalry live | **4/8** | **$94,455 (−1.3%)** | 1,211 | 4,368 |
+
+  In that matrix **2 of 8 towns reach EYEING** (days 27 and 31), both make a
+  real offer ($432 of $495, and $377 of $795), both are left unanswered, and one
+  cuts her board price and then walks it back when she misses a rent. It is an
+  endgame antagonism and it does not touch the escape promise.
+
+  **WHAT COMPETING ACTUALLY COSTS**, paired arms inside the same build (6
+  propped towns x 24 days, the bar staffed, the player refusing every offer):
+
+  | | rivalry off | she competes | ...and the player matches her price |
+  |---|---|---|---|
+  | JUICE BAR takings | $9,026 | **$8,464 (−6.2%)** | $8,567 (−5.1%) |
+  | drinks served | 1,478 | 1,401 | **1,650 (+11.6%)** |
+  | her showers served | 1,458 | **2,354 (+61%)** | 2,222 |
+  | CRAB SHACK takings | $16,975 | $17,617 | $17,805 |
+  | player lifetime | $31,649 | $31,821 | $32,247 |
+
+  Read those five rows together and the whole design is in the table. She really
+  does take the trade — her stalls run 61% busier and the bar loses 6.2% of its
+  takings. **Matching her price wins the VOLUME back at a thinner margin** (the
+  bar serves 11.6% MORE drinks than in a town with no rival at all, for slightly
+  less money). And the player's LIFETIME is a wash, because the promenade is
+  zero sum and the player has more than one shop: what the bar loses, the shack
+  picks up. Competing against one of your counters moves trade between them.
+
+  **REACHABILITY** (8 seeds x 40d, the headless buyer's own plan plus the juice
+  bar): 4 towns survive to day 40; **4/4 reach EYEING, 3/4 make a real offer,
+  1/4 runs the entire arc** including a competition move and a retreat.
+
+  ### Suite 116 -> 124, ZERO re-pointing
+  New: the cycler (order, wrap, camera convergence from a panned-away start,
+  a tourist not jamming it, both canvas modes' geometry, the hit-test driving
+  what a tap drives, and getting out of the way of a full-screen card);
+  `rivalry: her interest builds from HER OWN books` (with a PAIRED ARM whose
+  books are empty and whose line is drawn — nothing happens); `the offer is a
+  real number, and it can be ACCEPTED or REFUSED` (the itemized terms add to
+  the asking price, accept moves the money to the cent including what she
+  BORROWED, the crew come home, the bar keeps trading, refuse leaves everything
+  where it was); `after a refusal she competes with the PLAYER'S OWN levers, and
+  can be countered` (all three levers used and announced, the retreat on a
+  missed rent, the zero-sum share test with a paired price arm, and the lever's
+  own arithmetic); `if the juice bar FAILS she is first in the queue` (against a
+  deeper pocket standing right there); `the player can buy HER shop` (the ask
+  moves with her books, two taps, the seller is paid, she steps down, and the
+  two-lease orphan seam); `THE LEASE IS THE RIVAL` (a new holder inherits the
+  ambition and the old one gets their savings back); and the save/load roundtrip
+  (prices, war chest, valuation, escalation ledger and a standing offer that is
+  still answerable after the reload, plus an old save and a hand-edited one).
+  **The frozen day-2 fingerprint needed NO re-baseline** — the receipt that a
+  default town is untouched.
+  **Caught by the suite, worth writing down**: banking the war chest from day
+  one (before the player owns a bar) moved SUDSY's till by $39 on day 2 and
+  tripped the fingerprint plus two other pins — a till is not an inert number,
+  the job board reads it to post a vacancy and `ownerFunds` reads it to buy the
+  next bar of soap. She saves only when there is something to save for.
+
+  ### Story beat (organic, reproducible)
+  `node tools/headless.mjs --days 40 --seeds 1 --seedbase 1 --buy chef,table,juicebar`
+  (seed 2674). **Day 14**: SUDS SHOWERS misses its third lease. SUDSY loses the
+  shop she owned outright and goes back to the rail. The town has no shower
+  house for a fortnight. **Day 27**: **DRIFT**, a fisher, has $230 saved and
+  buys it for $200 — and the *same night* the day report says he has been
+  standing outside the juice bar. **Day 30** he offers **$432** for a bar he
+  values at $495: not a lowball, a real number, 87% of what the place is worth.
+  Nobody answers for three days. **Day 33** the offer lapses and he starts
+  competing; **day 35** he cuts a rinse to 90%. **Day 37** he misses his own
+  rent and **puts the price straight back to 100%** — the war costs him more
+  than it is worth, in public, and the player never had to do anything but wait.
+  **Day 38** SUDS SHOWERS fails again and DRIFT is back on the pier.
+  A fortnight after SUDSY lost the lease, the lease had found somebody else to
+  want the juice bar with. That is the whole thesis in one run.
+  Shots: `cycler-desktop`, `cycler-portrait`, `rival-eyeing`, `rival-offer`,
+  `rival-manage-price`, `rival-jobboard`, `rival-her-shop-ask`, `rival-bar-sold`
+  under shots/.
+<<<<<<< HEAD
+>>>>>>> worktree-agent-ab48134470d22d6a7
 - **THE CRAB DIARY — a per-crab activity log, and the record that shows it**
   (Matt's directive, built 2026-08-19, worktree: *"We need a detail view of
   the character where we can see all of their recent actions, because that is
@@ -2512,17 +2762,20 @@ payroll-scaled limit 90 + 70/crew, both inert); the collapse is growth-town
 unit economics.
 
 ## Backlog (rough priority)
-1. ~~**Business settings**~~ — **shipped 2026-08-18** as shop hours + the
-   management screen (see the systems bullet). Remaining loosenings from the
-   original idea: per-business PRICES and staffing rules. **Per-business (and
-   per-crab) WAGES shipped 2026-08-19** — see "THE WAGE IS A SETTING"; prices
-   are the last one standing, and the wage's `goingRate` layer is the pattern
-   a price lever would follow (a setting is only real if somebody responds).
+1. ~~**Business settings**~~ — **shipped**: shop hours + the management screen
+   (2026-08-18), per-business and per-crab WAGES (2026-08-19, "THE WAGE IS A
+   SETTING"), and per-business **PRICES** (2026-08-19, with the rivalry — it
+   followed the wage's `goingRate` pattern exactly: a setting is only real if
+   somebody responds, and tourists respond to boards). Still open from the
+   original idea: **staffing rules**.
 2. **More peer owners moving in** — the owner layer makes this content, not
    surgery: an OWNERS entry + BIZ entry + an NPC crab. Fish market buying
    wholesale off the pier is the natural next one. **Half-shipped 2026-08-19**:
    succession already mints peer owners at runtime (a fisher buys the failed
    shower house and the registry grows), so this is now only about NEW LOTS.
+   **And they have AMBITION since 2026-08-19**: a peer owner next door can come
+   for one of the player's businesses, and the player can buy theirs. A new lot
+   inherits all of that by pointing `RIVAL_CFG.SHOP`/`PRIZE` at it.
 3. **Player-avatar crab** — make `owner: "player"` also a walkable crab.
 4. **Fishing expansion** — hire fishers directly; fired/unhired crew return to
    the pier; weather/catch variance; quotas; a boat (see trade horizon T4).

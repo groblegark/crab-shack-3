@@ -301,9 +301,46 @@ function bizOpenNow(b) { const h = BIZ[b].hours; return tmin >= h.open && tmin <
 function anyBizOpenNow() { return Object.keys(BIZ).some(b => bizUnlocked(b) && bizOpenNow(b)); }
 function fmtHr(m) { const h = (m / 60) | 0, mm = m % 60; return h + (mm ? (mm < 10 ? "0" + mm : "" + mm) : ""); }   // 480 -> "8", 510 -> "830" (shift-label style)
 function fmtClock(m) { const h = (m / 60) | 0, mm = m % 60 | 0; return h + ":" + (mm < 10 ? "0" : "") + mm; }
+// ---------------------------------------------------------------- the price
+// THE LAST BUSINESS SETTING. Hours, wages, tip share and staff meals were all
+// data already; the MENU PRICE was the one number still frozen into the recipe
+// table. `BIZ[k].priceMul` scales every recipe in one shop - the shop-level
+// instrument a peer owner can hold too, exactly like the wage. Bounds
+// PRICE_MIN..PRICE_MAX in 5% steps; DEFAULT 1 is bit-identical to the frozen
+// build (Math.round(pay * 1) === pay for every integer price in BIZ), which is
+// what keeps the documented curves and the day-2 fingerprint untouched.
+//
+// A setting is only real if somebody responds, and two things do: TOURISTS
+// choose a cheaper shop (see the spawn weights - the shares move, the town's
+// total footfall does not, so cutting your price takes trade off a NEIGHBOUR
+// rather than conjuring guests out of the sea) and LOCALS can suddenly afford
+// a shop that was out of reach, because every affordability check in
+// pickErrand runs through localPrice.
+const PRICE_MIN = 0.7, PRICE_MAX = 1.3, PRICE_STEP = 0.05;
+const clampPrice = (v) => Math.max(PRICE_MIN, Math.min(PRICE_MAX,
+  Math.round((+v || 0) / PRICE_STEP) * PRICE_STEP));
+function bizPriceMul(b) { const m = BIZ[b] && BIZ[b].priceMul; return m == null ? 1 : m; }
+function setBizPrice(b, v) { if (BIZ[b]) BIZ[b].priceMul = clampPrice(v); }
+function menuPrice(b, r) { return Math.max(1, Math.round(r.pay * bizPriceMul(b))); }   // what it says on the board
+function localPrice(b, r) { return Math.ceil(menuPrice(b, r) * 1.25); }                // ...and locals pay +25% of that
+// How attractive this shop's board looks to somebody walking past. Cheap pulls,
+// dear pushes, and the curve is flat enough that a 30% cut is worth about a
+// third more footfall rather than the whole promenade. Exactly 1 at the default
+// price by construction (Math.pow(1, x) === 1), so an untouched town is untouched.
+const PRICE_ELAST = 1.2;
+// what share of the passing trade a shop pulls before its board is read. These
+// are the weights the spawn block has always used; naming them is what lets
+// `bizPull` be a function rather than a literal in the middle of a loop.
+const TOURIST_PULL = { shack: 0.5, arcade: 0.22, juicebar: 0.3 };
+function bizPullBase(b) { return TOURIST_PULL[b] == null ? 0.1 : TOURIST_PULL[b]; }
+function bizPull(b) { return bizPullBase(b) * priceAppeal(b); }
+function priceAppeal(b) {
+  const m = bizPriceMul(b);
+  return Math.max(0.6, Math.min(1.6, Math.pow(1 / m, PRICE_ELAST)));
+}
 function staffMealCharge(b, r) {   // what a selfCooking staffer rings up
   const pol = BIZ[b].mealPol || "retail";
-  return pol === "free" ? 0 : pol === "atcost" ? ingredientCost(r.raw) : r.pay;
+  return pol === "free" ? 0 : pol === "atcost" ? ingredientCost(r.raw) : menuPrice(b, r);
 }
 
 // ---------------------------------------------------------------- owners
@@ -391,6 +428,10 @@ const HOURS_POLICY = {
   // 1-day shift is stream chaos from her first move, not the shrink depth -
   // so the floor stays at 6h where her schedule has room to be interesting.
   showers: { quietDays: 3, pressureDays: 2, extendQ: 2, minSpan: 6 * 60, tiredCap: 0.75 },
+  // ...and the juice bar, for the day a PEER owner holds its lease (see THE
+  // RIVALRY). Inert while the player owns it - the caller only ever runs this
+  // for a business somebody else is running.
+  juicebar: { quietDays: 3, pressureDays: 2, extendQ: 2, minSpan: 6 * 60, tiredCap: 0.75 },
 };
 let hoursPolicyState = {};        // biz -> { hist: [{f,l,q}...], cd }  (persisted)
 let hoursObs = {}, _wasOpen = {}; // per-day boundary observations (transient)
@@ -421,14 +462,19 @@ function runHoursPolicy(b) {      // one NPC owner reads the day's signals at se
   if (st.cd > 0) { st.cd--; return; }
   const h = BIZ[b].hours, span = h.close - h.open;
   const quiet = st.hist.slice(-cfg.quietDays), press = st.hist.slice(-cfg.pressureDays);
+  // ONE LEVER, ONE OWNER OF IT: an owner fighting a price war for the shop
+  // next door does not shut early because last Tuesday's first hour was quiet.
+  // The rivalry's hours move and this policy's shrink rules are the same
+  // control, so the shrinks stand down while she is competing (see THE RIVALRY).
+  const fighting = b === RIVAL_CFG.SHOP && (rival.stage === "compete" || rival.stage === "offer");
   const staffRested = allCrabs().filter(k => k.p.job === b).every(k => (k.p.tired || 0) < cfg.tiredCap);
   let open = h.open, close = h.close, line = null;
   if (press.length >= cfg.pressureDays && press.every(d => d.q >= cfg.extendQ)
       && staffRested && h.close + 60 <= HOURS_MAX) {
     close += 60; line = "NOW CLOSES AT " + fmtHr(close);          // customers at the door: stay open later
-  } else if (quiet.length >= cfg.quietDays && quiet.every(d => d.f === 0) && span - 60 >= cfg.minSpan) {
+  } else if (!fighting && quiet.length >= cfg.quietDays && quiet.every(d => d.f === 0) && span - 60 >= cfg.minSpan) {
     open += 60; line = "NOW OPENS AT " + fmtHr(open);             // dead mornings: sleep in
-  } else if (quiet.length >= cfg.quietDays && quiet.every(d => d.l === 0 && d.q === 0) && span - 60 >= cfg.minSpan) {
+  } else if (!fighting && quiet.length >= cfg.quietDays && quiet.every(d => d.l === 0 && d.q === 0) && span - 60 >= cfg.minSpan) {
     close -= 60; line = "NOW CLOSES AT " + fmtHr(close);          // dead evenings: shut early
   }
   if (!line) return;
@@ -679,7 +725,12 @@ function listForSale(b, why) {
   const laid = [];
   for (const k of allCrabs().slice()) {
     if (k.p.job !== b && !(o && k.p.employer === o.id)) continue;
-    layOff(k);
+    // an owner-operator who still holds ANOTHER lease steps down to that
+    // counter rather than out of business - clearing p.owner outright would
+    // orphan the other shop at the next settlement (the death seam reads
+    // exactly that field)
+    if (o && k.p.owner === o.id) stepDownOwner(k, o.id, b);
+    else layOff(k);
     laid.push(k.p.name);
   }
   BIZ[b].owner = null;
@@ -787,6 +838,10 @@ function runSuccession() {
   // player's own crew are under contract with the player and are not in the
   // pool - the player buys through the shopfront themselves.)
   for (const b of saleList()) {
+    // ...and one crab jumps the queue: the rival who has been trying to buy
+    // this exact shop for a fortnight (see THE RIVALRY). She pays the same
+    // market price out of the same pocket - she just gets asked first.
+    if (rivalFirstRefusal(b)) continue;
     const price = salePrice(b);
     const cands = allCrabs().filter(k => k.p.npc && !k.p.sick
       && k.p.wallet >= price + SALE_CFG.RESERVE);
@@ -794,6 +849,672 @@ function runSuccession() {
     cands.sort((a, c2) => c2.p.wallet - a.p.wallet || (a.p.name < c2.p.name ? -1 : 1));
     buyBusiness(b, cands[0]);
   }
+}
+
+// ------------------------------------------------- THE RIVALRY: SUDSY WANTS THE JUICE BAR
+// Peer owners already ran shops, set hours, set wages, hired, and bought a
+// FAILED business off the market. Nobody ever came for a business that was
+// doing FINE - and the player's juice bar, sixty pixels down the promenade
+// from her own shower house, is the obvious prize.
+//
+// SHE IS A RIVAL WITH A BALANCE SHEET, NOT AN EVENT. Every number below comes
+// out of her own books - her till, her three-day takings, her rent record -
+// and every move she makes is a lever the player also holds: a price, an
+// opening hour, a wage, an offer. Nothing fires out of nowhere: she is SEEN
+// eyeing the place for days, then she names a number, and only if she is
+// refused does she compete. All of it is survivable, because a price war costs
+// HER a till too and she walks it back when she cannot afford it.
+//
+// THE SHAPE, in one line each:
+//   EYEING    intent >= EYE. She stands outside the bar on her breaks, the day
+//             report says so every night, the diary logs it, a toast names it.
+//   OFFER     intent >= OFFER and she can raise a number worth putting on the
+//             table. The card shows what she offers AND what the place is
+//             worth, so a lowball reads as a lowball.
+//   COMPETE   refused (or ignored for ANSWER_DAYS). One lever every STEP_DAYS,
+//             announced, and reversed the moment her own till cannot carry it.
+//   ...and she comes back with a better number every REOFFER days, because she
+//   has been saving and because competing has made the bar cheaper.
+const RIVAL_CFG = {
+  PRIZE: "juicebar",     // the shop she wants (the player's, next door to hers)
+  SHOP: "showers",       // ...and the balance sheet she reads. THE RIVALRY BELONGS TO
+                         // THIS LEASE, NOT TO SUDSY: whoever holds the shower house is
+                         // the rival, exactly the way HOURS_POLICY and WAGE_POLICY key
+                         // on the BUSINESS. SUDS SHOWERS fails in most long runs and a
+                         // fisher buys it off the market; hard-wiring "sudsy" would have
+                         // made this dead content the day her lease changed hands, and
+                         // the succession layer already says a new owner is just data.
+  OWNER: "sudsy",        // (the founding holder - documentation, not a lookup key)
+  // AMBITION IS A WAR CHEST, NOT A MOOD. She puts money by out of her own
+  // till on nights her shop settles clean and comfortable, and what she has
+  // saved against what the bar is worth IS the intent. Measured first: a real
+  // SUDS SHOWERS runs a till of $150-220 before the player opens a juice bar
+  // next door and $0-45 after, so a keep-back of two nights' rent and a wage
+  // means she banks in the good months and banks nothing in the lean ones -
+  // which is exactly the pressure this is supposed to model.
+  BANK_KEEP: 100,        // she leaves two nights' rent and a wage in the till...
+  BANK_FRAC: 0.5,        // ...then puts half of what is over it by...
+  BANK_MAX: 60,          // ...up to this a night
+  CAP: 1.3,
+  EYE: 0.28,             // she is SEEN at the bar once she can raise this share of it...
+  DROP: 0.18,            // ...and stops being seen there below THIS. A hysteresis band,
+                         // never a knife edge - the same shape auto-manage uses, and the
+                         // reason a single dark trading day cannot switch her off.
+  OFFER: 0.45,           // she puts a number on it at nearly half...
+  WARN_DAYS: 3,          // ...but NEVER before this many settlements of being seen there.
+                         // The warning is guaranteed by the CLOCK, not by the money
+                         // happening to cross two lines in the right order.
+  SMOOTH: 0.3,           // how fast her valuation of the bar follows its takings. A
+                         // three-day book on a small shop swings 2x overnight; she runs
+                         // an average of it, like anybody pricing a business would.
+  LOWBALL: 0.35,         // and she will not insult anybody: no offer under this share
+                         // of what the place is worth
+  PREMIUM: 0.35,         // a GOING CONCERN costs this much over the shuttered price...
+  HEALTH: 0.5,           // ...at half weight for a dead shop, full for a thriving one
+  FLOAT_NIGHTS: 1,       // and she keeps this many nights of the NEW shop's rent back -
+                         // nobody buys a second shop and cannot open it in the morning
+  ANSWER_DAYS: 3,        // an offer left unanswered lapses, and lapsing IS a refusal
+  REOFFER: 5,            // days before she comes back with a better number
+  STEP_DAYS: 2,          // one competition move every this many days
+  // THE THREE COMPETITION LEVERS, all of them settings the player also holds.
+  // A price cut and a longer day cost NOTHING up front - they cost margin, and
+  // the margin shows up as a missed rent, which is the retreat trigger. Only
+  // the wage costs cash on the night. See runRivalCompete.
+  CUT: 0.1,              // how much she takes off her own board each cut
+  WAGE_OVER: 2,          // a wage push lands this far over the best rate in town
+  HOLD: 0.35,            // what SHE wants for HER shop, on top, while her blood is up
+  ONLY: 0.4,             // ...and what anybody wants for the ONLY shop they have. An
+                         // owner-operator is not selling their livelihood at the price
+                         // of a shuttered lot on day two - this is the premium that
+                         // keeps a peer's counter out of reach until the player has
+                         // genuinely built something.
+  STAKEOUT: 0.5,         // how often an idle-hands trip takes her past the bar
+};
+// stage: none -> eyeing -> offer -> compete (-> offer -> ...), or done (she has it)
+function newRival() {
+  return { intent: 0, fund: 0, stage: "none", offer: null, offerDay: 0, lastOffer: 0,
+    refused: 0, step: 0, stepDay: 0, noDay: 0, eyeDay: 0, val: 0, who: null };
+}
+let rival = newRival();
+const RIVAL_STAGES = ["none", "eyeing", "offer", "compete", "done"];
+function loadRival(r) {
+  rival = newRival();
+  if (!r || typeof r !== "object") return;   // an old save has no rivalry, and "none" IS the old world
+  rival.intent = Math.max(0, Math.min(RIVAL_CFG.CAP, +r.intent || 0));
+  rival.fund = Math.max(0, Math.round(+r.fund || 0));
+  rival.val = Math.max(0, Math.round(+r.val || 0));
+  rival.who = typeof r.who === "string" && OWNERS[r.who] ? r.who : null;
+  rival.stage = RIVAL_STAGES.includes(r.stage) ? r.stage : "none";
+  rival.refused = Math.max(0, Math.round(+r.refused || 0));
+  rival.step = Math.max(0, Math.round(+r.step || 0));
+  rival.stepDay = Math.max(0, Math.round(+r.stepDay || 0));
+  rival.noDay = Math.max(0, Math.round(+r.noDay || 0));
+  rival.eyeDay = Math.max(0, Math.round(+r.eyeDay || 0));
+  rival.offerDay = Math.max(0, Math.round(+r.offerDay || 0));
+  rival.lastOffer = Math.max(0, Math.round(+r.lastOffer || 0));
+  if (r.offer && +r.offer.price > 0)
+    rival.offer = { price: Math.round(+r.offer.price), worth: Math.round(+r.offer.worth || 0),
+      day: Math.round(+r.offer.day || 0) };
+  if (rival.stage === "offer" && !rival.offer) rival.stage = "eyeing";   // a half-written save cannot strand a card
+}
+// WHO THE RIVAL IS TODAY: whoever holds the lease next door. `null` while the
+// shop is on the market or in the player's hands - in both cases there is
+// nobody across the street to want anything.
+function rivalOwnerId() {
+  const oid = bizOwner(RIVAL_CFG.SHOP);
+  return oid && oid !== "player" ? oid : null;
+}
+function rivalCrab() {
+  const oid = rivalOwnerId();
+  return oid ? allCrabs().find(k => k.p.owner === oid) || null : null;
+}
+function rivalName() { const o = OWNERS[rivalOwnerId()]; return (o && o.name) || "THE OWNER"; }
+function rivalOn() {
+  if (window._noRival) return false;                  // the measurement hatch (the game never sets it)
+  const o = OWNERS[rivalOwnerId()];
+  return !!(o && !o.gone && rivalCrab());
+}
+// THE WAR CHEST BELONGS TO A PERSON. When the lease changes hands the money
+// goes back to whoever put it by (it is real money and must not evaporate),
+// and the new holder starts their own ambition from nothing.
+function rivalOwnerCheck() {
+  const oid = rivalOwnerId();
+  if (rival.who === oid) return;
+  if (rival.fund > 0 && rival.who && OWNERS[rival.who]) OWNERS[rival.who].till += rival.fund;
+  const was = rival.who;
+  const keep = rival.stage === "done";   // a finished rivalry stays finished
+  Object.assign(rival, newRival());
+  rival.who = oid;
+  if (keep) rival.stage = "done";
+  if (was && oid && OWNERS[oid])
+    today.rival.push(OWNERS[oid].name + " HAS THE " + BIZ[RIVAL_CFG.SHOP].short + " NOW");
+}
+function prizeIsPlayers() {
+  return bizUnlocked(RIVAL_CFG.PRIZE) && bizOwner(RIVAL_CFG.PRIZE) === "player";
+}
+// her purse is her TILL plus her own POCKET - the same two pots the housing
+// ladder already moves money between, and the only money she has
+function rivalPurse() {
+  const o = OWNERS[rivalOwnerId()], c = rivalCrab();
+  return (o ? Math.max(0, o.till) : 0) + (c ? Math.max(0, c.p.wallet) : 0);
+}
+// HER LINE OF CREDIT, the same one the player draws on and the same one that
+// shuts a shop after three missed settlements. A small operator buying a second
+// shop borrows to do it; this is the game's own machinery for that, and the
+// risk is real - she services the debt out of both tills afterwards or the
+// three-strike rule takes a lease off her.
+function rivalCredit() {
+  const o = OWNERS[rivalOwnerId()];
+  if (!o) return 0;
+  // A LINE OF CREDIT IS A BUSINESS LINE. A crab with no lease has no line, so
+  // losing her own shop ends the ambition outright rather than leaving a
+  // shopless fisher borrowing three hundred dollars for a juice bar. This is
+  // also what makes "starve her shop of trade" a real counter and not a mood.
+  if (!Object.keys(BIZ).some(b2 => bizOwner(b2) === rivalOwnerId())) return 0;
+  return Math.max(0, creditLimit() - Math.max(0, o.credit || 0));
+}
+// EVERYTHING SHE COULD RAISE: the war chest, the till, her own pocket and what
+// the bank would lend her. This is the number the offer is built from and the
+// number the day report prints, so nothing about the offer is hidden.
+function rivalRaise() { return Math.max(0, rival.fund || 0) + rivalPurse() + rivalCredit(); }
+// SHE PUTS MONEY BY, out of her own till, on a night her shop settled clean and
+// is carrying more than a working float. Nothing is minted: the money leaves
+// the till it came from, which is why the war chest makes her shop leaner and
+// why she raids it back the moment a rent is at risk (rivalRaidFund).
+function bankRivalFund() {
+  const shop = RIVAL_CFG.SHOP, o = OWNERS[rivalOwnerId()];
+  if (!o || bizOwner(shop) !== rivalOwnerId() || forSale(shop)) return 0;
+  if ((bizStrike[shop] || 0) > 0) return 0;                    // a missed rent is not a good month
+  const spare = o.till - RIVAL_CFG.BANK_KEEP;
+  if (spare <= 0) return 0;
+  const put = Math.min(RIVAL_CFG.BANK_MAX, Math.floor(spare * RIVAL_CFG.BANK_FRAC));
+  if (put <= 0) return 0;
+  o.till -= put; rival.fund = (rival.fund || 0) + put;
+  return put;
+}
+// ...and she raids it before she misses a rent. A war chest that shuts your own
+// shop is not ambition, it is a bug - so this runs BEFORE her lease settles.
+function rivalRaidFund(b) {
+  if (b !== RIVAL_CFG.SHOP || !(rival.fund > 0)) return 0;
+  const o = OWNERS[rivalOwnerId()];
+  if (!o) return 0;
+  const need = Math.ceil(BIZ[b].rent * 1.5) - o.till;
+  if (need <= 0) return 0;
+  const take = Math.min(rival.fund, need);
+  rival.fund -= take; o.till += take;
+  return take;
+}
+// what she holds back: enough to OPEN the shop she is buying in the morning
+function rivalFloat() {
+  return RIVAL_CFG.FLOAT_NIGHTS * BIZ[RIVAL_CFG.PRIZE].rent;
+}
+// war chest, then till, then her pocket, then the BANK. Nothing is minted
+// anywhere: a drawn line is a debt she carries into every settlement after.
+function payFromRival(amt) {
+  const o = OWNERS[rivalOwnerId()], c = rivalCrab();
+  let left = Math.max(0, Math.round(amt));
+  { const d = Math.min(Math.max(0, rival.fund || 0), left); rival.fund -= d; left -= d; }
+  if (o) { const d = Math.min(Math.max(0, o.till), left); o.till -= d; left -= d; }
+  if (c) { const d = Math.min(Math.max(0, c.p.wallet), left); c.p.wallet -= d; left -= d; }
+  if (o && left > 0) { const d = Math.min(rivalCredit(), left); o.credit = (o.credit || 0) + d; left -= d; }
+  return Math.round(amt) - left;
+}
+function bizTakeAvg(b) {
+  const h = bizTake[b] || [];
+  return h.length ? h.reduce((s, v) => s + v, 0) / h.length : 0;
+}
+// how well a shop is ACTUALLY trading, 0..1, off the same three-day book the
+// asking price already reads. Two nights of rent a day is a healthy shop.
+function bizHealth(b) {
+  return Math.max(0, Math.min(1, bizTakeAvg(b) / Math.max(1, BIZ[b].rent * 2)));
+}
+// THE PRICE OF A GOING CONCERN, and every term of it checkable on the card.
+// askingPrice() is the succession layer's own pricer - lease + fixtures +
+// goodwill - which is what a SHUTTERED shop fetches. A shop still taking money
+// is worth that plus a premium, and the premium scales with how well it trades.
+function goingConcern(b, extra) {
+  const prem = RIVAL_CFG.PREMIUM * (0.5 + RIVAL_CFG.HEALTH * 2 * bizHealth(b)) + (extra || 0);
+  return Math.max(BIZ[b].rent * 2, Math.round(askingPrice(b) * (1 + prem)));
+}
+function offerTerms(b, extra) {   // the same number, itemized for the card
+  const avg = bizTakeAvg(b);
+  return {
+    lease: BIZ[b].rent * SALE_CFG.RENT_NIGHTS,
+    fixtures: bizFixtures(b) * SALE_CFG.FIXTURE,
+    goodwill: Math.round(avg * SALE_CFG.GOODWILL_DAYS),
+    take: Math.round(avg),
+    prem: Math.round((RIVAL_CFG.PREMIUM * (0.5 + RIVAL_CFG.HEALTH * 2 * bizHealth(b)) + (extra || 0)) * 100),
+    price: goingConcern(b, extra),
+  };
+}
+// WHAT SHE CAN PUT ON THE TABLE. She offers what the place is worth, or every
+// penny she can raise while keeping her shops open - whichever is smaller. A
+// lowball is a real outcome and the card shows both numbers, so refusing a
+// lowball is easy and refusing a fair offer is a genuine decision. Refuse her
+// and she saves; compete with her and the bar's goodwill (and so its price)
+// comes down. Either way the next offer is a different number.
+// WHAT SHE RECKONS IT IS WORTH: the going-concern price, smoothed. The three
+// day book behind it swings twice over on a small shop (one dark trading day
+// halves the goodwill), and a number that moves like that cannot be the basis
+// of an offer, a headline or a decision. One field, one line, and it is the
+// number every surface prints.
+function rivalWorth() {
+  const now = goingConcern(RIVAL_CFG.PRIZE, 0);
+  return Math.round(rival.val > 0 ? rival.val : now);
+}
+function rivalOfferPrice() {
+  const b = RIVAL_CFG.PRIZE;
+  const worth = rivalWorth();
+  const canRaise = Math.floor(rivalRaise() - rivalFloat());
+  return { worth, price: Math.max(0, Math.min(worth, canRaise)) };
+}
+// HOW BADLY SHE WANTS IT = HOW MUCH OF IT SHE HAS SAVED. Derived, never
+// accumulated, so there is no hidden counter anywhere: open her books and you
+// can compute this number yourself.
+function rivalIntent() {
+  if (!prizeIsPlayers()) return 0;
+  return Math.max(0, Math.min(RIVAL_CFG.CAP, rivalRaise() / Math.max(1, rivalWorth())));
+}
+function rivalEyeing(c) {
+  return rivalOn() && prizeIsPlayers() && c === rivalCrab()
+    && (rival.stage === "eyeing" || rival.stage === "offer" || rival.stage === "compete");
+}
+// ---- the offer card lives on the bar's own shopfront: the sign is the
+// owner's office door, and this is the letter pushed under it. One geometry
+// function feeds the draw and the hit-test, exactly like the FOR SALE chip.
+// The two lines the management screen prints: what she wants and what it is
+// worth on the top row, and HER OWN BOOKS on the row under it - the price on
+// her board, her hours, her wage and her till. Every one of those is a lever
+// the player holds too, which is what makes them worth printing.
+function rivalManageLines() {
+  if (!rivalOn() || !prizeIsPlayers() || rival.stage === "none" || rival.stage === "done")
+    return [null, null];
+  const who = rivalName(), shop = RIVAL_CFG.SHOP, prize = BIZ[RIVAL_CFG.PRIZE].short;
+  // 40 characters of 3x5 is what fits left of the management card's DONE chip,
+  // so the hours use the shift-label clock (8-21, not 8:00-21:00)
+  const nums = "HER " + BIZ[shop].short + ": " + Math.round(bizPriceMul(shop) * 100) + "%  "
+    + fmtHr(BIZ[shop].hours.open) + "-" + fmtHr(BIZ[shop].hours.close)
+    + "  $" + bizWage(shop) + "/DAY  TILL $" + fmt(Math.round(ownerFunds(shop)));
+  if (rivalOfferLive())
+    return [who + " OFFERS $" + fmt(rival.offer.price) + " (WORTH $"
+      + fmt(rival.offer.worth) + ") - TAP THE SIGN", nums];
+  if (rival.stage === "compete")
+    return [who + " IS COMPETING FOR THE " + prize, nums];
+  return [who + " IS EYEING THE " + prize + " - CAN RAISE $" + fmt(rivalRaise()) + " OF $"
+    + fmt(rivalWorth()), nums];
+}
+function rivalChipRects(b) {
+  const cx = Math.round((BIZ[b].x0 + BIZ[b].x1) / 2);
+  return { take: { x: cx - 46, y: 133, w: 44, h: 11 },
+           no:   { x: cx + 4,  y: 133, w: 34, h: 11 } };
+}
+function rivalOfferLive() { return rival.stage === "offer" && !!rival.offer && prizeIsPlayers(); }
+function makeRivalOffer() {
+  const b = RIVAL_CFG.PRIZE, q = rivalOfferPrice();
+  rival.offer = { price: q.price, worth: q.worth, day };
+  rival.stage = "offer"; rival.offerDay = day; rival.lastOffer = day;
+  const who = rivalName();
+  toast = { text: who + " OFFERS $" + fmt(q.price) + " FOR THE " + BIZ[b].short + " - TAP ITS SIGN", t: 9 };
+  today.rival.push(who + " OFFERS $" + fmt(q.price) + " FOR THE " + BIZ[b].short
+    + (q.price < q.worth ? " (WORTH $" + fmt(q.worth) + ")" : ""));
+  const c = rivalCrab();
+  if (c) crabLog(c, "money", "OFFERED $" + q.price + " FOR THE " + BIZ[b].short, 0);
+  popText("OFFER $" + fmt(q.price), (BIZ[b].x0 + BIZ[b].x1) / 2 - 24, 100, [255, 216, 96]);
+  if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+  if (window._stats) (window._stats.rivalOffers = window._stats.rivalOffers || [])
+    .push({ day, price: q.price, worth: q.worth });
+}
+// ACCEPT: take the money, lose the bar. The whole price moves from her pots to
+// yours - a sale between two owners is a TRANSFER, not the lease re-letting
+// that destroys half at the FOR SALE sign (there is a seller here, and the
+// seller is you). The bar keeps trading: she owns it, she runs the same policy
+// tables, and she posts for staff on the same job board.
+function acceptRivalOffer() {
+  if (!rivalOfferLive()) return false;
+  const b = RIVAL_CFG.PRIZE, price = rival.offer.price;
+  if (rivalPurse() < price) {
+    toast = { text: rivalName() + " CAN'T COVER $" + fmt(price) + " TONIGHT", t: 5 };
+    return false;
+  }
+  payFromRival(price);
+  // straight into the till, but NOT through earn(): a business sale is not
+  // trading revenue, so it must not inflate `lifetime` or the income-rate chip
+  coins += price;
+  popText("+$" + fmt(price), (BIZ[b].x0 + BIZ[b].x1) / 2 - 12, 110, [255, 230, 120]);
+  if (typeof sfx !== "undefined" && sfx.coin) sfx.coin();
+  handOverBiz(b, rivalOwnerId());
+  rival.stage = "done"; rival.offer = null; rival.intent = 0;
+  const who = rivalName();
+  toast = { text: "SOLD - " + who + " OWNS THE " + BIZ[b].name + " NOW. +$" + fmt(price), t: 9 };
+  today.rival.push("SOLD THE " + BIZ[b].short + " TO " + who + " FOR $" + fmt(price));
+  const c = rivalCrab();
+  if (c) { crabLog(c, "money", "BOUGHT THE " + BIZ[b].name + " FOR $" + price, 0);
+    crabLog(c, "life", "TWO SHOPS ON THE PROMENADE NOW", 0); }
+  if (typeof sfx !== "undefined" && sfx.buy) sfx.buy();
+  if (window._stats) (window._stats.rivalSales = window._stats.rivalSales || [])
+    .push({ day, biz: b, price, to: who });
+  save();
+  return true;
+}
+// hand a player-owned business to a peer owner: the lease moves, the people do
+// not. Your crew are under contract to YOU, so they come back to your kitchen;
+// anybody on the shop's own payroll goes back to the pier the way a closure
+// sends them.
+function handOverBiz(b, oid) {
+  for (const k of allCrabs().slice()) {
+    if (k.p.job !== b) continue;
+    if (k.p.npc) { layOff(k); continue; }
+    abortChef(k); abortErrand(k);
+    k.duty = false; k.pendingOff = false; k.kstate = "idle"; k.carrying = null;
+    k.dayState = "home"; k.cstate = "";
+    k.p.job = "shack"; k.workBiz = "shack";
+    crabLog(k, "work", "MOVED TO THE CRAB SHACK - THE " + BIZ[b].short + " WAS SOLD", 0);
+    today.moved.push(k.p.name + " BACK TO THE SHACK");
+  }
+  BIZ[b].owner = oid;
+  BIZ[b].autoLabor = true;    // a peer owner runs the same policy tables SUDSY does
+  bizStrike[b] = 0;
+  delete market[b];
+  popText("UNDER NEW OWNERSHIP", (BIZ[b].x0 + BIZ[b].x1) / 2 - 30, 100, [140, 255, 160]);
+}
+// REFUSE: nothing punitive happens. She competes, on levers the player also
+// holds, and she comes back with a number later.
+function refuseRivalOffer(why) {
+  if (rival.stage !== "offer") return false;
+  const b = RIVAL_CFG.PRIZE, who = rivalName();
+  rival.refused++;
+  // `step` is NOT reset: escalation is cumulative across refusals, so a second
+  // no lands on the next lever rather than starting the argument over
+  rival.stage = "compete"; rival.stepDay = day; rival.noDay = day;
+  rival.offer = null;
+  toast = { text: who + ": THEN I'LL TAKE THE TRADE INSTEAD", t: 8 };
+  today.rival.push((why === "lapsed" ? "NO ANSWER FOR " + who + " - " : "TURNED " + who + " DOWN - ")
+    + "SHE'LL COMPETE");
+  const c = rivalCrab();
+  if (c) crabLog(c, "life", "TURNED DOWN OVER THE " + BIZ[b].short + " - COMPETING", 0);
+  if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+  if (window._stats) (window._stats.rivalRefusals = window._stats.rivalRefusals || [])
+    .push({ day, why: why || "refused" });
+  return true;
+}
+function tapRivalChip(which) {
+  if (!rivalOfferLive()) return false;
+  return which === "take" ? acceptRivalOffer() : refuseRivalOffer("refused");
+}
+// ---- COMPETITION. Three levers, all of them settings that already exist and
+// that the player holds too, escalating one move at a time with a named toast
+// on every single one. There is no hidden term anywhere: what she does to her
+// board, her hours and her wage is exactly what the player can do back.
+const RIVAL_MOVES = ["price", "hours", "wage"];
+function runRivalCompete() {
+  const shop = RIVAL_CFG.SHOP, o = OWNERS[rivalOwnerId()], who = rivalName();
+  if (!o || bizOwner(shop) !== rivalOwnerId() || forSale(shop)) return false;
+  if (day - rival.stepDay < RIVAL_CFG.STEP_DAYS) return false;
+  rival.stepDay = day;
+  // A PRICE WAR COSTS THE ONE WHO STARTED IT. When her own till cannot carry
+  // the fight she walks the last move BACK, in public - which is the player's
+  // counter working, and the reason this can never become a death sentence.
+  // THE TRIGGER IS A MISSED RENT, not a thin till. A shower house settles most
+  // nights on $0-45 whatever it is doing, so reading the till instantly would
+  // make a rival that never fights - which is not "survivable", it is inert.
+  // What actually says the war is costing her more than it is worth is the
+  // strike counter the succession layer already keeps.
+  if ((bizStrike[shop] || 0) > 0) {
+    let line = null;
+    if (bizPriceMul(shop) < 1) {
+      setBizPrice(shop, bizPriceMul(shop) + RIVAL_CFG.CUT);
+      line = "PUTS THE " + BIZ[shop].short + " PRICE BACK TO " + Math.round(bizPriceMul(shop) * 100) + "%";
+    } else if (BIZ[shop].hours.close > 20 * 60) {
+      setBizHours(shop, BIZ[shop].hours.open, BIZ[shop].hours.close - 60);
+      line = "SHUTS THE " + BIZ[shop].short + " AT " + fmtClock(BIZ[shop].hours.close);
+    } else if (bizWage(shop) > WAGE_STD) {
+      setBizWage(shop, bizWage(shop) - 1);
+      line = "TRIMS THE " + BIZ[shop].short + " WAGE TO $" + bizWage(shop);
+    }
+    if (line) {
+      toast = { text: who + " " + line + " - SHE CAN'T CARRY THE FIGHT", t: 7 };
+      today.rival.push(who + " " + line + " (BACKING OFF)");
+      if (window._stats) (window._stats.rivalMoves = window._stats.rivalMoves || [])
+        .push({ day, move: "retreat", line });
+    }
+    return !!line;
+  }
+  // ...otherwise one lever, in order, cycling
+  for (let tries = 0; tries < RIVAL_MOVES.length; tries++) {
+    const move = RIVAL_MOVES[rival.step % RIVAL_MOVES.length];
+    rival.step++;
+    let line = null;
+    if (move === "price" && bizPriceMul(shop) - RIVAL_CFG.CUT >= PRICE_MIN - 1e-9) {
+      setBizPrice(shop, bizPriceMul(shop) - RIVAL_CFG.CUT);
+      line = "CUTS THE " + BIZ[shop].short + " PRICE TO " + Math.round(bizPriceMul(shop) * 100) + "%"
+        + " (" + BIZ[shop].recipes.map(r0 => "$" + menuPrice(shop, r0)).join("/") + ")";
+    } else if (move === "hours") {
+      const h = BIZ[shop].hours;
+      if (h.close + 60 <= HOURS_MAX) {
+        setBizHours(shop, h.open, h.close + 60);
+        line = "KEEPS THE " + BIZ[shop].short + " OPEN TO " + fmtClock(BIZ[shop].hours.close);
+      } else if (h.open - 30 >= HOURS_MIN) {
+        setBizHours(shop, h.open - 30, h.close);
+        line = "OPENS THE " + BIZ[shop].short + " AT " + fmtClock(BIZ[shop].hours.open);
+      }
+    } else if (move === "wage") {
+      const best = Math.max(WAGE_STD, townWage(shop), bizWage(shop));
+      const want = Math.min(WAGE_MAX, Math.max(bizWage(shop) + 1, best + RIVAL_CFG.WAGE_OVER));
+      const staffN = Math.max(1, allCrabs().filter(k => k.p.job === shop && !k.p.owner).length);
+      // ...and only the WAGE costs cash on the night: a price cut and a longer
+      // day are paid for out of margin, which is what the retreat rule reads
+      if (want > bizWage(shop) && o.till + (rival.fund || 0) >= want * staffN) {
+        setBizWage(shop, want);
+        for (const j of jobBoard) if (j.biz === shop) j.wage = bizWage(shop);
+        line = "POSTS $" + bizWage(shop) + " AT THE " + BIZ[shop].short;
+      }
+    }
+    if (!line) continue;
+    toast = { text: who + " " + line, t: 8 };
+    today.rival.push(who + " " + line);
+    const c = rivalCrab();
+    if (c) crabLog(c, "money", line.slice(0, 39), 0);
+    if (window._stats) (window._stats.rivalMoves = window._stats.rivalMoves || [])
+      .push({ day, move, line, price: bizPriceMul(shop), wage: bizWage(shop), close: BIZ[shop].hours.close });
+    return true;
+  }
+  return false;
+}
+// ---- ONE PASS AT SETTLEMENT. Reads her books, moves the stage, and never
+// does two things in a night.
+function runRivalAmbition() {
+  rivalOwnerCheck();   // the lease may have changed hands since last night
+  if (!rivalOn()) return;
+  const shop = RIVAL_CFG.SHOP, prize = RIVAL_CFG.PRIZE, o = OWNERS[rivalOwnerId()];
+  if (rival.stage === "done") return;                      // she has it; there is nothing left to want
+  if (!prizeIsPlayers()) {                                 // it is not yours to sell any more
+    if (rival.stage !== "none") { rival.stage = "none"; rival.offer = null; }
+    rival.intent = 0;
+    return;
+  }
+  // SHE READS HER OWN BOOKS AND NOTHING ELSE: a good night puts money by, a
+  // lean one puts nothing by, and what she has saved against what the bar is
+  // worth IS how badly she wants it. Squeeze her takings and the whole thing
+  // stalls - which is the player's cheapest counter, and it costs nothing.
+  const hers = bizOwner(shop) === rivalOwnerId() && !forSale(shop);
+  // SHE PUTS MONEY BY ONLY WHEN THERE IS SOMETHING TO SAVE FOR. This gate is
+  // load-bearing and it is measured: a till is not an inert number - the job
+  // board reads it to post a vacancy, the wage policy reads it before a raise,
+  // and `ownerFunds` reads it to buy the next bar of soap. Banking from day one
+  // moved SUDSY's till by $39 on day 2 of a town with no juice bar in it, which
+  // tripped the frozen day-2 fingerprint and two other pins for a perfectly
+  // good reason. Gated here, a town that never opens a juice bar is untouched.
+  // (The war chest is not load-bearing either way: in the 8-seed organic probe
+  // the whole arc fires with the fund reading 0 throughout, because the LINE OF
+  // CREDIT is what a small operator actually buys a shop with. What the chest
+  // adds is a rival whose shop is doing WELL getting there faster - which is
+  // exactly the handle the player's own price stepper has on her.)
+  bankRivalFund();
+  const gc = goingConcern(prize, 0);
+  rival.val = rival.val > 0 ? Math.round(rival.val * (1 - RIVAL_CFG.SMOOTH) + gc * RIVAL_CFG.SMOOTH) : gc;
+  rival.intent = rivalIntent();
+  const who = rivalName();
+  // a live offer runs out of road
+  if (rival.stage === "offer") {
+    if (day - rival.offerDay >= RIVAL_CFG.ANSWER_DAYS) refuseRivalOffer("lapsed");
+    else today.rival.push(who + " IS WAITING ON YOUR ANSWER - $" + fmt(rival.offer.price));
+    return;
+  }
+  if (rival.stage === "compete") {
+    if (!hers) {   // she lost her own shop: the fight is over and she says so
+      rival.stage = "none"; rival.intent = 0;
+      today.rival.push(who + " HAS OTHER PROBLEMS - THE " + BIZ[shop].short + " CAME FIRST");
+      return;
+    }
+    // ...and she only comes back with a number once she has actually spent
+    // REOFFER days competing. Without this the re-offer lands on the same
+    // settlement as her first move and she never gets to make one.
+    if (rival.intent >= RIVAL_CFG.OFFER && day - (rival.noDay || 0) >= RIVAL_CFG.REOFFER
+        && day - rival.lastOffer >= RIVAL_CFG.REOFFER) {
+      const q = rivalOfferPrice();
+      if (q.price >= q.worth * RIVAL_CFG.LOWBALL) { makeRivalOffer(); return; }
+    }
+    if (!runRivalCompete()) today.rival.push(who + " IS COMPETING WITH THE " + BIZ[prize].short);
+    return;
+  }
+  // ...and the two quiet stages
+  if (rival.intent >= RIVAL_CFG.OFFER && rival.stage === "eyeing"
+      && day - (rival.eyeDay || day) >= RIVAL_CFG.WARN_DAYS) {
+    const q = rivalOfferPrice();
+    if (q.price >= q.worth * RIVAL_CFG.LOWBALL) { makeRivalOffer(); return; }
+    // she wants it and cannot raise a number worth naming: that IS the warning,
+    // and it is written down, with the arithmetic, every night she is short
+    if (rival.stage !== "eyeing") startEyeing();
+    today.rival.push(who + " CAN RAISE $" + fmt(rivalRaise()) + " FOR THE " + BIZ[prize].short
+      + " - $" + fmt(q.worth));
+    return;
+  }
+  if (rival.intent >= (rival.stage === "eyeing" ? RIVAL_CFG.DROP : RIVAL_CFG.EYE)) {
+    if (rival.stage !== "eyeing") startEyeing();
+    else today.rival.push(who + " CAN RAISE $" + fmt(rivalRaise()) + " - THE "
+      + BIZ[prize].short + " IS WORTH $" + fmt(rivalWorth()));
+    return;
+  }
+  if (rival.stage === "eyeing") {
+    rival.stage = "none";
+    today.rival.push(who + " HAS STOPPED LOOKING AT THE " + BIZ[prize].short);
+  }
+}
+function startEyeing() {
+  const prize = RIVAL_CFG.PRIZE, who = rivalName();
+  rival.stage = "eyeing"; rival.eyeDay = day;
+  toast = { text: who + " HAS BEEN EYEING YOUR " + BIZ[prize].short + " ALL WEEK", t: 8 };
+  today.rival.push(who + " IS EYEING THE " + BIZ[prize].short);
+  const c = rivalCrab();
+  if (c) crabLog(c, "life", "STOOD LOOKING AT THE " + BIZ[prize].name, 0);
+  if (window._stats) (window._stats.rivalEyed = window._stats.rivalEyed || []).push({ day });
+}
+// FIRST IN THE QUEUE. If the bar ever FAILS, the crab who has been trying to
+// buy it for a fortnight does not wait her turn behind the deepest pocket in
+// town - that is the antagonism paying off. She still pays the market price
+// out of her own money, and she still has to be able to afford it.
+function rivalFirstRefusal(b) {
+  if (b !== RIVAL_CFG.PRIZE || rival.stage === "none" || !rivalOn()) return false;
+  const c = rivalCrab();
+  if (!c || c.p.sick) return false;
+  const price = salePrice(b), o = OWNERS[rivalOwnerId()];
+  if (rivalPurse() < price + SALE_CFG.RESERVE) return false;
+  // the buy path pays out of a crab's POCKET, so she draws the till down into
+  // it first - the owner draw the housing ladder already uses. Nothing minted.
+  const need = price + SALE_CFG.RESERVE - c.p.wallet;
+  if (need > 0 && o) { const d = Math.min(Math.max(0, o.till), need); o.till -= d; c.p.wallet += d; }
+  if (!buyBusiness(b, c)) return false;
+  rival.stage = "done"; rival.offer = null; rival.intent = 0;
+  today.rival.push(rivalName() + " WAS FIRST IN THE QUEUE FOR THE " + BIZ[b].short);
+  crabLog(c, "life", "GOT THE " + BIZ[b].short + " IN THE END", 0);
+  if (window._stats) (window._stats.rivalFirstRefusal = window._stats.rivalFirstRefusal || [])
+    .push({ day, biz: b, price });
+  return true;
+}
+// ---- ...AND THE OTHER WAY ROUND. The ownership layer is symmetric, so the
+// player can buy a shop that is NOT for sale, off an owner who is still
+// running it. Her ask is PUBLIC - painted on her own shopfront, itemized on
+// the job board - and it MOVES with her books: the going-concern price plus a
+// hold-out premium that scales with how much she fancies her chances. There is
+// no haggling minigame because the number IS the negotiation: out-compete her,
+// watch the ask fall, and buy her out. Two taps, because a shop is not a
+// misclick.
+let askArm = null, askArmT = 0;
+function rivalAsk(b) {
+  const oid = bizOwner(b);
+  const hold = oid === rivalOwnerId()
+    ? RIVAL_CFG.HOLD * Math.max(rival.intent, rival.stage === "compete" ? 1 : 0) : 0;
+  // ...and nobody sells the only shop they have at scrap-plus-a-bit
+  const only = oid && oid !== "player"
+    && Object.keys(BIZ).filter(b2 => bizOwner(b2) === oid).length === 1 ? RIVAL_CFG.ONLY : 0;
+  return goingConcern(b, hold + only);
+}
+function askChipRect(b) {
+  // the shoulder under the sign - the exact slot a player-owned shop's MANAGE
+  // chip occupies, because it is the same thing: the door into that owner's
+  // office. Clear of the CLOSED placard (118) and the stall tops.
+  const w = 54, z = BIZ[b];
+  return { x: Math.round((z.x0 + z.x1) / 2 - w / 2), y: 104, w, h: 11 };
+}
+function peerBizList() {   // shops somebody else is running - the ones you can make an offer on
+  return Object.keys(BIZ).filter(b => bizUnlocked(b) && !forSale(b)
+    && bizOwner(b) && bizOwner(b) !== "player");
+}
+function tapAskChip(b) {
+  if (!peerBizList().includes(b)) return false;
+  const price = rivalAsk(b), oid = bizOwner(b), o = OWNERS[oid];
+  if (coins < price) {
+    toast = { text: ownerName(oid) + " WANTS $" + fmt(price) + " FOR " + BIZ[b].name, t: 6 };
+    if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+    return false;
+  }
+  if (askArm !== b) {
+    askArm = b; askArmT = 3.5;
+    toast = { text: "TAP AGAIN TO BUY " + BIZ[b].name + " FOR $" + fmt(price), t: 4 };
+    if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+    return false;
+  }
+  askArm = null; askArmT = 0;
+  coins -= price;   // ...and out of it the same way, off the trading books
+  popText("-$" + fmt(price), (BIZ[b].x0 + BIZ[b].x1) / 2 - 12, 110, [255, 120, 120]);
+  if (o) o.till += price;     // the seller is PAID: a transfer between two owners, nothing minted
+  // her people are hers, not yours: the owner-operator steps down (to another
+  // counter if she holds one) and the payroll goes back to the pier
+  for (const k of allCrabs().slice()) {
+    if (k.p.job !== b && k.p.employer !== oid) continue;
+    if (k.p.owner === oid) stepDownOwner(k, oid, b);
+    else layOff(k);
+  }
+  BIZ[b].owner = "player"; BIZ[b].bought = true; BIZ[b].autoLabor = false;
+  bizStrike[b] = 0; delete market[b];
+  jobBoard = jobBoard.filter(j => j.biz !== b);
+  toast = { text: "YOU BOUGHT " + BIZ[b].name + " FROM " + ownerName(oid) + " FOR $" + fmt(price), t: 9 };
+  today.moved.push("BOUGHT " + BIZ[b].short + " FROM " + ownerName(oid) + " ($" + fmt(price) + ")");
+  popText("UNDER NEW OWNERSHIP", (BIZ[b].x0 + BIZ[b].x1) / 2 - 30, 100, [140, 255, 160]);
+  if (b === RIVAL_CFG.SHOP) {   // she has no balance sheet to be ambitious with any more
+    rival.stage = "none"; rival.intent = 0; rival.offer = null;
+    today.rival.push(rivalName() + " HAS NO SHOP TO BUILD ON NOW");
+  }
+  if (typeof sfx !== "undefined" && sfx.buy) sfx.buy();
+  if (window._stats) (window._stats.playerBuyouts = window._stats.playerBuyouts || [])
+    .push({ day, biz: b, price, from: ownerName(oid) });
+  save();
+  return true;
+}
+// An owner-operator who loses ONE lease is not out of business if they hold
+// another: they go and stand behind that counter instead. Clearing p.owner
+// unconditionally would ORPHAN the other shop at the next settlement (the
+// death seam reads exactly that field) - a latent fault from the day a peer
+// owner could hold two leases, and reachable now that one routinely does.
+function stepDownOwner(k, oid, exceptBiz) {
+  const other = Object.keys(BIZ).find(b2 => b2 !== exceptBiz && bizOwner(b2) === oid);
+  if (!other) { layOff(k); return; }
+  abortChef(k); abortErrand(k);
+  k.duty = false; k.pendingOff = false; k.kstate = "idle"; k.carrying = null;
+  k.dayState = "home"; k.cstate = "";
+  k.p.job = other; k.workBiz = other; k.p.shift = "D"; k.p.employer = null;
+  k.fishSpot = null;
+  crabLog(k, "work", "BACK BEHIND THE " + BIZ[other].short + " COUNTER", 0);
 }
 
 // ---------------------------------------------------------------- clock
@@ -1407,6 +2128,7 @@ function runWageRelations() {
 // nothing fires at all, so the rate cannot ping-pong across a knife edge.
 const WAGE_POLICY = {
   showers: { postDays: 1, trimOver: 1.12, tillFloor: 40, lossMemory: 3 },
+  juicebar: { postDays: 1, trimOver: 1.12, tillFloor: 40, lossMemory: 3 },   // same reason as HOURS_POLICY
 };
 let wagePolicyState = {};   // biz -> { cd, lost }  (persisted)
 function noteWageLoss(b) {  // somebody walked: the owner remembers for a few days
@@ -1613,7 +2335,7 @@ let manage = null;   // key of the player-owned business whose MANAGEMENT card i
 let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
   return { served: 0, revenue: 0, rage: 0, sick: [], died: [], recovered: [],
-    critical: [], walked: [], moved: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {},
+    critical: [], walked: [], moved: [], rival: [], byCrab: {}, repStart: 30, catchStart: 0, biz: {},
     tipsShared: 0, bused: 0 };
 }
 let screen = "title", hasSave = false, wiping = false;
@@ -1844,6 +2566,13 @@ function boredYields(c) {
     || (c.p.tired || 0) >= BORED_YIELD;
 }
 function wanderSpot(c, post) {
+  // A RIVAL EYEING A SHOP GOES AND STANDS OUTSIDE IT. Not a new behaviour -
+  // the same idle-hands trip every bored crab takes, aimed on purpose. This is
+  // the tell on the boardwalk, days before anything reaches a report.
+  if (rivalEyeing(c) && Math.random() < RIVAL_CFG.STAKEOUT) {
+    const z = BIZ[RIVAL_CFG.PRIZE];
+    return { x: z.queueX + 10, y: clearSpotY(z.queueX + 10, 156), label: "THE " + z.name, eyeing: true };
+  }
   const near = WANDER_SPOTS.filter(s => Math.abs(s.x - post) <= WANDER_PX);
   if (!near.length) return null;
   const s = near[(Math.random() * near.length) | 0];
@@ -2487,6 +3216,10 @@ function save() {
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
     mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
     tipShare: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].tipShare || 0; return m; })(),
+    // THE PRICE: one multiplier per shop (1 = the board price in the recipe
+    // table), plus the rivalry's whole state machine - see RIVAL_CFG
+    price: (() => { const m = {}; for (const k in BIZ) m[k] = bizPriceMul(k); return m; })(),
+    rival: rival,   // ...including her war chest, which is real money
     hoursPol: hoursPolicyState,
     // THE WAGE: per-business rates here, per-crab deals (p.wage/p.wageOwner)
     // and grievance (p.gripe/p.wageJob/p.wageDay/p.walkout) inside the
@@ -2651,6 +3384,13 @@ function load(slot) {
   // quantized on the way in, so a hand-edited 7.5 can't hand a crab 750%.
   if (s.tipShare) for (const b in s.tipShare)
     if (BIZ[b]) BIZ[b].tipShare = setTipShare(b, +s.tipShare[b] || 0);
+  // THE PRICE: an old save has no key at all, and 1 is the old board price.
+  // Clamped and 5%-snapped on the way in, so a hand-edited 9 can't charge $153
+  // for a taco. The rivalry rides in beside it - see loadRival().
+  for (const b in BIZ) BIZ[b].priceMul = 1;
+  if (s.price) for (const b in s.price)
+    if (BIZ[b] && s.price[b] != null) setBizPrice(b, +s.price[b]);
+  loadRival(s.rival);
   if (s.hoursPol) for (const b in s.hoursPol)
     if (BIZ[b] && s.hoursPol[b] && Array.isArray(s.hoursPol[b].hist))
       hoursPolicyState[b] = { hist: s.hoursPol[b].hist.slice(-4), cd: s.hoursPol[b].cd || 0 };
@@ -3402,7 +4142,7 @@ function pickErrand(c) {
     }
   }
   if (wantFood && staffed("shack")) {
-    const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= Math.ceil(r.pay * 1.25) + 2);
+    const affordable = BIZ.shack.recipes.filter(r => c.p.wallet >= localPrice("shack", r) + 2);
     if (affordable.length) {
       // treat yourself when flush, eat cheap when broke
       affordable.sort((a, b) => a.pay - b.pay);
@@ -3416,7 +4156,7 @@ function pickErrand(c) {
   if ((c.p.thirst || 0) >= 0.45) {
     const drinkAt = staffed("juicebar") ? "juicebar" : staffed("shack") ? "shack" : null;
     if (drinkAt) {
-      const drinks = BIZ[drinkAt].recipes.filter(r => DRINKS[r.id] && c.p.wallet >= Math.ceil(r.pay * 1.25) + 2);
+      const drinks = BIZ[drinkAt].recipes.filter(r => DRINKS[r.id] && c.p.wallet >= localPrice(drinkAt, r) + 2);
       if (drinks.length) {
         drinks.sort((a, b) => a.pay - b.pay);
         const r = c.p.wallet > 40 ? drinks[drinks.length - 1] : drinks[0];   // a COOLER when flush
@@ -3450,7 +4190,7 @@ function pickErrand(c) {
   // while you're the one handing out the kits".
   const rinseR = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];   // deluxe soak when flush
   const showerOpen = staffed("showers") && !(c.duty && c.workBiz === "showers");
-  const canShower = showerOpen && c.p.wallet >= Math.ceil(rinseR.pay * 1.25) + 2;
+  const canShower = showerOpen && c.p.wallet >= localPrice("showers", rinseR) + 2;
   if (needsBath && canShower) take({ biz: "showers", recipe: rinseR, need: "clean" });
   // THE STANDPIPE RINSE - the SAFETY NET, not a free shower. Cold water, no
   // soap, no towel: -0.35 against a $5 rinse's -0.5, pitched far above the
@@ -3466,7 +4206,7 @@ function pickErrand(c) {
   // bed rest otherwise: no arcade nights while ill
   if (!c.p.sick && (c.p.bored || 0) >= (off ? 0.35 : 0.6) && staffed("arcade")) {
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
-    if (c.p.wallet >= Math.ceil(r.pay * 1.25) + 2) take({ biz: "arcade", recipe: r, need: "fun" });
+    if (c.p.wallet >= localPrice("arcade", r) + 2) take({ biz: "arcade", recipe: r, need: "fun" });
   }
   let best = null, bestScore = 0;   // the chaining pick: best urgency per unit of detour
   for (const e of cand) {
@@ -3951,7 +4691,7 @@ function forcedErrand(c, b) {
       }
       return null;
     }
-    const aff = BIZ.shack.recipes.filter(r => c.p.wallet >= Math.ceil(r.pay * 1.25) + 2);
+    const aff = BIZ.shack.recipes.filter(r => c.p.wallet >= localPrice("shack", r) + 2);
     if (!aff.length) return null;
     aff.sort((a, b2) => a.pay - b2.pay);
     return { biz: "shack", recipe: c.p.wallet > 40 ? aff[(Math.random() * aff.length) | 0] : aff[0], need: "food" };
@@ -3959,12 +4699,12 @@ function forcedErrand(c, b) {
   if (!bizStaffed(b)) return null;
   if (b === "showers") {
     const r = BIZ.showers.recipes[c.p.wallet > 40 ? 1 : 0];
-    return c.p.wallet >= Math.ceil(r.pay * 1.25) + 2 ? { biz: b, recipe: r, need: "spa" } : null;
+    return c.p.wallet >= localPrice(b, r) + 2 ? { biz: b, recipe: r, need: "spa" } : null;
   }
   if (b === "arcade") {
     if (c.p.sick) return null;   // bed rest: no game nights while ill
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];
-    return c.p.wallet >= Math.ceil(r.pay * 1.25) + 2 ? { biz: b, recipe: r, need: "fun" } : null;
+    return c.p.wallet >= localPrice(b, r) + 2 ? { biz: b, recipe: r, need: "fun" } : null;
   }
   return null;
 }
@@ -4585,7 +5325,7 @@ function payAndBenefit(c, cust) {
   }
   if (c && c.p) today.byCrab[c.p.name] = (today.byCrab[c.p.name] || 0) + 1;
   if (cust.isCrab) {
-    const price = Math.ceil(cust.recipe.pay * 1.25);   // full retail, always - no broke-crab discounts
+    const price = localPrice(cust.biz, cust.recipe);   // full retail, always - no broke-crab discounts
     cust.crab.p.wallet = Math.max(0, cust.crab.p.wallet - price);
     creditBiz(cust.biz, price, cust.x, 126);
     if (window._stats && offToday(cust.crab)) {   // day-off spending, per crab (suite visibility)
@@ -4609,12 +5349,12 @@ function payAndBenefit(c, cust) {
     // `seatedWaiting` is exactly "this plate is going out to a seated guest" -
     // serve() calls us before it flips them to dining.
     const seated = cust.state === "seatedWaiting";
-    const tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult
+    const tip = menuPrice(cust.biz, cust.recipe) * 0.5 * (cust.patience / cust.maxPatience) * tipMult
       * (seated || window._fullCounterTip ? 1 : TIP_COUNTER);   // the flag is the paired-arm probe
     // one price on the menu, one price on the pop: the base. The tip is its
     // own little moment (Matt: 'are tacos 17 or 23? there are discrepancies')
-    creditBiz(cust.biz, cust.recipe.pay, cust.x, 126);
-    if (window._stats) window._stats.basePay = (window._stats.basePay || 0) + cust.recipe.pay;
+    creditBiz(cust.biz, menuPrice(cust.biz, cust.recipe), cust.x, 126);
+    if (window._stats) window._stats.basePay = (window._stats.basePay || 0) + menuPrice(cust.biz, cust.recipe);
     if (window._stats) {
       window._stats[seated ? "tipTableN" : "tipCounterN"] = (window._stats[seated ? "tipTableN" : "tipCounterN"] || 0) + 1;
       window._stats.tipGross = (window._stats.tipGross || 0) + tip;
@@ -4792,9 +5532,18 @@ function updateCustomers(dt) {
     // tourists pick a staffed business that is INSIDE its own open hours
     const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && !bizDark(b) && bizOpenNow(b) && allCrabs().some(c => c.duty && c.workBiz === b));
     if (open.length) {
-      const weights = open.map(b => b === "shack" ? 0.5 : b === "arcade" ? 0.22 : b === "juicebar" ? 0.3 : 0.1);
-      const wsum = weights.reduce((a, v) => a + v, 0);
-      let r = Math.random() * wsum, pick = open[0];
+      // The promenade is ZERO SUM by construction: the PRICE on a board moves
+      // the SHARES below, while the spawn interval underneath is computed from
+      // the UNPRICED weights - so undercutting takes trade off the shop next
+      // door and never conjures guests out of the sea. That is what makes a
+      // price war a war and not a growth strategy, for the player and for a
+      // rival alike. At the default price every appeal is exactly 1, so the
+      // stream is bit-identical to the frozen build.
+      const base = open.map(bizPullBase);
+      const wsum = base.reduce((a, v) => a + v, 0);
+      const weights = open.map(bizPull);
+      const psum = weights.reduce((a, v) => a + v, 0);
+      let r = Math.random() * psum, pick = open[0];
       for (let i = 0; i < open.length; i++) { r -= weights[i]; if (r <= 0) { pick = open[i]; break; } }
       // tourists never take the last slot - your own crew and neighbours eat too
       const tourQueue = customers.filter(k => k.biz === pick && !k.isCrab && k.state !== "leaving").length;
@@ -4804,7 +5553,7 @@ function updateCustomers(dt) {
       // beachgoers who'd never wait for a plate still grab a drink. Its weight
       // ADDS total traffic (interval shrinks so every other biz keeps the
       // exact flow it had before the bar opened).
-      const jbw = open.includes("juicebar") ? 0.3 : 0;
+      const jbw = open.includes("juicebar") ? bizPullBase("juicebar") : 0;
       spawnT = spawnEvery() * ((wsum - jbw) / wsum) * (0.7 + Math.random() * 0.6);
       return;
     }
@@ -4858,8 +5607,9 @@ function crabStatus(c) {
   }
   if (c.dayState === "working") {
     // IDLE HANDS: still clocked in, just not standing where you left them
-    if (c.wanderT > 0 && c.wander) return "WATCHING " + c.wander.label;
-    if (c.wander) return "WANDERED OFF TO " + c.wander.label;
+    // the rival's stakeout reads as what it is, not as a stroll
+    if (c.wanderT > 0 && c.wander) return (c.wander.eyeing ? "SIZING UP " : "WATCHING ") + c.wander.label;
+    if (c.wander) return (c.wander.eyeing ? "WALKING OVER TO " : "WANDERED OFF TO ") + c.wander.label;
     if (c.kstate === "work" && c.slotKind === "board") return "CHOPPING";
     if (c.kstate === "work" && c.slotKind === "grill") return "GRILLING";
     if (c.kstate === "toStallClean" || c.kstate === "cleaningStall") return "SCRUBBING A STALL";
@@ -5295,6 +6045,8 @@ cv.addEventListener("click", (ev) => {
       if (hit(R.op)) { setBizHours(manage, Math.min(h.open + 30, h.close - HOURS_SPAN_MIN), h.close); sfx.buy(); save(); return; }
       if (hit(R.cm)) { setBizHours(manage, h.open, Math.max(h.close - 30, h.open + HOURS_SPAN_MIN)); sfx.buy(); save(); return; }
       if (hit(R.cp)) { setBizHours(manage, h.open, h.close + 30); sfx.buy(); save(); return; }
+      if (hit(R.pm)) { setBizPrice(manage, bizPriceMul(manage) - PRICE_STEP); sfx.buy(); save(); return; }
+      if (hit(R.pp)) { setBizPrice(manage, bizPriceMul(manage) + PRICE_STEP); sfx.buy(); save(); return; }
       if ((manage === "shack" || manage === "juicebar") && hit(R.meal)) {
         b.mealPol = MEAL_POLS[(MEAL_POLS.indexOf(b.mealPol) + 1) % MEAL_POLS.length];
         sfx.ding(); save(); return;
@@ -5431,6 +6183,8 @@ cv.addEventListener("click", (ev) => {
     if (ffSleep) ffSleepDay = tmin < 6.5 * 60 ? day : day + 1;
     sfx.ding(); return;
   }
+  // ...and directly under it, the crab cycler: < crab >
+  if (tapCycler(p)) return;
   const wx = p.x + camX;
   // the job board is readable
   if (wx >= JOB_BOARD_X - 2 && wx < JOB_BOARD_X + 28 && p.y >= HOME_BOTTOM - 40 && p.y < HOME_BOTTOM + 4) {
@@ -5445,6 +6199,26 @@ cv.addEventListener("click", (ev) => {
     toast = { text: won ? "THE CRABALINA SAILS FROM THE PIER"
       : "THE FERRY OFFICE IS DOWN AT THE PIER - $" + ferryFare(), t: 5 };
     sfx.ding(); return;
+  }
+  // A STANDING OFFER on one of YOUR shopfronts: TAKE IT / NO. The sign is the
+  // owner's office door and this is the letter pushed under it, so it answers
+  // in the same place the MANAGE chip lives.
+  if (rivalOfferLive()) {
+    const R = rivalChipRects(RIVAL_CFG.PRIZE);
+    for (const which of ["take", "no"]) {
+      const r = R[which];
+      if (wx >= r.x - 3 && wx <= r.x + r.w + 3 && p.y >= r.y - 2 && p.y < r.y + r.h + 2) {
+        tapRivalChip(which); return;
+      }
+    }
+  }
+  // ...and the mirror of it: a PEER owner's shopfront carries their ASK, and
+  // the player can buy a shop that was never for sale. Two taps, same idiom.
+  for (const b of peerBizList()) {
+    const r = askChipRect(b);
+    if (wx >= r.x - 3 && wx <= r.x + r.w + 3 && p.y >= r.y - 2 && p.y < r.y + r.h + 2) {
+      tapAskChip(b); return;
+    }
   }
   // a shuttered shop's BUY chip: the player takes a failed business on through
   // the same shopfront the MANAGE chip lives on. Two taps - $200-odd is not a
@@ -5503,6 +6277,10 @@ addEventListener("keydown", (e) => {
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
+  // [ and ] step the selection through the town, exactly what the little crab
+  // cycler's chevrons do - the camera comes along, unlike an arrow-key pan
+  if (e.key === "[" && cyclerShown()) { cycleSel(-1); sfx.ding(); return; }
+  if (e.key === "]" && cyclerShown()) { cycleSel(1); sfx.ding(); return; }
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "Escape") { if (saveView) { closeSaveView(); return; } if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } sel = null; followIdx = -1; followNpc = null; followCust = null; }
@@ -6097,6 +6875,55 @@ function drawForSaleSigns() {
   }
 }
 
+// THE RIVALRY, PAINTED ON THE STREET. Same treatment as the FOR SALE boards:
+// drawn after the whole y-sorted pass, so a banner and its chips sit in FRONT
+// of the counters they belong to. Three things can be up at once and they
+// never share a row: the OFFER banner rides over the roofline at y=64, the
+// answer chips sit at counter height where a thumb already goes (the FOR SALE
+// chip's own slot - a shop cannot be both for sale and offered for), and a
+// peer owner's ASK takes the shoulder slot the MANAGE chip uses on your own
+// shops, because it is the same thing: the door into that owner's office.
+// Every rect comes out of the same geometry function the hit-test reads, so a
+// tap target can never drift from its pixels.
+function drawRivalSigns() {
+  const banner = (b, lbl, fg, bg) => {
+    const z = BIZ[b];
+    if (z.x1 - camX < 0 || z.x0 - camX > W) return;
+    const w2 = textWidth(lbl) + 12, x2 = Math.round((z.x0 + z.x1) / 2 - w2 / 2);
+    wrect(x2, 64, w2, 13, [30, 20, 36]);
+    wrect(x2 + 1, 65, w2 - 2, 11, bg);
+    if (x2 + w2 - camX > 0 && x2 - camX < W) text(ctx, lbl, x2 + 6 - camX, 67, fg);
+  };
+  const chip = (r, lbl, bg, fg) => {
+    wrect(r.x, r.y, r.w, r.h, [30, 20, 36]);
+    wrect(r.x + 1, r.y + 1, r.w - 2, r.h - 2, bg);
+    if (r.x - camX > -r.w && r.x - camX < W)
+      smallText(ctx, lbl, r.x + ((r.w - smallTextWidth(lbl)) >> 1) - camX, r.y + 3, fg || [30, 20, 36]);
+  };
+  const prize = RIVAL_CFG.PRIZE;
+  if (bizUnlocked(prize) && prizeIsPlayers() && rivalOn()) {
+    if (rivalOfferLive()) {
+      banner(prize, rivalName() + " OFFERS $" + fmt(rival.offer.price), [40, 24, 16], [255, 216, 96]);
+      const R = rivalChipRects(prize);
+      chip(R.take, "TAKE IT", [96, 200, 120]);
+      chip(R.no, "NO", [235, 150, 140]);
+    } else if (rival.stage === "compete") {
+      banner(prize, rivalName() + " IS COMPETING", [255, 240, 230], [180, 60, 40]);
+    } else if (rival.stage === "eyeing") {
+      banner(prize, rivalName() + " IS INTERESTED", [40, 24, 16], [222, 212, 196]);
+    }
+  }
+  // ...and every shop somebody else runs wears its price, so the player can
+  // always see what a buyout would cost before tapping anything
+  for (const b of peerBizList()) {
+    const z = BIZ[b];
+    if (z.x1 - camX < 0 || z.x0 - camX > W) continue;
+    const price = rivalAsk(b), armed = askArm === b;
+    chip(askChipRect(b), armed ? "TAP AGAIN" : "BUY $" + fmt(price),
+      coins >= price ? (armed ? [255, 200, 90] : [96, 200, 120]) : [190, 180, 180]);
+  }
+}
+
 function drawStation(key, kind, i) {
   const st = BIZ[key].stations[kind][i];
   const isBusy = busy[key] && busy[key][kind] && busy[key][kind][i];
@@ -6346,7 +7173,7 @@ function drawCustCard(k) {
   smallText(ctx, mood[0], 126 - smallTextWidth(mood[0]), 6, mood[1]);
   smallText(ctx, "TOURIST - IN TOWN FOR THE DAY", 29, 13, [120, 90, 60]);
   smallText(ctx, custStatus(k).slice(0, 26), 29, 21, [30, 110, 60]);
-  smallText(ctx, "WANTS: " + (ITEM_NAMES[k.recipe.icon] || "?") + " $" + k.recipe.pay, 29, 28, [140, 110, 40]);
+  smallText(ctx, "WANTS: " + (ITEM_NAMES[k.recipe.icon] || "?") + " $" + menuPrice(k.biz, k.recipe), 29, 28, [140, 110, 40]);
   smallText(ctx, "PATIENCE", 6, 44, [110, 110, 130]);
   rect(ctx, 40, 45, 60, 4, [30, 20, 36]);
   const pf = Math.max(0, Math.min(1, k.patience / (k.maxPatience || 50)));
@@ -6462,7 +7289,8 @@ function drawPanel() {
       if (!bizUnlocked(key) || bizOwner(key) !== "player") continue;   // your menu, your books
       for (const r of BIZ[key].recipes) {
         smallText(ctx, ITEM_NAMES[r.icon], 4, my, [190, 175, 160]);
-        smallText(ctx, "$" + r.pay + " / $" + INGREDIENT_COST[r.raw], 72, my, [140, 200, 150]);
+        smallText(ctx, "$" + menuPrice(key, r) + " / $" + INGREDIENT_COST[r.raw], 72, my,
+          bizPriceMul(key) === 1 ? [140, 200, 150] : [255, 190, 90]);
         my += MROW;
       }
     }
@@ -6766,6 +7594,90 @@ function followCrab(c) {
   else if (c.p.npc) { followNpc = c; followIdx = -1; followCust = null; }
   else { followIdx = crabs.indexOf(c); followNpc = null; followCust = null; }
 }
+
+// ---------------------------------------------------------------- CYCLE THE FOCUS
+// A pictorial next/prev: a little crab between two chevrons, no words, so it
+// reads the same in any language and at any canvas height. It steps the
+// SELECTION through the town and takes the CAMERA with it (followCrab sets
+// both), which is the whole point - you flick from crab to crab and watch each
+// one work.
+//
+// WHAT IT CYCLES: every resident crab, crew first then townsfolk - literally
+// allCrabs(), the town's own roster order. Visiting TOURISTS are deliberately
+// out: they are customer objects that arrive and go home mid-cycle, so a list
+// containing them has no stable length and "wrap around" stops meaning
+// anything. You can still click a tourist to follow one; the cycler then treats
+// them as "nothing selected" and steps to the first (or last) crab in town.
+//
+// WHERE IT LIVES: top-right, directly under the little sun, in the world area
+// rows 0..PANEL_Y that BOTH canvas modes share - so it is pixel-identical on
+// 240 and 288 and never fights the follow card (top-left) or the BILL/DEBT
+// chips (bottom-right). It hides behind any full-screen reading surface on
+// exactly the same terms the follow card does: the ledger, the management
+// card, the census, the save screen and the day report own the screen.
+function cycleList() { return allCrabs(); }
+const CYCLE_W = 48, CYCLE_H = 17;
+function cyclerRects() {
+  const x = W - CYCLE_W - 2, y = 29;
+  return { x, y, w: CYCLE_W, h: CYCLE_H,
+    prev:  { x, y, w: 14, h: CYCLE_H },
+    glyph: { x: x + 14, y, w: 20, h: CYCLE_H },
+    next:  { x: x + 34, y, w: 14, h: CYCLE_H } };
+}
+function cyclerShown() {
+  return screen === "play" && !gameOver
+    && !(dossier || manage || boardView || saveView || reportT > 0) && tab !== "menu"
+    && cycleList().length > 0;
+}
+// step the selection (and the camera with it) by dir, wrapping at both ends.
+// With nothing selected - or with a tourist selected, who is not in the list -
+// `>` takes the first crab in town and `<` takes the last.
+function cycleSel(dir) {
+  const list = cycleList();
+  if (!list.length) return null;
+  const i = list.indexOf(sel);
+  const next = i < 0 ? (dir > 0 ? list[0] : list[list.length - 1])
+    : list[((i + dir) % list.length + list.length) % list.length];
+  followCrab(next);
+  return next;
+}
+function tapCycler(p) {
+  if (!cyclerShown()) return false;
+  const R = cyclerRects();
+  const hit = (r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+  if (hit(R.prev)) { cycleSel(-1); sfx.ding(); return true; }
+  if (hit(R.next)) { cycleSel(1); sfx.ding(); return true; }
+  // the crab in the middle is a target too: it re-engages the camera on the
+  // crab you already picked, the same job the follow card's portrait does
+  if (hit(R.glyph)) { if (sel) followCrab(sel); else cycleSel(1); sfx.ding(); return true; }
+  return false;
+}
+function drawCycler() {
+  if (!cyclerShown()) return;
+  const R = cyclerRects();
+  rect(ctx, R.x, R.y, R.w, R.h, [30, 20, 36]);
+  rect(ctx, R.x + 1, R.y + 1, R.w - 2, R.h - 2, [255, 250, 235]);
+  // the two chevrons, drawn as pixels rather than typed: no words anywhere
+  const chev = (cx, cy, dir) => {
+    for (let i = 0; i < 4; i++) {
+      px(ctx, cx + i * dir, cy - i, [90, 60, 40]);
+      px(ctx, cx + i * dir, cy + i, [90, 60, 40]);
+      px(ctx, cx + i * dir + dir, cy - i, [90, 60, 40]);
+      px(ctx, cx + i * dir + dir, cy + i, [90, 60, 40]);
+    }
+  };
+  chev(R.prev.x + 4, R.y + 8, 1);    // "<" : apex on the left, arms opening right
+  chev(R.next.x + 9, R.y + 8, -1);   // ">" : apex on the right
+  // ...and the crab itself, wearing the selected shell so you can see whose
+  // it is. Nothing selected: the first crab in town, which is exactly who a
+  // tap is about to give you.
+  const who = cycleList().indexOf(sel) >= 0 ? sel : cycleList()[0];
+  const col = who && who.p ? who.p.color : 0;
+  rect(ctx, R.glyph.x, R.y + 1, R.glyph.w, R.h - 2, [200, 230, 245]);
+  blit(ctx, CRAB_ARTS[col].a, R.glyph.x + 2, R.y + 3);   // 16x12 art, centred in the 20x17 chip
+  const acc = who && who.p ? ACCESSORIES[crabHat(who)] : null;
+  if (acc) blit(ctx, acc.art, R.glyph.x + 2 + acc.dx, R.y + 3 + acc.dy);
+}
 function dossierBar(R, c, diary) {
   const chip = (r, label, hot, dim) => {
     rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
@@ -6838,7 +7750,7 @@ function drawCustDossier(k) {
     ly += 9;
   };
   row("NOW", custStatus(k).slice(0, 32), [70, 90, 130]);
-  row("ORDER", (ITEM_NAMES[k.recipe.icon] || "?") + " - $" + k.recipe.pay + (k.served ? " - PAID" : ""), [140, 110, 40]);
+  row("ORDER", (ITEM_NAMES[k.recipe.icon] || "?") + " - $" + menuPrice(k.biz, k.recipe) + (k.served ? " - PAID" : ""), [140, 110, 40]);
   row("MOOD", !k.served && k.patience < 15 ? "ABOUT TO WALK OUT" : k.happy || k.served ? "HAVING A GREAT TIME" : "WAITING PATIENTLY",
     !k.served && k.patience < 15 ? [190, 80, 80] : [40, 150, 70]);
   ly += 2;
@@ -7039,7 +7951,11 @@ function manageRects() {
     op: { x: x + 88, y: y + 44, w: 16, h: 16 },   // open +30
     cm: { x: x + 146, y: y + 44, w: 16, h: 16 },  // close -30
     cp: { x: x + 200, y: y + 44, w: 16, h: 16 },  // close +30
-    meal: { x: x + 6, y: y + 108, w: 156, h: 14 },
+    // THE PRICE lives with the takings it changes: big steppers, the board
+    // price they imply, and the meal chip pushed down 2px to make room
+    pm: { x: x + 40, y: y + 92, w: 16, h: 15 },
+    pp: { x: x + 96, y: y + 92, w: 16, h: 15 },
+    meal: { x: x + 6, y: y + 110, w: 156, h: 14 },
     // ---- SCHEDULE tab
     auto: { x: x + 6, y: y + 30, w: 104, h: 13 },
     sickPol: { x: x + 114, y: y + 30, w: 104, h: 13 },
@@ -7126,20 +8042,44 @@ function drawManage() {
       + "   COVER " + bizShiftWindow(key, "cover").label, x + 8, y + 65, [70, 90, 130]);
     smallText(ctx, "OVERTIME RUNS INSIDE THESE HOURS", x + 8, y + 74, [150, 140, 160]);
     const bk = today.biz[key] || { take: 0, cost: 0 };
-    smallText(ctx, "TODAY", x + 8, y + 88, [58, 42, 38]);
-    smallText(ctx, "TOOK $" + fmt(bk.take), x + 44, y + 88, [40, 150, 70]);
-    smallText(ctx, "COSTS $" + fmt(bk.cost), x + 104, y + 88, [190, 80, 80]);
-    smallText(ctx, "RENT $" + b.rent, x + 166, y + 88, [140, 110, 40]);
+    smallText(ctx, "TODAY", x + 8, y + 84, [58, 42, 38]);
+    smallText(ctx, "TOOK $" + fmt(bk.take), x + 44, y + 84, [40, 150, 70]);
+    smallText(ctx, "COSTS $" + fmt(bk.cost), x + 104, y + 84, [190, 80, 80]);
+    smallText(ctx, "RENT $" + b.rent, x + 166, y + 84, [140, 110, 40]);
+    // ---- THE PRICE. One multiplier, the whole board underneath it, and what
+    // it costs you: cheap pulls footfall off the shop next door and thins
+    // every margin you have. The promenade is zero sum - see the spawn weights.
+    {
+      const mul = bizPriceMul(key), pct = Math.round(mul * 100);
+      smallText(ctx, "PRICE", x + 8, y + 97, [58, 42, 38]);
+      btn(R.pm, "-"); btn(R.pp, "+");
+      const pTxt = pct + "%";
+      text(ctx, pTxt, x + 58 + ((38 - textWidth(pTxt)) >> 1), y + 97,
+        pct === 100 ? [40, 30, 40] : pct < 100 ? [190, 110, 40] : [40, 110, 60]);
+      const menu = b.recipes.slice(0, 3).map(r => (ITEM_NAMES[r.icon] || "?") + " $" + menuPrice(key, r)).join("  ");
+      smallText(ctx, menu.slice(0, 34), x + 118, y + 92, [110, 100, 110]);
+      // 100px of card between here and the right edge: ~25 characters of 3x5
+      smallText(ctx, pct === 100 ? "THE BOARD PRICE"
+        : pct < 100 ? "MORE FEET, THIN MARGIN"
+        : "FEWER FEET, FAT MARGIN", x + 118, y + 101,
+        pct === 100 ? [150, 140, 160] : [190, 110, 40]);
+    }
     if (key === "shack" || key === "juicebar") {
       chip(R.meal, "STAFF MEALS: " + MEAL_POL_LABEL[b.mealPol], "TAP", false);
       smallText(ctx, b.mealPol === "retail" ? "CREW PAY MENU PRICE AT THE PANTRY"
         : b.mealPol === "atcost" ? "CREW PAY ONLY THE INGREDIENTS"
         : "ON THE HOUSE - THE TILL EATS THE COST", R.meal.x + 4, R.meal.y + R.meal.h + 2, [110, 100, 110]);
     }
+    // THE RIVALRY, in numbers, on the management screen where the owner asked
+    // for them: what she wants, what she is paying, and what she is doing to
+    // her own board, hours and wage to take your trade.
     const sale0 = saleList()[0];
-    smallText(ctx, sale0 ? "FOR SALE: " + BIZ[sale0].name + " $" + fmt(salePrice(sale0)) + " - TAP ITS SIGN"
-      : "ROSTER + OT + SICK DAYS: SEE THE SCHEDULE TAB", x + 8, y + h2 - 26,
-      sale0 ? [180, 60, 40] : [150, 140, 160]);
+    const riv = rivalManageLines(key);
+    smallText(ctx, riv[0] || (sale0 ? "FOR SALE: " + BIZ[sale0].name + " $" + fmt(salePrice(sale0)) + " - TAP ITS SIGN"
+      : "ROSTER + OT + SICK DAYS: SEE THE SCHEDULE TAB"), x + 8, y + h2 - 26,
+      riv[0] ? [180, 60, 40] : sale0 ? [180, 60, 40] : [150, 140, 160]);
+    // ...and the numbers under it, kept clear of the DONE chip on the right
+    if (riv[1]) smallText(ctx, riv[1].slice(0, 40), x + 8, y + h2 - 17, [110, 100, 110]);
   } else if (manageTab === "SCHEDULE") {
     const auto = !!b.autoLabor;
     chip(R.auto, "AUTO-MANAGE " + (auto ? "ON" : "OFF"), null, auto);
@@ -7545,6 +8485,24 @@ function drawJobBoard() {
     smallText(ctx, "A DAY ON THE PIER PAYS ABOUT $" + Math.round(pierDay()), x + 12, ly,
       pierDay() > j.wage ? [180, 60, 40] : [110, 110, 130]); ly += 9;
   }
+  {   // THE RIVALRY, in two lines at the top of the wall. This board is a full
+      // card already (the payroll block below has carried a bottom guard for
+      // exactly that reason), so it takes the headline and the one number that
+      // matters and leaves the detail to the management screen. Its ~46
+      // characters of 3x5 is what sets the slice.
+    const riv = rivalManageLines();
+    const peers = peerBizList();
+    if (riv[0]) {
+      smallText(ctx, riv[0].slice(0, 46), x + 6, ly, [180, 60, 40]); ly += 7;
+      smallText(ctx, riv[1].slice(0, 46), x + 6, ly, [140, 110, 40]); ly += 9;
+      // (what SHE would take for HER shop is painted on her own shopfront and
+      // itemized on the management card - two lines is what this wall has)
+    } else if (peers.length) {
+      const b = peers[0];
+      smallText(ctx, BIZ[b].name + " WOULD SELL FOR $" + fmt(rivalAsk(b)) + " - TAP ITS SIGN",
+        x + 6, ly, coins >= rivalAsk(b) ? [40, 150, 70] : [110, 110, 130]); ly += 9;
+    }
+  }
   {   // BUSINESSES FOR SALE: the board carries the town's opportunities, not
       // just its vacancies. Price, why it closed, and how long it has stood
       // empty - a shop nobody can afford stays here until somebody can.
@@ -7593,6 +8551,7 @@ function drawJobBoard() {
     smallText(ctx, "EACH", cPr - smallTextWidth("EACH"), ly, [150, 140, 160]);
     ly += 7;
     for (const kind of Object.keys(IMPORTS)) {
+      if (ly > y + h2 - 20) break;   // a full board stops at its own frame
       const im = IMPORTS[kind];
       drawCommodity(kind, x + 6, ly - 1);
       smallText(ctx, im.name, x + 16, ly, [90, 90, 105]);
@@ -7629,7 +8588,8 @@ function drawReport() {
   if (!report || reportT <= 0) return;
   const creditLines = (report.drew ? 1 : 0) + (report.interest ? 1 : 0) +
     (report.loanPaid ? 1 : 0) + (report.debt ? 1 : 0)
-    + (report.tipsShared ? 1 : 0) + (report.bused ? 1 : 0);   // the table-service ledger
+    + (report.tipsShared ? 1 : 0) + (report.bused ? 1 : 0)   // the table-service ledger
+    + (report.rival || []).length;                            // ...and the rivalry
   const w2 = 176, x = ((W - w2) / 2) | 0, y = 24, h2 = 118 + creditLines * 8 + (report.off ? 8 : 0);
   ctx.fillStyle = "rgba(16,12,30,0.55)";
   ctx.fillRect(0, 0, W, PANEL_Y);
@@ -7664,6 +8624,10 @@ function drawReport() {
   for (const n of report.died) smallText(ctx, n + " HAS PASSED AWAY", x + 6, ly, [180, 60, 60]), ly += 7;
   // the warning line: named, the night BEFORE the death roll arms
   for (const n of (report.critical || [])) smallText(ctx, n + " IS FADING - NEEDS CARE", x + 6, ly, [200, 90, 70]), ly += 7;
+  // THE RIVALRY gets its own lane and its own colour: a peer owner coming for
+  // one of your shops is the loudest thing that can happen in a day
+  for (const n of (report.rival || []))
+    smallText(ctx, n, x + 6, ly, [200, 120, 40]), ly += 7;
   // IDLE HANDS' late stage, announced the night BEFORE it costs anything
   for (const n of (report.walked || []))
     smallText(ctx, n + " HAS HAD ENOUGH - OFF TOMORROW", x + 6, ly, [110, 120, 180]), ly += 7;
@@ -7691,6 +8655,7 @@ function frame(now) {
   if (saleArmT > 0) { saleArmT -= dt; if (saleArmT <= 0) saleArm = null; }
   if (ferryArm > 0) ferryArm -= dt;
   if (won) winT += dt;   // the beat before the ending card: she comes alongside first
+  if (askArmT > 0) { askArmT -= dt; if (askArmT <= 0) askArm = null; }
   if (saveMsg && saveMsg.t > 0) { saveMsg.t -= dt; if (saveMsg.t <= 0) saveMsg = null; }
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
@@ -7852,6 +8817,9 @@ function frame(now) {
         if (--o.darkT === 0) toast = { text: BIZ[b].name + " IS BACK IN BUSINESS", t: 6 };
         continue;
       }
+      // a rival's WAR CHEST comes out before a rent is missed: saving up to buy
+      // the shop next door must never be the thing that shuts your own
+      rivalRaidFund(b);
       const nf = settleCreditLine(o.credit || 0, o.till, BIZ[b].rent);
       o.credit = nf.bal; o.till = Math.max(0, nf.funds);   // interest lands either way; a missed bill stays owed
       if (nf.ok && !nf.missedMin) bizStrike[b] = 0;        // a clean night wipes the slate
@@ -7862,6 +8830,9 @@ function frame(now) {
     // the day's takings are booked, empty shops go on the market, and the
     // market clears - one call, all of it in its own block above
     runSuccession();
+    // ...and the peer owner who wants a shop that is NOT for sale reads her
+    // own books, one move a night (see THE RIVALRY)
+    runRivalAmbition();
     for (const c of npcs) {
       c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.1);
     }
@@ -7980,6 +8951,7 @@ function frame(now) {
         wages, rent, sick: today.sick.slice(0, 3), died: today.died.slice(0, 2),
         critical: today.critical.slice(0, 2), walked: today.walked.slice(0, 3),
         recovered: today.recovered.slice(0, 2), moved: today.moved.slice(0, 2),
+        rival: (today.rival || []).slice(0, 2),
         off: offNames.slice(0, 4).join(", "),
         repStart: Math.round(today.repStart), repEnd: Math.round(rep),
         best: Object.keys(today.byCrab).sort((a, b) => today.byCrab[b] - today.byCrab[a])[0],
@@ -8155,6 +9127,7 @@ function frame(now) {
   paint.sort((a, b) => a.base - b.base);
   for (const e of paint) e.f();
   drawForSaleSigns();   // boards go over the furniture, and the price has to read from the street
+  drawRivalSigns();     // ...and so do a rival's offer, her competition and her own asking price
   drawSwoop();
   drawFloaters(dt);
   {  // directed-crab marker: a bouncing flag where the followed crab was sent
@@ -8180,6 +9153,7 @@ function frame(now) {
   drawManage();
   drawDossier();   // above the management card: a census row opens a dossier ON TOP of it
   drawFollowCard();
+  drawCycler();   // < crab > : step the selection (and the camera) through the town
   {  // town reputation chip, top-right of the world
     const rTxt = "REP " + Math.round(rep);
     const rw = smallTextWidth(rTxt) + 8;
