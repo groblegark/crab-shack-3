@@ -430,6 +430,18 @@ function fitSmall(str, maxW) {
   while (out.length && smallTextWidth(out + "..") > maxW) out = out.slice(0, -1);
   return out.replace(/[\s,]+$/, "") + "..";
 }
+// ...and the same thing for the 5x7. It was missing, so every 5x7 string that
+// needed trimming was trimmed by CHARACTER COUNT instead - `name.slice(0, 9)` -
+// which is the exact guess-about-a-proportional-budget this file already has a
+// paragraph about. Found by a long name: the character card prints the name at
+// x29 and the mood right-aligned to x104, and "TIDEPOOL TIM" is 71px of 5x7,
+// so the name ran straight through DOWN and the two words became one.
+function fitText(str, maxW, spacing) {
+  if (textWidth(str, spacing) <= maxW) return String(str);
+  let out = String(str);
+  while (out.length && textWidth(out + "..", spacing) > maxW) out = out.slice(0, -1);
+  return out.replace(/[\s,]+$/, "") + "..";
+}
 function localPrice(b, r) { return Math.ceil(menuPrice(b, r) * 1.25); }                // ...and locals pay +25% of that
 // How attractive this shop's board looks to somebody walking past. Cheap pulls,
 // dear pushes, and the curve is flat enough that a 30% cut is worth about a
@@ -3461,6 +3473,72 @@ const UPS = {
 for (const k in UPS) UPS[k].key = k;
 function upCost(u) { return Math.ceil(u.base * Math.pow(u.mult, u.key === "chef" ? u.lvl - 2 : u.lvl)); }
 
+// ------------------------------------------------------- WHAT A SHOP BUTTON DOES
+// "Go to the shop. WHAT DO THESE THINGS DO? TOOLTIP TIME!" - the first outside
+// playtest, and the highest-value line in it. Every rung of the shop grid was a
+// NAME and a PRICE and nothing else, so a new player was spending a third of
+// their opening float on a word they had to guess the meaning of.
+//
+// THE RULING DRAWS THE LINE THROUGH THE MIDDLE OF THIS FEATURE (PLAN: interface
+// opacity is a bug, economic uncertainty is the game). A tooltip is allowed to
+// say three things, and all three are FACTS ABOUT THE MACHINE:
+//   1. what the thing is and what it changes about the town,
+//   2. what it costs once,
+//   3. what it costs EVERY NIGHT afterwards - a wage, or a second rent.
+// It is not allowed to say the fourth thing: whether it will pay for itself.
+// No projected income, no payback period, no "recommended". Deciding whether a
+// third crab earns her wage is the game, and a tooltip that answered it would
+// sand off the exact tension that made the playtester stay.
+//
+// Point 3 is the one that earns its keep. HIRE CRAB and ARCADE are both
+// one-off prices on the button and both of them are really a standing order
+// against every future 20:00, and nothing on screen said so.
+const UP_HELP = {
+  chef: ["ONE MORE CRAB ON YOUR CREW. THEY COOK, CARRY PLATES",
+         "AND CLEAR TABLES ON A SHIFT OF THEIR OWN."],
+  grill: ["A SECOND GRILL IN THE SHACK'S KITCHEN, SO TWO CRABS",
+          "CAN COOK AT THE SAME TIME INSTEAD OF QUEUEING."],
+  board: ["ANOTHER PREP BOARD BESIDE THE GRILL. THE STEP",
+          "BEFORE COOKING STOPS BEING THE BOTTLENECK."],
+  table: ["ANOTHER TABLE ON THE SHACK'S DECK. GUESTS WHO GET",
+          "A SEAT EAT SITTING DOWN - AND SEATED GUESTS TIP."],
+  juicebar: ["THE EMPTY LOT DOWN THE PROMENADE BECOMES A SECOND",
+             "BUSINESS OF YOURS. IT NEEDS A CRAB TO WORK IT."],
+  arcade: ["THE CLAWCADE BECOMES YOURS: A SECOND BUSINESS THAT",
+           "SELLS FUN INSTEAD OF FOOD. IT NEEDS STAFFING TOO."],
+  cadegear: ["MORE MACHINES ON THE ARCADE FLOOR, SO MORE CRABS",
+             "CAN PLAY AT ONCE INSTEAD OF STANDING IN LINE."],
+};
+// WHAT CHANGES, DERIVED. Every one of these is read out of the same function
+// the SIM uses (stationCap, bizTables, crabs.length), never typed as a
+// literal - so a tooltip cannot drift away from what the button actually does,
+// and a scenario can prove the promise by buying the thing and re-reading it.
+function upEffect(key) {
+  const cap = (kind) => stationCap(key === "cadegear" ? "arcade" : "shack", kind);
+  switch (key) {
+    case "chef": return "CREW " + crabs.length + " -> " + (crabs.length + 1);
+    case "grill": return "GRILLS " + cap("grill") + " -> " + (cap("grill") + 1);
+    case "board": return "PREP BOARDS " + cap("board") + " -> " + (cap("board") + 1);
+    case "table": {
+      const t = (bizTables("shack") || []).length;
+      return "TABLES " + t + " -> " + (t + 1);
+    }
+    case "cadegear": return "MACHINES " + cap("claw") + " -> " + (cap("claw") + 1);
+    case "juicebar": case "arcade":
+      return "BUSINESSES " + ownedBizList().length + " -> " + (ownedBizList().length + 1);
+  }
+  return "";
+}
+// ...AND WHAT IT COSTS YOU FOREVER. The nightly consequence, in the same words
+// the BILL chip and the MENU column use, off the same live settings - so
+// dropping the shack's wage on the management card changes what the HIRE CRAB
+// button promises, because it changes what a hire actually costs.
+function upOngoing(key) {
+  if (key === "chef") return "+$" + bizWage("shack") + " A SHIFT ON TONIGHT'S BILL";
+  if (key === "arcade" || key === "juicebar") return "+$" + BIZ[key].rent + " RENT EVERY NIGHT, FOREVER";
+  return "NOTHING MORE TO PAY AT 20:00";
+}
+
 function stationCap(bizKey, kind) {
   if (bizKey === "shack" && kind === "grill") return 1 + UPS.grill.lvl;
   if (bizKey === "shack" && kind === "board") return 1 + UPS.board.lvl;
@@ -3507,6 +3585,20 @@ let toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x, 3=6x
 // hours you spent paused.
 let paused = false;
 const FF_SPEED = [1, 2, 3, 6];
+// ---------------------------------------------------------------- the legible half
+// All three of these are DRAW-ONLY state off the same playtest. Nothing in this
+// group is ever read by the simulation; every one of them is a thing the player
+// could not see happening.
+//   shopTip   - which shop button's tooltip is on screen (see UP_HELP)
+//   helpView  - the HELP card, and which page of it
+//   hireCard  - the crab who just joined, and the seconds left on their card
+//   dayOpen   - what the till held at midnight, so "is my money going up?" has
+//               an answer that is HISTORY rather than a forecast
+let shopTip = null;
+let helpView = false, helpPage = 0, helpSeen = false, helpNudged = false;
+let hireCard = null;
+const HIRE_CARD_T = 8;      // long enough to read five lines and still watch them walk
+let dayOpen = 0;
 let camX = 1180, followIdx = -1, followNpc = null, followCust = null, tab = "crew";
 // SELECTION is not the camera. Click a crab to select (and focus) them; pan
 // away and the camera lets go but the selection - and its card, and the right-
@@ -4558,6 +4650,12 @@ function save() {
       stand: hall.stand, nominee: hall.nominee, plat: hall.plat },
     board: jobBoard, hireDay, trade, sudsRefund: sudsRefunded, firstPour,
     musicOn, musNudges,
+    // TWO PURELY LEGIBILITY FIELDS. `dayOpen` is the mark the panel's TODAY
+    // readout measures from, and it has to ride the save or a reload would
+    // report the whole day's takings as having happened since you came back.
+    // `helpSeen` is the once-only pulse on the HELP chip: a returning player
+    // should not be nagged about a card they have already read.
+    dayOpen: Math.round(dayOpen), helpSeen,
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
     mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
     tipShare: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].tipShare || 0; return m; })(),
@@ -4611,6 +4709,10 @@ function load(slot) {
   if (!Array.isArray(s.personas) || !s.personas.length) return false;   // reject before touching state
   coins = s.coins || 0; lifetime = s.lifetime || 0;
   day = s.day || 1; tmin = s.tmin != null ? s.tmin : 7 * 60;
+  // an old save has no midnight mark: open the day here rather than pretend
+  // the town has earned nothing, which would read as a huge false loss
+  dayOpen = typeof s.dayOpen === "number" ? s.dayOpen : coins;
+  helpSeen = !!s.helpSeen; helpNudged = helpSeen;
   lastRentDay = s.lastRentDay || 0;
   if (s.gameOver) { gameOver = true; screen = "play"; }
   bankrupt = !!s.bankrupt;
@@ -5359,11 +5461,11 @@ function hireCrew() {
   const pick = eligible.find(k => k.state === "waiting" || k.state === "arriving")
     || eligible.find(k => k.state !== "showering" && k.state !== "toStall" && k.state !== "waitStall")
     || eligible[0];
-  let c;
+  let c, how;
   if (pick) {
     c = convertTourist(pick);
     today.moved.push(c.p.name + " JOINED THE CREW (WAS VISITING)");
-    toast = { text: c.p.name + " LOVED IT HERE - JOINED THE CREW!", t: 6 };
+    how = "WAS HERE ON HOLIDAY - LIKED IT AND STAYED";
   } else {
     // nobody's visiting: the ad goes out and a new face answers, riding the
     // morning bus in - mechanically the hire completes now, so they walk
@@ -5376,9 +5478,31 @@ function hireCrew() {
     crabs.push(c);
     crabLog(c, "life", "ANSWERED THE AD AND RODE THE BUS IN", 0);   // DIARY
     today.moved.push(c.p.name + " JOINED THE CREW (OFF THE BUS)");
-    toast = { text: c.p.name + " ANSWERED THE AD - JUST OFF THE BUS", t: 6 };
+    how = "ANSWERED THE AD - CAME IN ON THE BUS";
   }
   popText(c.p.name + " JOINS THE CREW!", c.x - 20, FLOOR_Y - 30, [140, 255, 160]);
+  // "HIRED A CRAB. DON'T EVEN SEE THE CRAB. HE JUST JOINED THE CREW. WHAT DOES
+  // IT MEAN?" - the playtest again, and it was a straight omission: the whole
+  // visible consequence of the most expensive button in the game was a toast
+  // and a new face on a roster you were not looking at.
+  //
+  // THREE THINGS HAPPEN NOW, and the order matters. The CAMERA goes to them
+  // (followCrab sets selection and camera together, so the character card comes
+  // up on them as well); a POINTER bounces over their head for as long as the
+  // card is up, so "which one is that" is answered in the world rather than on
+  // a list; and the CARD says who they are and what they will cost - the shift
+  // they are on, the wage that lands on tonight's bill, and where they sleep,
+  // because a hire starts homeless like everybody else and a new player has no
+  // way to know that. Nothing here is read by the sim.
+  followCrab(c);
+  // ...and the camera SNAPS rather than eases. The follow lerp is `dt * 5`, so
+  // a hire two thousand pixels away would slide across the whole town while the
+  // card is already up - and PAUSING to read it would freeze the camera
+  // mid-slide, with the card pointing at nobody. Snapping is the idiom the ferry
+  // ending and the nav strip's tap already use for "go and look at this".
+  camX = clampCam(c.x - W / 2 + 8);
+  hireCard = { c, how, t: HIRE_CARD_T };
+  toast = null;   // the card says it all, and a toast under it would be two voices
   return c;
 }
 
@@ -8263,6 +8387,24 @@ function tryBuy(key) {
   if (key === "chef") hireCrew();   // recruited from the tourist pool (or the bus), never minted with a house
   sfx.buy(); save();
 }
+// THE TAP PATH, and it is deliberately NOT tryBuy. Same shape as tapSaleChip
+// and tapFerryChip: the world click handler decides only WHICH button was hit,
+// this decides what a tap on it MEANS, and tryBuy stays the one function that
+// moves money (which is why every tool and every scenario can keep driving it
+// directly without going through an arming state).
+//
+// ONE RULE, TWO INPUT DEVICES. A tap buys the thing whose tooltip is ALREADY
+// ON SCREEN, and otherwise puts the tooltip on screen. On a mouse that is a
+// single click, because moving the pointer over the button showed the tooltip
+// on the way in - hover does the arming for free. On a touchscreen, where
+// there is no hover and never will be, it is read-then-buy. Neither device
+// gets a mode the other one does not have; it is the same sentence.
+function tapShopButton(key) {
+  if (!key) return false;
+  if (shopTip !== key) { shopTip = key; sfx.ding(); return true; }
+  tryBuy(key);
+  return true;
+}
 
 // THE FERRY'S BUY PATH, whole - the same shape as tapSaleChip, for the same
 // reason: the world click handler decides only WHICH chip was hit, so the
@@ -8337,7 +8479,18 @@ cv.addEventListener("mousedown", (ev) => {
   if (navTrackHit(p)) { navDrag = true; navDragX = p.x; return; }
   if (p.y < PANEL_Y) { dragging = true; dragStartX = p.x; dragCamX = camX; dragMoved = false; }
 });
+// HOVER IS A LUXURY, NOT THE MECHANISM. A mouse gets the shop tooltip for
+// free by moving over a button - which is why a click on a hovered button
+// buys rather than arming (see tapShopButton). A touchscreen never fires this
+// listener at all and reaches exactly the same place in two taps.
+function shopHoverAt(p) {
+  if (tab !== "shop" || !shopTipLive(true)) return;
+  for (const b of BUTTONS)
+    if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) { shopTip = buttonKey(b); return; }
+  shopTip = null;   // off the grid: put the card away rather than leaving it armed
+}
 addEventListener("mousemove", (ev) => {
+  shopHoverAt(evPos(ev));
   if (tipDrag) { tipSliderTo(manage, evPos(ev).x); return; }
   if (navDrag) {
     const p = evPos(ev);
@@ -8409,10 +8562,18 @@ function clampCam(x) { return Math.max(0, Math.min(WORLD_W - W, x)); }
 
 cv.addEventListener("click", (ev) => {
   if (window.MergeMode && MergeMode.active()) return;
+  // THE HELP CARD SWALLOWS EVERYTHING, and it is tested first because it draws
+  // last: it is reachable from the title screen, from play, and from game over,
+  // so there is no screen it can be under.
+  if (helpView) { tapHelp(evPos(ev)); return; }
   if (saveView) { handleSaveClick(evPos(ev)); return; }   // the towns card swallows every click
   if (screen === "title") {
     const p = evPos(ev);
     const bx = W / 2 - 50;
+    {
+      const r = titleHelpRect();
+      if (p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h) { toggleHelp(); return; }
+    }
     if (p.x >= bx && p.x < bx + 100) {
       if (hasSave && p.y >= 118 && p.y < 134) { screen = "play"; startMusic(); sfx.ding(); return; }
       const ny = hasSave ? 138 : 122;
@@ -8618,6 +8779,12 @@ cv.addEventListener("click", (ev) => {
   startMusic();
   const p = evPos(ev);
   if (dragMoved) return;
+  {  // the hire card: a tap on it puts it away and gives the town back
+    const HR = hireCardRect();
+    if (hireCardLive() && p.x >= HR.x - 2 && p.x < HR.x + HR.w + 2 && p.y >= HR.y - 2 && p.y < HR.y + HR.h + 2) {
+      hireCard = null; sfx.ding(); return;
+    }
+  }
   // panel
   if (p.y >= PANEL_Y) {
     if (p.y < TAB_Y - 1) {
@@ -8635,15 +8802,18 @@ cv.addEventListener("click", (ev) => {
       if (p.x >= 145) { toggleMute(); if (!muted) sfx.ding(); return; }        // the speaker
     }
     if (p.y >= TAB_Y && p.y < TAB_Y + TAB_H) {
-      if (p.x >= 4 && p.x < 36) { tab = "crew"; return; }
-      if (p.x >= 38 && p.x < 70) { tab = "shop"; return; }
+      // LEAVING THE SHOP TAB DISARMS IT. A tooltip that is off screen must
+      // never still be the thing a tap would buy - come back to the tab and
+      // the first tap reads again, exactly as it did the first time.
+      if (p.x >= 4 && p.x < 36) { tab = "crew"; shopTip = null; return; }
+      if (p.x >= 38 && p.x < 70) { tab = "shop"; shopTip = null; return; }
       // SAVE opens the towns shelf - NEW GAME lives there now, per slot
       if (p.x >= 128 && p.x < 158) { openSaveView(); sfx.ding(); return; }
-      if (p.x >= 168) { tab = tab === "menu" ? "crew" : "menu"; sfx.ding(); return; }
+      if (p.x >= 168) { tab = tab === "menu" ? "crew" : "menu"; shopTip = null; sfx.ding(); return; }
     }
     if (tab === "shop") {
       for (const b of BUTTONS)
-        if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) { tryBuy(buttonKey(b)); return; }
+        if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) { tapShopButton(buttonKey(b)); return; }
     } else if (tab === "crew") {   // menu tab: no invisible crew cards to click
       for (let i = 0; i < crabs.length; i++) {
         const bx = 4 + i * CARD_STEP;
@@ -8795,11 +8965,20 @@ addEventListener("keydown", (e) => {
   }
   // [ and ] step the selection through the town, exactly what the little crab
   // cycler's chevrons do - the camera comes along, unlike an arrow-key pan
+  // H AND ? BOTH OPEN THE HELP. `?` is the key every player tries and `h` is
+  // the one they can reach without a shift, and the whole point of the screen
+  // is that the keys are not discoverable - so it would be perverse to hide
+  // its own key behind a guess. It also TOGGLES, so the same key closes it.
+  if (e.key === "h" || e.key === "H" || e.key === "?") { toggleHelp(); return; }
+  if (helpView) {   // the card owns the arrows while it is up: they turn its pages
+    if (e.key === "ArrowLeft") { helpFlip(-1); return; }
+    if (e.key === "ArrowRight") { helpFlip(1); return; }
+  }
   if (e.key === "[" && cyclerLive()) { cycleSel(-1); sfx.ding(); return; }
   if (e.key === "]" && cyclerLive()) { cycleSel(1); sfx.ding(); return; }
   if (e.key === "ArrowLeft") { camX = clampCam(camX - 24); followIdx = -1; followNpc = null; followCust = null; }
   if (e.key === "ArrowRight") { camX = clampCam(camX + 24); followIdx = -1; followNpc = null; followCust = null; }
-  if (e.key === "Escape") { if (saveView) { closeSaveView(); return; } if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } sel = null; followIdx = -1; followNpc = null; followCust = null; }
+  if (e.key === "Escape") { if (helpView) { closeHelp(); return; } if (saveView) { closeSaveView(); return; } if (dossier) { dossier = null; return; } if (manage) { manage = null; return; } sel = null; followIdx = -1; followNpc = null; followCust = null; }
 });
 
 // ---------------------------------------------------------------- drawing
@@ -9449,6 +9628,33 @@ function drawBusiness(key) {
     text(ctx, lbl, signX + signW / 2 - textWidth(lbl) / 2 - camX, 82,
       sick ? [120, 150, 90] : awol ? [180, 70, 70] : [40, 110, 190]);
   }
+  if (!forSale(key) && bizOpenNow(key) && bizOwner(key) === "player") {
+    // ---- THE TILL BOARD. Matt: "maybe it's not obvious enough that the crab
+    // shack is the central place money comes from?" The nav strip answers that
+    // on the MAP (tallest block, only gold one, only named one, dead centre);
+    // this answers it at STREET LEVEL, on the building itself - a board chalked
+    // with the day's takings, hung on your own back wall, going up while you
+    // watch the plates go out. It flashes with the strip, off the same watcher,
+    // so the two surfaces say the same thing at the same instant.
+    //
+    // It takes the slot the CLOSED placard uses and cannot fight it: that
+    // branch is `!bizOpenNow`, this one is the else, so exactly one of the two
+    // is ever hung. And it is on YOUR shops only - a peer's takings are not
+    // your business and were never on any surface the player can read.
+    //
+    // READ-ONLY, and via navTill's plain lookup rather than bizDayBook(), which
+    // would CREATE a day-book row for a shop that has not traded yet and put a
+    // phantom line in tonight's report.
+    const hot = navFlashing(key), took = navTill(key);
+    const tTxt = "TILL TODAY $" + fmt(took);
+    const bw = Math.max(52, smallTextWidth(tTxt) + 10);
+    const bx2 = signX + signW / 2 - bw / 2;
+    wrect(bx2, 118, bw, 11, [30, 20, 36]);
+    wrect(bx2 + 1, 119, bw - 2, 9, hot ? [255, 244, 210] : [58, 42, 38]);
+    if (bx2 + bw - camX > 0 && bx2 - camX < W)
+      smallText(ctx, tTxt, bx2 + ((bw - smallTextWidth(tTxt)) >> 1) - camX, 121,
+        hot ? [90, 60, 20] : took > 0 ? [255, 216, 96] : [150, 135, 125]);
+  }
 }
 
 // THE SHUTTERS. Painted after the whole y-sorted pass: boards nailed across a
@@ -9829,11 +10035,15 @@ function drawCustCard(k) {
   blit(ctx, CRAB_ARTS[k.color].a, 7, 14);
   const acc = ACCESSORIES[k.acc];
   if (acc) blit(ctx, acc.art, 7 + acc.dx, 14 + acc.dy);
-  text(ctx, k.name.split(" ")[0].slice(0, 9), 29, 5, [40, 30, 40]);
+  // ...and the same on the visitor's card, which had the same collision with a
+  // slice(0, 9) in place of a measurement: TIDEPOOL is 47px from x29 and
+  // DELIGHTED starts at x69.
   const mood = !k.served && k.recipe && k.patience < 15 ? ["STEAMED", [190, 80, 80]]
     : k.visitor ? visCondition(k)
     : k.happy || k.served ? ["HAPPY", [40, 150, 70]] : ["VISITING", [110, 110, 130]];
-  smallText(ctx, mood[0], 104 - smallTextWidth(mood[0]), 6, mood[1]);
+  const cMoodX = 104 - smallTextWidth(mood[0]);
+  text(ctx, fitText(k.name.split(" ")[0], cMoodX - 32), 29, 5, [40, 30, 40]);
+  smallText(ctx, mood[0], cMoodX, 6, mood[1]);
   if (k.visitor) {
     smallText(ctx, "VISITOR - " + visStayLabel(k), 29, 13, [120, 90, 60]);
     smallText(ctx, custStatus(k).slice(0, 26), 29, 21, [30, 110, 60]);
@@ -9868,9 +10078,15 @@ function drawFollowCard() {
   blit(ctx, CRAB_ARTS[p.color].a, 7, 14);
   const acc = ACCESSORIES[crabHat(c)];
   if (acc) blit(ctx, acc.art, 7 + acc.dx, 14 + acc.dy);
-  text(ctx, p.name, 29, 5, [40, 30, 40]);
+  // THE NAME GETS WHATEVER THE MOOD LEAVES IT. Both are on the same row and
+  // the mood is right-aligned to 104 (the cycler chevrons own 106..127), so a
+  // long name printed straight through it - TIDEPOOL TIM ends at x100 and DOWN
+  // starts at x89. Measured against the mood's actual width, so the budget
+  // shrinks for DELIGHTED and grows for OK.
   const [mood, mcol] = crabMood(c);
-  smallText(ctx, mood, 104 - smallTextWidth(mood), 6, mcol);   // 104: the cycler chevrons own 106..127
+  const moodX = 104 - smallTextWidth(mood);
+  text(ctx, fitText(p.name, moodX - 32), 29, 5, [40, 30, 40]);
+  smallText(ctx, mood, moodX, 6, mcol);
   smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 52, [150, 140, 160]);   // its own row: the need bars own y44-49
   smallText(ctx, TRAITS[p.trait].label + " " + MODES[p.mode].label, 29, 13, [120, 90, 60]);
   smallText(ctx, crabStatus(c).slice(0, 26), 29, 21, [30, 110, 60]);
@@ -9967,11 +10183,17 @@ const NAV_MAP = { x: 0, y: PANEL_Y - NAV_H, w: W, h: NAV_H };
 // warnings stack up from there.
 function navRects() {
   const cy = NAV_MAP.y - NAV_CHIP_H - 1;
-  const mw = smallTextWidth("MANAGE") + 8, tw = smallTextWidth("TOWN") + 8;
+  const mw = smallTextWidth("MANAGE") + 8, tw = smallTextWidth("TOWN") + 8, hw = smallTextWidth("HELP") + 8;
   return {
     map: NAV_MAP,
     manage: { x: 2, y: cy, w: mw, h: NAV_CHIP_H },
     town: { x: 4 + mw, y: cy, w: tw, h: NAV_CHIP_H },
+    // HELP sits third because it is the one you need least often and the one
+    // you need most badly. Its x is a CONSTANT (both labels to its left are
+    // literals), so it does not move when a player with no shop left loses the
+    // other two - see navChipsLive: MANAGE and TOWN need a business to open,
+    // and the help card needs nothing at all.
+    help: { x: 6 + mw + tw, y: cy, w: hw, h: NAV_CHIP_H },
   };
 }
 // world x <-> strip x. Rounded on the way out so a building's block and its
@@ -9999,7 +10221,7 @@ function navMarks() {
 // the strip is live on exactly the terms the crab cycler is: the town is on
 // screen and nothing is being read on top of it
 function navLive() {
-  return screen === "play" && !gameOver
+  return screen === "play" && !gameOver && !helpView
     && !(dossier || manage || boardView || saveView || reportT > 0)
     && !(window.MergeMode && MergeMode.active());
 }
@@ -10044,9 +10266,13 @@ function navTrackHit(p) {
   return p.x >= m.x && p.x < m.x + m.w && p.y >= y0 && p.y < m.y + m.h;
 }
 function navTapChip(p) {
-  if (!navChipsLive()) return false;
+  if (!navLive()) return false;
   const R = navRects();
   const hit = (r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+  // HELP first, and on navLive rather than navChipsLive: a player who has lost
+  // every shop can still ask what happened.
+  if (hit(R.help)) { toggleHelp(); return true; }
+  if (!navChipsLive()) return false;
   if (hit(R.manage)) {
     // WHICH SHOP? The one you are looking at, if you own it - the chip answers
     // for the business on screen - and the SHACK otherwise, because the shack is
@@ -10124,15 +10350,25 @@ function drawNav() {
     const px2 = Math.max(m.x, Math.min(m.x + m.w - 1, sx(sel.x + 8)));
     rect(ctx, px2, m.y + 2, 1, 1, [255, 255, 255]);
   }
-  // ---- and the two screens that used to be buildings
-  if (!navChipsLive()) return;
-  const chip = (r, label) => {
+  // ---- and the two screens that used to be buildings, plus the card that
+  // explains the other two
+  const chip = (r, label, hot) => {
     rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
-    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [235, 225, 205]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, hot ? [255, 216, 96] : [235, 225, 205]);
     smallText(ctx, label, r.x + ((r.w - smallTextWidth(label)) >> 1), r.y + 3, [90, 60, 40]);
   };
-  chip(R.manage, "MANAGE");
-  chip(R.town, "TOWN");
+  if (navChipsLive()) { chip(R.manage, "MANAGE"); chip(R.town, "TOWN"); }
+  // A TOWN THAT HAS NEVER OPENED THE HELP PULSES THE CHIP, once, on day one -
+  // exactly the shape of the music invite two rows down, and for the same
+  // reason: a chip nobody has ever pressed is a chip nobody knows is there.
+  // It stops the moment it is opened (helpSeen persists in the save), so it
+  // costs a returning player nothing.
+  const invite = !helpSeen && day <= 1;
+  chip(R.help, "HELP", invite && (time % 2) < 1.2);
+  if (invite && !helpNudged && !toast && reportT <= 0 && tmin > 7 * 60 + 20) {
+    toast = { text: "NEW HERE? TAP HELP - OR PRESS H", t: 7 };
+    helpNudged = true;
+  }
 }
 
 function drawPanel() {
@@ -10180,9 +10416,32 @@ function drawPanel() {
     rect(ctx, x, TAB_Y, 32, TAB_H, active ? [190, 140, 80] : [90, 70, 60]);
     smallText(ctx, t.toUpperCase(), x + 4, TAB_TX, active ? [40, 24, 16] : [160, 140, 130]);
   }
-  const rate = incomeRate();
-  const rateTxt = rate >= 100 ? "$" + Math.round(rate) + "/S" : "$" + rate.toFixed(1) + "/S";
-  text(ctx, rateTxt.slice(0, 7), 84, TAB_TX, [170, 150, 135]);
+  // "IS MY MONEY GOING UP? ITS TOO UNCLEAR!" - the playtest, and this slot is
+  // exactly where he was looking. It used to read "$1.1/S": dollars per SECOND
+  // OF REAL TIME, a number that changes with the speed chips, means nothing at
+  // a glance, and answers a question nobody asked.
+  //
+  // WHAT IT READS NOW IS HISTORY, NOT A FORECAST, and that distinction is the
+  // whole ruling. `coins - dayOpen` is what the till has done since midnight -
+  // a fact, already on the screen in the form of a number that got bigger.
+  // It does NOT project tonight (the BILL chip already states what is owed, and
+  // whether the two meet is the game). After 20:00 it goes hard negative,
+  // because the landlord just took the rent, and that is the loop being taught
+  // rather than hidden.
+  //
+  // MEASURED, NOT COUNTED: the label is dropped rather than the number when a
+  // rich town makes the pair too wide for the 52px between the SHOP tab and the
+  // SAVE chip. incomeRate() is still called for its side effect - it is the
+  // only thing that prunes earnHist, which would otherwise grow all run.
+  incomeRate();
+  {
+    const net = Math.round(coins - dayOpen);
+    const nTxt = (net < 0 ? "-$" : "+$") + fmt(Math.abs(net));
+    const full = "TODAY " + nTxt;
+    const lbl = smallTextWidth(full) <= 52 ? full : nTxt;
+    smallText(ctx, lbl, 126 - smallTextWidth(lbl), TAB_TX,
+      net > 0 ? [140, 220, 140] : net < 0 ? [235, 130, 130] : [170, 150, 135]);
+  }
   {
     rect(ctx, 128, TAB_Y, 30, TAB_H, saveView ? [190, 140, 80] : [90, 70, 60]);
     smallText(ctx, "SAVE", 128 + 6, TAB_TX, saveView ? [40, 24, 16] : [160, 140, 130]);
@@ -10346,6 +10605,9 @@ function drawLandlord() {
     }
   }
 }
+// ONE RECT, TWO READERS - the title's HOW TO PLAY button is drawn and hit
+// tested off this, so the button and its tap target cannot drift apart.
+function titleHelpRect() { return { x: W / 2 - 50, y: 96, w: 100, h: 15 }; }
 function drawTitle() {
   ctx.fillStyle = "rgba(16,20,50,0.35)";
   ctx.fillRect(0, 0, W, H);
@@ -10361,6 +10623,16 @@ function drawTitle() {
   blit(ctx, CRAB_ARTS[1].a, W / 2 + 44, 58, true);
   blit(ctx, ACCESSORIES.flower.art, W / 2 + 44, 55);
   smallText(ctx, "A WHOLE IDLE BEACH ECONOMY", W / 2 - 64, 76, [110, 90, 80]);
+  // HOW TO PLAY, above the menu rather than below it, because below it is full:
+  // CONTINUE / NEW GAME / SAVED TOWNS run from y118 to y161 and the saved-town
+  // count sits under those. This is the only free band on the card, and it is
+  // the right one anyway - it is the line a first-timer reads on the way past.
+  {
+    const r = titleHelpRect();
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [96, 170, 220]);
+    text(ctx, "HOW TO PLAY", r.x + ((r.w - textWidth("HOW TO PLAY")) >> 1), r.y + 4, [245, 250, 255]);
+  }
   // menu
   const bx = W / 2 - 50;
   if (hasSave) {
@@ -11118,8 +11390,20 @@ function drawManage() {
     // The explanation is now the readout, which is where it belonged.
     const cut = pct === 0 ? "ALL TO THE TILL" : pct === 100 ? "ALL TO THE CREW" : pct + "% TO CREW";
     smallText(ctx, cut, tr.x + tr.w + 5, tr.y + 4, pct ? [190, 110, 40] : [110, 100, 110]);
-    const rowHint = auto ? "AUTO ROTA" : "TAP A ROW";
-    smallText(ctx, rowHint, x + w2 - 6 - smallTextWidth(rowHint), y + 60, [110, 100, 110]);
+    // ...AND THE MUSH, ROUND TWO. Matt, again, after the first fix: "the tips
+    // slider is mushed up against other text; there may be a couple of other
+    // instances like that." He is right and this was the cause. The card's
+    // right-hand column ran TONIGHT $92 (y+45), TOWN/PIER (y+54), a "TAP A ROW"
+    // hint (y+60) and the slider's own readout (y+66) - FOUR strings at a 6px
+    // pitch in a 5px font, none of them technically overlapping, all of them
+    // unreadable as a group. The automated sweep cannot see this: it fires on
+    // two pixels of overlap and this was one pixel of gap.
+    //
+    // The hint is the line that goes, because it was ALREADY SAID: the foot of
+    // this same card carries "TAP A ROW: SHIFT, OT, SICK, OR - / + ON THE
+    // WAGE" (and the AUTO sentence in the other state), next to the roster it
+    // is about. Deleting a duplicate is a better fix than moving one, and it
+    // leaves the slider's readout a row of its own.
     const staff = allCrabs().filter(c => c.p.job === key);
     // ---- THE WAGE. Shop rate on the left with real steppers, APPLY TO ALL
     // beside it, and the consequences written out on the right: what tonight's
@@ -11139,9 +11423,7 @@ function drawManage() {
     // it describes. Trimmed by WIDTH (fitSmall), not by character count: the
     // AUTO line is 216px of 3x5 against 170px of card, and a slice(0, n) is a
     // guess about a proportional budget - see the Conventions note in PLAN.
-    smallText(ctx, fitSmall(deals ? deals + " ON A PRIVATE DEAL - ALL PUTS THEM BACK ON $" + bizWage(key)
-      : auto ? "AUTO: SICK DAYS GRANTED, OT CALLED WHEN COVER IS SHORT"
-      : "TAP A ROW: SHIFT, OT, SICK, OR - / + ON THE WAGE", R.done.x - (x + 6) - 6),
+    smallText(ctx, fitSmall(rosterHint(key, deals), rosterHintBudget(R)),
       x + 6, y + h2 - 13, [110, 100, 110]);
     if (!staff.length) smallText(ctx, "NOBODY ASSIGNED - REASSIGN FROM A DOSSIER", x + 8, y + 70, [190, 80, 80]);
     for (let i = 0; i < Math.min(staff.length, R.rows.length); i++) {
@@ -11818,12 +12100,440 @@ function drawToast() {
   text(ctx, toast.text, x + 6, y + 3, [90, 50, 30], sp);
 }
 
+// ===========================================================================
+// THE HELP CARD - what the machine is, on the machine
+// ===========================================================================
+// Matt: "need a pass at the UI and perhaps a help screen; my friend says the UI
+// isn't so intuitive." The friend then produced the list: what the crabs are
+// for, what the shop buttons do, where the management screen is. Every one of
+// those is a real feature with no on-screen
+// affordance, and PLAN's audit found more of them: right-click orders, the
+// crab cycler's `[` and `]`, and the TRADE LEDGER, which is filed inside a
+// HELP WANTED board that nobody has any reason to click.
+//
+// TWO CONSTRAINTS SHAPE THE COPY, and they pull against each other.
+//   - THE SPOILER EMBARGO. The town's name is the ending. It is not on this
+//     card, and neither is the boat: "you can leave" is a discovery the arcade
+//     unlocks, and a help screen that hands it over on day one takes the
+//     discovery away for nothing.
+//   - THE RULING. Interface opacity is a bug; economic uncertainty is the
+//     game. So this card explains the MACHINE - the loop, the deadline, the
+//     controls - and nowhere on it does it say what to buy, in what order, or
+//     whether you can afford it. It teaches you to read the town, not to win.
+//
+// WHY IT IS PAGED rather than scrolled: five pages of thirteen lines each is
+// 65 lines of 3x5 on a 256-pixel screen, and paging is the idiom the diary and
+// the ballot roll already use here. The page you need is the page you are on -
+// a player who came in off the SHOP tab wants page 5, not a scrollbar.
+const HELP_PAGES = [
+  { title: "THE SHACK", lines: [
+    ["t", "YOU RUN THE CRAB SHACK. IT IS THE ONLY THING IN"],
+    ["t", "THIS TOWN THAT PUTS MONEY IN YOUR POCKET."],
+    ["-"],
+    ["h", "THE LOOP, IN ORDER"],
+    ["t", "1. FISHERS LAND FISH OFF THE PIER."],
+    ["t", "2. YOUR KITCHEN BUYS THE FISH."],
+    ["t", "3. YOUR CREW COOK IT AND CARRY THE PLATE OUT."],
+    ["t", "4. THE GUEST PAYS. THAT IS THE $ IN THE PANEL."],
+    ["-"],
+    ["h", "SO"],
+    ["t", "GUESTS WHO GET A TABLE ALSO LEAVE A TIP."],
+    ["t", "EVERY OTHER SHOP ON THE PROMENADE IS SOMEBODY"],
+    ["t", "ELSE'S TILL. YOU EARN FROM WHAT YOU OWN."],
+    ["-"],
+    ["h", "AND ONE NUMBER THAT IS NOT MONEY"],
+    ["t", "REP, TOP RIGHT, IS WHAT THE TOWN SAYS ABOUT"],
+    ["t", "YOU. IT SETS HOW BUSY THE NEXT BOAT IS."],
+  ] },
+  { title: "THE CRABS", lines: [
+    ["t", "CRABS ARE YOUR STAFF, AND THEY ARE ALSO PEOPLE"],
+    ["t", "WITH THEIR OWN WALLETS AND THEIR OWN BAD DAYS."],
+    ["-"],
+    ["h", "WHAT THEY DO FOR YOU"],
+    ["t", "COOK, SERVE, CLEAR TABLES, AND MAN WHATEVER YOU"],
+    ["t", "BUY. ONE CRAB WORKS ONE SHIFT A DAY."],
+    ["-"],
+    ["h", "WHAT THEY NEED"],
+    ["t", "HUNGRY, THIRSTY, DIRTY, TIRED, BORED. THEY FIX"],
+    ["t", "IT THEMSELVES OUT OF THEIR OWN WAGES - IN YOUR"],
+    ["t", "SHOP AND IN EVERYBODY ELSE'S. A CRAB WITH"],
+    ["t", "NOTHING LEFT GETS ILL, AND ILL CRABS STAY HOME."],
+  ] },
+  { title: "THE CLOCK", lines: [
+    ["t", "THE DAY RUNS 06:00 TO 24:00 AND IT DOES NOT"],
+    ["t", "WAIT FOR YOU TO FINISH READING."],
+    ["-"],
+    ["h", "20:00 IS THE ONLY DEADLINE THERE IS"],
+    ["t", "THE LANDLORD TAKES THE RENT AND YOUR CREW TAKE"],
+    ["t", "THEIR WAGES. BOTH. EVERY NIGHT."],
+    ["t", "THE BILL CHIP IS TONIGHT'S TOTAL - TAP IT FOR"],
+    ["t", "THE FULL BREAKDOWN AND YOUR MENU PRICES."],
+    ["t", "SHORT ON THE NIGHT AND THE BANK COVERS YOU, AT"],
+    ["t", "A PRICE. THE BANK RUNS OUT OF PATIENCE."],
+    ["-"],
+    // NO PAUSE, AND SAYING SO IS THE POINT (owner, 2026-08-20: "remove the
+    // pause button, it's against the spirit of the game"). The clock running
+    // while you work the town out is the game - so the card states the rule
+    // plainly instead of offering a way round it.
+    ["h", "AND IT ONLY RUNS FORWARD"],
+    ["t", "THE >> CHIPS RUN THE CLOCK FASTER, NEVER"],
+    ["t", "SLOWER, AND THE LITTLE SUN SKIPS TO MORNING."],
+    ["t", "THERE IS NO STOPPING IT. WORK IT OUT AS YOU"],
+    ["t", "GO, AND LEARN IT BY LOSING SOME OF IT."],
+  ] },
+  // ---- WHO IS WHO. Matt, 2026-08-20: "there should be a help screen for
+  // public functions and roles" - and it is the direct answer to the playtest's
+  // "theres pinchy and claudi. WHAT DO THEY DO?? NOBODY KNOWS." The town is
+  // full of crabs and only SOME of them are yours; before this there was no
+  // surface anywhere that said which was which, or who was paying them.
+  { title: "WHO IS WHO", lines: [
+    ["t", "EVERY CRAB HERE IS WORKING FOR SOMEBODY, AND"],
+    ["t", "ONLY SOME OF THEM ARE WORKING FOR YOU."],
+    ["-"],
+    ["k", "YOUR CREW", "YOU HIRE THEM, YOU PAY THEM AT 20:00"],
+    ["k", "OWNERS", "RUN THEIR OWN SHOP, PAY THEMSELVES"],
+    ["k", "FISHERS", "SELF-EMPLOYED. THEY SELL YOU THE FISH"],
+    ["k", "VISITORS", "OFF THE FERRY WITH REAL MONEY TO SPEND"],
+    ["k", "THE MAYOR", "ELECTED. TOP HAT. RUNS THE SHELTER"],
+    ["k", "RIVAL OWNERS", "COME FOR YOUR TRADE AND YOUR SHOPS"],
+    ["k", "THE LANDLORD", "MR. PINCHERTON. NEVER SEEN, ALWAYS PAID"],
+    ["-"],
+    ["t", "AN OWNER-OPERATOR WORKS THE LONG D SHIFT:"],
+    ["t", "THERE IS NOBODY ELSE TO COVER THEM."],
+    ["t", "TAP ANY CRAB, THEN ITS CARD, TO SEE WHICH OF"],
+    ["t", "THESE IT IS AND WHAT IT EARNS."],
+  ] },
+  // ---- PUBLIC FUNCTIONS. The things the town does that are nobody's private
+  // business, and the iron rule underneath all of them: nothing is conjured.
+  { title: "THE TOWN HALL", lines: [
+    ["t", "THE TOWN DOES THINGS FOR ITSELF, AND PAYS"],
+    ["t", "FOR THEM OUT OF ONE POT WITH A LEDGER."],
+    ["-"],
+    ["h", "THE SHELTER"],
+    ["t", "A ROOF FOR ANY CRAB WITH NOWHERE TO SLEEP."],
+    ["t", "IT PAYS THE LANDLORD RENT JUST LIKE YOU DO,"],
+    ["t", "AND IT SERVES A POT OF BOWLS AT NIGHT."],
+    ["-"],
+    ["h", "THE TOWN FUND - FOUR PURSES, MAYOR'S PICK"],
+    ["t", "A LEVY ON TAKINGS. HARBOUR DUES PER HEAD"],
+    ["t", "LANDED. A CUT OF THE HOUSE RENTS. A TIN."],
+    ["t", "THEY FALL ON DIFFERENT CRABS, WHICH IS WHY"],
+    ["t", "THE VOTE IS WORTH CASTING."],
+    ["-"],
+    ["t", "NOTHING HERE IS FREE. EVERY BOWL IN THAT POT"],
+    ["t", "WAS BOUGHT FROM A REAL SHOP THE NIGHT BEFORE."],
+  ] },
+  { title: "POLLING DAY", lines: [
+    ["h", "EVERY SUNDAY"],
+    ["t", "NOMINATIONS CLOSE AT SATURDAY NIGHT'S"],
+    ["t", "SETTLEMENT. TWO BALLOT TABLES GO UP, THE"],
+    ["t", "POLLS RUN 07:00 TO 19:00, THE PAPER IS"],
+    ["t", "FINITE, AND THE COUNT IS BY HAND AFTER"],
+    ["t", "CLOSE. A LONG SHIFT CAN COST A CRAB ITS VOTE."],
+    ["-"],
+    ["h", "YOU CAN STAND, AND YOU CAN WIN"],
+    ["t", "PUT UP ONE OF YOUR CREW ON THE HALL TAB OF"],
+    ["t", "THE MANAGE CARD. CRABS VOTE THEIR OWN"],
+    ["t", "CIRCUMSTANCES, NOT YOURS."],
+    ["-"],
+    // THE INTERFACE BUG, ANSWERED IN WORDS. The HALL tab's dials only ever
+    // write `hall.plat` - the platform your nominee would stand on - and
+    // `hall.policy` is written only while playerMayor(). The mechanism was
+    // always right; the card never SAID so, and the dials read as though they
+    // set the town's policy. (The card itself is being fixed in parallel; this
+    // is the sentence that has to exist somewhere a player can look it up.)
+    ["h", "AND UNTIL THEY WIN, THE DIALS ARE A PROMISE"],
+    ["t", "YOU CANNOT SET THE TOWN'S POLICY UNLESS ONE"],
+    ["t", "OF YOUR CRABS IS WEARING THE HAT. UNTIL THEN"],
+    ["t", "THOSE DIALS ARE YOUR MANIFESTO, NOTHING MORE."],
+  ] },
+  { title: "FINDING THINGS", lines: [
+    ["h", "THE STRIP ABOVE THE PANEL IS THE WHOLE TOWN"],
+    ["t", "TO SCALE. THE BRIGHT SLICE IS WHAT YOU CAN SEE."],
+    ["t", "TAP IT TO GO THERE, DRAG IT TO SCRUB ALONG."],
+    ["t", "SHACK IS NAMED ON IT AND FLASHES WHEN IT TAKES MONEY."],
+    ["-"],
+    ["h", "MANAGE"],
+    ["t", "HOURS, PRICES, WAGES, THE ROTA, TIPS AND THE"],
+    ["t", "TOWN HALL. ONE CARD - TAP ALONG ITS TABS."],
+    // The election is a thing the TOWN does, so it belongs on the page about
+    // where things are rather than on a page of its own. Worded to survive the
+    // poll being rebuilt as a physical one (that work is somebody else's, and
+    // "on Sundays, and the HALL tab is where you stand" is true either way).
+    ["t", "THE TOWN ELECTS A MAYOR ON SUNDAYS, AND THE"],
+    ["t", "HALL TAB IS WHERE YOU STAND IN IT."],
+    ["-"],
+    ["h", "TOWN"],
+    ["t", "EVERY CRAB IN TOWN. TAP A ROW TO READ ONE."],
+    ["-"],
+    ["h", "THE SHOP TAB"],
+    ["t", "TAP A BUTTON ONCE TO SEE WHAT IT DOES AND WHAT"],
+    ["t", "IT COSTS YOU AT 20:00. TAP IT AGAIN TO BUY."],
+  ] },
+  { title: "CONTROLS", lines: [
+    ["k", "CLICK A CRAB", "WATCH THEM. TAP THE CARD FOR MORE"],
+    ["k", "RIGHT-CLICK", "SEND A CREW CRAB SOMEWHERE"],
+    ["k", "DRAG", "PAN THE TOWN"],
+    ["-"],
+    ["k", "F", "SPEED: 1X 2X 3X 6X"],
+    // the 3x5 font has no bracket glyphs (see font.js), so the keys are named
+    // rather than drawn - a "??  ??" row would be worse than no row at all
+    ["k", "BRACKET KEYS", "STEP THROUGH THE CRABS"],
+    ["k", "ARROWS", "PAN THE TOWN"],
+    ["k", "M / N / B", "MUTE / MUSIC / NEXT TRACK"],
+    ["k", "ESC", "BACK OUT OF ANYTHING"],
+    ["k", "H  OR  ?", "THIS CARD"],
+    ["-"],
+    ["h", "AND ONE NOBODY WOULD EVER GUESS"],
+    ["t", "THE HELP WANTED BOARD IN THE MIDDLE OF TOWN"],
+    ["t", "ALSO CARRIES THE TOWN'S TRADE LEDGER."],
+  ] },
+];
+// The card is the full readable width of the screen and sits ABOVE the panel in
+// both canvas heights (the world always keeps rows 0..PANEL_Y - see the
+// geometry block), so one rect table serves the phone and the desktop.
+// Where the second column of a KEY row starts. Measured against the widest key
+// label the card carries, and hoisted out of the draw so the suite can check
+// every label against the same number rather than a copy of it - a scenario
+// that asserts its own constant is asserting nothing.
+const HELP_KEYCOL = 56;
+// THE ROSTER HINT, hoisted out of the draw for the same reason. All three of
+// these are FIXED COPY and all three of them used to be over budget - the
+// widest ran 187px into the 166 between the card's left margin and its DONE
+// chip, so every one of them printed as a sentence ending in "..". fitSmall
+// stops a line running off a card; it does not stop it reading as unfinished.
+//
+// The fix is to WRITE to the budget rather than trim to it, and the only way to
+// keep that true is to let the suite measure the same strings the card prints -
+// a scenario carrying its own copy of the copy would prove nothing.
+function rosterHintBudget(R) { return R.done.x - (R.x + 6) - 6; }
+function rosterHint(key, deals) {
+  if (deals) return deals + " ON PRIVATE DEALS - ALL RESETS TO $" + bizWage(key);
+  return BIZ[key].autoLabor ? "THE ROTA MANAGES ITSELF: SICK DAYS AND OT"
+    : "TAP A ROW: SHIFT, OT, SICK OR THE WAGE";
+}
+function helpRects() {
+  const x = 6, y = 6, w = W - 12, h = PANEL_Y - 14;
+  const fy = y + h - 13;
+  return { x, y, w, h,
+    prev: { x: x + 5, y: fy, w: 26, h: 10 },
+    next: { x: x + 34, y: fy, w: 26, h: 10 },
+    done: { x: x + w - 35, y: fy, w: 30, h: 10 } };
+}
+function helpFlip(d) {
+  helpPage = (helpPage + d + HELP_PAGES.length) % HELP_PAGES.length;
+  sfx.ding();
+}
+// ONE DOOR OUT, and every close goes through it - DONE, a tap off the card and
+// Escape alike.
+//
+// AND IT DOES NOT STOP THE CLOCK, which was the tempting mistake and is against
+// the spirit of the game (owner, 2026-08-20, removing the pause chip outright):
+// the day running while you read the instructions IS the game. The rule this
+// whole pass is written to is narrower than "reading should be free" - a player
+// who cannot tell WHAT A BUTTON DOES is a bug; a player losing money while they
+// work it out is the design. So the card explains and gets out of the way; it
+// buys nobody a single minute.
+function closeHelp() {
+  if (!helpView) return;
+  helpView = false;
+  sfx.ding();
+}
+function toggleHelp() {
+  if (helpView) { closeHelp(); return; }
+  helpView = true;
+  // ...and remember that it has been read, so the chip stops pulsing. Only
+  // from PLAY: save() writes the active slot, and writing one from the title
+  // screen would mint a phantom town on the shelf for somebody who has done
+  // nothing but read the instructions.
+  helpSeen = true; helpNudged = true;
+  if (screen === "play") save();
+  sfx.ding();
+}
+function drawHelp() {
+  if (!helpView) return;
+  const R = helpRects(), { x, y } = R, w2 = R.w, h2 = R.h;
+  ctx.fillStyle = "rgba(16,12,30,0.72)";
+  ctx.fillRect(0, 0, W, H);
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 14, [58, 42, 38]);
+  const P = HELP_PAGES[helpPage] || HELP_PAGES[0];
+  text(ctx, "HOW TO PLAY", x + 6, y + 4, [255, 240, 210]);
+  {  // the page's own name, right-aligned in the header bar it shares
+    const t2 = P.title;
+    smallText(ctx, t2, x + w2 - smallTextWidth(t2) - 6, y + 5, [190, 140, 80]);
+  }
+  // ONE PITCH FOR EVERY ROW. A blank row is a row, not a special case, which is
+  // what keeps a page from silently sliding under its own footer when a line is
+  // added - and the footer is where the sweep would catch it if it did.
+  let ly = y + 19;
+  for (const L of P.lines) {
+    if (L[0] === "-") { ly += 4; continue; }
+    if (L[0] === "h") smallText(ctx, L[1], x + 8, ly, [180, 90, 40]);
+    else if (L[0] === "k") {
+      smallText(ctx, L[1], x + 8, ly, [40, 30, 40]);
+      smallText(ctx, fitSmall(L[2], w2 - 16 - HELP_KEYCOL), x + 8 + HELP_KEYCOL, ly, [90, 80, 90]);
+    } else smallText(ctx, fitSmall(L[1], w2 - 16), x + 8, ly, [70, 62, 72]);
+    ly += 8;
+  }
+  const chip = (r, label, dim) => {
+    rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, dim ? [222, 212, 196] : [190, 140, 80]);
+    smallText(ctx, label, r.x + ((r.w - smallTextWidth(label)) >> 1), r.y + 3, [40, 24, 16]);
+  };
+  chip(R.prev, "<", false);
+  chip(R.next, ">", false);
+  chip(R.done, "DONE", false);
+  const pTxt = (helpPage + 1) + " / " + HELP_PAGES.length;
+  smallText(ctx, pTxt, R.next.x + R.next.w + 8, R.next.y + 3, [140, 130, 130]);
+}
+function tapHelp(p) {
+  if (!helpView) return false;
+  const R = helpRects();
+  const hit = (r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
+  if (hit(R.prev)) { helpFlip(-1); return true; }
+  if (hit(R.next)) { helpFlip(1); return true; }
+  if (hit(R.done)) { closeHelp(); return true; }
+  // ANYWHERE ELSE ON THE CARD TURNS THE PAGE FORWARD, and anywhere off it
+  // closes: the same two gestures the day report and the dossier already use,
+  // so nothing here has to be learned either.
+  const onCard = p.x >= R.x - 2 && p.x < R.x + R.w + 2 && p.y >= R.y - 2 && p.y < R.y + R.h + 2;
+  if (onCard) helpFlip(1); else closeHelp();
+  return true;
+}
+
+// ===========================================================================
+// THE SHOP TOOLTIP - see UP_HELP for what it is allowed to say
+// ===========================================================================
+// WHERE IT GOES, and this was the whole difficulty. The shop grid is two rows
+// of buttons that end at y237 of a 240-row canvas, so there is no room under
+// it; the nav strip owns PANEL_Y-7..PANEL_Y and its chip row the eleven rows
+// above that; and the top of the screen belongs to the character card whenever
+// anybody is selected. What is left is the band directly above the MANAGE /
+// TOWN chips, which is sky - so the card hangs off the bottom of the world,
+// pointing down at the grid it describes.
+const SHOPTIP_H = 36;
+function shopTipRect() {
+  const cy = NAV_MAP.y - NAV_CHIP_H - 1;      // the chip row's own top (see navRects)
+  return { x: 2, y: cy - 1 - SHOPTIP_H, w: W - 4, h: SHOPTIP_H };
+}
+// `probe` is the hover test, which has to answer BEFORE a key is picked; the
+// draw asks the same question with a key already in hand.
+function shopTipLive(probe) {
+  return (probe || !!shopTip) && tab === "shop" && screen === "play" && !gameOver && !helpView
+    && !(dossier || manage || boardView || saveView || reportT > 0)
+    && !hireCardLive()   // buying a crab REPLACES the tooltip with the crab: one voice at a time
+    && !(window.MergeMode && MergeMode.active());
+}
+function drawShopTip() {
+  if (!shopTipLive()) return;
+  const u = UPS[shopTip];
+  if (!u) return;
+  const R = shopTipRect(), { x, y } = R, w2 = R.w;
+  const maxed = u.lvl >= u.max, cost = upCost(u), afford = coins >= cost;
+  rect(ctx, x, y, w2, R.h, [30, 20, 36]);
+  rect(ctx, x + 1, y + 1, w2 - 2, R.h - 2, [255, 250, 235]);
+  // the name, and the price it is asking, at opposite ends of the same line
+  text(ctx, u.name, x + 5, y + 4, [58, 42, 38]);
+  const cTxt = maxed ? "MAXED OUT" : "$" + fmt(cost);
+  text(ctx, cTxt, x + w2 - 5 - textWidth(cTxt), y + 4,
+    maxed ? [140, 130, 130] : afford ? [40, 130, 70] : [190, 80, 80]);
+  const body = UP_HELP[shopTip] || ["", ""];
+  smallText(ctx, fitSmall(body[0] || "", w2 - 10), x + 5, y + 13, [70, 62, 72]);
+  smallText(ctx, fitSmall(body[1] || "", w2 - 10), x + 5, y + 20, [70, 62, 72]);
+  // the bottom line is the CONSEQUENCE line: what changes about the town on the
+  // left, what it costs you every night after on the right. Both derived.
+  const eff = maxed ? "NOTHING LEFT TO BUY HERE" : upEffect(shopTip);
+  smallText(ctx, eff, x + 5, y + 28, maxed ? [140, 130, 130] : [40, 130, 70]);
+  const ong = maxed ? "" : !afford ? "YOU HAVE $" + fmt(Math.floor(coins)) : upOngoing(shopTip);
+  if (ong) smallText(ctx, fitSmall(ong, w2 - 14 - smallTextWidth(eff)),
+    x + w2 - 5 - smallTextWidth(fitSmall(ong, w2 - 14 - smallTextWidth(eff))), y + 28,
+    !afford ? [190, 80, 80] : [150, 110, 40]);
+}
+
+// ===========================================================================
+// THE HIRE CARD - somebody actually arrives
+// ===========================================================================
+// The counterpart to hireCrew's camera move and pointer. This says the three
+// things a roster entry does not: WHO they are and how they got here, WHAT
+// they will do all day, and WHAT THEY COST YOU - a shift window, a wage on
+// tonight's bill, and a cot at the shelter, because a hire starts homeless
+// like everybody else in this town and nothing anywhere said so.
+// ...and what the job IS, per shop, because "COOKS AND SERVES" is a lie about
+// an arcade floor. Keyed on the BUSINESS, so a new lot adds a row here and
+// nothing else changes - the same shape the policy tables use.
+const HIRE_DUTY = { shack: "COOKS AND SERVES AT", juicebar: "POURS AND SERVES AT",
+  arcade: "MINDS THE FLOOR AT" };
+const HIRE_CARD = { w: 210, h: 62 };
+// y78 is measured, not chosen: the character card owns y2..60 (and followCrab
+// has just put the new hire on it), the toast band is y62..75, and the nav
+// chip row starts at y157. This is the hole between them.
+function hireCardRect() { return { x: ((W - HIRE_CARD.w) / 2) | 0, y: 78, w: HIRE_CARD.w, h: HIRE_CARD.h }; }
+function hireCardLive() {
+  return !!(hireCard && hireCard.t > 0 && hireCard.c && screen === "play" && !gameOver && !helpView
+    && !(dossier || manage || boardView || saveView || reportT > 0));
+}
+function drawHireCard() {
+  if (!hireCardLive()) return;
+  const c = hireCard.c, p = c.p, R = hireCardRect(), { x, y } = R;
+  rect(ctx, x - 2, y - 2, R.w + 4, R.h + 4, [30, 20, 36]);
+  rect(ctx, x, y, R.w, R.h, [255, 250, 235]);
+  rect(ctx, x, y, R.w, 12, [40, 130, 70]);
+  text(ctx, p.name + " JOINS THE CREW", x + 6, y + 3, [235, 255, 240]);
+  // the portrait, at 2x, in their own shell colours - the same face the crew
+  // card and the dossier draw, so "which one is that" has one answer
+  blit(ctx, art2("c" + p.color, CRAB_ARTS[p.color].a), x + 6, y + 16);
+  const acc = ACCESSORIES[p.acc];
+  if (acc) blit(ctx, art2("a" + p.acc, acc.art), x + 6 + acc.dx * 2, y + 16 + acc.dy * 2);
+  const tx = x + 40;
+  smallText(ctx, fitSmall(hireCard.how || "", R.w - 46), tx, y + 16, [110, 100, 110]);
+  const b = BIZ[p.job] || BIZ.shack;
+  smallText(ctx, fitSmall((HIRE_DUTY[p.job] || "WORKS AT") + " " + b.name, R.w - 46), tx, y + 25, [70, 62, 72]);
+  const win = baseShift(c);   // their own contracted hours, whatever shop and shift they landed on
+  smallText(ctx, (p.shift === "M" ? "MORNINGS " : p.shift === "E" ? "EVENINGS " : "DAYS ") + win.label,
+    tx, y + 34, [70, 90, 130]);
+  smallText(ctx, "$" + Math.round(wageRate(c)) + " A SHIFT, ON TONIGHT'S BILL AT 20:00", tx, y + 43, [190, 80, 80]);
+  smallText(ctx, p.homeless ? "SLEEPS AT THE SHELTER UNTIL THEY CAN AFFORD A ROOM"
+    : "HAS SOMEWHERE TO SLEEP", x + 6, y + 53, [110, 100, 110]);
+}
+// ...and the pointer in the world, so the card and the town agree about who is
+// being talked about. Drawn in the world pass, over the crab's head, bobbing.
+function drawHirePointer() {
+  if (!hireCardLive()) return;
+  const c = hireCard.c;
+  if (c.hidden || c.x == null) return;
+  const sx = Math.round(c.x + 8 - camX);
+  if (sx < 4 || sx > W - 4) return;
+  // 20 above the feet, not 26: the arrow is 9 rows tall (a 4-row stem over a
+  // 5-row head) and at 26 its stem printed behind the bottom edge of the hire
+  // card, which sits at y140. This lands it in the gap between the card and the
+  // crab's own head, which is what it is pointing at.
+  const bob = Math.round(Math.sin(time * 6) * 2);
+  const py = Math.round(c.y) - 20 + bob;
+  for (let i = 0; i < 5; i++) rect(ctx, sx - (4 - i), py + i, 2 * (4 - i) + 1, 1, [96, 232, 120]);
+  rect(ctx, sx - 1, py - 4, 3, 4, [96, 232, 120]);
+}
+
 // ---------------------------------------------------------------- main loop
 let last = performance.now(), saveT = 0;
 function frame(now) {
+  // TWO CLOCKS, and the second one is new. `dt` is SIM time, scaled by the
+  // speed chips, and everything in the world runs on it. `raw` is WALL time,
+  // and the HIRE CARD runs on that instead: a card you are meant to read must
+  // not get six times shorter because the town is running at 6x. It buys the
+  // player nothing - the day underneath it is running at whatever speed they
+  // chose - it just means the card is legible at every one of them. (The toast
+  // deliberately stays on sim time: it is an event notice, and it belongs to
+  // the moment in the day that produced it.)
+  //
+  // Deliberately computed BESIDE the dt line rather than out of it, so the
+  // speed row's own arithmetic is left exactly as it was.
+  const raw = Math.max(0, Math.min(0.1, (now - last) / 1000));
   const dt = paused ? 0
     : Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
   last = now; time += dt;
+  if (hireCard) { hireCard.t -= raw; if (hireCard.t <= 0) hireCard = null; }
   if (saveConfirmT > 0) { saveConfirmT -= dt; if (saveConfirmT <= 0) saveConfirm = null; }
   if (saleArmT > 0) { saleArmT -= dt; if (saleArmT <= 0) saleArm = null; }
   if (ferryArm > 0) ferryArm -= dt;
@@ -11833,6 +12543,7 @@ function frame(now) {
   if (!gameOver && screen === "play") tmin += dt * TS;
   if (tmin >= 1440) {
     tmin -= 1440; day++;
+    dayOpen = coins;   // the mark the panel's TODAY readout is measured from
     settleFishMarket();   // the day's landings vs the day's appetite set tomorrow's pier price
     townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
     for (const c of allCrabs()) { c.workedToday = false; c.otMin = 0; }   // a new day's ledger
@@ -12201,6 +12912,7 @@ function frame(now) {
     drawNight();
     drawTitle();
     drawSaveScreen();
+    drawHelp();   // HOW TO PLAY is readable before the first day, which is the point
     requestAnimationFrame(frame);
     return;
   }
@@ -12371,6 +13083,7 @@ function frame(now) {
       }
     }
   }
+  drawHirePointer();   // the new hire, pointed at, in the town rather than on a list
   drawNight();
   drawNav();      // HUD, so: after the night wash - the map never goes dark
   drawJobBoard();
@@ -12420,9 +13133,12 @@ function frame(now) {
     }
   }
   drawPanel();
-  if (!boardView && !manage && !saveView && !dossier) drawToast();   // reading surfaces own the screen
+  drawShopTip();       // hangs off the bottom of the world, pointing at the grid it explains
+  drawHireCard();
+  if (!boardView && !manage && !saveView && !dossier && !helpView) drawToast();   // reading surfaces own the screen
   if (gameOver) drawGameOver();
   drawSaveScreen();
+  drawHelp();          // the last word: HOW TO PLAY sits over everything, including game over
   if (window.MergeMode) MergeMode.frame(dt);
   // sun mode: chain extra 0.6s sim steps synchronously (same per-step bound the
   // suite verifies at 6x) so the night passes in about a second of real time
@@ -12443,6 +13159,7 @@ hasSave = load();
 if (!hasSave) {
   crabs = [newCrab(makeCrabPersona(0)), newCrab(makeCrabPersona(1))];
   coins = 150;   // a few bux in your pocket - rent is due tonight: ingredients + first rent buffer
+  dayOpen = coins;   // day one opens on the float, so TODAY starts at +$0
 }
 seedVisitors();   // somebody is always already here (no-op if the save carried its own)
 requestAnimationFrame(frame);

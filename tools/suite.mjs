@@ -4665,6 +4665,46 @@ scenario("no card prints text on top of its own text", () => {
     run("board", () => { manage = null; boardView = true; }, () => drawJobBoard());
     run("save", () => { boardView = false; saveView = true; }, () => drawSaveScreen());
     run("report", () => { saveView = false; }, () => drawReport());
+    // ---- THE ONBOARDING PASS'S OWN SURFACES, and one class this sweep had
+    // never been pointed at. reportT has to come down first: the sim was run
+    // UNTIL a report exists, and every one of these is gated on nothing being
+    // read on top of it.
+    for (let hp = 0; hp < HELP_PAGES.length; hp++)
+      run("help-" + (hp + 1), () => { reportT = 0; helpView = true; helpPage = hp; }, () => drawHelp());
+    for (const uk of Object.keys(UPS))
+      run("shoptip-" + uk, () => { helpView = false; tab = "shop"; hireCard = null; shopTip = uk; },
+        () => drawShopTip());
+    run("hire-card", () => { shopTip = null; tab = "crew";
+      hireCard = { c: crabs[0], how: "WAS HERE ON HOLIDAY - LIKED IT AND STAYED", t: 5 }; },
+      () => drawHireCard());
+    // ---- THE CHARACTER CARD, WITH THE LONGEST NAME THE GAME CAN ACTUALLY DEAL
+    // and the widest mood it can print beside it. This is how the class got
+    // missed for so long: crabs[0] is PINCHY, six characters, and the card only
+    // breaks at about ten. TIDEPOOL TIM is a real name off the customer roster
+    // and it printed straight through DOWN.
+    run("card-longname", () => {
+      hireCard = null; sel = crabs[0]; dossier = null; manage = null;
+      const longest = CRAB_NAMES.concat(CUSTOMER_NAMES)
+        .reduce((a, b) => (textWidth(b) > textWidth(a) ? b : a));
+      crabs[0].p.name = longest;
+      crabs[0].p.homeless = true; crabs[0].p.wallet = 0;   // DOWN: the widest mood on the roster
+    }, () => drawFollowCard());
+    // ...and the VISITOR's card, which is a different layout with the same
+    // name/mood row and had the same fault - a slice(0, 9) where a measurement
+    // belonged, against a mood that can be as wide as DELIGHTED.
+    run("visitor-card", () => {
+      const v = customers.find(k => k.visitor);
+      if (!v) throw new Error("no visitor in town to draw a card for");   // a silent no-op proves nothing
+      v.name = CUSTOMER_NAMES.reduce((a, b) => (textWidth(b) > textWidth(a) ? b : a));
+      v.wallet = 188; v.purse = 200; v.room = true; v.roomN = 7; sel = v;
+    }, () => drawFollowCard());
+    // A SHOPFRONT IS A CARD TOO. Everything above is a panel; this is the first
+    // time the sweep has been pointed at WORLD text, and it is where the newest
+    // string in the game lives - the shack's TILL TODAY board, hung in the same
+    // slot as the CLOSED placard, one roofline under the sign and the MANAGE
+    // chip. Midday, so the shop is open and the board is actually up.
+    run("shopfront", () => { hireCard = null; tmin = 12 * 60;
+      camX = clampCam((BIZ.shack.x0 + BIZ.shack.x1) / 2 - W / 2); }, () => drawBusiness("shack"));
     text = T; smallText = S; rect = RC;
     return JSON.stringify(hits);
   })()`));
@@ -4731,6 +4771,19 @@ scenario("no surface prints off the canvas", () => {
     // the job board card carries the TRADE LEDGER under the openings
     run("board", () => { toast = null; boardView = true; }, () => drawJobBoard());
     run("save", () => { boardView = false; saveView = true; }, () => drawSaveScreen());
+    // ---- the onboarding pass's surfaces, every page and every button, before
+    // the run reaches the two end-of-game cards (which set gameOver and won and
+    // would put all three of these behind their own liveness gates)
+    run("help", () => { saveView = false; helpView = true; }, () => {
+      for (helpPage = 0; helpPage < HELP_PAGES.length; helpPage++) drawHelp();
+    });
+    run("shoptip", () => { helpView = false; reportT = 0; tab = "shop"; hireCard = null; }, () => {
+      for (const uk of Object.keys(UPS)) { shopTip = uk; drawShopTip(); }
+    });
+    run("hire-card", () => { shopTip = null; tab = "crew";
+      hireCard = { c: crabs[0], how: "WAS HERE ON HOLIDAY - LIKED IT AND STAYED", t: 5 }; },
+      () => drawHireCard());
+    run("nav-chips", () => { hireCard = null; helpSeen = false; day = 1; }, () => drawNav());
     run("gameover", () => { saveView = false; gameOver = true; bankrupt = false; }, () => drawGameOver());
     run("ending", () => { won = true; winT = 99; winRec = { day: 40, lifetime: 99999,
       crew: ["PINCHY", "CLAWDIA", "SHELDON", "BARNACLE", "REEF"], pop: 9, housed: 7,
@@ -6653,6 +6706,523 @@ scenario("a corrupt town hall in a save is clamped, not trusted", () => {
   if (!okMech(got.pmech) || got.pbowls > 6) return `the platform came back as ${got.pmech}/${got.pbowls}`;
   if (!got.seated) return "the office was left vacant by a corrupt save";
   if (got.poll !== null) return "a poll that was a string came back as something";
+  return true;
+});
+
+// ===========================================================================
+// THE ONBOARDING PASS - shop tooltips, the help card, a visible hire, and
+// "is my money going up?"  (off Ben Lewis's playtest; see PLAN)
+// ===========================================================================
+
+scenario("the shop tooltip promises what the button actually does", () => {
+  // THE MECHANISM, NOT THE COINCIDENCE. upEffect() reads the same functions the
+  // SIM reads - stationCap, bizTables, crabs.length, ownedBizList - and prints
+  // "N -> N+1". So the honest test is not "the string says GRILLS 1 -> 2"; it
+  // is: read the promise, BUY the thing, and check the town now holds exactly
+  // the number the promise named. A tooltip that drifted away from its button
+  // fails this even though its words never changed.
+  const sim = createSim({ seed: 5 });
+  sim.runDays(1);
+  const counters = {
+    chef: "crabs.length",
+    grill: 'stationCap("shack", "grill")',
+    board: 'stationCap("shack", "board")',
+    table: 'bizTables("shack").length',
+    juicebar: "ownedBizList().length",
+    arcade: "ownedBizList().length",
+    cadegear: 'stationCap("arcade", "claw")',
+  };
+  // the arcade has to be standing before CADE GEAR+'s counter means anything,
+  // which is why the order below is the shop grid's own order
+  for (const key of ["chef", "grill", "board", "table", "juicebar", "arcade", "cadegear"]) {
+    sim.G("coins = 40000;");
+    const promise = sim.G(`upEffect(${JSON.stringify(key)})`);
+    const m = /-> (\d+)$/.exec(promise);
+    if (!m) return `${key}: "${promise}" does not name a number it will move to`;
+    const before = sim.G(counters[key]);
+    const from = /(\d+) ->/.exec(promise);
+    if (!from || +from[1] !== before)
+      return `${key}: the tooltip opened on "${promise}" while the town held ${before}`;
+    sim.G(`tryBuy(${JSON.stringify(key)});`);
+    const after = sim.G(counters[key]);
+    if (after !== +m[1]) return `${key}: promised "${promise}" and the town went ${before} -> ${after}`;
+  }
+  return true;
+});
+
+scenario("the tooltip's nightly cost is the live setting, not a printed number", () => {
+  // The second half of what a tooltip is allowed to say (see UP_HELP): what the
+  // thing costs you EVERY night after. HIRE CRAB quotes the shack's wage and
+  // ARCADE quotes the arcade's rent, so moving the wage on the management card
+  // has to move what the button promises - otherwise the line is decoration.
+  const sim = createSim({ seed: 7 });
+  const base = sim.G('upOngoing("chef")');
+  if (!base.includes("$" + sim.G('bizWage("shack")')))
+    return `HIRE CRAB quoted "${base}" at a wage of $${sim.G('bizWage("shack")')}`;
+  sim.G('setBizWage("shack", bizWage("shack") + 7);');
+  const moved = sim.G('upOngoing("chef")');
+  if (moved === base) return `the wage moved and the tooltip still said "${base}"`;
+  if (!moved.includes("$" + sim.G('bizWage("shack")'))) return `after the raise it said "${moved}"`;
+  // ...and the rents are each shop's own, not one shared literal
+  for (const k of ["arcade", "juicebar"])
+    if (!sim.G(`upOngoing(${JSON.stringify(k)})`).includes("$" + sim.G(`BIZ.${k}.rent`)))
+      return `${k} does not quote its own rent`;
+  // a rung with no standing order has to SAY so rather than say nothing: the
+  // blank is exactly the ambiguity the whole feature exists to remove
+  for (const k of ["grill", "board", "table", "cadegear"])
+    if (!sim.G(`upOngoing(${JSON.stringify(k)})`)) return `${k} has no nightly line at all`;
+  return true;
+});
+
+scenario("a shop button reads before it buys, and hover is what makes it one tap", () => {
+  // The arming rule, both input devices, in one scenario. tapShopButton is the
+  // whole of the click path (tryBuy is left alone so the tools and the rest of
+  // this suite can still buy directly), so this drives what a tap drives.
+  const sim = createSim({ seed: 9 });
+  sim.G('tab = "shop"; shopTip = null; coins = 5000;');
+  const lvl0 = sim.G("UPS.table.lvl"), coins0 = sim.G("Math.round(coins)");
+  sim.G('tapShopButton("table")');
+  if (sim.G("shopTip") !== "table") return "the first tap did not put the tooltip up";
+  if (sim.G("UPS.table.lvl") !== lvl0) return "the first tap bought the thing";
+  if (sim.G("Math.round(coins)") !== coins0) return "the first tap moved money";
+  sim.G('tapShopButton("table")');
+  if (sim.G("UPS.table.lvl") !== lvl0 + 1) return "the second tap did not buy";
+  // A DIFFERENT BUTTON IS A FIRST TAP AGAIN - the arm belongs to the tooltip
+  // that is on screen, not to the grid.
+  const g0 = sim.G("UPS.grill.lvl");
+  sim.G('tapShopButton("grill")');
+  if (sim.G("UPS.grill.lvl") !== g0) return "moving to another button bought it outright";
+  // HOVER IS THE ARM ON A MOUSE. Pointing at a button is the same act as the
+  // first tap, which is the whole reason a desktop click buys in one.
+  sim.G("shopTip = null;");
+  const b = JSON.parse(sim.G("JSON.stringify(BUTTONS.find(b => buttonKey(b) === 'board'))"));
+  sim.G(`shopHoverAt({ x: ${b.x + 2}, y: ${b.y + 2} })`);
+  if (sim.G("shopTip") !== "board") return "hovering a button did not raise its tooltip";
+  const bd0 = sim.G("UPS.board.lvl");
+  sim.G('tapShopButton("board")');
+  if (sim.G("UPS.board.lvl") !== bd0 + 1) return "a click on a hovered button did not buy";
+  // ...and the pointer coming off the grid puts the card away rather than
+  // leaving an armed button behind it
+  sim.G("shopHoverAt({ x: 250, y: PANEL_Y + 2 })");
+  if (sim.G("shopTip")) return "the tooltip stayed up with the pointer off the grid";
+  return true;
+});
+
+scenario("the shop tooltip is drawn, and dies behind every reading surface", () => {
+  // A silent no-op proves nothing, so first: it actually prints, and it prints
+  // the four things it is allowed to (name, price, what changes, what it costs
+  // every night after).
+  const sim = createSim({ seed: 11 });
+  sim.runDays(1);
+  const drew = (setup) => JSON.parse(sim.G(`(() => {
+    ${setup}
+    const out = []; const T = text, S = smallText;
+    text = (c, s2, x, y, col, sz) => { out.push(String(s2)); return T(c, s2, x, y, col, sz); };
+    smallText = (c, s2, x, y, col) => { out.push(String(s2)); return S(c, s2, x, y, col); };
+    try { drawShopTip(); } finally { text = T; smallText = S; }
+    return JSON.stringify(out);
+  })()`));
+  const live = drew('screen = "play"; gameOver = false; helpView = false; dossier = null;'
+    + ' manage = null; boardView = false; saveView = false; reportT = 0; hireCard = null;'
+    + ' tab = "shop"; shopTip = "arcade"; coins = 5000;');
+  if (!live.includes(sim.G("UPS.arcade.name"))) return "the tooltip did not print the button's name";
+  if (!live.some(s => s.indexOf("$") === 0)) return "the tooltip did not print a price";
+  if (!live.includes(sim.G('upEffect("arcade")'))) return "the tooltip did not print what changes";
+  if (!live.includes(sim.G('upOngoing("arcade")'))) return "the tooltip did not print the nightly cost";
+  // A READING SURFACE OWNS THE SCREEN. The tooltip hangs in the world above the
+  // panel, so every card that covers the world has to kill it - including the
+  // HIRE CARD, which is what a HIRE CRAB tap puts there in its place.
+  const surfaces = {
+    dossier: "dossier = crabs[0];",
+    manage: 'dossier = null; manage = "shack";',
+    board: "manage = null; boardView = true;",
+    save: "boardView = false; saveView = true;",
+    report: "saveView = false; reportT = 3;",
+    help: "reportT = 0; helpView = true;",
+    hire: "helpView = false; hireCard = { c: crabs[0], how: 'X', t: 5 };",
+    "the crew tab": 'hireCard = null; tab = "crew";',
+    "game over": 'tab = "shop"; gameOver = true;',
+  };
+  for (const k of Object.keys(surfaces)) {
+    const n = drew(surfaces[k] + ' shopTip = "arcade";');
+    if (n.length) return `the tooltip was still drawn behind ${k}: ${JSON.stringify(n.slice(0, 2))}`;
+  }
+  return true;
+});
+
+scenario("the help card fits the card, in the font the card is printed in", () => {
+  // THE GENERAL FORM OF THE LEASE BUG, aimed at the newest and wordiest surface
+  // in the game. Measured with the game's own widths at the size drawHelp uses,
+  // against the card's OWN rect table - and the key column is checked against
+  // HELP_KEYCOL rather than a copy of 56, or the scenario would only be
+  // asserting its own constant.
+  //
+  // AND THE CHARACTER SET, which is the bug this caught for real: the 3x5 font
+  // has no bracket glyphs (font.js), so a controls page listing "[ ]" printed
+  // "?? ??" on a screen whose entire job is explaining the controls. Anything
+  // sGlyph would have to fall back on is a defect, not a typo.
+  const sim = createSim({ seed: 3 });
+  const R = JSON.parse(sim.G("JSON.stringify(helpRects())"));
+  const KEYCOL = sim.G("HELP_KEYCOL");
+  const pages = JSON.parse(sim.G("JSON.stringify(HELP_PAGES)"));
+  const charset = sim.G("Object.keys(FONT_SMALL).join('')");
+  const bigset = sim.G("Object.keys(FONT).join('')");
+  const sw = (s) => String(s).length * 4 - 1;                 // smallTextWidth
+  const bodyLimit = R.w - 16, descLimit = R.w - 16 - KEYCOL;
+  const badChar = (s, set) => {
+    for (const ch of String(s).toUpperCase()) if (ch !== " " && set.indexOf(ch) < 0) return ch;
+    return null;
+  };
+  for (const P of pages) {
+    const c0 = badChar(P.title, charset);
+    if (c0) return `page title "${P.title}" needs a "${c0}" the 3x5 font does not have`;
+    for (const L of P.lines) {
+      for (const s of L.slice(1)) {
+        const c = badChar(s, charset);
+        if (c) return `"${s}" needs a "${c}" the 3x5 font does not have`;
+      }
+      // headings are NOT trimmed by fitSmall on purpose (a clipped heading
+      // reads as a typo), so they are the ones that have to be measured here
+      if (L[0] === "h" && sw(L[1]) > bodyLimit)
+        return `heading "${L[1]}" is ${sw(L[1])}px on a ${bodyLimit}px card`;
+      if (L[0] === "k") {
+        if (sw(L[1]) >= KEYCOL) return `key label "${L[1]}" is ${sw(L[1])}px into a ${KEYCOL}px column`;
+        if (sw(L[2]) > descLimit) return `"${L[2]}" is ${sw(L[2])}px in a ${descLimit}px column`;
+      }
+      if (L[0] === "t" && sw(L[1]) > bodyLimit)
+        return `"${L[1]}" is ${sw(L[1])}px on a ${bodyLimit}px card`;
+    }
+    // ...and the whole page has to land ABOVE the footer chips, walked at the
+    // pitch drawHelp actually uses (8 a row, 4 a gap, first row at y+19)
+    let ly = R.y + 19;
+    for (const L of P.lines) ly += L[0] === "-" ? 4 : 8;
+    if (ly > R.prev.y - 2) return `page "${P.title}" runs to y${ly}, under its own footer at y${R.prev.y}`;
+  }
+  if (badChar("HOW TO PLAY", bigset)) return "the header needs a glyph the 5x7 font does not have";
+  return true;
+});
+
+scenario("the help card is reachable from play, and from a town with nothing left", () => {
+  // The whole point of the card is that it is FINDABLE, so this asserts the
+  // doors: the nav strip's chip, the chip's rect being the chip that is drawn,
+  // and the card's own paging - and that HELP lives for a player with no
+  // business left to manage, which is exactly the player most likely to want an
+  // explanation.
+  const sim = createSim({ seed: 13 });
+  sim.runDays(1);
+  const R = JSON.parse(sim.G("JSON.stringify(navRects())"));
+  const mid = (r) => `{ x: ${r.x + (r.w >> 1)}, y: ${r.y + (r.h >> 1)} }`;
+  sim.G('helpView = false; screen = "play"; gameOver = false; dossier = null; manage = null;'
+    + " boardView = false; saveView = false; reportT = 0;");
+  if (!sim.G(`navTapChip(${mid(R.help)})`) || !sim.G("helpView")) return "the HELP chip did not open the card";
+  sim.G("helpView = false;");
+  // the chip's rect IS the chip that is drawn: nothing clickable that was never
+  // painted, and nothing painted you cannot hit
+  const painted = JSON.parse(sim.G(`(() => {
+    const out = []; const S = smallText;
+    smallText = (c, s2, x, y, col) => { out.push([String(s2), x, y]); return S(c, s2, x, y, col); };
+    try { drawNav(); } finally { smallText = S; }
+    return JSON.stringify(out); })()`));
+  const chipRow = painted.find(p => p[0] === "HELP");
+  if (!chipRow) return "the HELP chip was never drawn";
+  if (chipRow[1] < R.help.x || chipRow[1] > R.help.x + R.help.w)
+    return `the HELP label prints at x${chipRow[1]}, outside its own rect x${R.help.x}..${R.help.x + R.help.w}`;
+  // A PLAYER WITH NOTHING LEFT can still ask what happened: MANAGE and TOWN go
+  // dark with the last business, HELP does not.
+  sim.G('for (const k in BIZ) if (bizOwner(k) === "player") BIZ[k].owner = "sudsy";');
+  if (sim.G("navChipsLive()")) return "the fixture did not actually strip the player's businesses";
+  if (!sim.G(`navTapChip(${mid(R.help)})`) || !sim.G("helpView")) return "HELP went dark with the last shop";
+  // the card swallows its own clicks and pages both ways off one rect table
+  const HR = JSON.parse(sim.G("JSON.stringify(helpRects())"));
+  sim.G("helpPage = 0;");
+  sim.G(`tapHelp({ x: ${HR.next.x + 2}, y: ${HR.next.y + 2} })`);
+  if (sim.G("helpPage") !== 1) return "NEXT did not turn the page";
+  sim.G(`tapHelp({ x: ${HR.prev.x + 2}, y: ${HR.prev.y + 2} })`);
+  if (sim.G("helpPage") !== 0) return "PREV did not turn it back";
+  sim.G(`tapHelp({ x: ${HR.done.x + 2}, y: ${HR.done.y + 2} })`);
+  if (sim.G("helpView")) return "DONE did not close the card";
+  // ...and it kills the strip underneath it, on the same terms every other
+  // reading surface does
+  sim.G("helpView = true;");
+  if (sim.G("navLive()")) return "the nav strip was still live behind the help card";
+  // EVERY DOOR OUT ACTUALLY CLOSES IT - DONE, a tap off the card, and the chip
+  // again - because a reading surface you cannot leave is worse than one you
+  // cannot find.
+  const doors = { "the DONE chip": `tapHelp({ x: ${HR.done.x + 2}, y: ${HR.done.y + 2} })`,
+    "a tap off the card": `tapHelp({ x: 1, y: ${HR.y + HR.h + 6} })`,
+    "the HELP chip again": "toggleHelp()" };
+  for (const d of Object.keys(doors)) {
+    sim.G("helpView = false; toggleHelp();");
+    if (!sim.G("helpView")) return `the fixture for ${d} did not open the card`;
+    sim.G(doors[d]);
+    if (sim.G("helpView")) return `${d} did not close the card`;
+  }
+  // ...AND IT DOES NOT BUY THE PLAYER TIME (owner, 2026-08-20: the pause chip
+  // is gone, "it's against the spirit of the game"). Opening the instructions
+  // must not stop the clock - the day running while you work the town out is
+  // the game, and a help screen that froze it would put the pause back under
+  // another name.
+  const t0 = sim.G("tmin"), d0 = sim.G("day");
+  sim.G("helpView = false; toggleHelp();");
+  if (!sim.runUntil(`day > ${d0} || tmin > ${t0} + 20`, { maxSteps: 40000 }))
+    return "the clock did not advance while the help card was open";
+  sim.G("closeHelp()");
+  return true;
+});
+
+scenario("the help card teaches the machine and does not spoil the ending", () => {
+  // TWO STANDING RULINGS MEET ON THIS CARD (PLAN): the town's name is embargoed
+  // until the ending, and the way out is a discovery the arcade unlocks. A help
+  // screen is the easiest place in the whole game to leak either one, and it is
+  // written once and then never read again by anybody who built it - so the
+  // guard has to be automatic.
+  const sim = createSim({ seed: 3 });
+  const all = sim.G("HELP_PAGES.map(p => p.title + ' ' + p.lines.map(l => l.slice(1).join(' ')).join(' ')).join(' ')");
+  // THE BOAT'S EXISTENCE IS NOT THE SECRET. She lands tourists four times a
+  // day in plain sight and the game's own toast says "THE FERRY IS IN" - so the
+  // word FERRY is fine and the roles page uses it. What is embargoed is the way
+  // OUT on her: the office at the pier head, the fare, and where she goes.
+  for (const word of ["FERRY OFFICE", "TICKET", "FARE", "ESCAPE", "PASSAGE", "MAINLAND"])
+    if (all.includes(word)) return `the help card says "${word}" - that is the ending`;
+  // ...and it must not do the player's arithmetic for them: no forecast, no
+  // advice, no shopping order. Economic uncertainty is the game.
+  for (const word of ["RECOMMEND", "SHOULD BUY", "PROFIT", "PAYS FOR ITSELF", "WILL EARN"])
+    if (all.includes(word)) return `the help card says "${word}" - that is the player's job`;
+  // ...NOR OFFER A WAY OUT OF THE CLOCK. The pause chip was removed on the
+  // owner's instruction - "it's against the spirit of the game" - and a help
+  // screen is exactly where it would quietly come back, either as a control or
+  // as a promise that reading is free. Neither.
+  for (const word of ["PAUSE", "SPACE BAR", "STOP THE CLOCK", "FREEZE"])
+    if (all.includes(word)) return `the help card says "${word}" - the clock cannot be stopped`;
+  // IT DOES HAVE TO SAY THE LOAD-BEARING THINGS, or it is decoration. The
+  // second half of this list is Matt's own brief (2026-08-20): "there should be
+  // a help screen for public functions and roles" - so a future edit that
+  // quietly drops the roles page or the town hall page fails here rather than
+  // being noticed by the next player who cannot tell what a fisher is.
+  for (const word of ["20:00", "RENT", "WAGES", "TIP", "CRAB SHACK", "REP",
+                      "YOUR CREW", "FISHERS", "VISITORS", "THE MAYOR", "THE LANDLORD",
+                      "SHELTER", "TOWN FUND", "SUNDAY", "MANIFESTO"])
+    if (!all.includes(word)) return `the help card never mentions ${word}`;
+  return true;
+});
+
+scenario("a hire is something you can see happen", () => {
+  // "Hired a crab. Don't even see the crab. He just joined the crew." Three
+  // things have to land, and all three are asserted off the hire itself rather
+  // than off a fixture: the CAMERA is on them, the CARD names them and what
+  // they cost, and the POINTER is over their head in the town.
+  const sim = createSim({ seed: 21 });
+  sim.runDays(1);
+  sim.G("coins = 5000; hireCard = null; followIdx = -1; sel = null; toast = null;");
+  const before = sim.G("crabs.length");
+  sim.G('tryBuy("chef")');
+  if (sim.G("crabs.length") !== before + 1) return "nobody was hired";
+  const name = sim.G("crabs[crabs.length - 1].p.name");
+  if (!sim.G("hireCard && hireCard.c === crabs[crabs.length - 1]")) return "the card is not about the crab who joined";
+  if (!sim.G("isFollowing(crabs[crabs.length - 1])")) return "the camera did not go to the new hire";
+  if (sim.G("sel !== crabs[crabs.length - 1]")) return "the new hire was not selected";
+  if (sim.G("toast")) return "a toast is competing with the card for the same moment";
+  const drew = JSON.parse(sim.G(`(() => {
+    const out = []; const T = text, S = smallText;
+    text = (c, s2, x, y, col, sz) => { out.push(String(s2)); return T(c, s2, x, y, col, sz); };
+    smallText = (c, s2, x, y, col) => { out.push(String(s2)); return S(c, s2, x, y, col); };
+    try { drawHireCard(); } finally { text = T; smallText = S; }
+    return JSON.stringify(out); })()`));
+  const joined = drew.join(" | ");
+  if (!joined.includes(name)) return "the card does not say who joined";
+  // A HIRE IS A STANDING ORDER, not a purchase, and the card has to read as one
+  for (const must of ["20:00", "SHIFT"])
+    if (!joined.includes(must)) return `the card never says ${must}`;
+  if (!/\$\d+/.test(joined)) return "the card never says what they cost";
+  // THE POINTER. Drawn in the WORLD pass, which is the whole point: it is
+  // pinned to the crab, not to a place on the screen. So the test is that
+  // panning the camera moves it by exactly as much, the other way - a pointer
+  // parked at a screen coordinate would pass "it drew" and fail this.
+  const pointerX = () => sim.G(`(() => {
+    let x0 = null; const RC = rect;
+    rect = (c, x, y, w, h, col) => { if (x0 === null) x0 = x; return RC(c, x, y, w, h, col); };
+    try { drawHirePointer(); } finally { rect = RC; }
+    return x0 === null ? -9999 : x0; })()`);
+  sim.G("camX = clampCam(crabs[crabs.length - 1].x - 128);");
+  const cam0 = sim.G("camX"), p0 = pointerX();
+  if (p0 === -9999) return "no pointer over the new hire";
+  sim.G("camX = clampCam(camX + 40);");
+  const cam1 = sim.G("camX"), p1 = pointerX();
+  if (cam1 === cam0) return "the fixture could not pan the camera at all";
+  if (p1 === -9999) return "the pointer vanished when the camera moved";
+  if (p0 - p1 !== cam1 - cam0)
+    return `the camera moved ${cam1 - cam0}px and the pointer moved ${p0 - p1}px`;
+  sim.G("hireCard = null;");
+  if (pointerX() !== -9999) return "the pointer outlived the card";
+  return true;
+});
+
+scenario("the hire card runs on the wall clock, not the game clock", () => {
+  // A card you are meant to READ must not get six times shorter because the
+  // speed chips are on - which is exactly what would happen if it burned down
+  // on dt the way the toast does. Same wall time, two speeds, same card left.
+  const burn = (ff) => {
+    const sim = createSim({ seed: 33 });
+    sim.runDays(1);
+    sim.G(`coins = 5000; ffMode = ${ff}; tryBuy("chef");`);
+    const t0 = sim.G("hireCard.t");
+    sim.runUntil("false", { maxSteps: 40 });   // 40 x 50ms of wall clock
+    return [t0, sim.G("hireCard ? hireCard.t : 0")];
+  };
+  const [a0, a1] = burn(0), [b0, b1] = burn(3);
+  if (a0 !== b0) return "the card did not open on the same timer at both speeds";
+  if (Math.abs((a0 - a1) - (b0 - b1)) > 0.25)
+    return `1x burned ${(a0 - a1).toFixed(2)}s of card and 6x burned ${(b0 - b1).toFixed(2)}s`;
+  if (a0 - a1 <= 0) return "the card never burned down at all";
+  return true;
+});
+
+scenario("TODAY is history: the panel answers is-my-money-going-up without forecasting", () => {
+  // "Is my money going up? Its too unclear!" The slot used to read "$1.1/S" -
+  // dollars per second of REAL time, a number that changes when you press a
+  // speed chip. It reads coins - dayOpen now, which is a FACT about today, and
+  // the three properties that make it one are asserted here.
+  const sim = createSim({ seed: 41 });
+  sim.runDays(1);
+  const net = () => sim.G("Math.round(coins - dayOpen)");
+  // 1. IT IS THE ARITHMETIC IT CLAIMS TO BE
+  sim.G("coins = dayOpen + 137;");
+  if (net() !== 137) return `the readout does not equal the day's movement (${net()})`;
+  // 2. IT IS NOT A FORECAST. Tonight's bill is the OTHER half of the sum and
+  // the player does the subtraction - so moving the bill must not move this.
+  const n0 = net();
+  sim.G("BIZ.shack.rent += 500;");
+  const moved = sim.G("nightlyDue() + creditDueTonight()");
+  if (net() !== n0) return "tonight's bill leaked into today's takings";
+  if (!moved) return "the fixture did not actually give the town a bill";
+  sim.G("BIZ.shack.rent -= 500;");
+  // 3. MIDNIGHT RESETS IT, off the same rollover the day log uses - otherwise
+  // it would slowly turn into "lifetime", which is a different question.
+  const d0 = sim.G("day");
+  sim.G("coins = 4000;");   // solvent enough to reach the next midnight
+  if (!sim.runUntil(`day > ${d0}`, { maxSteps: 400000 })) return "the town never reached midnight";
+  if (Math.abs(sim.G("coins - dayOpen")) > 60)
+    return `the new day opened ${net()} away from the till`;
+  // 4. AND SETTLEMENT PULLS IT DOWN, which is the loop being taught rather than
+  // hidden: at 20:00 the landlord and the crew take their cut of exactly this.
+  if (!sim.runUntil("tmin >= 19 * 60 + 50", { maxSteps: 400000 })) return "the town never reached the evening";
+  const nBefore = net();
+  if (!sim.runUntil("tmin >= 20 * 60 + 10", { maxSteps: 400000 })) return "the town never reached settlement";
+  if (net() >= nBefore) return `settlement took money and TODAY went ${nBefore} -> ${net()}`;
+  return true;
+});
+
+scenario("dayOpen survives a reload, so a returning town is not reported as rich", () => {
+  // The failure this exists to prevent: `dayOpen` defaulting to 0 on an old
+  // save, so a town with $900 in the till comes back reading "TODAY +$900".
+  const store = new Map();
+  const a = createSim({ seed: 1337, storage: store, fresh: false });
+  a.runDays(2);
+  a.G("save()");
+  const net = a.G("Math.round(coins - dayOpen)");
+  const b = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!b.G("load(activeSlot)")) return "the save would not load";
+  if (b.G("Math.round(coins - dayOpen)") !== net)
+    return `today read ${net} before the reload and ${b.G("Math.round(coins - dayOpen)")} after`;
+  // ...and a save from before this field existed opens the day at the till it
+  // came back with, which reads +$0 rather than a phantom fortune
+  const key = a.G("slotKey(activeSlot)");
+  const env = JSON.parse(store.get(key));
+  delete env.dayOpen;
+  store.set(key, JSON.stringify(env));
+  const c = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!c.G("load(activeSlot)")) return "the pre-dayOpen save would not load";
+  if (c.G("Math.round(coins - dayOpen)") !== 0)
+    return `an old save came back reading TODAY ${c.G("Math.round(coins - dayOpen)")}`;
+  return true;
+});
+
+scenario("the shack says where the money comes from, and only your shops do", () => {
+  // Matt: "maybe it's not obvious enough that the crab shack is the central
+  // place money comes from?" The board is a READING of the same day book the
+  // management card and the nav strip's flash already share - so the test is
+  // that it reads that till, on the shops you own, and never invents one.
+  const sim = createSim({ seed: 17 });
+  sim.runDays(1);
+  if (!sim.runUntil("today.biz.shack && today.biz.shack.take > 0", { maxSteps: 400000 }))
+    return "the shack never took any money to put on a board";
+  const painted = (key) => JSON.parse(sim.G(`(() => {
+    camX = clampCam((BIZ.${key}.x0 + BIZ.${key}.x1) / 2 - W / 2);
+    const out = []; const S = smallText;
+    smallText = (c, s2, x, y, col) => { out.push(String(s2)); return S(c, s2, x, y, col); };
+    try { drawBusiness(${JSON.stringify(key)}); } finally { smallText = S; }
+    return JSON.stringify(out); })()`));
+  sim.G("tmin = 12 * 60;");   // trading hours: the board and the CLOSED placard share a slot
+  const mine = painted("shack").find(s => s.indexOf("TILL TODAY") === 0);
+  if (!mine) return "the shack's own shopfront does not say what it has taken";
+  const want = "TILL TODAY $" + sim.G("fmt(today.biz.shack.take)");
+  if (mine !== want) return `the board reads "${mine}" against a day book that says "${want}"`;
+  // A PEER'S TAKINGS ARE NOT YOUR BUSINESS - the player has never had a surface
+  // that reads somebody else's till, and this must not become the first.
+  if (painted("showers").some(s => s.indexOf("TILL TODAY") === 0))
+    return "a shop the player does not own hung a till board";
+  // ...and drawing the board must not CREATE a day-book row for a shop that has
+  // not traded, which would put a phantom line in tonight's report
+  sim.G('coins = 5000; tryBuy("juicebar"); delete today.biz.juicebar;');
+  painted("juicebar");
+  if (sim.G("today.biz.juicebar != null"))
+    return "drawing the board minted a day-book row for a shop that has not traded";
+  return true;
+});
+
+scenario("no fixed sentence on a card is trimmed to a pair of dots", () => {
+  // THE THIRD SWEEP, and the one Matt's note actually asked for. Its two
+  // siblings catch a string that prints OFF a surface and a string that prints
+  // ON TOP OF another one. Neither of them can see the failure that produced
+  // "the tips slider is mushed up against other text": copy that FITS, because
+  // fitSmall quietly cut its tail off, and reads as an unfinished sentence.
+  //
+  // THE LINE THIS DRAWS is between copy that is WRITTEN and copy that is
+  // ASSEMBLED. A menu line built out of whatever the shop sells, a report line
+  // built out of whoever moved house, a ballot line built out of a crab's own
+  // name - those are genuinely unbounded and trimming is the right answer for
+  // them, which is what fitSmall is for. A sentence somebody typed into game.js
+  // has a known width and a known budget and should simply have been written to
+  // fit. Only the second kind is swept here.
+  //
+  // Every string and every budget is read out of the game's own tables and rect
+  // tables - never retyped here, or the scenario would be checking a copy of
+  // the copy and would go green the moment somebody made the real one longer.
+  const sim = createSim({ seed: 3 });
+  const over = JSON.parse(sim.G(`(() => {
+    const out = [];
+    const push = (where, s, w) => {
+      if (smallTextWidth(s) > w) out.push([where, String(s), smallTextWidth(s), w]);
+    };
+    // ---- the help card: body lines, headings and the key column's second half
+    const HR = helpRects();
+    for (const P of HELP_PAGES) for (const L of P.lines) {
+      if (L[0] === "t" || L[0] === "h") push("help/" + P.title, L[1], HR.w - 16);
+      if (L[0] === "k") push("help/" + P.title, L[2], HR.w - 16 - HELP_KEYCOL);
+    }
+    // ---- the shop tooltip: two lines of body per rung, plus both halves of
+    // the consequence line at the widest they can be
+    const SR = shopTipRect();
+    for (const k in UP_HELP) {
+      for (const line of UP_HELP[k]) push("tooltip/" + k, line, SR.w - 10);
+      push("tooltip/" + k, upEffect(k) + "  " + upOngoing(k), SR.w - 10);
+    }
+    // ---- the hire card: the two derived lines, against the column beside the
+    // portrait (the same R.w - 46 the draw uses)
+    const CR = { w: HIRE_CARD.w };
+    for (const k in HIRE_DUTY) push("hire/" + k, HIRE_DUTY[k] + " " + BIZ[k].name, CR.w - 46);
+    // ---- and the management card's roster hint, against the DONE chip it
+    // stops at, in all three states it can be in
+    const MR = manageRects(), budget = rosterHintBudget(MR);
+    push("manage/roster", rosterHint("shack", 0), budget);
+    push("manage/roster", rosterHint("shack", 9), budget);
+    BIZ.shack.autoLabor = true;
+    push("manage/roster", rosterHint("shack", 0), budget);
+    BIZ.shack.autoLabor = false;
+    return JSON.stringify(out);
+  })()`));
+  if (over.length)
+    return over.map(o => `${o[0]}: "${o[1]}" is ${o[2]}px in a ${o[3]}px slot`).slice(0, 6).join("\n        ");
   return true;
 });
 
