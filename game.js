@@ -563,6 +563,14 @@ const bizUnlocked = (b) => b === "shack" || (!!BIZ[b] && (!!BIZ[b].bought || biz
 // is not a constant somebody picked. It is the office's lever, and it is the
 // thing an election is actually about.
 const SHELTER_RENT = 10;         // Mr. Pincherton owns the shelter too, and he charges for it
+// ...AND HE CHARGES BY THE BED. The town RENTS this building, so a bigger
+// shelter is not something the town buys once - it is a bigger bill every
+// night, for as long as the beds stand (see ACCOMMODATION UPGRADES, where the
+// mayor signs for them and the purse has to carry them). Every reader of the
+// shelter's rent goes through this one function so the number on the placard,
+// the number in the ledger and the number a voter prices a platform against
+// can never disagree.
+function shelterRent() { return SHELTER_RENT + dormExtra() * DORM_CFG.RENT; }
 const SHELTER_FLOAT = 1;         // ...and the purse is struck to carry this many nights of it IN HAND.
                                  // Same idiom the town already uses everywhere money has to survive a
                                  // bad day (RIVAL_CFG.FLOAT_NIGHTS, BANK_KEEP's "two nights' rent and a
@@ -968,7 +976,7 @@ function ballotBill() {
   return (allCrabs().length + BALLOT_SPARE) * BALLOT_PRICE;
 }
 function fundNeed() {
-  return Math.max(0, SHELTER_RENT * (1 + SHELTER_FLOAT) + townFund.arrears
+  return Math.max(0, shelterRent() * (1 + SHELTER_FLOAT) + townFund.arrears
     + potWant() * bowlCost() + ballotBill() - townFund.bal);
 }
 // the attribution switch, the same shape as _failOff and _noRival: the balance
@@ -1171,9 +1179,9 @@ function purseYield(p) {
 // bowls. SHELTER_FLOAT is deliberately left out, because it is a stock rather
 // than a flow - the purse collects that one night of rent once and then carries
 // it, so it is not part of what a policy costs you week after week.
-function platTake(p) { return Math.min(purseYield(p), SHELTER_RENT + (p.bowls | 0) * bowlCost()); }
+function platTake(p) { return Math.min(purseYield(p), shelterRent() + (p.bowls | 0) * bowlCost()); }
 function platBowls(p) {   // bowls the purse can actually pay for, after the roof
-  return Math.max(0, Math.min(p.bowls | 0, Math.floor((purseYield(p) - SHELTER_RENT) / Math.max(1, bowlCost()))));
+  return Math.max(0, Math.min(p.bowls | 0, Math.floor((purseYield(p) - shelterRent()) / Math.max(1, bowlCost()))));
 }
 // THE ROOF IS WORTH MORE THAN THE POT, and the town knows it. A platform whose
 // purse cannot even cover the shelter's rent is a platform that closes the
@@ -1193,7 +1201,7 @@ function roofWeight(c) {
   return (c.p.homeless ? 0.60 : 0.20) * seen;
 }
 function platValue(c, p) {
-  const roof = purseYield(p) >= SHELTER_RENT ? 1 : 0;
+  const roof = purseYield(p) >= shelterRent() ? 1 : 0;
   return potStake(c) * (platBowls(p) / POT_MAX)
     + roofWeight(c) * roof
     - purseCost(c, p.mech) * (platTake(p) / 60);   // 60 = a big night for this fund
@@ -1532,7 +1540,7 @@ function runTownHall() {
   // 1. the rent, which comes before the pot: a shelter with no roof serves
   //    nobody, and a mayor who buys soup before paying the lease is not a
   //    mayor for very long.
-  const owed = SHELTER_RENT + townFund.arrears;
+  const owed = shelterRent() + townFund.arrears;
   const paid = fundRemit(owed, "MR. PINCHERTON", "SHELTER RENT");
   if (paid >= owed - 0.005) { townFund.arrears = 0; townFund.strikes = 0; }
   else {
@@ -2929,7 +2937,7 @@ function hotelierArrive() {
   toast = { text: c.p.name + " HAS BOUGHT THE " + BIZ[b].name + " - $" + fmt(price), t: 9 };
   today.rival.push(c.p.name + " BOUGHT THE " + BIZ[b].short + " OFF " + sold + " - $" + fmt(price));
   crabLog(c, "life", "CAME TO TOWN AND BOUGHT THE " + BIZ[b].short, 0);
-  crabLog(c, "money", "PAID $" + price + " FOR SEVEN ROOMS", 0);
+  crabLog(c, "money", "PAID $" + price + " FOR " + hotelRooms().length + " ROOMS", 0);
   popText("UNDER NEW MANAGEMENT", (BIZ[b].x0 + BIZ[b].x1) / 2 - 34, 96, [255, 216, 96]);
   if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
   if (window._stats) window._stats.hotelier = { day, price, name: c.p.name, from: sold, moves: [] };
@@ -3060,6 +3068,543 @@ function runHotelier() {
   if (!hotelierRuns()) return;   // she sold up, or the lease took her under
   runHotelierPolicy();
 }
+
+// ===========================================================================
+// ACCOMMODATION UPGRADES - THE DORMITORY AND THE ANNEXE
+// ===========================================================================
+// (Matt, 2026-08-20, verbatim: "Also now we have two multi accommodation
+// places; need to be able to make each pretty big by buying upgrades.")
+//
+// The town has two buildings that sleep more than one crab, and until now both
+// of them were frozen at the size they shipped: the DRIFTWOOD's seven rooms,
+// and the SHELTER's cots. This block makes both of them GROW, and the whole
+// design is in who signs for the growth, because that is who pays for it.
+//
+// THE DRIFTWOOD IS CAPITAL. Rooms are the OWNER'S decision - the player's if
+// they hold the lease, BRASS's or REEF's if they do - paid once, out of a till
+// that has to have the money in it tonight, and worth it only if the beds sell.
+// THE SHELTER IS RENT. Nobody owns it; the town rents it off Mr. Pincherton and
+// the mayor signs the lease. So a bigger shelter is not a purchase at all, it
+// is A BIGGER BILL EVERY NIGHT, for as long as the beds stand, out of a purse
+// somebody in this town is paying into. That is the honest coupling and it is
+// the one that makes the office worth winning: four more cots is a permanent
+// fiscal commitment the next mayor inherits, and a town that votes itself a
+// tin-cup purse and a twelve-bed dormitory bolts its own shelter.
+//
+// NOTHING IS CONJURED, and this block adds no fourth door. The hotel's builder
+// pays MR. PINCHERTON, who owns the fabric of every commercial lease in this
+// town (he "will not give up a point of a commercial lease" - see the owner
+// layer), and the money leaves the world at him exactly the way every rent in
+// this game already leaves it. The shelter's extra beds are REMITTED to the
+// same landlord, through fundRemit, on the same audited ledger as the rent -
+// the key money the night they are signed for, and the rent every night after.
+// Building materials are deliberately NOT modelled as a trade import: the town
+// is not buying timber, it is renting more of a building that already stands,
+// and inventing a freighter for it would be a fiction the ledger does not need.
+//
+// THE SHELTER HAD NO WALL AT ALL BEFORE THIS, and that is the fault this
+// block fixes on the way past. `homeSpot` cycled four cot positions with a
+// modulo, so the fifth homeless crab slept on top of the first and the
+// twentieth slept on top of the fourth: the shelter was infinite, which is a
+// strange thing for the one building the entire town hall exists to pay for.
+// It has four beds now - the four the art has drawn since the day it shipped -
+// and the crab who finds them taken sleeps rough on the step, which is the
+// state this game already models, prices, and has a scenario for.
+// ===========================================================================
+const DORM_CFG = {
+  BASE: 4,        // the cots the shelter opens with, and the four the sprite draws.
+                  // MEASURED: six do-nothing towns over 30 days peak at 3-4 crabs
+                  // homeless at bedtime (SUDSY, SALTY, DRIFT and KELP found it on
+                  // day one; REEF opens in the cottage next to his hotel). So a
+                  // town that hires nobody never touches the wall, and the FIFTH
+                  // crab is always somebody who arrived after the game started -
+                  // a hire off the morning bus, a drifter answering a posting, a
+                  // crab who lost a house. Growth is what fills a shelter.
+  MAX: 12,        // ...and the most Mr. Pincherton will let the town have: two more
+                  // rows of four in the same footprint (see cotSpot - the building
+                  // cannot get wider: house 5 ends four pixels west of it and house 6
+                  // starts flush against its east wall, so it gets DEEPER and it gets
+                  // a storey).
+  RENT: 3,        // a night, per bed past the base. The base is $10 for four, which
+                  // is $2.50 a bed: the landlord does not do a bulk discount, and a
+                  // twelve-bed dormitory is $34 a night against a $10 one. That is
+                  // the number the election has to answer for.
+  ROUGH: 2,       // an NPC mayor signs after this many nights running with somebody
+                  // on the step for want of a bed. One bad night is weather.
+  COOL: 4,        // ...and one bed at a time, no faster than this. A mayor who added
+                  // a row a night would have the purse under water inside a week
+                  // and the shelter bolted, which is a worse outcome for the crabs
+                  // they built it for.
+};
+// beds BOUGHT, over the base. Persisted (see save/load): a dormitory that
+// forgot itself on a reload would leave the town paying rent on beds it does
+// not have, which is the one thing the fund's ledger promises cannot happen.
+function newDorm() { return { beds: 0, day: 0, short: 0, take: 0 }; }
+let dorm = newDorm();
+function loadDorm(d) {
+  dorm = newDorm();
+  if (!d || typeof d !== "object") return;   // an old save is a four-bed shelter, which IS the old world
+  dorm.beds = Math.max(0, Math.min(DORM_CFG.MAX - DORM_CFG.BASE, Math.round(+d.beds || 0)));
+  dorm.day = Math.max(0, Math.round(+d.day || 0));
+  dorm.short = Math.max(0, Math.round(+d.short || 0));
+  dorm.take = Math.max(0, +d.take || 0);
+}
+// WHAT THE PURSE RAISED, over a WHOLE day. purseYield reads today's takings and
+// today's landings, so asking it at 09:00 gets you a morning's worth of levy and
+// a refusal the player cannot argue with; the mayor's own policy asks at
+// settlement, when the day is in. So the number is RECORDED there, once a
+// night, and everything else - the chip, the refusal line, the CPU's own test -
+// reads the recorded one. The player and the office are then held to the same
+// figure, which is the only version of this that is fair to either of them.
+function dormTake() { return dorm.take || 0; }
+function dormExtra() { return Math.max(0, Math.min(DORM_CFG.MAX - DORM_CFG.BASE, dorm.beds | 0)); }
+function shelterBeds() { return DORM_CFG.BASE + dormExtra(); }
+function dormFull() { return shelterBeds() >= DORM_CFG.MAX; }
+// WHERE THE BEDS ARE. Four to a row, and the rows go BACK into the building
+// rather than along the front, because the shelter is boxed in: house 5 ends
+// at x440, the shelter runs 444-512 and house 6 starts at 512. There is no
+// sideways. FLOOR_MIN is 126, so three rows at 155/145/135 is the whole of
+// what a crab can walk to inside this footprint - which is where MAX comes
+// from. It is not a round number, it is the floor plan.
+function cotSpot(i) {
+  const row = Math.min(2, (i / 4) | 0), col = i % 4;
+  return { x: SHELTER_X + 6 + col * 14, y: 155 - row * 10 };
+}
+// WHO GETS A BED, and it is decided by TENURE rather than by roster order.
+// `p.nCot` is the nights-at-the-shelter counter logNightly has always kept, so
+// the shelter keeps its regulars and the newest arrival is the one who finds
+// the beds taken. Two reasons it is that way round and not the other:
+//   - roster order would give every bed to the player's crew (crabs come before
+//     npcs in allCrabs), so the player would never once feel the wall they are
+//     being asked to pay to move. The pinch has to land on the hire.
+//   - everybody's counter ticks on the same nights, so the ORDER never churns:
+//     "the crab who has slept here longest keeps their cot" is stable, testable
+//     and arguable from the dossier, which is the bar for anything this game
+//     does to a crab while the player is not looking.
+// MEMOISED PER FRAME, because homeSpot asks for it once per homeless crab per
+// tick and the draw asks again: the roll only ever changes at a settlement, a
+// hire or a death, so a sort per frame is the whole cost and it is paid once.
+let _cotRoll = null, _cotKey = "";
+function cotRoster() {
+  const all = allCrabs();
+  let n = 0; for (const c of all) if (c.p.homeless) n++;
+  // the LENGTH of the roll is part of the key, not just the frame: an eviction,
+  // a hire and a move-in all land inside a settlement, which is one frame, and
+  // a memo that only watched the clock would hand the old roll back to the
+  // crab who has just lost their house.
+  const key = time + ":" + n;
+  if (_cotRoll && _cotKey === key) return _cotRoll;
+  const idx = new Map(all.map((c, i) => [c, i]));
+  const roll = all.filter(c => c.p.homeless)
+    .sort((a, b) => ((b.p.nCot || 0) - (a.p.nCot || 0)) || (idx.get(a) - idx.get(b)));
+  _cotKey = key; _cotRoll = roll;
+  return roll;
+}
+function cotRank(c) { return cotRoster().indexOf(c); }
+function hasCot(c) {
+  if (!c.p.homeless) return false;
+  const r = cotRank(c);
+  return r >= 0 && r < shelterBeds();
+}
+// ...and the crabs who did not get one. The count the mayor's policy reads and
+// the placard prints: this is the shelter's own waiting list.
+function cotShort() { return Math.max(0, cotRoster().length - shelterBeds()); }
+// ---- SIGNING FOR A BED ----------------------------------------------------
+// KEY MONEY: the first night up front, remitted the moment the lease is signed,
+// so a bed that is added is a bed that has already cost the fund real money
+// out of a real balance. It is small on purpose - the fund CANNOT save up, by
+// construction (fundNeed strikes the purse to one night's bill and nothing
+// more), so a capital cost would simply mean the shelter could never grow at
+// all. What gates this is not a pile of money, it is the PURSE.
+function bunkKey() { return DORM_CFG.RENT; }
+// THE TEST, and the player-as-mayor sits exactly the same one the CPU mayor
+// does: would the purse the town VOTED FOR still cover the shelter's bill with
+// this bed on it? That is the whole fiscal argument in one line. MEASURED over
+// four 40-day growth towns: a town on Mr. Pincherton's cut raises about the
+// rent and no more, so it stalls at five beds and the refusal says which purse
+// it was ("THE RENTS WON'T CARRY $16 A NIGHT"); only a purse that genuinely
+// raises more than the shelter costs can grow it. The mayor does not have to be
+// told this - they have to be TOLD THE NUMBER, which is what the chip and the
+// notice do.
+function bunkWhy() {
+  if (!hallOn()) return "THERE IS NO TOWN HALL";
+  if (dormFull()) return "THE SHELTER IS AS BIG AS IT GETS";
+  if (shelterShut()) return "THE SHELTER IS BOLTED";
+  if (townFund.arrears > 0 || townFund.strikes > 0) return "THE SHELTER'S RENT IS IN ARREARS";
+  if (townFund.bal < bunkKey()) return "THE FUND HASN'T GOT THE $" + bunkKey() + " KEY MONEY";
+  if (dormTake() < shelterRent() + DORM_CFG.RENT + potWant() * bowlCost())
+    return "THE " + purseOf(hall.policy).short + " WON'T CARRY $" + (shelterRent() + DORM_CFG.RENT) + " A NIGHT";
+  return null;
+}
+function canBunk() { return bunkWhy() === null; }
+// ...and the deed. `who` is the name that goes in the report and the ledger -
+// the mayor, whoever they are, because the office signs and the office is what
+// the town votes on.
+function buildBunk(who) {
+  if (!canBunk()) return false;
+  fundRemit(bunkKey(), "PINCHERTON", "BED " + (shelterBeds() + 1) + " KEY MONEY");
+  dorm.beds = dormExtra() + 1; dorm.day = day; dorm.short = 0; _cotKey = "";
+  const name = who || hall.mayor || "THE TOWN";
+  today.moved.push(name + " TOOK ANOTHER BED - SHELTER $" + shelterRent() + "/NIGHT");
+  toast = { text: "THE SHELTER TAKES BED " + shelterBeds() + " - RENT $" + shelterRent() + " A NIGHT", t: 7 };
+  popText("BED " + shelterBeds(), SHELTER_X + 20, 120, [190, 220, 255]);
+  const m = mayorCrab();
+  if (m) crabLog(m, "life", "TOOK BED " + shelterBeds() + " AT THE SHELTER - $" + shelterRent() + "/NIGHT", 0);
+  if (typeof sfx !== "undefined" && sfx.buy) sfx.buy();
+  if (window._stats) window._stats.bunks = (window._stats.bunks || 0) + 1;
+  return true;
+}
+// THE CHIP ON THE SHELTER. It is only live while the player holds the office,
+// because the shelter is not their property - it is the town's bill, and the
+// hand that signs for it has to be the hand the town elected. When somebody
+// else is wearing the hat the chip is not drawn at all and the placard says
+// what the waiting list is instead, which is the honest read: you can see the
+// problem and you cannot fix it until you win the office.
+let upArm = null, upArmT = 0;   // the two-tap arm for both upgrades - a nightly bill is not a misclick
+// THE NOTICE'S TOP EDGE. Its BOTTOM is pinned five pixels above the shelter's
+// roofline and it grows upward - a row for the beds, and another for the chip
+// when the player is the one who may tap it - so a taller notice never lands on
+// the roof and a loft storey pushes the whole board up with it.
+function dormNoticeY() {
+  return HOME_BOTTOM - SHELTER2.h - dormLoftH() - 28 - (bunkChipLive() ? 11 : 0);
+}
+function dormNoticeH() { return bunkChipLive() ? 36 : 25; }
+function bunkChipRect() { return { x: SHELTER_X + 5, y: dormNoticeY() + 22, w: 72, h: 10 }; }
+function bunkChipLive() { return hallOn() && playerMayor() && !dormFull(); }
+function tapBunkChip() {
+  const why = bunkWhy();
+  if (why) {
+    toast = { text: why, t: 5 };
+    if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+    return false;
+  }
+  if (upArm !== "bunk") {
+    upArm = "bunk"; upArmT = 3.5;
+    toast = { text: "TAP AGAIN: $" + DORM_CFG.RENT + " A NIGHT FOREVER - RENT $"
+      + shelterRent() + ">$" + (shelterRent() + DORM_CFG.RENT), t: 5 };
+    if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+    return false;
+  }
+  upArm = null; upArmT = 0;
+  const ok = buildBunk(hall.mayor);
+  if (ok) save();
+  return ok;
+}
+// ---- THE MAYOR'S OWN JUDGEMENT -------------------------------------------
+// The CPU mayor runs the hours-policy pattern: one observation a night, a
+// streak that has to hold, a cooldown, and a line in the report naming the
+// signal that caused the move. She does not build because the fund looks
+// healthy - she builds because there is a crab on the step, which is the only
+// thing the office exists to answer.
+function runDormPolicy() {
+  if (!hallOn() || !hall.mayor) return;
+  dorm.take = Math.round(purseYield(hall.policy) * 100) / 100;   // a whole day's purse, recorded once
+  const short = cotShort();
+  dorm.short = short > 0 ? dorm.short + 1 : 0;
+  if (playerMayor()) return;                       // the player's office, the player's call
+  if (dorm.short < DORM_CFG.ROUGH) return;
+  if (day - dorm.day < DORM_CFG.COOL) return;
+  const why = bunkWhy();
+  if (why) {
+    // A MAYOR WHO CANNOT BUILD SAYS SO. The town is being told, in the report,
+    // that the beds are short and the purse it voted for will not stretch -
+    // which is an argument for a different purse, and the next ballot is the
+    // place to make it.
+    if (short > 0 && dorm.short === DORM_CFG.ROUGH)
+      today.moved.push(short + " SLEPT OUT - " + fitReport(why));
+    return;
+  }
+  buildBunk(hall.mayor);
+}
+// the report card is 176 wide and these lines are drawn at x+6 (the standing
+// rule: TEXT IS MEASURED, NOT COUNTED)
+function fitReport(s) { return fitSmall(s, 164); }
+
+// ===========================================================================
+// THE ANNEXE - the Driftwood grows into its own forecourt
+// ===========================================================================
+// A ROOM IS THE OWNER'S CAPITAL, and this is the first thing in the game that
+// lets an owner - the player or a peer - turn a till into permanent capacity.
+//
+// WHERE THEY GO, and it is a floor plan rather than a preference. The seven
+// rooms are `stalls` on the back wall at y136, running 2244-2428 at a 28px
+// pitch, and the wall is FULL: the linen press is at 2206 and the lot ends at
+// 2428 with the queue standing at 2432. There is no second storey to build
+// either - FLOOR_MIN is 126, so a crab cannot walk to an upstairs landing, and
+// a room a guest cannot reach is scenery. What the Driftwood does have is a
+// FORECOURT: the front row at y158, the row the shack keeps its tables in, on
+// the same solid band (149-164) that leaves both travel lanes their daylight
+// by construction. So the hotel grows the way a seafront hotel actually grows -
+// it puts CABANAS on its own front, one at a time, and you can count them from
+// the promenade.
+//
+// AND THE LANDLORD TAKES HIS CUT. A cabana is built on Mr. Pincherton's land
+// under Mr. Pincherton's lease, so the build price goes to him and the rent
+// goes up for good. That is what stops "buy every room" being free, because
+// OCCUPANCY FALLS WITH EVERY ROOM YOU ADD: the seven ran at 69% (4.8 lets a
+// night), and eight growth seeds that built out to twelve and thirteen rooms
+// ran at about 56% (7.3 a night, 1,051 -> 1,471 lets over the block). More beds
+// sold, a thinner house - so the marginal hut earns less than the last one did
+// and the rent on it is the same. An owner who builds past their demand is
+// paying rent on empty huts, which is exactly the judgement the shop is for.
+const ROOM_CFG = {
+  EXTRA: 6,        // cabanas the forecourt holds: 2266 to 2396 at a 26px pitch, and the
+                   // last one ends at 2412 - clear of the queue slot at 2432. Seven rooms
+                   // become thirteen, which is "pretty big" for a town whose ferry lands
+                   // four sailings a day.
+  BUILD: 80,       // paid once, to the landlord. Priced off the shop's own book: the
+                   // Driftwood takes ~$63 a night of room money, so a hut is a bit over a
+                   // night's takings - a real decision at a $150 opening float and an easy
+                   // one for a house that has been full for a week.
+  RENT: 4,         // ...and a night, for good. The base lease is $35 for seven rooms ($5 a
+                   // room), so the annexe is cheaper per bed than the house and still dear
+                   // enough that an empty hut hurts.
+  SHORT: 3,        // GUESTS turned away for want of a room - bedded down on the sand with
+                   // every room LET, not merely unmade (an unmade bed is the wage lever's
+                   // signal, see THE HOTELIER) - before a CPU owner puts a hut up. The
+                   // capacity signal and the labour signal are the two halves of one fact,
+                   // and this one is a running tally rather than a nightly reading because
+                   // a guest beds down at 21:00 and the books close at 20:00: today.roomsLost
+                   // is cleared at midnight, so a night's count would be read a day late or
+                   // not at all.
+  FLOOR: 60,       // ...and only with this left in the till afterwards. A hotel that builds
+                   // itself out of tomorrow's payroll goes on strike and loses the lease,
+                   // which is a worse outcome than a guest on the beach.
+  COOL: 4,         // one hut at a time, the hotelier's own pacing
+};
+const HOTEL_ROOMS_BASE = 7, HOTEL_RENT_BASE = 35;
+function newAnnexe() { return { built: 0, day: 0, short: 0 }; }
+let annexe = newAnnexe();
+function loadAnnexe(a) {
+  annexe = newAnnexe();
+  if (!a || typeof a !== "object") { setHotelRooms(HOTEL_ROOMS_BASE); return; }
+  annexe.built = Math.max(0, Math.min(ROOM_CFG.EXTRA, Math.round(+a.built || 0)));
+  annexe.day = Math.max(0, Math.round(+a.day || 0));
+  annexe.short = Math.max(0, Math.round(+a.short || 0));
+  setHotelRooms(HOTEL_ROOMS_BASE + annexe.built);
+}
+function cabanaSpot(i) { return { x: 2266 + i * 26, y: 158 }; }
+// THE ROOMS ARE THE TRUTH, not a counter beside them: the annexe IS the length
+// of BIZ.hotel.stalls, so every reader in the game - the housekeeping dispatch,
+// freeRoom, the hotelier's own full-house test, the asking price's per-fixture
+// term, the save's room index - grows with it and none of them had to be told.
+// Rebuilt rather than appended so a load lands on exactly the geometry a fresh
+// build of the same size has, to the pixel.
+function setHotelRooms(n) {
+  const b = BIZ.hotel;
+  if (!b) return;
+  const want = Math.max(HOTEL_ROOMS_BASE, Math.min(HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA, n | 0));
+  while (b.stalls.length > want) {
+    const st = b.stalls.pop();
+    if (st && st.occupant) { if (st.occupant.room === st) st.occupant.room = null; st.occupant = null; }
+  }
+  while (b.stalls.length < want) {
+    const s = cabanaSpot(b.stalls.length - HOTEL_ROOMS_BASE);
+    b.stalls.push({ x: s.x, y: s.y, cabana: true, occupant: null, dirty: false, cleaning: false });
+  }
+  b.rent = HOTEL_RENT_BASE + (b.stalls.length - HOTEL_ROOMS_BASE) * ROOM_CFG.RENT;
+  annexe.built = b.stalls.length - HOTEL_ROOMS_BASE;
+  _bandsKey = "";   // the furniture cache keys on the room count; make it re-read anyway
+}
+function annexeFull() { return hotelRooms().length >= HOTEL_ROOMS_BASE + ROOM_CFG.EXTRA; }
+function roomBuildCost() { return ROOM_CFG.BUILD; }
+// the same predicate for whoever is holding the lease: the player's till IS
+// coins, a peer owner's is their own, and neither of them may spend money they
+// have not got. `oid` is an owner-registry key.
+function roomWhy(oid) {
+  if (!BIZ.hotel || !bizUnlocked("hotel")) return "THE DRIFTWOOD IS NOT OPEN";
+  if (annexeFull()) return "THE FORECOURT IS FULL";
+  if (forSale("hotel")) return "THE DRIFTWOOD IS ON THE MARKET";
+  const till = oid === "player" ? coins : (OWNERS[oid] ? OWNERS[oid].till : 0);
+  if (till < roomBuildCost()) return "THAT'S $" + roomBuildCost() + " AND THE TILL HASN'T GOT IT";
+  return null;
+}
+function buildRoom(oid) {
+  if (roomWhy(oid)) return false;
+  if (oid === "player") coins -= roomBuildCost();
+  else OWNERS[oid].till -= roomBuildCost();
+  setHotelRooms(hotelRooms().length + 1);
+  annexe.day = day; annexe.short = 0;
+  const who = oid === "player" ? "THE DRIFTWOOD" : (OWNERS[oid] ? OWNERS[oid].name : "THE DRIFTWOOD");
+  today.moved.push(who + " PUT UP CABANA " + annexe.built + " - RENT $" + BIZ.hotel.rent);
+  toast = { text: who + " PUTS UP CABANA " + annexe.built + " - RENT $" + BIZ.hotel.rent, t: 7 };
+  popText("CABANA " + annexe.built, cabanaSpot(annexe.built - 1).x - 4, 128, [255, 216, 96]);
+  const c = allCrabs().find(k => k.p.owner === oid);
+  if (c) crabLog(c, "money", "BUILT CABANA " + annexe.built + " - $" + roomBuildCost(), 0);
+  if (typeof sfx !== "undefined" && sfx.buy) sfx.buy();
+  if (window._stats) window._stats.cabanas = (window._stats.cabanas || 0) + 1;
+  return true;
+}
+// THE CHIP. It rides the hotel's own roofline beside the sign, in the west end
+// the sign never reaches, so the shopfront still reads as the owner's office
+// door: MANAGE opens the books, ROOM+ signs for a hut. Only the owner sees it,
+// and only the player is ever the owner who sees it - a peer owner has the
+// policy below instead, which is the same decision made out loud.
+function roomChipRect() {
+  const b = BIZ.hotel;
+  return { x: b.x0 + 4, y: 105, w: 52, h: 10 };
+}
+function roomChipLive() { return !!BIZ.hotel && bizUnlocked("hotel") && bizOwner("hotel") === "player" && !annexeFull(); }
+function tapRoomChip() {
+  const why = roomWhy("player");
+  if (why) {
+    toast = { text: why, t: 5 };
+    if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+    return false;
+  }
+  if (upArm !== "room") {
+    upArm = "room"; upArmT = 3.5;
+    toast = { text: "TAP AGAIN: $" + roomBuildCost() + " NOW, $" + ROOM_CFG.RENT
+      + " A NIGHT - ROOMS " + hotelRooms().length + ">" + (hotelRooms().length + 1), t: 5 };
+    if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+    return false;
+  }
+  upArm = null; upArmT = 0;
+  const ok = buildRoom("player");
+  if (ok) save();
+  return ok;
+}
+// ---- A PEER OWNER'S OWN JUDGEMENT ----------------------------------------
+// Keyed on the LEASE, not on BRASS: REEF builds on the same rule, and so does
+// the fisher who takes the Driftwood on after a failure, because the policy
+// tables in this game key on the BUSINESS (see THE HOTELIER). The signal is
+// today.roomsShort - a guest bedded down on the sand with every room LET,
+// which is a bed the house did not have rather than a bed it did not make.
+function runAnnexePolicy() {
+  const oid = bizOwner("hotel");
+  if (!oid || oid === "player") return;   // the player's lease, the player's call
+  if (annexe.short < ROOM_CFG.SHORT) return;
+  if (day - annexe.day < ROOM_CFG.COOL) return;
+  const o = OWNERS[oid];
+  if (!o || o.gone) return;
+  if (o.till < roomBuildCost() + ROOM_CFG.FLOOR) return;   // never out of tomorrow's payroll
+  if ((bizStrike.hotel || 0) > 0) return;                  // a house in arrears does not build
+  if (roomWhy(oid)) return;
+  buildRoom(oid);
+}
+// ...and the tally itself, called from sleepOnSand when the house was FULL
+// rather than behind on its linen. It counts guests, not nights, and it is
+// persisted, because a hotel that forgot who it turned away on a reload would
+// never build anything.
+function noteRoomShort() {
+  annexe.short = (annexe.short | 0) + 1;
+  if (window._stats) window._stats.roomShort = (window._stats.roomShort || 0) + 1;
+}
+// ONE PASS AT SETTLEMENT for both ladders, after the books are closed and the
+// day's beds are counted.
+function runAccommodation() {
+  runAnnexePolicy();
+  runDormPolicy();
+}
+// ---- WHAT THE SHELTER LOOKS LIKE WHEN IT GROWS ---------------------------
+// An upgrade you cannot see is a number on a card, and the owner's rule is that
+// the town is the interface. The shelter cannot get wider - house 5 ends four
+// pixels west of it and house 6 stands flush against its east wall - so it
+// gets a STOREY: one band of loft above the
+// roofline per row of beds bought, with a lit window for each bed up there, and
+// the mayor's placard rides up with it. The cots themselves are drawn one per
+// BED, so the count on the placard and the beds in the room are the same
+// number and always were.
+function dormLoftH() { return Math.max(0, Math.ceil(dormExtra() / 4)) * 10; }
+function drawDormLoft() {
+  const top = HOME_BOTTOM - SHELTER2.h;
+  // the loft storeys, stacked on the roofline
+  for (let r = 0; r < dormLoftH() / 10; r++) {
+    const y = top - 10 - r * 10, beds = Math.min(4, dormExtra() - r * 4);
+    wrect(SHELTER_X, y, SHELTER2.w, 10, [30, 20, 36]);
+    wrect(SHELTER_X + 1, y + 1, SHELTER2.w - 2, 8, [96, 78, 66]);
+    wrect(SHELTER_X + 1, y + 1, SHELTER2.w - 2, 1, [128, 106, 88]);
+    const roll = cotRoster();
+    for (let i = 0; i < beds; i++) {
+      const wx = SHELTER_X + 7 + i * 14;
+      wrect(wx, y + 3, 8, 5, [40, 30, 40]);
+      // a lamp in the loft window when the crab in that bed is home in it
+      const who = roll[DORM_CFG.BASE + r * 4 + i];
+      const occ = who && who.dayState === "home";
+      wrect(wx + 1, y + 4, 6, 3, occ && darkness() > 0.4 ? [255, 216, 130] : [58, 70, 92]);
+    }
+  }
+}
+function drawDormBeds() {
+  // ...and the beds themselves, one per cot, so a full house reads as a full
+  // room from the boardwalk. The back rows are drawn first (they are further
+  // up the shelter's floor) and the crabs are painted over them by the
+  // y-sorted pass, exactly the way the shower stalls work.
+  for (let i = shelterBeds() - 1; i >= 0; i--) {
+    const s = cotSpot(i), taken = i < cotRoster().length;
+    wrect(s.x - 1, s.y - 5, 13, 5, [30, 20, 36]);
+    wrect(s.x, s.y - 4, 11, 3, taken ? [150, 120, 150] : [120, 112, 120]);   // blanket
+    wrect(s.x, s.y - 4, 3, 3, [225, 220, 230]);                              // pillow
+    wrect(s.x - 1, s.y, 13, 1, [70, 56, 60]);                                // the frame's feet
+  }
+}
+// THE WAITING LIST, on the placard. The office's remit is legible from the
+// boardwalk (the mayor, the purse, the pot); this is the fourth thing it has to
+// answer for now, and it is the one that makes the chip worth tapping.
+function dormLine() {
+  const short = cotShort();
+  if (short > 0) return short + " WITH NO BED";
+  return shelterBeds() - cotRoster().length + " BEDS FREE";
+}
+// ---- THE TWO CHIPS -------------------------------------------------------
+// THE PRICE IS ON THE BUTTON, and the second tap is where the recurring half
+// is spelled out (see tapBunkChip / tapRoomChip): "$3 A NIGHT FOREVER" and
+// "$80 AND $4 A NIGHT ON THE LEASE". The standing rule is that interface
+// opacity is a bug - a permanent bill hidden behind a one-word chip would be
+// the worst example of it in the game.
+function drawBunkChip() {
+  if (!bunkChipLive()) return;
+  const r = bunkChipRect(), ok = canBunk();
+  const lbl = upArm === "bunk" ? "TAP AGAIN" : "BED+ $" + DORM_CFG.RENT + "/NIGHT";
+  wrect(r.x, r.y, r.w, r.h, [30, 20, 36]);
+  wrect(r.x + 1, r.y + 1, r.w - 2, r.h - 2,
+    ok ? (upArm === "bunk" ? [255, 200, 90] : [96, 200, 120]) : [150, 140, 140]);
+  if (r.x - camX > -r.w && r.x - camX < W)
+    smallText(ctx, fitSmall(lbl, r.w - 4), r.x + ((r.w - smallTextWidth(fitSmall(lbl, r.w - 4))) >> 1) - camX,
+      r.y + 3, [30, 20, 36]);
+}
+function drawRoomChip() {
+  if (!roomChipLive()) return;
+  const r = roomChipRect(), ok = !roomWhy("player");
+  const lbl = upArm === "room" ? "TAP AGAIN" : "ROOM+ $" + roomBuildCost();
+  wrect(r.x, r.y, r.w, r.h, [30, 20, 36]);
+  wrect(r.x + 1, r.y + 1, r.w - 2, r.h - 2,
+    ok ? (upArm === "room" ? [255, 200, 90] : [96, 200, 120]) : [150, 140, 140]);
+  if (r.x - camX > -r.w && r.x - camX < W)
+    smallText(ctx, fitSmall(lbl, r.w - 4), r.x + ((r.w - smallTextWidth(fitSmall(lbl, r.w - 4))) >> 1) - camX,
+      r.y + 3, [30, 20, 36]);
+}
+// A CABANA, drawn where a table would be. Deliberately NOT a copy of the back
+// wall's door: a room in the house and a hut on the front are different things
+// to buy and they have to look it. Same three affordances though - the number
+// over it, the lamp when somebody is in, the Z when they are asleep and the
+// crumb-flecks when housekeeping has not been round - because a guest cannot
+// tell the difference and neither should the player.
+function drawCabana(t, n) {
+  const guest = t.occupant && t.occupant.visitor ? t.occupant : null;
+  const lit = guest && (guest.state === "inRoom" || darkness() > 0.4);
+  const y = t.y - 15;
+  wrect(t.x, y + 3, 16, 12, [214, 198, 170]);               // the hut
+  wrect(t.x, y + 3, 16, 1, [180, 164, 140]);
+  wrect(t.x - 2, y, 20, 3, [30, 20, 36]);                   // the eaves
+  for (let i = 0; i < 5; i++)                               // ...and a striped awning
+    wrect(t.x - 2 + i * 4, y + 1, 4, 2, i % 2 ? [96, 200, 255] : [250, 250, 255]);
+  wrect(t.x + 5, y + 6, 6, 9, lit ? [255, 216, 130] : [70, 60, 90]);   // the door
+  wrect(t.x + 5, y + 6, 6, 1, [40, 32, 44]);
+  wrect(t.x + 1, y + 5, 3, 3, lit ? [255, 216, 130] : [58, 70, 92]);   // the little window
+  const nx = t.x + 7 - camX;
+  if (nx > -12 && nx < W) smallText(ctx, "" + n, nx, y - 6, [70, 60, 90]);
+  if (guest && guest.state === "inRoom") {
+    const ph = ((time * 0.7 + t.x * 0.01) % 1);
+    smallText(ctx, "Z", t.x + 12 - camX, y + 2 - ph * 4, [190, 205, 255]);
+  }
+  if (t.dirty) {
+    px(ctx, t.x + 3 - camX, t.y - 2, [220, 190, 130]);
+    px(ctx, t.x + 8 - camX, t.y - 1, [200, 170, 120]);
+    px(ctx, t.x + 12 - camX, t.y - 2, [220, 190, 130]);
+  }
+}
+
 
 // ---------------------------------------------------------------- clock
 const TS = 4;                     // game minutes per real second
@@ -4542,8 +5087,13 @@ function homeX(c) { return homeSpot(c).x; }
 function homeSpot(c) {
   if (c.p.boat != null) return boatSpot(c.p.boat);   // on deck, rain or shine
   if (c.p.homeless) {
-    const cot = [6, 20, 34, 48][Math.max(0, allCrabs().indexOf(c)) % 4];
-    return { x: SHELTER_X + cot, y: 155 };
+    // THE SHELTER HAS A NUMBER OF BEDS IN IT (see ACCOMMODATION UPGRADES).
+    // This used to be `[6,20,34,48][index % 4]` - four positions, cycled, so
+    // the fifth homeless crab slept inside the first one and the building had
+    // no capacity at all. A crab with no cot still walks to the shelter, and
+    // beds down on the step when they get there (updateHome).
+    const r = cotRank(c);
+    return cotSpot(r < 0 || r >= shelterBeds() ? shelterBeds() - 1 : r);
   }
   const hx = HOUSE_XS[c.p.house];
   return darkness() > 0.7
@@ -4584,7 +5134,12 @@ function updateHome(c, dt) {
   // banks NOTHING on either ladder, and the exhaustion it leaves behind arms
   // tomorrow's sickness roll - which is exactly why the office failing has to
   // land here rather than in a number on a panel.
-  if (c.p.homeless && shelterShut() && darkness() > 0.7 && !c.p.rough
+  // ...AND SO IS A SHELTER WITH NO BED LEFT IN IT. Same walk, same step, same
+  // state: the crab who came home to a full house is in exactly the position
+  // the crab who came home to a bolted door is in, and the town can see both
+  // of them lying outside it. That is what makes the mayor's beds worth their
+  // rent - and what the placard's waiting list is counting.
+  if (c.p.homeless && (shelterShut() || !hasCot(c)) && darkness() > 0.7 && !c.p.rough
       && Math.abs(c.x - homeX(c)) < 40) { sleepRough(c); return; }
   // convalescence: DAYLIGHT hours spent at home while ill are what the care
   // ladder reads (night sleep is everyone's, so it would prove nothing). A
@@ -5025,6 +5580,12 @@ function save() {
     // same class of bug as the fund minting money, and the same rule catches
     // it: what is in the box is a resource, so it rides in the envelope.
     box: ballotBox,
+    // ACCOMMODATION UPGRADES: the beds the town signed for and the huts the
+    // hotel's owner built. The dormitory rides in its own key; the ANNEXE is
+    // written as a COUNT and the stalls are rebuilt from it on load, because
+    // the rooms are the geometry - a saved array of x's would let a reload
+    // land a hut somewhere a fresh build never would.
+    dorm, annexe: { built: hotelRooms().length - HOTEL_ROOMS_BASE, day: annexe.day, short: annexe.short },
     board: jobBoard, hireDay, trade, sudsRefund: sudsRefunded, firstPour,
     musicOn, musNudges,
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
@@ -5345,6 +5906,13 @@ function load(slot) {
   // visitor list at all: it is flagged here and seeded a boat-load at boot,
   // which is the only place that still happens.
   preVisSave = !s._vis;
+  // their needs, their wallet and their diary intact. An old save has no
+  // visitors at all and simply waits for the next ferry.
+  // ACCOMMODATION UPGRADES, and this has to run BEFORE the visitors below: a
+  // guest is re-hung on their room BY INDEX, so the rooms have to be standing
+  // first or a guest asleep in cabana 3 wakes up outdoors.
+  loadDorm(s.dorm);
+  loadAnnexe(s.annexe);
   customers = customers.filter(k => !k.visitor);
   if (Array.isArray(s.visitors)) for (const v of s.visitors) {
     if (!v || typeof v.n !== "string") continue;
@@ -6621,7 +7189,12 @@ function setT(c, x, y) { c.tx = x; c.ty = y; }
 // not touch me there". Furniture never moves during a day, so the corridors
 // it leaves are stable waypoints, not a search problem.
 function solidBandsKey() {
-  return Object.keys(BIZ).map(b => (bizUnlocked(b) ? 1 : 0)).join("") + ":" + UPS.table.lvl;
+  // ...and the hotel's ROOM COUNT, because a cabana in the forecourt is a
+  // solid the same way a table is (ACCOMMODATION UPGRADES). Without it the
+  // cache handed back the seven-room town's bands forever and walkers routed
+  // straight through the huts.
+  return Object.keys(BIZ).map(b => (bizUnlocked(b) ? 1 : 0)).join("") + ":" + UPS.table.lvl
+    + ":" + hotelRooms().length;
 }
 let _bands = null, _bandsKey = "";
 function solidBands() {
@@ -8154,6 +8727,12 @@ function sleepOnSand(k) {
     // signal the hotelier answers with money (see THE HOTELIER).
     if (hotelRooms().some(r => r.dirty || r.cleaning))
       today.roomsLost = (today.roomsLost || 0) + 1;
+    // ...and the OTHER half of it: every room LET and somebody still on the
+    // sand is a bed this hotel does not HAVE, which is a capacity problem and
+    // is answered with a cabana rather than with a wage (ACCOMMODATION
+    // UPGRADES). The two tests are disjoint by construction, so no guest is
+    // ever counted as both.
+    else if (hotelRooms().length && hotelRooms().every(r => r.occupant)) noteRoomShort();
     popText("NO ROOM!", k.x - 10, FLOOR_Y - 34, [255, 150, 130]);
     if (window._stats) window._stats.unhoused = (window._stats.unhoused || 0) + 1;
   }
@@ -8313,7 +8892,10 @@ function updateVisitor(k, dt) {
   if (k.state === "toRoom") {
     const r = k.room;
     if (!r) { k.state = "roam"; return; }
-    if (visStep(k, r.x + 2, 148, dt)) { k.state = "inRoom"; visLog(k, "home", "TURNED IN FOR THE NIGHT"); }
+    // ...and they stand at the door, wherever the door is: 148 for the back
+    // wall's rooms (unchanged, to the pixel) and the boardwalk line for a
+    // cabana in the forecourt (ACCOMMODATION UPGRADES).
+    if (visStep(k, r.x + 2, Math.min(FLOOR_MAX, r.y + 12), dt)) { k.state = "inRoom"; visLog(k, "home", "TURNED IN FOR THE NIGHT"); }
     return;
   }
   // ASLEEP, AND THERE IS NOWHERE TO WALK. This guard is not decoration: with
@@ -9315,6 +9897,25 @@ cv.addEventListener("click", (ev) => {
   if (wx >= JOB_BOARD_X - 2 && wx < JOB_BOARD_X + 28 && p.y >= HOME_BOTTOM - 40 && p.y < HOME_BOTTOM + 4) {
     boardView = true; sfx.ding(); return;
   }
+  // THE SHELTER'S BED+ CHIP (ACCOMMODATION UPGRADES). Only while the player is
+  // wearing the hat: the shelter is the town's bill, so the hand that signs
+  // for a bed has to be the hand the town elected. When somebody else holds
+  // the office the chip is not there and the notice above it says how many
+  // crabs are sleeping outside - which is an argument to take to the ballot.
+  if (bunkChipLive()) {
+    const r = bunkChipRect();
+    if (wx >= r.x - 3 && wx <= r.x + r.w + 3 && p.y >= r.y - 2 && p.y < r.y + r.h + 2) {
+      tapBunkChip(); return;
+    }
+  }
+  // ...and the DRIFTWOOD's ROOM+ chip, which is the same idiom on the other
+  // building: the owner's decision, on the owner's shopfront, two taps.
+  if (roomChipLive()) {
+    const r = roomChipRect();
+    if (wx >= r.x - 3 && wx <= r.x + r.w + 3 && p.y >= r.y - 2 && p.y < r.y + r.h + 2) {
+      tapRoomChip(); return;
+    }
+  }
   // the ferry office: the whole kiosk is the target, the chip is the label
   if (!won && ferryKnown() && wx >= FERRY_X - 6 && wx <= FERRY_X + FERRY_W + 6 && p.y >= 112 && p.y < 162) {
     tapFerryChip(); return;
@@ -9939,7 +10540,10 @@ function drawPollingPlaces() {
   }
 }
   // the crab shelter
+  // the crab shelter - and the storeys the town has signed for on top of it
+  drawDormLoft();
   wblit(SHELTER2, SHELTER_X, HOME_BOTTOM - SHELTER2.h);
+  drawDormBeds();
   if (SHELTER_X - camX > -80 && SHELTER_X - camX < W) {
     smallText(ctx, "SHELTER", SHELTER_X + 22 - camX, HOME_BOTTOM - SHELTER2.h + 3, [30, 20, 36]);
     smallText(ctx, "SHELTER", SHELTER_X + 21 - camX, HOME_BOTTOM - SHELTER2.h + 2, [240, 235, 220]);
@@ -9950,14 +10554,25 @@ function drawPollingPlaces() {
     // THE NOTICE. Hung above the shelter's own sign rather than over it - the
     // sign says what the building is and the notice says who is running it, and
     // a screenshot with the word SHELTER half under a board is worse than
-    // either. Two 7px rows, so it clears the roof line at HOME_BOTTOM - h.
-    const sx = SHELTER_X + 4 - camX, sy = HOME_BOTTOM - SHELTER2.h - 21;
-    const shut = shelterShut(), ok = potOk();
-    wrect(SHELTER_X + 2, sy - 2, 78, 18, [30, 20, 36]);
-    wrect(SHELTER_X + 3, sy - 1, 76, 16, shut ? [120, 50, 50] : [58, 42, 38]);
+    // either. 7px rows, and its BOTTOM edge is what is pinned clear of the roof
+    // line (see dormNoticeY) - it grows upward, so it never lands on the roof.
+    // THE THIRD LINE IS THE BEDS. The notice grew a row with the dormitory
+    // (ACCOMMODATION UPGRADES): a shelter you can enlarge has to say from the
+    // boardwalk how big it is and who is sleeping outside it, or the chip
+    // under it is a button with no argument behind it. It also rides UP with
+    // the loft storeys, so it never lands on the roof it is nailed above.
+    const sy = dormNoticeY(), sx = SHELTER_X + 4 - camX;
+    const shut = shelterShut(), ok = potOk(), short = cotShort();
+    wrect(SHELTER_X + 2, sy - 2, 78, dormNoticeH(), [30, 20, 36]);
+    wrect(SHELTER_X + 3, sy - 1, 76, dormNoticeH() - 2, shut ? [120, 50, 50] : [58, 42, 38]);
     smallText(ctx, fitSmall("MAYOR " + (hall.mayor || "-"), 72), sx + 2, sy + 1, [255, 216, 96]);
     smallText(ctx, fitSmall(potLine(), 72), sx + 2, sy + 8,
       ok > 0 ? [200, 235, 200] : ok < 0 ? [255, 190, 150] : [255, 190, 190]);
+    smallText(ctx, fitSmall(dormLine(), 72), sx + 2, sy + 15,
+      short > 0 ? [255, 150, 130] : [190, 205, 235]);
+    // ...and the BED+ chip hangs off the bottom of the same notice, but only
+    // while the player is the one wearing the hat (ACCOMMODATION UPGRADES).
+    drawBunkChip();
     // ...AND THE POT ITSELF. OUT ON THE BOARDWALK, immediately left of where
     // the queue stands (errandStopX puts a crab at SOUP_X, and a crab is 16
     // wide), because the first cut drew it inside among the cots and it read as
@@ -10078,6 +10693,7 @@ function drawBusiness(key) {
   wrect(signX + 1, 93, signW - 2, 10, key === "shack" ? [190, 140, 80] : key === "juicebar" ? [255, 150, 60] : [96, 170, 220]);
   if (signX + signW - camX > 0 && signX - camX < W)
     textShadow(ctx, b.sign, signX + 7 - camX, 95, [255, 250, 240], [70, 50, 40]);
+  if (key === "hotel") drawRoomChip();
   if (bizOwner(key) === "player") {
     // MANAGE chip: the sign doubles as the owner's office door (tap to open
     // the management screen - the chip is the discoverable half of the target)
@@ -11909,7 +12525,7 @@ function drawHall(R, chip) {
     // the gap to that neighbour and not a character count that felt about right.
     smallText(ctx, fitSmall(shut ? "SHELTER BOLTED - " + townFund.shut + " MORE NIGHT" + (townFund.shut === 1 ? "" : "S")
       : potLine() + (townFund.bowls > 0 ? " AT $" + bowlCost() + " EACH" : ""), 116), x + 8, y + 75, bar);
-    smallText(ctx, fitSmall("RENT $" + SHELTER_RENT + (townFund.arrears > 0 ? " OWES $" + Math.ceil(townFund.arrears) : "")
+    smallText(ctx, fitSmall("RENT $" + shelterRent() + (townFund.arrears > 0 ? " OWES $" + Math.ceil(townFund.arrears) : "")
       + (townFund.strikes > 0 ? " STRIKE " + townFund.strikes + "/" + SHELTER_STRIKES : ""), w2 - 134),
       x + 128, y + 75, townFund.strikes > 0 ? [190, 80, 80] : [110, 100, 110]);
     smallText(ctx, fitSmall("SERVED " + townFund.served + ", TURNED AWAY " + townFund.cold
@@ -12548,6 +13164,7 @@ function frame(now) {
   last = now; time += dt;
   if (saveConfirmT > 0) { saveConfirmT -= dt; if (saveConfirmT <= 0) saveConfirm = null; }
   if (saleArmT > 0) { saleArmT -= dt; if (saleArmT <= 0) saleArm = null; }
+  if (upArmT > 0) { upArmT -= dt; if (upArmT <= 0) upArm = null; }   // the accommodation chips' arm
   if (ferryArm > 0) ferryArm -= dt;
   if (won) winT += dt;   // the beat before the ending card: she comes alongside first
   if (askArmT > 0) { askArmT -= dt; if (askArmT <= 0) askArm = null; }
@@ -12742,6 +13359,9 @@ function frame(now) {
     runRivalAmbition();
     // ...and the one who came for the hotel and got it reads hers (THE HOTELIER)
     runHotelier();
+    // ...and both ACCOMMODATION ladders: the Driftwood's owner reads the guests
+    // she had to turn away, and the mayor reads the crabs who found no cot.
+    runAccommodation();
     for (const c of npcs) {
       c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.1);
     }
@@ -13019,6 +13639,9 @@ function frame(now) {
     // lamp is on when a guest is in residence, and an unmade bed (the DIRTY
     // flag housekeeping is about to clear) hangs its own little card.
     if (stalls && BIZ[key].lodging) { for (const t of stalls) paint.push({ base: t.y, f: () => {
+      // ...and the forecourt's huts are stalls too (ACCOMMODATION UPGRADES):
+      // same list, same cycle, their own silhouette.
+      if (t.cabana) { drawCabana(t, stalls.indexOf(t) + 1); return; }
       const guest = t.occupant && t.occupant.visitor ? t.occupant : null;
       const lit = guest && (guest.state === "inRoom" || darkness() > 0.4);
       wblit(HOTEL_DOOR[lit ? 1 : 0], t.x, t.y - HOTEL_DOOR[0].h);
