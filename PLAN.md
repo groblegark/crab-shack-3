@@ -5360,7 +5360,11 @@ language is merely kept distinct so either reading still works.
   dismiss can drop you to the title); mistPeak is a day-hash so a
   clear/thick pair is chosen, not waited for (day 11 ≈ 0.25 is a good
   night, day 37 ≈ 0.8 a thick one); the crab cycler lives in the CHARACTER
-  CARD header, so shoot the card, not the top-right. Console staging:
+  CARD header, so shoot the card, not the top-right. **There is no pause
+  and no speed of zero** (ruled out on purpose), so a frame cannot be held
+  across an await: kill requestAnimationFrame on the page, then drive
+  frame() yourself with synthetic timestamps — frame(last) gives dt of
+  exactly zero, which is the only way to stop the clock for a shot. Console staging:
   `UPS.arcade.lvl = 1; coins = 20000` opens the ferry office and greens
   the fingerpost. **Re-verify a UI screenshot after any UI merge — a
   published shot of a moved control is a stale doc.**
