@@ -8,6 +8,130 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-20, evening — Polling day
+
+![The box fills through the day, and tells you nothing](devlog/img/2026-08-20-ballot-box.png)
+
+*Papers go in face down. The tally is zero all day, whatever is in there.*
+
+The brief was three sentences: voting is an action, polls have a closing
+time, and ballots are made and counted on paper. The election stopped
+being a function call and became a day.
+
+### Turnout is geography
+
+Crabs walk to a ballot table. Not teleport, not resolve — walk, scored
+through exactly the same detour machinery that decides whether lunch is
+worth the trip. Turnout across 24 polls, six seeds, twenty-nine days:
+**82%**. But the spread is the story, and it points somewhere I didn't
+expect.
+
+| by shift | | by trade | |
+|---|---|---|---|
+| M | 92% | shack | 92% |
+| E | 92% | showers | 80% |
+| D (day off) | 89% | hotel | 79% |
+| **D (working)** | **73%** | fishing | 78% |
+
+**Shift predicts turnout. Trade barely does.** By trade it's 78 to 92 and
+mostly noise — a fisher and a shower attendant vote about as well as each
+other. By shift it's 73 against 92, and it is structural: the long D shift
+runs 8:30 to 18:30, and the polls, open 07:00 to 19:00, bracket that day by
+half an hour at each end.
+
+Now look at the two D rows. Same crabs. On a working day they vote 73%; on
+their day off, **89%**. Sixteen points of turnout is not who they are, it's
+what their day is.
+
+So it isn't the fisher who struggles to vote, and it isn't the shopkeeper.
+**It's whoever's day is long.** Which makes the hours sign the lever — the
+D window is derived from a shop's opening hours, and the player sets those.
+You can, if you like, run a business whose staff can't reach a ballot box.
+Nobody will stop you, and nobody will mention it.
+
+### The seed that changed the design
+
+The first version had one ballot box, on the promenade. Seed 1337 polled
+**two crabs out of eight.**
+
+That reads like apathy until you look at a map. The fishing fleet works
+8:30 to 18:30, out at the pier, 1200 pixels from the box. Polls shut at
+19:00. They weren't uninterested; they were *at work, too far away, until
+after closing.*
+
+A bias a crab can do something about is a choice. A structural bias nobody
+can act on is just a broken vote. So there are two tables now, in the same
+idiom as the two standpipes — one where the town lives, one where the town
+works.
+
+![The second table, at the foot of the pier](devlog/img/2026-08-20-pier-head.png)
+
+*The fix, in one frame: a table at the pier head, and a crab stood at it.*
+
+And here is the part that is funnier and truer than any of the politics.
+The reason the fleet is hard to enfranchise is not ideology, it's that
+**the town has no room.** There is not one 74-pixel gap left on 2512 pixels
+of coast. Placing the second table meant fighting the furniture already on
+the boardwalk — the first attempt put it 48 pixels west of the rail and
+cost the fishing fleet seventeen points of turnout, which only showed up
+because somebody re-measured instead of assuming. Narrowing the polling
+board by four pixels bought the table its place back at the rail.
+
+Four pixels of signage was the difference between a fisher voting and not.
+
+One box on the promenade polled two of eight. Two tables took the *same
+town* to 82%. The difference between a functioning election and a broken
+one was one piece of furniture — and the only reason it could ever break is
+that this town is 2512 pixels wide and a crab walks about eleven pixels a
+second.
+
+### The ratchet
+
+A test scenario found the sharpest thing in the whole pass. Picture a town
+where everybody sleeps at the shelter. No houses, so no house rent. So a
+RENTS-funded town office has no income. So it cannot afford ballot paper.
+So it can never hold the election **that would move it off RENTS.**
+
+Locked out of its only lever by the mechanism the lever controls. A poverty
+trap with a paperwork step. The town passes the hat now — but the shape of
+that failure is worth keeping in mind, because it wasn't put there on
+purpose, and neither are the real ones.
+
+### The tally does not exist until it is counted
+
+My favourite decision in the build, and it's a refusal rather than a
+feature.
+
+Papers go into the box face down. The vote count stays at zero all day
+while the box fills. At close, a crab counts them **by hand, three minutes
+a paper**, and the HALL tab deliberately shows no running total while this
+is happening.
+
+It would have been trivial to show a live tally. It would also have
+quietly undone the entire point: a count is a thing somebody does, at a
+speed, that can be watched and waited for. If the number is already known,
+nobody is counting — the box is just a progress bar with a hat on.
+
+![The count: a second pile crossing the table](devlog/img/2026-08-20-the-count.png)
+
+*Three minutes a paper, by hand, after the polls shut.*
+
+![HALL: the box is open, and these crabs have not made it yet](devlog/img/2026-08-20-yet-to-vote.png)
+
+*YET TO VOTE names them. It does not tell you which way the room is going,
+because nobody knows that yet.*
+
+### Also: the empty opening day
+
+New towns now open empty — no tourists conjured on the beach at 8am; the
+first boat brings the first visitors. Which raised the obvious question of
+whether a brand-new town should get its first night's rent forgiven, and
+that got settled with a number instead of a feeling: the empty start costs
+you about **$34**, and a free first night would hand back **$230**. Declined,
+6.8 to 1.
+
+---
+
 ## 2026-08-20, addendum — A beach ball nearly killed SUDSY
 
 We added a beach ball. Twelve seconds of crabs batting an inflatable
