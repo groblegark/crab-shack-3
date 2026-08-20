@@ -31,9 +31,25 @@ naming: a pillar can be eroded entirely by changes that are each individually
 defensible.** Nobody was careless; the check was per-change and the damage was
 cumulative.
 
-**The intuitive suspect is CLEARED**: rebuilt with the shelter's capacity
-effectively unlimited, both growth blocks return *identical* results seed for
-seed. The four-bed wall is never reached.
+**WHERE IT ACTUALLY WENT.** Two suspects were arm-tested rather than argued
+about, and both came back smaller than the intuition:
+
+- **The finite shelter: CLEARED.** Rebuilt with capacity effectively unlimited,
+  both growth blocks return *identical* results seed for seed — in one block
+  bit-identical, because a four-bed shelter is exactly the size of a founding
+  town and the wall cannot bind in a town evicted on day 13.
+- **Accommodation as a whole: ~1 escape at most, i.e. noise.** A 2x2 on one
+  build, 16 growth seeds an arm (`--nodorm` / `--noannexe`, now on
+  `headless.mjs`): **both off 2/16 · dorm only 2/16 · annexe only 1/16 · both
+  on 1/16.** Every arm is within one town of every other. The pass's own
+  earlier "3/8 → 4/8" was the coin, measured at its branch point.
+
+So the erosion is mostly **the empty opening day** (−2), then **polling day**
+(−1), with accommodation inside the noise. And the empty opening is the one
+change that already came with a costed remedy: its own pass measured the hole
+at **$34 of the day-one till** and named the lever — the opening purse, sized
+to $34 — while explicitly rejecting a free first night as a $230 handout for a
+$34 problem.
 
 PLAN's own precedent says this matters — a rent change that restored the
 baseline was REJECTED because it took growth escape to 0/8. Driving growth
