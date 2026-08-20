@@ -358,6 +358,28 @@ const ACCESSORIES = {
     "KPAPK",
     ".KPK.",
   ], PAL) },
+  // THE MAYOR'S TOP HAT (Matt: "Little top hat and all"). Worn by whoever
+  // holds the office and by nobody else - crabHat() puts it on over the
+  // toque, so the mayor is the mayor even while they are working a shift,
+  // which is most of the day for every crab in this town.
+  // GEOMETRY, because a hat that is a pixel out looks like a mistake rather
+  // than a joke. Eight wide at dx 4, so the BRIM spans columns 4-11 of a
+  // 16-wide crab and passes cleanly between the eyestalks (columns 2-3 and
+  // 12-13) instead of sitting on them. dy -6 puts the brim on row -1, which is
+  // exactly where the toque's brim sits - so a mayor's hat sits on their head
+  // at the same height a chef's does, and swapping between them does not make
+  // the crab bob. Five rows of crown against the toque's three is what makes
+  // it read as a TOP hat at 1x on a 256px canvas and not as a dark toque, and
+  // the amber band is the one bright row: at this size a silhouette needs one
+  // piece of colour to be findable in a crowd of nine.
+  tophat: { dx: 4, dy: -6, art: parseArt([
+    ".KKKKKK.",
+    ".KNNNNK.",
+    ".KNNNNK.",
+    ".KNNNNK.",
+    ".KAAAAK.",
+    "KKKKKKKK",
+  ], PAL) },
   none: null,
 };
 

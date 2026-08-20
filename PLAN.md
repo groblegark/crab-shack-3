@@ -35,6 +35,20 @@ compounds or collapses → the landlord collects at 20:00 either way.
   A visitor is a persistent `customers` entry (`k.visitor`), so the queue,
   seating, tipping, busing, follow-cam and dossier all work on them unchanged.
   `window.onFerry(kind)` is the seam for the horizon/mainland work.
+- **THE TOWN HALL** (2026-08-19): a **TOWN FUND** (`townFund`) with an audited
+  ledger, a **MAYOR** in a top hat (`hall.mayor`, `crabHat`), and an
+  **ELECTION** every Sunday. The office's whole remit is the homeless shelter -
+  its RENT (to Mr. Pincherton) and its POT of bowls, bought from the shack the
+  night before. What the mayor decides is WHERE THE MONEY COMES FROM: one of
+  four `PURSES` (levy on takings / harbour dues per head landed / a cut of Mr.
+  Pincherton's house rents / a collection tin) at a rate the office sets.
+  Money enters the fund only through `fundTake` (out of a named payer's live
+  balance), and leaves only through `fundPay` (into a shop's till, as a sale)
+  or `fundRemit` (destroyed at the landlord, like every other rent). Crabs vote
+  their own circumstances (`potStake` / `purseCost` / `platBowls`), one written
+  line per voter, and **the player can stand and win**. Fund dry -> the pot is
+  COLD; three missed rents -> the shelter is BOLTED and its crabs `sleepRough`.
+  See the shipped entry below.
 - **Owner layer**: `OWNERS` registry + `creditBiz`/`debitBiz`/`ownerFunds`.
   The player's till IS `coins`. NPC revenue never touches player books.
   The registry GROWS: `BIZ[k].owner` is a key into it, `null` means nobody
@@ -366,6 +380,11 @@ vm — never fork game logic into tools/) and perf expectations live there.
 - `--norival` on `tools/headless.mjs` switches THE RIVALRY off (game.js reads
   `window._noRival` through `rivalOn()` and never sets it), which is how the
   paired arms behind the rivalry numbers were measured.
+- `--nohall` does the same for THE TOWN HALL (`window._noHall` via `hallOn()`):
+  no fund, no purse, no shelter rent, no pot, no elections. Every balance
+  number in the mayor entry has a `--nohall` arm of the SAME build behind it,
+  which is a stronger comparison than the pre-feature build - it isolates the
+  feature rather than the week.
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
@@ -3535,6 +3554,385 @@ the same morning, and again on day 13.
 Two needs, two verbs, and you can tell which is which from the boardwalk.
 Shots: `idle-hands-pier-rail`, `microsleep-at-the-grill`, `asleep-on-the-sand`,
 `walkout-day-report` under `shots/`.
+
+## THE MAYOR, THE TOWN FUND AND ELECTIONS (shipped 2026-08-19, worktree)
+
+Matt's brief, verbatim: *"Sorry do we have some kind of communal food pot? We
+are going to need a charity system, these resources don't come from nowhere.
+Same thing for rent on the shelter. Unfortunately this means a new mayor
+character and elections. So far they just manage the homeless shelter… yeah
+this will be a whole thing but it shouldn't be too bad eh! Little top hat and
+all."* Plus his two rulings, both load-bearing:
+1. **Where the money comes from is "exactly the choice the mayor will make."**
+2. **The player can stand and win**, with the conflict of interest that follows.
+
+### THE MODEL IN FIVE LINES
+The **TOWN FUND** is an account with an audited ledger. It pays two bills and
+only two: the shelter's **RENT** to Mr. Pincherton (`SHELTER_RENT` 10 a night)
+and its **POT** — bowls bought from the shack the night before at
+`bowlCost()` = `ingredientCost("fish_raw") + SOUP_MARGIN`. The money to pay
+them comes from whichever of four **PURSES** the town last voted for. The
+office's whole remit is those two bills; it has no say over hours, wages,
+prices or anything else the player already holds.
+
+### NOTHING IS CONJURED, AND IT IS ENFORCED RATHER THAN PROMISED
+Three doors, and there is no fourth:
+- `fundTake(account, amt, why)` — money in, out of a NAMED payer's own live
+  balance. The payer is passed as an account (player till / owner till / crab
+  wallet / visitor purse), not as a label, so a credit cannot be written
+  without a matching debit somewhere real.
+- `fundPay(account, amt, why)` — money out, into a till that exists. This is
+  how a bowl gets paid for: the shack sold it, so the shack's owner banks it,
+  and that owner is very often the player.
+- `fundRemit(amt, who, why)` — money out to the landlord, destroyed exactly
+  the way the shack lease and every crab's house rent already leave this world.
+  The ONE place the fund makes the town poorer, and it is labelled.
+
+`worldMoney()` weighs every wallet, till, minted visitor purse, credit balance
+and the fund itself. `auditFund()` (off in the browser, on in the suite via
+`window._auditFund`) records that total either side of EVERY movement.
+
+### THE CONSERVATION PROOF
+Scenario **"the town fund moves money and never mints it"**. Two seeds, 14 days
+each, the policy walked through ALL FOUR purses over the run so every door into
+the fund is exercised rather than just the one that town would elect. It
+asserts, per movement:
+- **TAKE and PAY leave `worldMoney()` exactly where it was** (delta 0, tolerance
+  1e-6). The money changed hands; none appeared.
+- **REMIT lowers it by exactly what was remitted and not a cent more** — the
+  shelter's rent leaving the world at Mr. Pincherton, labelled as such.
+- **The ledger IS the balance**: sum(take) − sum(pay) − sum(remit) equals
+  `townFund.bal` to 1e-6 over the whole run.
+- **Every row names a counterparty and a reason.** "Where did that bowl come
+  from" has to have an answer or the feature is a lie.
+- All three doors were actually used, or the proof is incomplete and the
+  scenario says so.
+
+Measured on the shipping build: a plain seed-1337 fortnight records **53 fund
+movements and zero conservation breaks**; the scenario's purse-cycling arms
+record more again, and it refuses to pass on fewer than 30 in case the audit
+never got going.
+
+The FOOD half has its own receipt, scenario **"a bowl is bought from the shack
+at a price, and the shack buys the fish"**: one stocking, to the cent — the
+fund pays 3 x `bowlCost()`, the shack's day book gains exactly that in TAKINGS,
+its cost column gains exactly 3 x `ingredientCost("fish_raw")`, the owner's
+till moves by the difference, and `trade.useDay` gains exactly 3.
+
+### THE FOUR PURSES — they fall on different people, which is the point
+| purse | rate steps | who actually pays | what it raises |
+|---|---|---|---|
+| LEVY | 0/2/4/6/8 % of the day's takings | every business, the player's shack included | the most, and the only one that bills the player directly |
+| DUES | $0-4 a head landed | the visitors, at the gangway | a lot, and every dollar of it never reaches a counter |
+| RENTS | 0/10/20/30/40 % of the house rents | Mr. Pincherton, off his own residential book | roughly the shelter's rent and no more |
+| TIN | $0-4 asked of each | whoever is `TIN_KEEP` clear themselves | next to nothing |
+
+**THE FUND DOES NOT HOARD.** `fundNeed()` is the shelter's bill and nothing
+else — one night's rent, one night's `SHELTER_FLOAT`, and the bowls the town
+has crabs ill enough to want. So the rate a mayor sets is a CEILING on what
+they may reach for, not the size of the reach. Without it, "vote for the
+biggest levy" is a runaway and the levy stops being a policy.
+
+**A POT IS MADE FRESH, AND A KITCHEN COOKS FOR THE BEDS IT HAS.** Last
+night's bowls do not keep, so a generous mayor buys them again every night —
+that was the other way round first and it hollowed the election out (the fund
+bought two bowls on day two, they carried over untouched, and the office's
+entire ongoing bill was the $10 rent; a policy nobody has to pay for is not a
+policy). And the mayor's number is a CEILING, not a standing order: `potWant()`
+puts on a bowl for each crab actually ill tonight plus one spare. Measured
+before that cap on a 35-day growth town: **26 bowls bought and thrown out
+against ONE served**, which is not a soup kitchen, it is a town buying bin-food
+out of a levy.
+
+**THE LEVY IS TWO PASSES.** The first cut walked `Object.keys(BIZ)` and stopped
+at `need`, which billed the SHACK — first in the table and the biggest earner —
+for the town's whole bill while the shops next door paid nothing. That is a
+bias against the player hidden inside an object literal's ordering. Every
+shop's share is now worked out first and scaled back by one common fraction.
+
+### THE MAYOR
+An NPC crab wears the office and a **LITTLE TOP HAT** (`ACCESSORIES.tophat`,
+eight wide at `dx 4` so the brim passes cleanly between the eyestalks, `dy -6`
+so it sits at exactly the toque's height, five rows of crown and one amber
+band). `crabHat()`
+puts it on OVER the work toque, because a mayor in this town still works their
+shift and an office you only see after hours is an office you never see. It is
+deliberately NOT in `ACC_KEYS`, so no tourist ever lands wearing one.
+
+Visible from the boardwalk: a placard over the shelter (MAYOR / the pot's
+state, three states — bolted, cold, or a bowl count), the pot itself steaming
+on the step when there is something in it, a line on the nightly report, an
+OFFICE row on the mayor's dossier, and the **HALL** tab on the management card
+with **three pages behind one chip**: BOOKS (the fund's balance, the day's
+in/out, the last four ledger rows with their counterparties named), LAST BALLOT
+(the tally), and **THE ROLL** — every voter's own reason, paged eight at a time
+through the same chip, because sharing the card with the tally left room for
+three lines of fourteen and one line per voter is the bar the owner set.
+A suite scenario draws every one of those surfaces (including a stale roll page
+past the end, and each of them with no ballot yet) and asserts the HALL tab's
+controls are on the card, clear of DONE and clear of each other — the ledger
+block ran straight through both control rows first time, which is invisible to
+an assertion about behaviour and obvious in one screenshot.
+
+### THE ELECTION
+**Cadence: every SUNDAY**, on the week the town already keeps (`WEEKDAYS`, and
+the staggered rota hangs off it). Day 1 is a Monday, so the first ballot is day
+7 — late enough that there is a trading record to vote on, early enough that
+even a do-nothing town (median eviction 11) holds one, and a 30-day run holds
+four. A fresh town opens with a founding mayor on Mr. Pincherton's cut at its
+cap, because the shelter was open before the player signed the lease.
+
+**Votes are self-interest, computed, never rolled.** Three small numbers:
+- `potStake(c)` — what they'd gain from a full pot. +0.55 homeless, +0.20 ill,
+  +0.25 if they have actually queued at it, **-0.30 fisher** (a fisher roasts
+  their own catch — measured, not flavoured) and **-0.15 player's crew** (of
+  1800 ticks where a sick crab could not buy food, ZERO were the crew's).
+- `purseCost(c, mech)` — what they'd lose. An owner reads the levy at 1.0; a
+  crab on somebody's payroll at 0.28; a crab with neither at 0.04.
+- `roofWeight(c)` — what keeping the shelter OPEN is worth: 0.60 to a crab who
+  sleeps there, 0.20 to everybody else, and **DOUBLE for everyone while the
+  lease is in arrears or the door is bolted**. That last part is what makes the
+  politics move: a town can vote itself into losing the shelter and then votes
+  itself back out — a corrective loop rather than a ratchet.
+
+The decisive term is `platBowls(p)`: **bowls the purse can actually pay for**,
+after the roof. A homeless crab does not vote for the most generous promise,
+they vote for the one that will put a bowl in front of them — so a platform its
+purse cannot fund is worth nothing to them, and TIN's generosity is worthless.
+
+**The ballot** is ONE CANDIDATE PER DISTINCT PLATFORM — the crab who wants it
+most — capped at four, plus the incumbent, plus the player's nominee if they
+stood. Crew crabs never stand unless nominated: "the player can stand and win"
+is a decision, not something that happens to them. And if the player's crab
+runs on a platform a townsfolk candidate was already offering, the seat goes to
+the player's nominee rather than the ballot running two identical candidates
+and splitting their own supporters on a tie-break. That is the player's one
+real advantage and it is a fair one: an NPC stands on what they personally
+want, while the player can read the whole roster and stand on what will carry
+the town.
+
+### THE FAILURE MODE, AND IT LANDS ON PEOPLE
+Fund short of the rent → arrears + a strike. `SHELTER_STRIKES` 3 in a row and
+Mr. Pincherton bolts the door for `SHELTER_SHUT_NIGHTS` 4. The crabs who live
+there then **sleep rough** — an existing state with real teeth (banks NO rest
+on either ladder, and the exhaustion arms the next morning's sickness roll).
+Fund short of a bowl → the pot is **COLD**, and a crab who walked the whole
+promenade for it gets nothing and says so.
+
+### KNOBS (all new; no pre-existing price, wage or rent was touched)
+`SHELTER_RENT` 10, `SHELTER_FLOAT` 1, `SHELTER_STRIKES` 3,
+`SHELTER_SHUT_NIGHTS` 4, `SOUP_MARGIN` 2, `POT_MAX` 6, `POLL_WEEKDAY` 6,
+`TIN_KEEP` 30, `POLL_LINES` 24, `PURSES[*].steps`, the weights inside
+`potStake` / `purseCost` / `roofWeight`, and the pot's own `SOUP_AT` /
+`SOUP_SICK_AT` / `SOUP_FILL` / `SOUP_MINS` / `SOUP_CD` lifted unchanged from
+the parked build.
+
+### WHAT IT COSTS THE SAVE
+The ledger (last 24 rows) and the ballot's roll (up to `POLL_LINES` 24 lines)
+are both written, because "who paid for that" losing its answer on a reload
+would break the one promise the feature makes. Measured on a day-21 town:
+**2.6KB of a 27.8KB envelope, 9.4%** — against 14.5KB of townsfolk personas.
+Five slots of that is nowhere near a localStorage limit.
+
+### ONE HUNK IS SHARED WITH THE SICK-CRAB WINDOW FIX
+This pass was built on top of `ownTime = off || !!c.p.sick` (the "a sick day is
+not a shift" fix), because the pot is worthless if an ill crab cannot leave the
+house to reach it. That hunk is **textually identical** to the one already
+sitting in the main working tree, comment and all, so git merges it as a
+same-content addition rather than a conflict. Nothing else from that pass was
+taken; the ferry/CRABALINA canon, `VIS_SAVE_STATES` and the `bizUnlocked` guard
+are all still that pass's to land.
+
+### ATTRIBUTION SWITCH
+`--nohall` on `tools/headless.mjs` (game.js reads `window._noHall` through
+`hallOn()` and never sets it) — the same arm-off pattern as `--failoff` and
+`--norival`. Every balance number below has a paired arm behind it.
+
+### WHAT A MAYOR ACTUALLY DECIDES
+Two dials and nothing else:
+- **THE PURSE** — which of the four, and at what rate. This is the whole
+  election. A LEVY funds a real pot and every shopkeeper pays for it, the
+  player included. DUES fund one too and nobody in town pays a penny, but the
+  money never reaches a counter. Mr. PINCHERTON'S CUT costs the town nothing at
+  all and buys the roof and almost nothing else. THE TIN raises so little that
+  the shelter goes into arrears.
+- **THE POT** — bowls a night, 0 to `POT_MAX`. A ceiling, not a standing order:
+  `potWant()` cooks for the crabs who are actually ill, plus one spare.
+
+### WHAT AN ELECTION FEELS LIKE
+Every Sunday at settlement. Townsfolk put themselves up (crew only when the
+player nominates one), one candidate per distinct platform, at most four plus
+the incumbent plus the player's. Every crab in town votes their own
+circumstances and the ballot records a written line for each of them.
+
+### THE FROZEN DAY-2 FINGERPRINT DID NOT MOVE
+Worth recording, because a fund, a mayor, a weekly ballot and a shelter with a
+rent sounds exactly like something that would re-baseline it. Two full days —
+two settlements, two rent cuts off every housed crab, two remits to Mr.
+Pincherton — and seeds 1337 and 4242 come out **byte-identical to the pre-pass
+build**, coins to the thousandth. Two design choices do that:
+- A cut of Mr. Pincherton's rents is a **diversion**, not a new cost: it comes
+  out of a payment the tenant was making anyway, and what the fund does not
+  take is destroyed at the landlord exactly as before.
+- `potWant()` cooks for the beds it has, and **nobody is ill on day 1 or 2 of a
+  fresh town**, so no bowls are bought and no fish leave the crate. (The cut
+  before that one read +$4.000 on both seeds and `catch` 4 → 3 on 4242.)
+
+**Zero re-pointings in this pass.** Two scenarios were re-*written* — my own
+new ones, when `potWant` and `SHELTER_FLOAT` changed what they should assert.
+
+### BALANCE — measured, attributed, and NOT tuned away
+Every arm below is the SAME BUILD; the paired arm is `--nohall`. That is a
+stronger comparison than "before the feature", because it isolates the office
+rather than the week's other work.
+
+**Inertness proof first.** `--nohall` reproduces the pre-pass build
+BYTE-IDENTICALLY on the 16-seed baseline AND on both growth blocks — same
+eviction days in the same order, same `lifetime $53447`, same
+`housing 0/80/42`, same `purse $2617`, same 11 quits. The switch really does
+turn the whole office off, which is also why the `--nohall` arms below were
+measured once and not re-measured after each tune: with the office off, the
+code that runs IS the pre-pass build's.
+
+| 30d x16, buy nothing | survived | eviction days | median |
+|---|---|---|---|
+| **town hall ON** | **0/16** | 6,9,9,10,10,10,11,11,11,11,11,11,12,13,13,15 | 11 |
+| `--nohall` | 0/16 | 6,9,10,10,11,11,11,11,11,11,12,12,13,14,15,15 | 11 |
+
+**Lose-by-default holds at 0/16, median 11.** The do-nothing town is untouched:
+it dies before it can vote itself anything, on the founding cut of Mr.
+Pincherton's book, which is a purse that costs the player nothing.
+
+| 40d x8 `--buy chef,table` | survived | eviction days | median |
+|---|---|---|---|
+| **hall ON**, default seeds | **2/8** | 6,9,10,10,11,14,41,41 | 11 |
+| `--nohall`, default seeds | 3/8 | 6,8,11,11,11,41,41,41 | 11 |
+| **hall ON**, `--seedbase 8` | **2/8** | 10,11,11,11,11,14,41,41 | 11 |
+| `--nohall`, `--seedbase 8` | 2/8 | 10,11,11,13,14,15,41,41 | 14 |
+
+**Growth: 4/16 against 5/16 — one seed in sixteen.** CLAUDE.md's own warning
+applies ("eight growth seeds is a coin; sixteen is the honest number"), and one
+seed on sixteen is inside the wobble this project has documented repeatedly.
+The direction is real and expected: the office is a NEW BILL on a town, and a
+town near the edge is where a new bill shows. (The flipped seed is not named
+here because the `--nohall` arm was run without per-seed output; the two arms'
+eviction lists are in the table and that is what is actually known.)
+**Nothing was tuned to get it back.** No pre-existing price,
+wage or rent was touched; the shelter's rent, the bowl margin and the purse
+rate tables are all new numbers this pass introduced.
+
+### TWO THINGS WERE TUNED, both of them my own, both measured before and after
+1. **`potWant()` — a kitchen cooks for the beds it has.** Before: a 35-day
+   growth town bought and threw out **26 bowls to serve ONE**. After: 20 thrown
+   out for 4 served over the same 35 days, and the pot's cost now tracks the
+   number of crabs actually ill.
+2. **`SHELTER_FLOAT` — a night's rent carried in hand.** Six solvent towns over
+   24 days, hall on:
+
+   | | shelter shut | rough nights | mean hunger while ill | starving share | ill deaths |
+   |---|---|---|---|---|---|
+   | `--nohall` | 0 | 35 | 0.578 | 31.8% | 6 |
+   | hall, no float | **5** | 75 | 0.584 | 27.9% | 6 |
+   | hall, **with float** | **2** | 59 | **0.535** | **25.1%** | 5 |
+
+   Without the float the office was making crab welfare WORSE and buying
+   nothing with it, and not one of those five closures was a bad policy — every
+   one was a purse that cleared the rent on polling day and came up a dollar
+   short on a quiet Tuesday. With the float, the shelter still closes, but it
+   closes because of what the town VOTED FOR. That is the failure mode Matt
+   asked for; the other one was just variance.
+
+   The remaining +24 rough nights against `--nohall` is the honest price of the
+   feature: the shelter has a rent now, and a town that funds it badly loses it.
+
+### THE POT, MEASURED HONESTLY — it fires rarely, and that is the design
+Six unsubsidised towns (no coin injection: the kind that lose, average last day
+~11), 30 days, hall on vs `--nohall`:
+
+| | ill-ticks | mean hunger while ill | starving share | ticks blocked* | bowls | ill deaths |
+|---|---|---|---|---|---|---|
+| `--nohall` | 73207 | 0.591 | 26.1% | 18002 (24.6%) | 0 | 3 |
+| hall ON | 50403 | 0.503 | 23.7% | 2974 (5.9%) | **5** | 1 |
+
+\* "blocked" = a tick where a crab is ill, hungry past the pot's own threshold,
+and holding less than the price of the cheapest local plate. It is the refusal
+this whole feature was built for.
+
+**Read the direction, not the factor.** Two chaotic sims diverge, the ill-tick
+counts are not comparable, and — the number that matters for honesty — the pot
+served **FIVE BOWLS** across six towns and thirty days. Five bowls cannot move
+fifteen thousand ticks. The pot is a genuine last resort and it behaves like
+one: sick crabs only, offered LAST, and only when the town has nothing to sell
+them. Its job is that no crab is ever pinned on the starvation line with no
+route out at all, exactly the way the public taps do it for water — not to feed
+the town. What actually carries weight in this pass is the SHELTER'S RENT and
+what the town votes to do about it.
+
+### Devlog beat (organic, reproducible — seed 1337, a growth town)
+`node tools/headless.mjs --days 35 --seeds 1 --buy chef,table` and read the
+ballots. THE TOWN'S POLITICS CHANGE AS THE TOWN GROWS, and nobody wrote that
+arc — it falls out of who happens to be sleeping at the shelter on a Sunday.
+
+- **Day 1.** SUDSY holds the office nobody voted for: she runs the showers, she
+  sleeps at the shelter, and she is therefore the most conflicted crab in town.
+  The founding purse is Mr. Pincherton's 40%, and it buys the roof.
+- **Day 7.** SUDSY 5, DRIFT 3. DRIFT stands on HARBOUR DUES $4 and four bowls;
+  the three crabs on cots vote for him and everybody with a wage or a till
+  votes to keep the comfortable arrangement. *"KELP -> DRIFT: SLEEPS AT THE
+  SHELTER, 4 BOWLS, AND PAYS LITTLE."*
+- **Day 14.** SUDSY 6, KELP 4, SALTY 3 — and **CLAWDIA, one of the player's own
+  founding crew, has lost her house and votes against her employer's interest**:
+  *"CLAWDIA -> KELP: SLEEPS AT THE SHELTER, 4 BOWLS, AND PAYS LITTLE."*
+- **Day 21.** SALTY 6, SUDSY 6. A dead heat, and the incumbent holds it.
+- **Day 28.** **SALTY 7, SUDSY 5.** The shack has been hiring, every new hire
+  starts on a cot, and the shelter finally outvotes the tills. PINCHY — the
+  crab the player started the game with — votes for the pot. The town runs on
+  HARBOUR DUES $3 and six bowls: the tourists pay for the soup.
+
+That is the shape of the whole feature in one run. **The player's own success
+builds the electorate that votes to tax them** — and the ledger says so by
+name: `d35 TAKE $3 FROM SURF MOM (HARBOUR DUE)`, `d35 TAKE $1 FROM KRILL BILL
+(HARBOUR DUE)`, `d35 REMIT $10 TO MR. PINCHERTON (SHELTER RENT)`.
+
+### SUITE 139 -> 153, ZERO RE-POINTINGS
+`if node tools/suite.mjs; then ...; else ...; fi` -> **SUITE GREEN, 153/153 in
+874.8s**, exit code 0. Fourteen new scenarios:
+the conservation audit, the bowl's own bill, the cold pot, a purse that raises
+nothing bolting the shelter, the levy billing the player by name, the fund
+being struck to the bill, votes splitting the town by circumstance, the week's
+ballot accounting for every voter, the player standing and winning and then
+paying their own levy, the hat being the mayor's and nobody else's, the HALL
+tab's geometry, the save/load roundtrip, a pre-mayor save opening with an
+office, and a corrupt one being clamped.
+
+### WHAT WAS NOT BUILT, AND WHY
+- **No powers beyond the shelter.** Matt's scope: "So far they just manage the
+  homeless shelter." No hours, no wages, no prices, no rents, no zoning.
+- **No mayoral routine.** The mayor keeps their job, their shift and their
+  house; the office is a hat, a policy and a placard. No town hall building, no
+  ribbon-cutting, no salary and no expenses.
+- **No recall, no term limits, no coalitions.** A term is a week and the only
+  way out is losing the next one.
+- **No campaign beyond the platform.** Candidates do not persuade, spend, or
+  lie about what they will do; a platform is exactly what the winner enacts.
+- **Tourists do not fund the tin.** DUES is the tourist mechanism and one
+  channel per constituency is enough; a second would just be the same money.
+- **RENTS is residential only.** Mr. Pincherton will talk about the cottages
+  (he would rather have tenants than empty lots) and not about a commercial
+  lease. That cap is what stops the free option from being the only option.
+- **The pot is still SICK-ONLY.** Not a scope cut - a measured one, carried
+  over from the parked build: open to everybody it cost 1/8 + 1/8 of growth AND
+  fed the ill worse, because the well stopped buying plates.
+- **The player cannot swap nominee mid-term.** While your crab wears the hat,
+  the NOMINEE chip refuses; an incumbent defends their own seat.
+- **No per-shop levy floor for a multi-shop player.** A peer owner has one till
+  per lease; the player's shops all draw on `coins`, so the "never below its own
+  rent" floor is the last shop's rather than the sum. Bounded by a night's
+  shelter bill and written down at the call site rather than papered over.
+- **A voter's written line can lose its tail.** `fitSmall` trims by width and
+  the longest reasons run past 208px, so the least informative clause ("AND
+  PAYS LITTLE") is what clips. The alternative was shortening "SLEEPS AT THE
+  SHELTER", and the flavour is worth more than the qualifier.
 
 ## (superseded by the retune above) Lose-by-default after the tap
 The public tap fixed a structural unfairness (crabs could be barred from ever

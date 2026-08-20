@@ -1822,6 +1822,22 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // The 30-day curve was re-measured against a control on the same tree:
   // lose-by-default holds at 0/16 either way, median eviction 11 -> 12 and the
   // tails tighten (6-15 -> 10-14). See PLAN, THE FLICKERING HOTEL.
+  //
+  // NOT RE-BASELINED BY THE MAYOR PASS (2026-08-19), and that is worth writing
+  // down, because a town fund, a mayor, a weekly election and a shelter with a
+  // rent sounds exactly like something that would move this. It does not, and
+  // for a reason that is the founding purse's whole design:
+  //   * A CUT OF MR. PINCHERTON'S RENTS is a DIVERSION, not a new cost. It
+  //     comes out of a payment the tenant was making anyway, so a housed
+  //     crab's wallet cannot tell the difference and neither can this
+  //     fingerprint - and the remainder is destroyed at the landlord exactly
+  //     as it always was.
+  //   * `potWant()` cooks for the beds it has, and nobody is ill on day 1 or
+  //     2 of a fresh town, so no bowls are bought and no fish leave the crate.
+  //     (An earlier cut stocked the policy's full number regardless; it read
+  //     +$4.000 here on both seeds and catch 4 -> 3 on 4242.)
+  // So the office runs for two full days - two settlements, two rent cuts per
+  // housed crab, two remits to Mr. Pincherton - and the town is byte-identical.
   const want = {
     1337: '{"day":3,"tmin":0,"coins":188.643,"rep":56.4742,"catch":4,"serves":63,"crabServes":3,"rage":5,"till":280.838,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",18],["DRIFT",21],["KELP",4]],"pos":[[520,154],[108,154],[388,154],[2136,154],[248,167],[2072,154],[478,167]]}',
     4242: '{"day":3,"tmin":0,"coins":214.868,"rep":58.5215,"catch":4,"serves":61,"crabServes":4,"rage":4,"till":271.624,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",1],["DRIFT",7],["KELP",0]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,167],[248,154]]}',
@@ -5844,6 +5860,469 @@ scenario("measurement: a bored walkout and a pay walkout share one counter", () 
     return "the counter is not a list of rows: " + JSON.stringify(rows);
   if (!rows.every(r => r && r.name && r.day))
     return "a walkout row has no name or no day on it: " + JSON.stringify(rows);
+  return true;
+});
+
+// ======================================================================
+// THE TOWN HALL: the fund, the mayor and the elections
+// ======================================================================
+
+scenario("the town fund moves money and never mints it", () => {
+  // THE IRON RULE OF THIS FEATURE, checked per movement rather than argued.
+  // worldMoney() weighs everything in this town that holds money - the
+  // player's till, every peer owner's till and credit line, every crab's
+  // wallet, every visitor's minted purse, and the fund itself - and the audit
+  // hook records it either side of EVERY single fund movement.
+  //   TAKE and PAY must leave that total EXACTLY where it was. The money
+  //     changed hands; none appeared.
+  //   REMIT must lower it by exactly what was remitted and not a cent more -
+  //     that is the shelter's rent leaving the world at Mr. Pincherton, the
+  //     same way the shack lease and every crab's house rent already do.
+  // The policy is walked through all four purses over the run so that every
+  // door into the fund is exercised, not just the one this town elects.
+  for (const seed of [1337, 4011]) {
+    const sim = createSim({ seed });
+    sim.G('window._auditFund = { rows: [] };');
+    let i = 0;
+    sim.runDays(14, { tickEvery: 400, onTick: (G) => {
+      const mech = ["levy", "dues", "rents", "tin"][(i++ >> 3) % 4];
+      G(`hall.policy = { mech: "${mech}", rate: 3, bowls: 3 };`);
+      if (G("coins") < 400) G("coins = 900");   // keep the town trading, so the levy has a base
+    } });
+    const A = JSON.parse(sim.G("JSON.stringify(window._auditFund)"));
+    const rows = A.rows || [];
+    if (rows.length < 30) return `seed ${seed}: only ${rows.length} fund movements - the audit never got going`;
+    const bad = rows.filter(r => !r.ok);
+    if (bad.length) return `seed ${seed}: ${bad.length}/${rows.length} movements changed the world's money, e.g. ` +
+      JSON.stringify(bad[0]);
+    // ...and the ledger adds up: the balance IS the sum of the doors.
+    const net = rows.reduce((s, r) => s + (r.kind === "take" ? r.amt : -r.amt), 0);
+    const bal = sim.G("townFund.bal");
+    if (Math.abs(net - bal) > 1e-6) return `seed ${seed}: ledger says $${net.toFixed(2)}, fund holds $${bal.toFixed(2)}`;
+    // every row names a counterparty. "Where did that bowl come from" has to
+    // have an answer or the whole feature is a lie.
+    const anon = rows.filter(r => !r.who || r.who === "?" || !r.why);
+    if (anon.length) return `seed ${seed}: ${anon.length} fund movements with no named payer/payee`;
+    // and all three doors were actually used
+    const kinds = new Set(rows.map(r => r.kind));
+    for (const k of ["take", "pay", "remit"])
+      if (!kinds.has(k)) return `seed ${seed}: the ${k} door was never exercised - the proof is incomplete`;
+  }
+  return true;
+});
+
+scenario("a bowl is bought from the shack at a price, and the shack buys the fish", () => {
+  // THE OTHER HALF OF "NOTHING IS CONJURED": the FOOD has to come from
+  // somewhere too. One stocking, measured to the cent: the fund pays the shack
+  // the board price for three bowls, that money lands in the shack owner's
+  // till (here, the player's own), and the shack pays for three fish out of it
+  // on the same trade ledger every paying customer's plate goes through.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(2);
+  const got = JSON.parse(sim.G(`(() => {
+    hall.policy = { mech: "levy", rate: 4, bowls: 3 };
+    townFund.bal = 200; townFund.bowls = 0; townFund.arrears = 0; townFund.shut = 0;
+    // a kitchen cooks for the beds it has (potWant): three ill crabs, so three
+    // bowls is a night's pot rather than a number nobody asked for
+    for (const c of allCrabs().slice(0, 2)) c.p.sick = { days: 1 };
+    const bk = bizDayBook("shack");
+    const k0 = bk.take, c0 = bk.cost, t0 = coins, u0 = trade.useDay;
+    const each = bowlCost(), ing = ingredientCost("fish_raw"), b0 = townFund.bal;
+    const n = stockPot();
+    return JSON.stringify({ n, each, ing, dTake: bk.take - k0, dCost: bk.cost - c0,
+      dCoins: coins - t0, dFund: townFund.bal - b0, dUse: trade.useDay - u0, bowls: townFund.bowls });
+  })()`));
+  if (got.n !== 3) return `stocked ${got.n} bowls, wanted 3`;
+  if (got.bowls !== 3) return `the pot holds ${got.bowls} bowls`;
+  if (Math.abs(got.dFund + 3 * got.each) > 1e-6) return `the fund paid $${-got.dFund}, the bowls cost $${3 * got.each}`;
+  if (Math.abs(got.dTake - 3 * got.each) > 1e-6) return `the shack booked $${got.dTake} of takings, not $${3 * got.each}`;
+  if (Math.abs(got.dCost - 3 * got.ing) > 1e-6) return `the shack booked $${got.dCost} of ingredients, not $${3 * got.ing}`;
+  if (Math.abs(got.dCoins - 3 * (got.each - got.ing)) > 1e-6)
+    return `the owner's till moved $${got.dCoins}, expected $${3 * (got.each - got.ing)}`;
+  if (got.dUse !== 3) return `${got.dUse} fish went on the market's demand signal, not 3`;
+  return true;
+});
+
+scenario("an empty fund means a cold pot, and a cold pot feeds nobody", () => {
+  // THE FAILURE MODE, at the pot. takeBowl is the only way food leaves the
+  // shelter step and it will not invent one: an empty pot turns the crab away,
+  // their hunger is untouched, and the town counts it.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(2);
+  const got = JSON.parse(sim.G(`(() => {
+    const c = allCrabs()[0];
+    townFund.bowls = 0; townFund.shut = 0; townFund.cold = 0;
+    c.p.hunger = 0.9;
+    const okEmpty = takeBowl(c), hEmpty = c.p.hunger, coldEmpty = townFund.cold;
+    townFund.bowls = 1;
+    const okFull = takeBowl(c), left = townFund.bowls, ate = c.p.bowls || 0;
+    // ...and a bolted shelter serves nothing even with a full pot
+    townFund.bowls = 2; townFund.shut = 3;
+    const okShut = takeBowl(c), warmShut = potWarm();
+    return JSON.stringify({ okEmpty, hEmpty, coldEmpty, okFull, left, ate, okShut, warmShut });
+  })()`));
+  if (got.okEmpty !== false) return "an empty pot served a bowl";
+  if (Math.abs(got.hEmpty - 0.9) > 1e-9) return `a cold pot moved hunger to ${got.hEmpty}`;
+  if (got.coldEmpty !== 1) return `the turn-away was not counted (cold ${got.coldEmpty})`;
+  if (got.okFull !== true || got.left !== 0 || got.ate !== 1)
+    return `a stocked pot did not serve cleanly (ok ${got.okFull}, left ${got.left}, ate ${got.ate})`;
+  if (got.warmShut !== false || got.okShut !== false) return "a bolted shelter served a bowl anyway";
+  return true;
+});
+
+scenario("a purse that raises nothing bolts the shelter and puts crabs on the street", () => {
+  // THE FAILURE MODE, at the shelter. THE TIN at $0 is the honest worst case -
+  // a charity with no tax base - and the consequence is not a number on a
+  // panel: three missed settlements and Mr. Pincherton locks the door, after
+  // which the crabs who live there sleep rough, which banks NO rest at all
+  // and feeds straight into the next morning's sickness roll.
+  const sim = createSim({ seed: 1337 });
+  const rough0 = sim.G("(window._stats.roughNights || 0)");
+  sim.runDays(9, { tickEvery: 200, onTick: (G) => {
+    G(`hall.policy = { mech: "tin", rate: 0, bowls: 0 };`);   // re-pinned past any election
+    if (G("coins") < 400) G("coins = 900");
+  } });
+  const st = JSON.parse(sim.G(`JSON.stringify({ shut: townFund.shut, shuts: (window._stats.shelterShuts || 0),
+    arrears: townFund.arrears, rough: (window._stats.roughNights || 0),
+    sleepingOut: allCrabs().filter(c => c.p.homeless && (c.p.rough || c.p.roughLast >= day - 1)).length })`));
+  if (!st.shuts) return `the fund raised nothing for nine nights and the shelter never shut (arrears $${st.arrears})`;
+  if (!(st.rough > rough0)) return "the shelter shut and nobody ended up sleeping rough";
+  return true;
+});
+
+scenario("the levy bills the player's own till, by name, in the ledger", () => {
+  // Matt's second ruling, made checkable: "the player can stand and win, with
+  // the conflict of interest that follows - set the levy and you pay it too."
+  // The shack is in collectPurse's loop on exactly SUDSY's terms, and the row
+  // it writes says YOU.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(2);
+  const got = JSON.parse(sim.G(`(() => {
+    hall.policy = { mech: "levy", rate: 4, bowls: 0 };   // 8% of what each shop took today
+    townFund.bal = 0; townFund.arrears = 0; townFund.ledger = [];
+    coins = 900; bizDayBook("shack").take = 300;
+    const t0 = coins, got = collectPurse();
+    const mine = townFund.ledger.filter(r => r.who === "YOU");
+    return JSON.stringify({ got, dCoins: coins - t0, rows: mine.length,
+      why: mine.length ? mine[0].why : "", amt: mine.length ? mine[0].amt : 0,
+      youPaid: townFund.youPaid });
+  })()`));
+  if (!(got.got > 0)) return "the levy collected nothing from a trading town";
+  if (!(got.dCoins < 0)) return `the player's till did not move (${got.dCoins})`;
+  if (!got.rows) return "no ledger row named YOU - the player was not billed";
+  if (!/LEVY/.test(got.why)) return `the row that billed the player says "${got.why}"`;
+  if (Math.abs(got.dCoins + got.amt) > 1e-6) return `the ledger says $${got.amt}, the till lost $${-got.dCoins}`;
+  if (Math.abs(got.youPaid - got.amt) > 1e-6) return "the nightly report's YOU PAID number disagrees with the ledger";
+  return true;
+});
+
+scenario("the fund is struck to the bill and does not hoard", () => {
+  // The rate a mayor sets is a CEILING on what they may reach for, not the
+  // size of the reach - otherwise "vote for the biggest levy" is a runaway and
+  // the levy stops being a policy. An 8% levy on a $600 town takes the
+  // shelter's BILL - a night's rent, a night's float, and the bowls the town
+  // has crabs ill enough to want - and not one dollar of the other $32.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(2);
+  const got = JSON.parse(sim.G(`(() => {
+    hall.policy = { mech: "levy", rate: 4, bowls: 2 };
+    townFund.bal = 0; townFund.arrears = 0; townFund.bowls = 0;
+    for (const c of allCrabs().slice(0, 2)) c.p.sick = { days: 1 };   // so the pot is wanted
+    coins = 2000; bizDayBook("shack").take = 600;
+    const bill = SHELTER_RENT * (1 + SHELTER_FLOAT) + potWant() * bowlCost();
+    const took = collectPurse();
+    return JSON.stringify({ took, bill, want: potWant(), rate: purseRate(hall.policy), base: 600 });
+  })()`));
+  if (got.want !== 2) return `the pot wanted ${got.want} bowls, not the policy's 2`;
+  if (Math.abs(got.took - got.bill) > 0.01)
+    return `an 8% levy on $600 took $${got.took}, but the shelter's bill was $${got.bill}`;
+  if (got.took >= got.base * got.rate / 100)
+    return "the levy took its whole ceiling rather than its bill";
+  return true;
+});
+
+scenario("votes are self-interest: the same ballot splits the town by circumstance", () => {
+  // The bar the owner set for this feature is that a result be EXPLAINABLE,
+  // one line per voter, from the roster. So the two ends of the town are
+  // checked directly against the same pair of platforms: a funded pot paid for
+  // by a levy, and Mr. Pincherton's comfortable cut that feeds nobody.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(3);
+  const got = JSON.parse(sim.G(`(() => {
+    const A = { mech: "levy", rate: 4, bowls: 4 };     // feeds the shelter, businesses pay
+    const B = { mech: "rents", rate: 4, bowls: 0 };    // costs nobody in town, feeds nobody
+    bizDayBook("shack").take = 600;                    // a trading town, so A can actually deliver
+    const h = allCrabs().find(c => c.p.homeless && !c.p.fisher && !c.p.owner);
+    const o = allCrabs().find(c => c.p.owner);
+    if (!h || !o) return JSON.stringify({ miss: 1 });
+    return JSON.stringify({ h: h.p.name, o: o.p.name,
+      hA: platValue(h, A), hB: platValue(h, B), oA: platValue(o, A), oB: platValue(o, B),
+      hWhy: voteReason(h, A), oWhy: voteReason(o, B), bowlsA: platBowls(A), bowlsB: platBowls(B) });
+  })()`));
+  if (got.miss) return "this town has no homeless crab and no owner to compare";
+  if (!(got.bowlsA > 0)) return "the funded platform could not actually deliver a bowl - nothing to prefer";
+  if (!(got.hA > got.hB)) return `${got.h} sleeps at the shelter and did not prefer the funded pot (${got.hA} vs ${got.hB})`;
+  if (!(got.oB > got.oA)) return `${got.o} keeps a till and did not prefer the purse that spares it (${got.oB} vs ${got.oA})`;
+  if (!/SHELTER/.test(got.hWhy)) return `the shelter sleeper's line reads "${got.hWhy}"`;
+  if (!/TILL/.test(got.oWhy)) return `the owner's line reads "${got.oWhy}"`;
+  return true;
+});
+
+scenario("an election is held on the week, and every voter is accounted for", () => {
+  // Polling day rides the town's existing week (day 1 is a Monday, so the
+  // first ballot is day 7). What this checks is the BOOKKEEPING: everybody in
+  // town votes, every vote lands on a candidate, and there is one written line
+  // per voter - the legibility bar, not a feeling about it.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(7, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const p = JSON.parse(sim.G("JSON.stringify(hall.poll)"));
+  if (!p) return "no ballot was held by the end of day 7";
+  if (p.day !== 7) return `the ballot fell on day ${p.day}, not the town's first Sunday`;
+  const cast = p.cands.reduce((s, k) => s + k.votes, 0);
+  if (cast !== p.turnout) return `${cast} votes cast, ${p.turnout} crabs in town`;
+  if (p.lines.length !== Math.min(p.turnout, sim.G("POLL_LINES")))
+    return `${p.lines.length} written reasons for ${p.turnout} voters`;
+  const win = p.cands.find(k => k.name === p.winner);
+  if (!win) return "the winner is not on their own ballot";
+  for (const k of p.cands) if (k.votes > win.votes) return `${k.name} outpolled the winner`;
+  if (sim.G("hall.mayor") !== p.winner) return "the winner did not take the office";
+  return true;
+});
+
+scenario("the player can stand for office and win, and then the levy is theirs", () => {
+  // Matt: "The player can STAND FOR OFFICE AND WIN, with the conflict of
+  // interest that follows: set the levy and you pay it too." Both halves, in
+  // the order they actually happen.
+  //
+  // WINNING IS A POLITICAL ACT, not a purchase. A townsfolk candidate stands
+  // on what THEY personally want; the player can read the whole roster off the
+  // HALL tab and stand on what will carry it. Here everybody but the two shop
+  // owners sleeps at the shelter - a shape this game reaches on its own by
+  // about day 11, and the crew reach it fastest because a new hire starts on a
+  // cot - so the platform that carries the town is the shelter's, and the
+  // player stands on it against the owners who would rather it stayed cold.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(3);
+  sim.G(`(() => {
+    for (const c of allCrabs()) if (!c.p.owner) { c.p.homeless = true; c.p.house = null; c.p.fisher = false; }
+    bizDayBook("shack").take = 600;
+    // what the shelter's own crabs want, worked out with the game's own scorer
+    // - which is exactly the reading the HALL tab hands the player
+    const voter = allCrabs().find(c => c.p.homeless && c.p.npc && !c.p.owner);
+    hall.stand = true; hall.nominee = crabs[0].p.name;
+    hall.plat = idealPlatform(voter);
+  })()`);
+  sim.runDays(7, { tickEvery: 60, onTick: (G) => {
+    if (G("coins") < 900) G("coins = 1800");
+    G(`bizDayBook("shack").take = Math.max(bizDayBook("shack").take, 600);`);   // a town worth levying
+    // ...and hold the town in that shape: a solvent town rehouses itself at
+    // every settlement (that ladder is the whole housing system), which would
+    // quietly dissolve the electorate this scenario is about before polling day
+    G(`for (const c of allCrabs()) if (!c.p.owner) { c.p.homeless = true; c.p.house = null; }`);
+    // an ATTENTIVE player: the platform tracks what the town would vote for,
+    // which is the reading the HALL tab's ballot page hands them every Sunday.
+    // (A stale platform genuinely loses - measured: a day-3 platform still on
+    // the ballot at day 7 polled ZERO, because the yields had moved under it.)
+    G(`{ const v = allCrabs().find(c => c.p.homeless && c.p.npc && !c.p.owner);
+         if (v) hall.plat = idealPlatform(v); }`);
+  } });
+  const got = JSON.parse(sim.G(`JSON.stringify({ mayor: hall.mayor, mine: playerMayor(),
+    pol: policyLine(hall.policy), nominee: hall.nominee, you: hall.poll && hall.poll.you,
+    ran: hall.poll ? (hall.poll.cands.find(k => k.name === hall.poll.winner) || {}).line : "-",
+    hat: (() => { const m = mayorCrab(); return m ? crabHat(m) : "-"; })(),
+    tally: hall.poll ? hall.poll.cands.map(k => k.name + ":" + k.votes).join(" ") : "-" })`));
+  if (!got.mine) return `the player's candidate lost: mayor is ${got.mayor} (${got.tally})`;
+  if (!got.you) return "the poll record does not know the winner was the player's";
+  if (got.mayor !== got.nominee) return `${got.mayor} wears the hat but the nominee was ${got.nominee}`;
+  if (got.pol !== got.ran) return `the town is on "${got.pol}" but the ballot won on "${got.ran}"`;
+  if (got.hat !== "tophat") return "the player's mayor is not wearing the hat";
+  // ...AND NOW THE CONFLICT OF INTEREST. In office the platform dials ARE the
+  // town's policy: turn them to a levy and the very next settlement bills the
+  // player's own till, by name, in the ledger.
+  const bill = JSON.parse(sim.G(`(() => {
+    hall.plat = { mech: "levy", rate: 4, bowls: 3 };
+    hall.policy = Object.assign({}, hall.plat);          // what the HALL tab's dials do
+    townFund.bal = 0; townFund.arrears = 0; townFund.bowls = 0;
+    townFund.youPaid = 0; townFund.ledger = [];
+    coins = 2000; bizDayBook("shack").take = 600;
+    const t0 = coins; collectPurse();
+    return JSON.stringify({ d: coins - t0, youPaid: townFund.youPaid,
+      rows: townFund.ledger.filter(r => r.who === "YOU").length });
+  })()`));
+  if (!(bill.d < 0)) return "the player set the levy and their own till was not billed";
+  if (!bill.rows) return "no ledger row named YOU after the player's own levy";
+  if (Math.abs(bill.youPaid + bill.d) > 1e-6) return "the report's YOU PAID number disagrees with the till";
+  return true;
+});
+
+scenario("the mayor wears the hat, and nobody else ever does", () => {
+  // "Little top hat and all" - and it outranks the work toque, because a mayor
+  // in this town still works a shift and an office you only see after hours is
+  // an office you never see. The other half matters just as much: the hat is
+  // NOT in ACC_KEYS, so no crab and no tourist is ever handed one at random.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(2);
+  const got = JSON.parse(sim.G(`(() => {
+    const m = mayorCrab();
+    if (!m) return JSON.stringify({ noMayor: 1 });
+    m.duty = true;   // even mid-shift
+    const others = allCrabs().filter(c => c !== m).map(c => crabHat(c));
+    return JSON.stringify({ mayor: m.p.name, hat: crabHat(m), others,
+      inAcc: ACC_KEYS.indexOf("tophat"), art: !!(ACCESSORIES.tophat && ACCESSORIES.tophat.art) });
+  })()`));
+  if (got.noMayor) return "a fresh town has nobody in the office";
+  if (got.hat !== "tophat") return `the mayor is wearing "${got.hat}" on duty`;
+  if (got.others.indexOf("tophat") >= 0) return "somebody who is not the mayor is wearing the top hat";
+  if (got.inAcc >= 0) return "the top hat is in ACC_KEYS - a tourist could land wearing the office";
+  if (!got.art) return "the top hat has no sprite";
+  return true;
+});
+
+scenario("the HALL tab draws, and nothing lands under anything else", () => {
+  // A 256x240 canvas punishes a card that grew a row. This walks every surface
+  // the mayor pass added - the tab in all its states, the shelter placard in
+  // all THREE of its (bolted / cold / on), the mayor's own sprite and dossier,
+  // and the nightly report - and then checks the geometry the eye cannot: that
+  // every HALL control is on the card, clear of DONE and clear of each other,
+  // and that the ledger's last row stops above the candidacy strip. (It did
+  // not: six 8px rows ran straight through both control rows.)
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(2);
+  const errs = JSON.parse(sim.G(`(() => {
+    const e = [];
+    const t = (name, fn) => { try { fn(); } catch (ex) { e.push(name + ": " + (ex && ex.message)); } };
+    manage = "shack";
+    for (const tab of MANAGE_TABS) { manageTab = tab; t("draw " + tab, () => drawManage()); }
+    manageTab = "HALL";
+    for (const v of HALL_VIEWS) { hallView = v; t("HALL " + v, () => drawManage()); }
+    // ...and every page of the roll, including one past the end (the chip is
+    // the pager, so a stale hallRollPage after a smaller ballot is reachable)
+    hallView = "ROLL";
+    for (hallRollPage = 0; hallRollPage < 4; hallRollPage++) t("HALL roll p" + hallRollPage, () => drawManage());
+    hallRollPage = 0;
+    hall.poll = null;
+    for (const v of HALL_VIEWS) { hallView = v; t("HALL " + v + ", no ballot yet", () => drawManage()); }
+    hallView = "BOOKS";
+    for (let i = 0; i < 12; i++) fundRow("take", 3, "SOMEBODY", "RENT CUT");   // a full ledger
+    t("HALL full ledger", () => drawManage());
+    hall.stand = true; hall.nominee = crabs[0].p.name; t("HALL standing", () => drawManage());
+    townFund.shut = 3; t("HALL shut", () => drawManage()); t("town shut", () => drawTown());
+    townFund.shut = 0; townFund.bowls = 3; t("town pot on", () => drawTown());
+    townFund.bowls = 0; townFund.potWhy = "nocall"; t("town no call", () => drawTown());
+    townFund.potWhy = "funds"; t("town cold", () => drawTown());
+    const m = mayorCrab();
+    t("draw the mayor", () => drawCrab(m));
+    t("mayor dossier", () => { dossier = m; drawDossier(); dossier = null; });
+    crabs[0].p.bowls = 2;
+    t("bowl-eater dossier", () => { dossier = crabs[0]; drawDossier(); dossier = null; });
+    report = { day: 3, served: 4, revenue: 100, rage: 0, wages: 40, rent: 230, sick: [], died: [],
+      critical: [], walked: [], recovered: [], moved: [], rival: [], off: "", repStart: 30, repEnd: 31,
+      best: "PINCHY", bestN: 3, coins: 100, tipsShared: 0, bused: 0, drew: 0, interest: 0, loanPaid: 0,
+      debt: 0, hallPaid: 12, hallGot: 6, bowls: 2, potShut: false, potWhy: "ok",
+      mayor: hall.mayor, hallPol: policyLine(hall.policy), hallOwn: false };
+    reportT = 5;
+    t("report", () => drawReport());
+    report.potShut = true; report.hallOwn = true; report.bowls = 0;
+    t("report, shelter shut", () => drawReport());
+    report = null; reportT = 0;
+    // ---- geometry
+    manageTab = "HALL";
+    const R = manageRects(), keys = ["hview","stand","nom","pmech","prm","prp","pbm","pbp"];
+    const hits = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    for (let i = 0; i < keys.length; i++) {
+      const r = R[keys[i]];
+      if (!r) { e.push("no rect " + keys[i]); continue; }
+      if (r.x < R.x || r.y < R.y || r.x + r.w > R.x + R.w || r.y + r.h > R.y + R.h)
+        e.push(keys[i] + " is off the card");
+      if (hits(r, R.done)) e.push(keys[i] + " sits on DONE");
+      for (let j = i + 1; j < keys.length; j++) if (R[keys[j]] && hits(r, R[keys[j]]))
+        e.push(keys[i] + " overlaps " + keys[j]);
+    }
+    for (const tab of MANAGE_TABS) if (R.tab[tab].x + R.tab[tab].w > R.x + R.w) e.push("tab " + tab + " runs off the card");
+    // the ledger block: four 7px rows from y+101 must stop above the strip
+    const strip = Math.min(R.stand.y, R.prm.y);
+    if (R.y + 101 + 4 * 7 > strip) e.push("the ledger runs into the candidacy strip");
+    manage = null; dossier = null;
+    return JSON.stringify(e);
+  })()`));
+  return errs.length ? errs.join(" / ") : true;
+});
+
+scenario("the town hall survives a save and a reload, ledger and all", () => {
+  // The fund is real money and the ledger is the answer to "who paid for that".
+  // Losing either on a reload would break the one promise this feature makes.
+  const store = new Map();
+  const a = createSim({ seed: 1337, storage: store, fresh: false });
+  a.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  a.G(`hall.stand = true; hall.nominee = crabs[0].p.name;
+       hall.plat = { mech: "dues", rate: 3, bowls: 5 }; townFund.bowls = 2; save();`);
+  const before = a.G(`JSON.stringify({ bal: Math.round(townFund.bal * 100) / 100, bowls: townFund.bowls,
+    served: townFund.served, cold: townFund.cold, wasted: townFund.wasted, arrears: townFund.arrears,
+    strikes: townFund.strikes, shut: townFund.shut, mayor: hall.mayor, pol: policyLine(hall.policy),
+    plat: policyLine(hall.plat), stand: hall.stand, nominee: hall.nominee,
+    ledger: townFund.ledger.slice(-8), poll: hall.poll && hall.poll.winner })`);
+  const b = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!b.G("load(activeSlot)")) return "the save would not load back";
+  const after = b.G(`JSON.stringify({ bal: Math.round(townFund.bal * 100) / 100, bowls: townFund.bowls,
+    served: townFund.served, cold: townFund.cold, wasted: townFund.wasted, arrears: townFund.arrears,
+    strikes: townFund.strikes, shut: townFund.shut, mayor: hall.mayor, pol: policyLine(hall.policy),
+    plat: policyLine(hall.plat), stand: hall.stand, nominee: hall.nominee,
+    ledger: townFund.ledger.slice(-8), poll: hall.poll && hall.poll.winner })`);
+  if (before !== after) return `the town hall drifted across a reload:\n        before ${before}\n        after  ${after}`;
+  return true;
+});
+
+scenario("an old save with no town hall opens with an office, not a hole", () => {
+  // Every save written before this pass has no `fund` and no `hall` key. It
+  // must come back as a town that has been keeping its shelter open all along -
+  // never as one with a null mayor and a fund that cannot be audited.
+  const store = new Map();
+  const a = createSim({ seed: 1337, storage: store, fresh: false });
+  a.runDays(3);
+  a.G("save()");
+  const key = a.G("slotKey(activeSlot)");
+  const env = JSON.parse(store.get(key));
+  delete env.fund; delete env.hall;                 // a pre-mayor envelope
+  store.set(key, JSON.stringify(env));
+  const b = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!b.G("load(activeSlot)")) return "the pre-mayor save would not load";
+  const got = JSON.parse(b.G(`JSON.stringify({ mayor: hall.mayor, seated: !!mayorCrab(),
+    pol: policyLine(hall.policy), bal: townFund.bal, ledger: townFund.ledger.length })`));
+  if (!got.mayor || !got.seated) return `an old save came back with no mayor (${got.mayor})`;
+  if (got.bal !== 0 || got.ledger !== 0) return "an old save came back with money it never had";
+  if (!/RENTS/.test(got.pol)) return `an old save opened on "${got.pol}" instead of the founding arrangement`;
+  return true;
+});
+
+scenario("a corrupt town hall in a save is clamped, not trusted", () => {
+  // A save file is untrusted input (the importer exists). A nonsense mechanism,
+  // a rate off the end of the table, a negative fund and a ledger that is not
+  // a ledger must all land somewhere sane rather than anywhere at all.
+  const store = new Map();
+  const a = createSim({ seed: 1337, storage: store, fresh: false });
+  a.runDays(3);
+  a.G("save()");
+  const key = a.G("slotKey(activeSlot)");
+  const env = JSON.parse(store.get(key));
+  env.fund = { bal: -500, bowls: 99, strikes: 40, shut: 900, arrears: -2, ledger: "nope" };
+  env.hall = { mayor: 12345, policy: { mech: "chocolate", rate: 99, bowls: -4 },
+    plat: { mech: null, rate: "x", bowls: 400 }, poll: "no" };
+  store.set(key, JSON.stringify(env));
+  const b = createSim({ seed: 1337, storage: store, fresh: false });
+  if (!b.G("load(activeSlot)")) return "the corrupt save would not load at all";
+  const got = JSON.parse(b.G(`JSON.stringify({ bal: townFund.bal, bowls: townFund.bowls,
+    strikes: townFund.strikes, shut: townFund.shut, arrears: townFund.arrears,
+    ledger: Array.isArray(townFund.ledger) ? townFund.ledger.length : -1,
+    mech: hall.policy.mech, rate: hall.policy.rate, hbowls: hall.policy.bowls,
+    pmech: hall.plat.mech, pbowls: hall.plat.bowls, seated: !!mayorCrab(), poll: hall.poll })`));
+  if (got.bal < 0 || got.arrears < 0) return "a negative fund survived the load";
+  if (got.bowls > 6 || got.strikes > 3 || got.shut > 4) return "the shelter's counters were not clamped";
+  if (got.ledger !== 0) return "a ledger that was a string came back as something else";
+  const okMech = (m) => ["levy", "dues", "rents", "tin"].indexOf(m) >= 0;
+  if (!okMech(got.mech) || got.rate > 4 || got.hbowls < 0) return `policy came back as ${got.mech}/${got.rate}/${got.hbowls}`;
+  if (!okMech(got.pmech) || got.pbowls > 6) return `the platform came back as ${got.pmech}/${got.pbowls}`;
+  if (!got.seated) return "the office was left vacant by a corrupt save";
+  if (got.poll !== null) return "a poll that was a string came back as something";
   return true;
 });
 
