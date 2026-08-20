@@ -6032,6 +6032,51 @@ If the escape rate ever needs to come back down, the honest lever is
 after) and that is the new pressure, landing exactly where it was aimed: on the
 crabs a growing shack keeps hiring, who all start homeless.
 
+### THE ATTRIBUTION, RE-MEASURED ON MERGED MAIN - AND THE 3/8 -> 4/8 ABOVE WAS THE COIN
+Every number in the table above is measured on the BRANCH POINT, before the
+town started opening EMPTY (`a new town opens empty, and the first boat brings
+the first tourists`) and before the illness and polling passes landed. That
+change alone moves the growth curve a long way down, so the pass was re-measured
+on merged main as a **2x2 on one build**, 16 growth seeds per arm, using two new
+attribution arms on `tools/headless.mjs` (the same idiom as `--nohall` /
+`--norival` / `--nohotelier`, but as CONFIG overrides, because both halves of
+this pass are pure data):
+- **`--noannexe`** sets `ROOM_CFG.EXTRA = 0` - the forecourt holds no cabanas
+  ever, so the Driftwood is seven rooms on a $35 lease: the hotel as it shipped.
+- **`--nodorm`** sets `DORM_CFG.BASE = 99` - the shelter is bigger than the town
+  can ever be, so nobody is ever short of a cot and no mayor ever signs for one:
+  the shelter as it was when `homeSpot` cycled four positions with a modulo.
+
+| arm (growth `--buy chef,table` 40d) | block 1 | block 2 | **16 seeds** | unhoused visitors | roomShort |
+|---|---|---|---|---|---|
+| BOTH OFF (the pre-pass world) | 1/8 | 1/8 | **2/16** | 795 | 560 |
+| DORM only (`--noannexe`) | 1/8 | 1/8 | **2/16** | 832 | 603 |
+| ANNEXE only (`--nodorm`) | 1/8 | 0/8 | **1/16** | 601 | 248 |
+| BOTH ON (shipped) | 1/8 | 0/8 | **1/16** | 577 | 235 |
+
+**THE GROWTH PILLAR IS NOT LOOSENED.** Every arm lands within ONE town of every
+other over sixteen seeds, and if anything the pass reads very slightly HARDER,
+not easier. The 3/8 -> 4/8 in the table above is exactly the coin CLAUDE.md
+warns about; the second block happened to flip the same way, and on a build
+where the town opens empty the whole comparison collapses into noise.
+
+**THE SHELTER'S WALL DOES NOT BIND IN A TOWN THAT DIES ON DAY 13**, and the
+receipt is unusually clean: in block 2, `--noannexe` and `--noannexe --nodorm`
+come back **bit-identical** (6,10,10,10,14,14,16,41; lifetime $43,020; 687 room
+lets; 412 unhoused), as do BOTH ON and `--nodorm`. A four-bed shelter is exactly
+the size of a founding town, so the beds only start to matter once a shack has
+been hiring for a fortnight - which is the design, and it is also why the
+dormitory cannot be measured on a curve whose median town is evicted on day 13.
+
+**WHAT THE ANNEXE ACTUALLY BUYS, on this build, is not money - it is BEDS:**
+visitors who slept on the sand fall **795 -> 601 (-24%)** and guests turned away
+from a genuinely full house fall **560 -> 248 (-56%)**, while room LETS barely
+move (1,461 -> 1,459). In a short town the Driftwood is queue- and demand-
+limited, not room-limited, so more rooms convert rough nights into beds without
+adding takings. The revenue only shows up on the long horizon, where the towns
+survive to compound reputation - which is where the branch-point block read
+1,051 -> 1,471 lets, and it had four towns alive at day 41 to do it with.
+
 ### WHAT IT COSTS THE SAVE
 Two small keys: `dorm` (beds, the last build day, the streak, the recorded
 purse) and `annexe` (the count, the last build day, the tally). The ANNEXE is

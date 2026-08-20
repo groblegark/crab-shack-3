@@ -43,6 +43,20 @@ const NOHOTELIER = args.includes("--nohotelier");
 // elections. This is how the mayor pass's own balance movement was attributed
 // - the same arm-off pattern as --failoff and --norival.
 const NOHALL = args.includes("--nohall");
+// ACCOMMODATION UPGRADES: the two halves come apart, and the matrix can read
+// each of them on its own. These are CONFIG overrides rather than a
+// `window._noX` flag because both halves are pure data, and the override lands
+// on exactly the pre-pass world:
+//   --noannexe  ROOM_CFG.EXTRA = 0  - the forecourt holds no cabanas, so the
+//               Driftwood is seven rooms at a $35 lease for ever, which is the
+//               hotel as it shipped.
+//   --nodorm    DORM_CFG.BASE = 99  - the shelter is bigger than the town can
+//               ever be, so nobody is ever short of a cot and no mayor ever
+//               signs for one: the shelter as it was, when homeSpot cycled four
+//               cot positions with a modulo and the fifth crab slept in the
+//               first. (dormExtra() clamps at MAX - BASE, so the rent stays $10.)
+const NOANNEXE = args.includes("--noannexe");
+const NODORM = args.includes("--nodorm");
 const SEEDS = parseInt(opt("seeds", "1"));
 // THE WAGE LEVER. --wage N sets every PLAYER-owned shop's rate (the setting
 // the SCHEDULE tab exposes); --star N puts one named crab on a private deal
@@ -120,6 +134,8 @@ if (FAILOFF.length) G(`window._failOff = ${JSON.stringify(Object.fromEntries(FAI
 if (NORIVAL) G(`window._noRival = true;`);
 if (NOHOTELIER) G(`window._noHotelier = true;`);
 if (NOHALL) G(`window._noHall = true;`);
+if (NOANNEXE) G(`ROOM_CFG.EXTRA = 0; setHotelRooms(HOTEL_ROOMS_BASE);`);
+if (NODORM) G(`DORM_CFG.BASE = 99;`);
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);
 const buyScript = BUY.length ? new vm.Script(`
   if (tmin >= 9 * 60 && tmin <= 19 * 60 && Math.abs(tmin - Math.round(tmin / 60) * 60) < ${STEP} * TS / 2) {
