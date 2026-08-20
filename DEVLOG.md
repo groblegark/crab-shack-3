@@ -127,10 +127,32 @@ to day 10.
   standing inside one another, and locals weren't in the slot system at all
   — three crabs sharing a four-pixel span.
 - **There is a pause button.** There wasn't one. This is embarrassing and
-  it's fixed.
+  it's fixed. *(Correction, a day later: no there isn't. See below.)*
 - **There is a beach ball.** It has its own story, in the next entry.
 
 167 scenarios green; baseline 0/16 at a median of day 12.
+
+### Correction: the pause button is gone again
+
+We shipped a pause button yesterday and removed it today, which is the
+shortest life any feature here has had. The owner's ruling: *"Remove the
+pause button. It's against the spirit of the game."*
+
+He's right, and the reasoning is better than the feature was. Pause got
+built because a playtester said, mid-game: *"Meanwhile there's a clock
+ticking. PAUSE ANYONE? I'm losing time here."* That reads like a complaint.
+It is actually a description of the game **working** — and it came from the
+same player who said the secret sauce is "punishing you for not
+understanding at pace."
+
+You cannot keep the second sentence and fix the first with a pause button.
+
+So the line is drawn, and everything the onboarding work does from here runs
+to it: **a player who can't tell what a button does is a bug we fix; a
+player who is losing money while they work it out is the game.** The clock
+does not stop. It's now pinned by a test that asserts there is no pause
+state and no speed of zero, and then checks the clock is actually running —
+so pause can't come back in disguise as "speed 0 by default."
 
 ---
 
