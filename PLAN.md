@@ -49,23 +49,50 @@ landed in one night. Everything below is merged, pushed and live.
    probed and DECLINED with the number: the empty start costs $34 and a rent
    grace hands back $230.
 
+10. **THE ILLNESS ROLL — MEASURED AND DELIBERATELY NOT FIXED.** This was in
+    the queue below with a diagnosis and a recommended fix, both written by
+    me, and **both were wrong**. The full write-up is at the end of this file;
+    the short version, because it is the most useful thing anybody learned
+    today:
+    - The sampling bias is REAL and large — the roll judges a morning crab
+      carrying 1.7x the hunger and 1.8x the thirst of an evening crab, because
+      the settlement runs before an evening crab has clocked off.
+    - **The outcome does not move.** The evening crab carries 1.2x the
+      exhaustion into the same roll, the halves cancel, and assembled risk
+      comes out M/E **x0.98** over 2124 crew crab-nights. The 9.2%-vs-1.9%
+      figure I put in this file **does not reproduce in any rig.**
+    - Swap the founders' shifts and the gap follows **the crab, not the
+      shift** — PINCHY is the sicker of the two on mornings AND on evenings.
+      CLAWDIA is `TIDY`, a founder trait in crabs.js. That is the supercrab.
+    - Both obvious fixes were built and rejected on measurement. "Judge their
+      own day" — the one recommended here — is **worse on exactly the thing it
+      was for**: +116% town risk, because a morning crab clocks off at 14:00
+      and stays up while an evening crab clocks off at 20:00 and goes to bed.
+      A morning crab really does spend 2.48h a night past the exhaustion line
+      against an evening crab's 1.41h. **That is a real day, not an artifact.**
+    - What shipped is the rig (`tools/shiftill.mjs`), an inert `rollLog` seam,
+      `illRisk()` split out with the receipt, three scenarios and two charts.
+      Behaviour is byte-identical.
+
+    **The lesson, and it is the same one as the merge failures:** a
+    measurement in this file is not a fact until somebody has reproduced it.
+    I wrote 9.2/1.9 into STATE OF PLAY as settled and recommended a fix off
+    it; an agent asked to reproduce it first found it was noise at ~180
+    crab-nights an arm. Ask for the reproduction BEFORE the fix, every time.
+
 **NEXT UP (Matt's queue, in his order):**
-- **Accommodation upgrades** — *"now we have two multi accommodation places;
-  need to be able to make each pretty big by buying upgrades"* (the shelter and
-  the Driftwood).
 - **The departure card** — end-of-day view of who is leaving on the ferry and
   how they feel, with a quote DERIVED from their stats. See the backlog entry.
-- **The illness-roll clock artifact** — the nightly sickness roll reads needs
-  at 20:00 for everybody, which is late in a MORNING crab's day and early in an
-  EVENING crab's. Morning crabs are ill 9.2% of the time against evening's
-  1.9%, and CLAWDIA is on evenings in all 8 seeds — which is the whole of
-  Matt's "CLAWDIA has supercrab powers of never getting sick". The fix is to
-  judge a crab's OWN day (its peak, or its own bedtime) rather than the wall
-  clock. NOT started; it is a core-system change wanting its own matrices.
 - **The onboarding/UI pass** — off Ben Lewis's playtest, under the two-kinds-
   of-not-knowing rule below. The wall-of-text opening, tooltips on shop
   upgrades, seeing a hire actually arrive, and making "is my money going up?"
-  answerable at a glance.
+  answerable at a glance. **Now carries a required section** (Matt,
+  2026-08-20): *"there should be a help screen for public functions and
+  roles"* — who every crab in this town is FOR (crew, owner-operators,
+  fishers, the mayor, Mr. Pincherton, the rival, the hotelier, visitors) and
+  what the town does that is nobody's business (the shelter, the fund, the
+  pot, polling day). Plus the plain sentence that you cannot set the town's
+  policy unless one of your crabs is wearing the hat.
 - **A surf spot mid-beach** — explicitly deferred by Matt behind the ball.
 
 **THE THREE RULINGS THAT CONSTRAIN NEW WORK** (each has its own section
@@ -3095,6 +3122,27 @@ cover — serves roughly halve (66 -> 38, 61 -> 41), SUDSY's till halves with
 them, rep is 5 points lower, and the player's till is $64/$105 down at the end
 of day two. Two fixtures that used to CLEAR the opening crowd are now no-ops
 and are kept as belts, with their comments re-pointed to say so.
+
+## RUNNING A FLEET: two ways agents stand on each other (2026-08-20)
+
+Both of these cost real hours today and neither is obvious until it happens.
+
+**1. `pkill -f tools/suite.mjs` KILLS EVERY AGENT'S SUITE, NOT YOURS.** Five
+sessions were running the same command from different worktrees. I killed a run
+of mine that way twice; at least one of those took a subagent's 26-minute run
+with it, and it had no way to tell that from a crash. **Kill by PID**, from the
+`$!` of your own launch, or match on your own worktree path.
+
+**2. A SHARED `/tmp` LOG PATH TRUNCATES SOMEBODY ELSE'S RUN.** `/tmp/suite.log`
+and friends are one file on one machine. Two agents redirecting into it get one
+interleaved, truncated file and both read a false result. **Put the log inside
+your own worktree**, or name it after your branch.
+
+And the one that is not about collisions: **a detached run's log will look
+EMPTY for a long time even when the run is healthy**, because node
+block-buffers to a file. `ps aux | grep [s]uite.mjs` is how you tell "still
+running" from "died"; an empty log is not evidence of either. (`script -q`
+gives it a pty and restores line buffering if you would rather watch it.)
 
 ## THERE IS NO PAUSE (Matt, 2026-08-20) — a ruling, and why it is one
 
