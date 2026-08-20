@@ -6661,9 +6661,9 @@ scenario("a corrupt town hall in a save is clamped, not trusted", () => {
 // ===========================================================================
 scenario("shelter: the beds are finite, and the crab with no cot sleeps on the step", () => {
   // THE MECHANISM, not a coincidence: the shelter beds exactly `shelterBeds()`
-  // crabs and the overflow sleeps rough - so the same town, on the same night,
-  // with two more beds in it, beds EVERYBODY. Both arms are asserted here
-  // because "somebody slept rough" on its own is true of any tired town.
+  // crabs and the overflow sleeps rough - so the SAME town, on the SAME night,
+  // with a bed each, beds everybody. Both arms are asserted here because
+  // "somebody slept rough" on its own is true of any tired town.
   const sim = createSim({ seed: 31 });
   // AFTER the settlement, so the housing ladder cannot quietly rent four of
   // them a house between the fixture and the night (it did, first time). Broke,
