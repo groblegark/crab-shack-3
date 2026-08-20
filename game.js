@@ -10663,6 +10663,18 @@ function drawNav() {
   rect(ctx, cx0, m.y, 1, m.h, [255, 255, 255]);
   rect(ctx, cx0 + cw - 1, m.y, 1, m.h, [255, 255, 255]);
   rect(ctx, cx0, m.y + m.h - 1, cw, 1, [255, 255, 255]);   // ...and underlined, so it reads as a frame
+  // ---- THE POLLING TABLES, on top of the wash so they read from anywhere on
+  // the coast. This is the one day a week the strip has to answer a question
+  // it is not otherwise asked - "where do I go and is it still open" - and a
+  // crab three screens away has no other way to be told. It BLINKS while the
+  // polls are open and holds steady through the count, then goes when the
+  // result is declared and the table comes down.
+  if (pollCalled() && ballotBox.printed > 0 && !ballotBox.declared) {
+    const lit = ballotBox.shut || ((time * 2) | 0) % 2 === 0;
+    if (lit) for (const pl of POLL_PLACES)
+      rect(ctx, Math.max(m.x, Math.min(m.x + m.w - 1, sx(pl.x + 16))), m.y + 1, 1, 2,
+        ballotBox.papers > 0 || ballotBox.shut ? [255, 216, 96] : [200, 110, 40]);
+  }
   // whoever is picked - crab, townsfolk or tourist - goes on top of the wash, so
   // the strip answers "where are they" even when they are three screens away
   if (sel && sel.x != null && !sel.hidden) {

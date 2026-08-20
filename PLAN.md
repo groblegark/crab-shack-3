@@ -37,6 +37,16 @@ landed in one night. Everything below is merged, pushed and live.
    boat), a save/load crash that bricked any town saved mid-errand, the
    sick-day errand-window fix, and two automated UI sweeps.
 
+**LANDED 2026-08-20:**
+8. **POLLING DAY** — the election stopped being a function call. Two tables you
+   walk to, polls that shut at 19:00, paper ballots bought off the ferry, and a
+   hand count that is the only thing that knows the answer. Turnout 82% with a
+   real gradient by shift and trade. See the POLLING DAY section below.
+9. **The empty opening** — a new town opens deserted at 07:00 and the 08:00
+   sailing lands the first tourists you ever see. The free first night was
+   probed and DECLINED with the number: the empty start costs $34 and a rent
+   grace hands back $230.
+
 **NEXT UP (Matt's queue, in his order):**
 - **Accommodation upgrades** — *"now we have two multi accommodation places;
   need to be able to make each pretty big by buying upgrades"* (the shelter and
@@ -3083,6 +3093,141 @@ cover — serves roughly halve (66 -> 38, 61 -> 41), SUDSY's till halves with
 them, rep is 5 points lower, and the player's till is $64/$105 down at the end
 of day two. Two fixtures that used to CLEAR the opening crowd are now no-ops
 and are kept as belts, with their comments re-pointed to say so.
+
+## POLLING DAY — VOTING IS AN ACTION (Matt, 2026-08-20, shipped)
+
+> "voting is an action, polls have a closing time, and ballots are made and
+> counted on paper"
+
+### What was wrong with the first election
+
+It was a **function call**. `runElection()` ran at settlement, every crab in
+town voted their interest in one loop, in no time at all, and the result
+existed the instant it was cast. That is a poll in the sense a weather
+forecast is a poll: an aggregate of preferences nobody had to act on. Matt's
+three clauses each name one of the frictions a real one has, and each is now a
+mechanism with a scenario asserting the mechanism rather than a feeling.
+
+### 1. THE VOTE IS AN ERRAND
+
+There are tables (`POLL_PLACES`) on the promenade and at the pier head, and a
+crab has to **walk to one**. It is gathered in `pickErrand` and scored through
+the same detour machinery as a plate of food or a drink at the tap, so turnout
+is geography and shifts rather than a number somebody picked. `civicUrge` is a
+**ramp**, not a constant: for most of the day a vote is worth `VOTE_BASE` — a
+thing you do if the table is on your way — and in the last `VOTE_URGE_HRS` it
+climbs and crabs who have not got there start making a special trip. Capped
+below `DIRE` (0.9) so nobody ever walks off a shift to vote.
+
+**MEASURED, 24 polls across 6 seeds and 29 days: turnout 82%.**
+
+| by shift | | by trade | |
+|---|---|---|---|
+| M | 96% | shack | 94% |
+| E | 92% | fishing | 87% |
+| D (off) | 83% | hotel | 74% |
+| D | 76% | showers | 67% |
+
+The crab who struggles is the **owner-operator on the long D shift** — SUDSY,
+9:30 to 17:30, with the box 256px up the promenade. Not a wall (she makes it
+two times in three) and not a bias nobody can act on: the D shift derives from
+the shop's OPEN HOURS, and **the hours sign is a lever the player already
+holds**. Shorten your crew's polling-day shift and they vote.
+
+### TWO TABLES, and why — the measurement that changed the design
+
+With a single box on the promenade, **seed 1337 polled TWO of eight**. Not
+apathy: a map. A stop costs about a real second per 11px of walking, the town
+is 2512px wide, the whole D-shift fishing fleet works 8:30–18:30 at the PIER
+1200px away, and the polls shut at 19:00. A fisher could not have voted if they
+had sprinted. **A structural bias nobody can act on is not a choice**, and this
+game is about choices — so the box goes where the people are, twice, exactly
+the idiom the two standpipes already use (`WATER_TAPS`). The PAPER is still one
+supply for one election, so running out is still running out.
+
+### 2. THE POLLS SHUT
+
+`POLL_OPEN = 7:00`, `POLL_SHUT = 19:00`. The early opening is load-bearing: a
+working crab's errand window closes 30 minutes before they leave the house, so
+an owner-operator on the 8:30 D shift has **no daylight at all** between the
+town opening at 8:00 and their own front door. Polls open early in real towns
+for exactly this crab. The 19:00 close is the tension — the D-shift owner
+finishing at 18:30 has half an hour and a walk.
+
+The rule at the table is the one a returning officer uses: **standing there
+when it shuts counts; turning up at one minute past does not.** A latecomer is
+recorded in `ballotBox.late` and says so in their own diary.
+
+### 3. THE BALLOTS ARE PAPER
+
+Nominations close at the settlement the **night before** — you cannot print a
+ballot paper without knowing whose names go on it — which gives the player's
+decision to STAND a real deadline, called out on the HALL tab on the night it
+bites. The office then orders one sheet per crab plus `BALLOT_SPARE`, at
+`BALLOT_PRICE` each, **off the ferry, on the trade ledger** (`paper` joined
+`IMPORTS`), out of the town fund through `fundRemit`. Same law as everything
+else: nothing is conjured.
+
+Three things had to be fixed before that worked, each one measured:
+
+- **The purse must BUDGET for it** (`ballotBill` inside `fundNeed`), and **two
+  nights out**, not one — RENTS is taken out of each house rent on its way past
+  and DUES land with the ferry, so on the founding policy the fund's balance
+  tonight is what last night's collection left. Before: *every seed, every
+  week, "NO BALLOT PAPER"* — not because the town was poor but because nobody
+  had asked for the money.
+- **Paper comes BEFORE the soup.** The roof is statutory and so is the
+  election; the pot is what the mayor CHOSE. A budget spends its obligations
+  before its intentions. With the pot first, three seeds in four printed
+  nothing, because an $8 bowl beat $2.25 of paper every time.
+- **And if the purse is still short, the town PASSES THE HAT** (`whipRound`).
+  This kills a real **ratchet**, and a scenario found it rather than a reading
+  of the code: a town where everybody sleeps at the shelter pays no house rent,
+  so a RENTS-funded office can never print ballots, so it can never hold the
+  election that would move it off RENTS. This system's standing rule is that a
+  town can vote itself into losing the shelter and then vote itself back out —
+  *a corrective loop, never a ratchet*. The hat is the same movement the
+  collection tin already makes (`fundTake` out of a named crab's live balance,
+  audited), scoped to a statutory purchase of a few pennies. A town where
+  NOBODY has `WHIP_KEEP` in their pocket still holds no election, which is the
+  destitute case that failure was always meant to be about.
+
+### AND THE COUNT IS BY HAND
+
+`COUNT_MINS` a paper, in the order they went into the box. **The tally does not
+exist until it is counted**: `cands[].votes` stays at zero all day while the
+box fills, and the declaration comes on the promenade when the last paper is
+read — so a town that votes for a new purse at teatime is trading under it by
+nightfall (the office used to change hands at the settlement table, one day
+later). `finishCount()` at settlement is the safety net for a town big enough
+that its count runs past 20:00.
+
+### What the player sees
+
+In the world: a trestle, a box with a slot cut in the lid, and a board that
+says one of the **five states** — not yet open, open with a pile of blanks you
+can watch go down, open with the pile gone, being counted, declared. The pile
+is **one pixel a sheet**, so "the paper is running out" is legible from the
+boardwalk. The count is a second pile moving across the table.
+
+On the HALL tab: the live box on polling day — who is on the paper, how many
+have voted, how much paper is left, and the three ways a crab loses a vote,
+each by name. **No running tally, deliberately.** The papers are face down
+until the count; a live total would quietly undo the whole point.
+
+### Balance
+
+Baseline `--days 30 --seeds 16` **0/16, median day 12**; growth
+`--buy chef,table --days 40 --seeds 8` **3/8**. Both unmoved. Suite 172 → 179.
+
+### Left deliberately undone
+
+**Nobody physically counts.** The count takes real time at the box, with a
+visible pile, but there is no crab animated doing it — a returning officer who
+had to walk there would need a fallback for being asleep, at work, or dead, and
+that is a state machine for a detail. Flagged for Matt rather than hidden: if
+he wants the count to be somebody's job too, it is a contained addition on top
+of what is here.
 
 ## CANON: THERE IS ONE FERRY (Matt, 2026-08-19)
 
