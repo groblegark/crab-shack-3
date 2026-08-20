@@ -3342,6 +3342,17 @@ unit economics.
   Matt: keep the focus on INDIVIDUAL crabs — named crabs doing specific
   things beat aggregate stats for stories.** Build sessions: ping the
   coordinator after merge batches so entries stay current.
+  Shot-staging notes learned the hard way: stage saves clear of the 20:00
+  settlement or the day report + NOW PLAYING toast photobomb the frame;
+  the music-nudge toast fires ~19:06 and lands in horizon shots; evening
+  horizons are cleanest staged at tmin 1140 with no clicks (clicking to
+  dismiss can drop you to the title); mistPeak is a day-hash so a
+  clear/thick pair is chosen, not waited for (day 11 ≈ 0.25 is a good
+  night, day 37 ≈ 0.8 a thick one); the crab cycler lives in the CHARACTER
+  CARD header, so shoot the card, not the top-right. Console staging:
+  `UPS.arcade.lvl = 1; coins = 20000` opens the ferry office and greens
+  the fingerpost. **Re-verify a UI screenshot after any UI merge — a
+  published shot of a moved control is a stale doc.**
 - Suite green before push; economy changes need a matrix re-run.
 - Big features → fork subagents in git worktrees (they don't push; the parent
   reviews screenshots + suite output, merges, re-verifies, pushes).
