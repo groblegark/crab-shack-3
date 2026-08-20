@@ -33,6 +33,11 @@ const FAILOFF = (opt("failoff", "") || "").split(",").filter(Boolean);
 // peer owner coming for the player's juice bar - the paired arm behind the
 // numbers in PLAN.
 const NORIVAL = args.includes("--norival");
+// `--nohotelier` keeps REEF behind the Driftwood's desk (game.js reads
+// window._noHotelier through hotelierOn() and never sets it), which is the
+// paired arm behind every number in PLAN's hotelier entry: the same seeds, the
+// same town, with and without a crab who buys the hotel and prices it.
+const NOHOTELIER = args.includes("--nohotelier");
 const SEEDS = parseInt(opt("seeds", "1"));
 // THE WAGE LEVER. --wage N sets every PLAYER-owned shop's rate (the setting
 // the SCHEDULE tab exposes); --star N puts one named crab on a private deal
@@ -108,6 +113,7 @@ if (STAR != null)
 G('soundOn = false; musicOn = false; screen = "play"; window._headless = true; window._stats = { tourServes: 0, crabServes: 0, tourRage: 0, crabRage: 0, bused: 0 };');
 if (FAILOFF.length) G(`window._failOff = ${JSON.stringify(Object.fromEntries(FAILOFF.map(k => [k, 1])))};`);
 if (NORIVAL) G(`window._noRival = true;`);
+if (NOHOTELIER) G(`window._noHotelier = true;`);
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);
 const buyScript = BUY.length ? new vm.Script(`
   if (tmin >= 9 * 60 && tmin <= 19 * 60 && Math.abs(tmin - Math.round(tmin / 60) * 60) < ${STEP} * TS / 2) {
@@ -173,9 +179,14 @@ const labour = G(`JSON.stringify({
   cot: allCrabs().filter(c => c.p.homeless).length,
   crewHoused: crabs.filter(c => !c.p.homeless).length, crewN: crabs.length,
   purse: Math.round(allCrabs().reduce((s, c) => s + Math.max(0, c.p.wallet), 0)),
-  walkouts: ((window._stats.walkouts || []).length) || 0,   // a counter, not a list, on some paths
+  walkouts: (window._stats.walkouts || []).length,
   quits: (window._stats.wageQuits || []).length,
   wageMoves: (window._stats.wageMoves || []).map(m => "d" + m.day + ":" + m.rate).join(","),
+  hotelier: window._stats.hotelier
+    ? "d" + window._stats.hotelier.day + " $" + window._stats.hotelier.price
+      + " room$" + roomPrice() + " wage$" + bizWage("hotel")
+      + " x" + window._stats.hotelier.moves.length : "-",
+  roomLets: window._stats.roomLets || 0, unhoused: window._stats.unhoused || 0,
 })`);
 return { dayRows, wall, labour, lifetime: G("Math.round(lifetime)"), stats: G("JSON.stringify(window._stats)"),
   over: G("gameOver"), bankrupt: G("bankrupt"), debt: G("Math.round(credit.bal)"), day: G("day"), rent: G("rentAmount()"), rep: G("Math.round(rep)"), wal: G("JSON.stringify(window._wal)"),
@@ -242,6 +253,8 @@ if (SEEDS > 1) {
   console.log(`>> lifetime $${results.reduce((s, r) => s + r.lifetime, 0)}`
     + `; housing boat/house/cot ${sum(l => l.boat)}/${sum(l => l.housed)}/${sum(l => l.cot)}`
     + `; crew housed ${sum(l => l.crewHoused)}/${sum(l => l.crewN)}`
-    + `; purse $${sum(l => l.purse)}; walkouts ${sum(l => l.walkouts)}; quits ${sum(l => l.quits)}`);
+    + `; purse $${sum(l => l.purse)}; walkouts ${sum(l => l.walkouts)}; quits ${sum(l => l.quits)}`
+    + `; roomLets ${sum(l => l.roomLets)}; unhoused ${sum(l => l.unhoused)}`
+    + `; hotelier ${L.filter(l => l.hotelier !== "-").length}/${SEEDS}`);
 }
 console.log(`(${results.reduce((s, r) => s + r.wall, 0)}ms total)`);

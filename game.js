@@ -434,6 +434,18 @@ function staffMealCharge(b, r) {   // what a selfCooking staffer rings up
 //   staff meals (retail)           crew wallet -> shack till; till pays ingredients
 //   crew shower fees               crew wallet -> SUDSY till  (leaves player loop)
 //   SUDSY's own meals              SUDSY wallet -> player till
+//   BRASS's bankroll (arrival)     -> outside money IN, ONCE (see THE HOTELIER):
+//                                  a crab moves to town with her savings. The
+//                                  price of the hotel leaves her wallet the
+//                                  same evening and NOTHING of it is destroyed
+//                                  - half into the seller's pocket, half into
+//                                  the shop's own drawer as its opening float
+//                                  (SALE_CFG.FLOAT_FRAC) - and what is left is
+//                                  an ordinary crab wallet from then on, which
+//                                  the house rent and the counters drain like
+//                                  anybody's. Same shape as a visitor's wallet
+//                                  stepping off the ferry, and the only other
+//                                  place a crab is minted with money.
 //   wages (nightly)                player till -> crew wallets
 //   crew house rent (nightly)      crew wallet -> DESTROYED (the town keeps it)
 //   shack/biz rents (nightly)      owner till  -> DESTROYED (Mr. Pincherton)
@@ -448,7 +460,14 @@ const OWNERS = {
   // REEF keeps the DRIFTWOOD HOTEL. A second peer owner, on exactly the same
   // terms SUDSY is on - his own till, his own lease, his own wage and hours
   // policy - because the owner layer is a registry, not a fixture.
-  reef: { id: "reef", name: "REEF", till: 140, credit: 0, darkT: 0 },
+  // ...and `soft` is REEF himself: an old crab with no heir who will take a
+  // fair price for the Driftwood. It sits on the OWNER, not on the lease,
+  // because it is a fact about him - the hotelier who buys him out runs the
+  // same seven rooms and will not sell them at a fair price at all. (Same
+  // reasoning THE RIVALRY uses in reverse: the ambition keys on the lease
+  // because anybody holding it would want the shop next door; a willing
+  // seller keys on the crab because not everybody is one.)
+  reef: { id: "reef", name: "REEF", till: 140, credit: 0, darkT: 0, soft: true },
 };
 const bizOwner = (b) => BIZ[b].owner === null ? null : (BIZ[b].owner || "player");
 // never let a draw path throw on an owner who has left the registry (sold up,
@@ -779,8 +798,12 @@ function tapSaleChip(b) {
 // player parts with, and walks down to the pier a rich crab.
 const OFFER_MULT = 1.5;   // a shop that is still taking money costs more than a shuttered one
 function offerPrice(b) { return Math.round(askingPrice(b) * OFFER_MULT); }
+function ownerIsSoft(b) {          // is the crab holding this lease a willing seller?
+  const o = OWNERS[bizOwner(b)];
+  return !!(o && o.soft && !o.gone);
+}
 function canOffer(b) {
-  return !!BIZ[b] && !!BIZ[b].sellable && bizUnlocked(b) && !forSale(b)
+  return !!BIZ[b] && !!BIZ[b].sellable && ownerIsSoft(b) && bizUnlocked(b) && !forSale(b)
     && bizOwner(b) !== "player" && !bizDark(b);
 }
 function offerChipRect(b) {
@@ -806,15 +829,23 @@ function tapOfferChip(b) {
   if (ok) save();
   return ok;
 }
-function buyOutOwner(b) {
+// `buyer` is a crab, or null for the player tapping the OFFER chip. A peer
+// buyer walks the SAME path - list the shop at the willing seller's price,
+// then run the ordinary purchase - because "somebody else got there first" has
+// to be the same transaction the player would have made, or the two prices
+// drift apart and the race stops being a race. Nothing renders between the
+// listing and the purchase (this is one settlement call), so the lease is
+// never seen unowned and never seen owned twice.
+function buyOutOwner(b, buyer) {
   if (!canOffer(b)) return false;
   const price = offerPrice(b);
-  if (coins < price) return false;
+  if (buyer ? buyer.p.wallet < price + SALE_CFG.RESERVE : coins < price) return false;
   const oid = bizOwner(b);
   const seller = allCrabs().find(k => k.p.owner === oid) || null;
+  if (seller === buyer) return false;            // nobody buys a hotel off themselves
   if (!listForSale(b, "soldup")) return false;
   market[b].price = price;                       // at the going-concern price, not the fire-sale one
-  if (!buyBusiness(b, null)) return false;       // the player's own path: pays price, keeps the float
+  if (!buyBusiness(b, buyer || null)) return false;   // the player's own path: pays price, keeps the float
   const banked = price - Math.floor(price * SALE_CFG.FLOAT_FRAC);
   if (seller) {
     seller.p.wallet += banked;                   // conserved: exactly what left the player's pocket
@@ -823,7 +854,8 @@ function buyOutOwner(b) {
     today.moved.push(seller.p.name + " SOLD UP - $" + banked + " IN THE BANK");
   }
   if (window._stats) (window._stats.buyouts = window._stats.buyouts || [])
-    .push({ day, biz: b, price, seller: seller ? seller.p.name : null });
+    .push({ day, biz: b, price, seller: seller ? seller.p.name : null,
+      buyer: buyer ? buyer.p.name : "YOU" });
   return true;
 }
 function bizFixtures(b) {
@@ -1609,8 +1641,14 @@ function askChipRect(b) {
   return { x: Math.round((z.x0 + z.x1) / 2 - w / 2), y: 104, w, h: 11 };
 }
 function peerBizList() {   // shops somebody else is running - the ones you can make an offer on
+  // ...MINUS the ones whose owner is a willing seller and already wears an
+  // OFFER chip. Both chips live in the shoulder under the sign (y104/y105) and
+  // both are hit-tested here, so a shop that qualified for both drew two
+  // labels on top of each other and gave the tap to the DEARER of the two
+  // prices - which is exactly what REEF's hotel did from the day it shipped.
+  // One shop, one price, one chip: a willing seller's own number wins.
   return Object.keys(BIZ).filter(b => bizUnlocked(b) && !forSale(b)
-    && bizOwner(b) && bizOwner(b) !== "player");
+    && bizOwner(b) && bizOwner(b) !== "player" && !canOffer(b));
 }
 function tapAskChip(b) {
   if (!peerBizList().includes(b)) return false;
@@ -1667,6 +1705,290 @@ function stepDownOwner(k, oid, exceptBiz) {
   k.p.job = other; k.workBiz = other; k.p.shift = "D"; k.p.employer = null;
   k.fishSpot = null;
   crabLog(k, "work", "BACK BEHIND THE " + BIZ[other].short + " COUNTER", 0);
+}
+
+// ------------------------------------------------- THE HOTELIER: BRASS TAKES THE DRIFTWOOD
+// REEF opened the Driftwood and REEF is a SOFT TOUCH - an old crab with no
+// heir, and `soft` on his owner row says so. That made the hotel a shop the
+// player BUYS rather than somebody the player has to contend with, and the
+// owner asked for the other thing ("a new crab needs to own the hotel...
+// probably competition").
+//
+// SO SOMEBODY ELSE BUYS IT FIRST. BRASS gets off the morning bus with the
+// price of the place in her bag and takes it off him through the player's own
+// OFFER chip - the same listing, at the same price, in the same transaction
+// the player would have made - and then runs seven rooms like a business
+// instead of like a hobby. Nothing about her is scripted: every move she makes
+// is one of the settings the management screen exposes, made for a reason
+// that is printed in the day report on the night she makes it.
+//
+// WHY SHE IS COMPETITION, in the two places it costs the player money:
+//   THE PURSE   a visitor's wallet is minted on the boat and spent down in
+//               this town. `visPick` holds the BOARD price of a bed back
+//               before it will buy anything else (roomReserve -> roomPrice),
+//               so every step BRASS puts on her own board is a step off the
+//               town's supper money. Zero sum, exactly like the promenade.
+//   THE LABOUR  she pays over the odds when her rooms go unturned, and
+//               `townWage()` is a MEAN over the shops that are hiring. Her
+//               raise moves every crab's goingRate, which moves the crew's
+//               payRatio, which is the grievance ladder that already existed.
+//               She poaches by moving the market, not by a special case.
+// Both levers cost HER too - the wage leaves her till on the night, a dear
+// room empties beds - so when the Driftwood misses a lease payment she walks
+// the last move back in public, on the rivalry's own retreat rule.
+//
+// AND SHE IS NOT A SOFT TOUCH. The moment she signs, the OFFER chip on the
+// hotel's sign (REEF's fair price) is replaced by the ASK chip every peer
+// shop wears - `goingConcern` plus the hold-out premium for the only shop she
+// has - in the same slot on the same sign. What she costs the player is a
+// number painted on the shopfront from her first night.
+const HOTELIER_CFG = {
+  SHOP: "hotel",         // the lease she comes for, and the only one she runs
+  NAME: "BRASS",
+  MIN_DAY: 5,            // nobody buys a seafront hotel in a town they landed in yesterday
+  WORTH: 60,             // ...and she only comes for a house that is TAKING money: the
+                         // three-day book the asking price already reads. A town whose
+                         // hotel never gets going never meets her, which is most of why
+                         // the do-nothing baseline is untouched by her (measured: PLAN).
+  WARN_DAYS: 2,          // SHE IS HEARD OF BEFORE SHE IS SEEN. The day report names the
+                         // interest, with the price on it, for this many settlements
+                         // before she lands - the rivalry's rule that the warning is
+                         // guaranteed by the CLOCK and not by money crossing a line.
+  BANKROLL: 800,         // what she brings. A fixed number, not "whatever it costs": a
+                         // hotel trading well enough is genuinely out of her reach, and
+                         // the report says so rather than quietly inventing the money.
+  FULL: 0.70,            // rooms LET tonight against rooms on the hook: a full house...
+  SLACK: 0.30,           // ...and beds going begging. A wide dead band between them so
+                         // the board cannot ping-pong - the same disjoint-regimes shape
+                         // HOURS_POLICY and WAGE_POLICY converge on, for the same reason.
+                         // It self-limits either way: a dearer room sells fewer beds.
+  REMIND: 5,             // ...and if she cannot afford the place, how often the report
+                         // says so. A standing fact is not news every night.
+  STEP_DAYS: 2,          // one move every this many nights, the rivalry's own pacing: a
+                         // board that moved every single settlement walked the full
+                         // 1.00 -> 1.30 band inside a week and stopped being readable
+  WAGE_OVER: 2,          // a wage push lands this far over the best rate in town
+  TILL_FLOOR: 40,        // ...and only if the till can carry the night after it
+};
+// heard: the day the town first heard of her. day: the day she signed.
+// id: her owner-registry key, which is how every surface finds her.
+function newHotelier() { return { heard: 0, day: 0, id: null, moves: 0, moveDay: 0, missed: 0, nag: 0 }; }
+let hotelier = newHotelier();
+function loadHotelier(h) {
+  hotelier = newHotelier();
+  if (!h || typeof h !== "object") return;   // an old save never met her, and that IS the old world
+  hotelier.heard = Math.max(0, Math.round(+h.heard || 0));
+  hotelier.day = Math.max(0, Math.round(+h.day || 0));
+  hotelier.moves = Math.max(0, Math.round(+h.moves || 0));
+  hotelier.moveDay = Math.max(0, Math.round(+h.moveDay || 0));
+  hotelier.missed = Math.max(0, Math.round(+h.missed || 0));
+  hotelier.nag = Math.max(0, Math.round(+h.nag || 0));
+  hotelier.id = typeof h.id === "string" && OWNERS[h.id] ? h.id : null;
+  if (!hotelier.id) hotelier.day = 0;        // a half-written save cannot strand her
+}
+function hotelierOn() { return !window._noHotelier; }   // the measurement hatch (the game never sets it)
+function hotelierCrab() {
+  return hotelier.id ? allCrabs().find(k => k.p.owner === hotelier.id) || null : null;
+}
+// SHE IS THE HOTELIER ONLY WHILE SHE HOLDS THE LEASE. Buy her out, or watch
+// the lease take her under, and everything below stops dead: there is nothing
+// left in her the town cannot answer.
+function hotelierRuns() {
+  return !!(hotelier.id && bizOwner(HOTELIER_CFG.SHOP) === hotelier.id
+    && !forSale(HOTELIER_CFG.SHOP) && hotelierCrab());
+}
+// The free lot nearest a door, or -1. This is the housing ladder's own rule
+// (see the settlement pass: nobody rents the far end of town from their own
+// job), asked at the moment she signs rather than at the next settlement - an
+// owner-operator who spent her first day walking 1700px in from the shelter
+// would leave the desk dark on the one day the town is watching her.
+function freeLotFor(door) {
+  const used = new Set(allCrabs().filter(k => !k.p.homeless).map(k => k.p.house));
+  let free = -1, bestD = Infinity;
+  for (let h = 0; h < HOUSE_XS.length; h++) {
+    if (used.has(h)) continue;
+    const d = Math.abs(HOUSE_XS[h] - door);
+    if (d < bestD) { bestD = d; free = h; }
+  }
+  return free;
+}
+// WHAT SHE HAS TO FIND: the willing seller's own price, the reserve every
+// buyer in this game keeps back, and the cost of getting off a cot. Derived
+// from the same function the OFFER chip prints, so the number in the day
+// report and the number on the shopfront can never disagree.
+function hotelierCost() {
+  return offerPrice(HOTELIER_CFG.SHOP) + SALE_CFG.RESERVE + MOVE_IN_COST + HOUSE_RENT;
+}
+// ...and the town she is interested in: a hotel with a willing seller behind
+// the desk, still trading, taking real money over its last three nights.
+function hotelierWants() {
+  const b = HOTELIER_CFG.SHOP;
+  return hotelierOn() && !hotelier.day && day >= HOTELIER_CFG.MIN_DAY
+    && bizUnlocked(b) && canOffer(b) && bizTakeAvg(b) >= HOTELIER_CFG.WORTH;
+}
+function hotelierArrive() {
+  const b = HOTELIER_CFG.SHOP, price = offerPrice(b);
+  const keeper = allCrabs().find(k => k.p.owner === bizOwner(b));
+  const sold = keeper ? keeper.p.name : "THE KEEPER";
+  // she gets off the west-end bus like everybody else who moved to this town,
+  // and drives the length of the promenade to the door she has just bought
+  // A RED SHELL IN SUNGLASSES, and a BEACH BUGGY - which is not just money on
+  // wheels. The lot next door to the hotel is usually free and she takes it,
+  // but if it is not, the nearest free lot is the far side of town and an
+  // owner-operator who walks it spends her whole ten-hour day on the road.
+  // The buggy is what makes the bad case survivable. TIDY, like REEF: the
+  // difference between them is not that she keeps a worse house.
+  const p = { name: freeCrewName(HOTELIER_CFG.NAME), npc: true, fisher: false,
+    trait: "tidy", mode: "buggy", acc: "shades", color: 0, shift: "D",
+    homeless: true, house: null, wallet: HOTELIER_CFG.BANKROLL, job: "fishing",
+    hunger: 0.15, dirt: 0.2, bored: 0.1, tired: 0.2 };
+  const c = newCrab(p);
+  c.x = BUS_STOPS[0]; c.y = 158;
+  npcs.push(c);
+  // the player's own buy-out path, from the other side of the counter. If it
+  // refuses for any reason she was never here at all: a half-bought hotel is
+  // worse than no hotelier.
+  if (!buyOutOwner(b, c)) { npcs = npcs.filter(k => k !== c); return false; }
+  hotelier.id = c.p.owner; hotelier.day = day;
+  const lot = freeLotFor(BIZ[b].door);
+  if (lot >= 0 && c.p.wallet >= MOVE_IN_COST + HOUSE_RENT) {
+    c.p.wallet -= MOVE_IN_COST; c.p.house = lot; c.p.homeless = false;
+    logHome(c, "MOVED INTO " + placeName(c.p) + " - $" + MOVE_IN_COST);
+  }
+  c.x = BIZ[b].door - 40;   // ...and she is behind the desk the same evening
+  toast = { text: c.p.name + " HAS BOUGHT THE " + BIZ[b].name + " - $" + fmt(price), t: 9 };
+  today.rival.push(c.p.name + " BOUGHT THE " + BIZ[b].short + " OFF " + sold + " - $" + fmt(price));
+  crabLog(c, "life", "CAME TO TOWN AND BOUGHT THE " + BIZ[b].short, 0);
+  crabLog(c, "money", "PAID $" + price + " FOR SEVEN ROOMS", 0);
+  popText("UNDER NEW MANAGEMENT", (BIZ[b].x0 + BIZ[b].x1) / 2 - 34, 96, [255, 216, 96]);
+  if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+  if (window._stats) window._stats.hotelier = { day, price, name: c.p.name, from: sold, moves: [] };
+  return true;
+}
+// ---- HER POLICY IS HER PERSONALITY. One move a night, out of the settings
+// the management screen exposes, each one announced by name with the signal
+// that caused it. Read the day report for a week and you know exactly who she
+// is: she prices the board off the beds she sold last night, and she pays
+// whatever it takes to have them made up in the morning.
+function runHotelierPolicy() {
+  const b = HOTELIER_CFG.SHOP, o = OWNERS[hotelier.id], c = hotelierCrab();
+  const rooms = BIZ[b].stalls || [];
+  const lets = today.roomsLet || 0;          // beds actually sold today, counted at check-in
+  const lost = today.roomsLost || 0;         // ...and beds lost to unmade linen, counted on the sand
+  // ...and every line below is MEASURED against the day report's own card
+  // (176px wide, drawn at x+6, so 164px) rather than counted in characters.
+  // Suite-pinned, because a report line is the only place the town speaks.
+  const say = (line, cat) => {
+    toast = { text: c.p.name + " " + line, t: 7 };
+    today.rival.push(c.p.name + " " + line);
+    crabLog(c, cat || "money", line.slice(0, 39), 0);
+    hotelier.moves++; hotelier.moveDay = day;
+    if (window._stats && window._stats.hotelier)
+      window._stats.hotelier.moves.push({ day, line, price: bizPriceMul(b), wage: bizWage(b) });
+  };
+  // THE RETREAT, and the trigger is a MISSED RENT rather than a thin till -
+  // the rivalry measured that lesson and it holds here for the same reason. A
+  // seven-room lease settles all over the place, so a till gate would make a
+  // hotelier who never moves at all; what says her policy is costing her more
+  // than it is worth is the strike counter the succession layer already keeps.
+  // The wage goes first: it is the only one of the two that costs cash tonight.
+  if ((bizStrike[b] || 0) > 0) {
+    hotelier.missed++;
+    if (bizWage(b) > WAGE_STD) {
+      setBizWage(b, bizWage(b) - 1);
+      for (const j of jobBoard) if (j.biz === b) j.wage = bizWage(b);
+      say("CUTS THE WAGE TO $" + bizWage(b) + " - MISSED RENT", "life");
+    } else if (bizPriceMul(b) > 1) {
+      setBizPrice(b, bizPriceMul(b) - PRICE_STEP);
+      say("DROPS THE ROOM TO $" + roomPrice() + " - MISSED RENT", "life");
+    }
+    return;
+  }
+  // ---- SHORT OF HANDS, and the signal is a guest asleep on the beach with a
+  // bed standing unmade behind her. That is a sale her LAUNDRY cost her, not
+  // her demand - so she answers it with money, over the best rate in town. It
+  // is the same move the rivalry's wage lever makes and it lands in the same
+  // place: townWage(), and every payslip in this town that is measured
+  // against it, the player's crew included.
+  if (day - hotelier.moveDay < HOTELIER_CFG.STEP_DAYS) {
+    today.rival.push(c.p.name + ": " + lets + "/" + rooms.length + " BEDS AT $"
+      + roomPrice() + ", $" + bizWage(b) + "/DAY");
+    return;
+  }
+  const post = jobBoard.find(j => j.biz === b);
+  const staff = allCrabs().filter(k => k.p.job === b && !k.p.owner);
+  if (lost > 0 || (post && day - post.day >= 1)) {
+    const best = Math.max(WAGE_STD, townWage(b), bizWage(b));
+    const want = Math.min(WAGE_MAX, Math.max(bizWage(b) + 1, best + HOTELIER_CFG.WAGE_OVER));
+    const n = Math.max(1, staff.length);
+    if (want > bizWage(b) && o.till >= HOTELIER_CFG.TILL_FLOOR + want * n) {
+      setBizWage(b, want);
+      for (const j of jobBoard) if (j.biz === b) j.wage = bizWage(b);
+      say("POSTS $" + bizWage(b)
+        + (lost > 0 ? " - " + lost + " BEDS WENT UNMADE" : " - NOBODY ANSWERED"));
+      return;
+    }
+  }
+  // ---- THE BOARD MOVES WITH THE HOUSE, and that is the whole of her. Beds
+  // sold is the only number she needs: a house that nearly filled says the
+  // room is underpriced, beds going begging say it is dear. She never touches
+  // anybody else's board - only her own, one step, on the player's own stepper.
+  // ...and a day the desk never opened is NOT a day the room was too dear. Her
+  // own rest day, a shift nobody covered, a shop that went dark on a missed
+  // rent - all of them read as "nought beds sold" and none of them is a price
+  // signal. The day book is the honest test: no takings, no reading.
+  const traded = bizDayBook(b).take > 0;
+  if (traded && lets >= HOTELIER_CFG.FULL * rooms.length
+      && bizPriceMul(b) + PRICE_STEP <= PRICE_MAX + 1e-9) {
+    setBizPrice(b, bizPriceMul(b) + PRICE_STEP);
+    say("PUTS THE ROOM UP TO $" + roomPrice() + " - " + lets + "/" + rooms.length + " SOLD");
+    return;
+  }
+  if (traded && lets <= HOTELIER_CFG.SLACK * rooms.length
+      && bizPriceMul(b) - PRICE_STEP >= PRICE_MIN - 1e-9) {
+    setBizPrice(b, bizPriceMul(b) - PRICE_STEP);
+    say("DROPS THE ROOM TO $" + roomPrice() + " - "
+      + (lets ? lets + "/" + rooms.length + " SOLD" : "NONE SOLD"));
+    return;
+  }
+  // ...and a quiet night is still a line in the report, carrying the two
+  // numbers that decide her next move. Nothing about her is ever hidden.
+  // (The report prints the first TWO lines of today.rival and THE RIVALRY runs
+  // first, so on the rare night both are talking, the rarer event - a peer
+  // owner coming for the player's bar - keeps the room.)
+  today.rival.push(c.p.name + ": " + lets + "/" + rooms.length + " BEDS AT $"
+    + roomPrice() + ", $" + bizWage(b) + "/DAY");
+}
+// ---- ONE PASS AT SETTLEMENT, after the market has cleared: she is either on
+// her way here, or she is running seven rooms.
+function runHotelier() {
+  if (!hotelierOn()) return;
+  if (!hotelier.day) {
+    if (!hotelierWants()) return;
+    const b = HOTELIER_CFG.SHOP;
+    if (hotelierCost() > HOTELIER_CFG.BANKROLL) {
+      // priced out, and the town hears exactly why - but a standing fact is
+      // not news every night the way a stage change is, so this one is on a
+      // leash. A hotel doing well enough to be out of her reach can stay that
+      // way for the rest of the run.
+      if (day - hotelier.nag >= HOTELIER_CFG.REMIND) {
+        hotelier.nag = day;
+        today.rival.push("A BUYER CAN'T MEET THE " + BIZ[b].short + "'S $" + fmt(offerPrice(b)));
+      }
+      return;
+    }
+    if (!hotelier.heard) {
+      hotelier.heard = day;
+      toast = { text: "SOMEBODY HAS BEEN ASKING AFTER THE " + BIZ[b].name, t: 8 };
+      today.rival.push("A BUYER WANTS THE " + BIZ[b].short + " - $" + fmt(offerPrice(b)));
+      return;
+    }
+    today.rival.push("THE " + BIZ[b].short + " HAS A BUYER WAITING - $" + fmt(offerPrice(b)));
+    if (day - hotelier.heard >= HOTELIER_CFG.WARN_DAYS) hotelierArrive();
+    return;
+  }
+  if (!hotelierRuns()) return;   // she sold up, or the lease took her under
+  runHotelierPolicy();
 }
 
 // ---------------------------------------------------------------- clock
@@ -2256,7 +2578,7 @@ function runWageRelations() {
         today.moved.push(c.p.name + " REFUSES TOMORROW'S SHIFT OVER $" + rate);   // DIARY HOOK: walkout
         if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
         if (window._stats) (window._stats.walkouts = window._stats.walkouts || [])
-          .push({ day: day + 1, name: c.p.name, rate });
+          .push({ day: day + 1, name: c.p.name, rate, why: "pay" });
       }
     } else if (c.p.walkout != null && g < WAGE_CFG.GRUMBLE) {
       delete c.p.walkout;   // fixed: back on the clock, no lingering grudge state
@@ -3402,7 +3724,7 @@ function save() {
     // the player has bought off the market, and the live FOR SALE listings
     owners: (() => { const m = {}; for (const k in OWNERS) m[k] = { name: OWNERS[k].name,
       till: Math.round(OWNERS[k].till || 0), credit: Math.round(OWNERS[k].credit || 0),
-      darkT: OWNERS[k].darkT || 0 }; return m; })(),
+      darkT: OWNERS[k].darkT || 0, soft: !!OWNERS[k].soft }; return m; })(),
     bizOwner: (() => { const m = {}; for (const k in BIZ) m[k] = bizOwner(k); return m; })(),
     bizBought: (() => { const m = {}; for (const k in BIZ) if (BIZ[k].bought) m[k] = true; return m; })(),
     market, bizTake, bizStrike,
@@ -3415,6 +3737,7 @@ function save() {
     // table), plus the rivalry's whole state machine - see RIVAL_CFG
     price: (() => { const m = {}; for (const k in BIZ) m[k] = bizPriceMul(k); return m; })(),
     rival: rival,   // ...including her war chest, which is real money
+    hotelier,       // ...and the hotelier: who she is, when she landed, what she has moved
     hoursPol: hoursPolicyState,
     // THE VISITORS MID-STAY. A visit spans nights, so it has to survive a
     // reload or "stay for a day or two" is a lie the moment you close the tab.
@@ -3504,7 +3827,10 @@ function load(slot) {
     if (!so || typeof so !== "object" || k === "player") continue;
     OWNERS[k] = { id: k, name: String(so.name || k).toUpperCase().slice(0, 12),
       till: Math.max(0, Math.round(+so.till || 0)), credit: Math.max(0, Math.round(+so.credit || 0)),
-      darkT: Math.max(0, Math.min(9, +so.darkT || 0)) };
+      darkT: Math.max(0, Math.min(9, +so.darkT || 0)),
+      // a save written before willing sellers moved onto the owner: REEF was
+      // the only one, and BIZ.sellable was the whole of it
+      soft: so.soft != null ? !!so.soft : k === "reef" };
   }
   if (s.bizOwner) for (const b in s.bizOwner) {
     if (!BIZ[b]) continue;
@@ -3608,6 +3934,7 @@ function load(slot) {
   if (s.price) for (const b in s.price)
     if (BIZ[b] && s.price[b] != null) setBizPrice(b, +s.price[b]);
   loadRival(s.rival);
+  loadHotelier(s.hotelier);
   if (s.hoursPol) for (const b in s.hoursPol)
     if (BIZ[b] && s.hoursPol[b] && Array.isArray(s.hoursPol[b].hist))
       hoursPolicyState[b] = { hist: s.hoursPol[b].hist.slice(-4), cd: s.hoursPol[b].cd || 0 };
@@ -5647,7 +5974,7 @@ function visBenefit(k) {
   if (k.need === "food" || (!DRINKS[r.id] && k.biz === "shack")) k.hunger = 0;
   if (k.need === "fun" || k.biz === "arcade") k.bored = 0;
   visLog(k, "need", "BOUGHT " + (ITEM_NAMES[r.icon] || "SOMETHING")
-    + " AT THE " + BIZ[k.biz].short + " - $" + r.pay);
+    + " AT THE " + BIZ[k.biz].short + " - $" + menuPrice(k.biz, r));
 }
 function serve(c) {
   const cust = c.cust;
@@ -6146,6 +6473,13 @@ function sleepOnSand(k) {
     k.leaveT = Math.min(k.leaveT, nearestSail(gnow() + 540));
     visLog(k, "peril", "NO ROOM AT THE HOTEL - SLEPT ON THE BEACH");
     today.moved.push(k.name + " SLEPT ON THE BEACH - HOTEL FULL");
+    // ...and whether the room they could not have was LET or merely UNMADE.
+    // freeRoom() refuses a dirty or half-cleaned room, so a guest on the sand
+    // with linen still on the floor is a bed the hotel lost to its own
+    // housekeeping rather than to demand - which is a LABOUR problem, and the
+    // signal the hotelier answers with money (see THE HOTELIER).
+    if (hotelRooms().some(r => r.dirty || r.cleaning))
+      today.roomsLost = (today.roomsLost || 0) + 1;
     popText("NO ROOM!", k.x - 10, FLOOR_Y - 34, [255, 150, 130]);
     if (window._stats) window._stats.unhoused = (window._stats.unhoused || 0) + 1;
   }
@@ -6159,7 +6493,15 @@ function sleepOnSand(k) {
 function wantsRoom(k) {
   return k.nights > 0 && !k.room && !k.rough && k.nightsHad < k.nights;
 }
-function roomReserve(k) { return wantsRoom(k) ? ROOM_RATE : 0; }
+// WHAT A ROOM COSTS TONIGHT, off the board rather than the recipe table.
+// ROOM_RATE is the printed rate; the hotel's own price multiplier is a setting
+// its owner moves (and the hotelier below moves it most weeks), so a visitor
+// who holds back the RECIPE price walks up to a desk asking more than they
+// kept - and payAndBenefit charges the board price and credits the till with
+// it whatever the wallet holds, which MINTS the difference. All of it reads
+// this one function now.
+function roomPrice() { return menuPrice("hotel", BIZ.hotel.recipes[0]); }
+function roomReserve(k) { return wantsRoom(k) ? roomPrice() : 0; }
 function visLevel(k, need) {
   return need === "food" ? k.hunger : need === "drink" ? k.thirst
     : need === "clean" ? k.dirt : k.bored;
@@ -6176,10 +6518,16 @@ function visRoomFor(k, b) {   // is there a slot left in that line for a tourist
 }
 function visPick(k) {
   const cand = [], res = roomReserve(k);
-  const afford = (r) => k.wallet >= r.pay + res;
+  // the BOARD price, not the recipe table's. Every till in this game charges
+  // menuPrice; a shop that has repriced itself upward would otherwise pull in
+  // a visitor who cannot clear the counter, and the counter would credit the
+  // owner the full price out of a wallet that never held it. (The crabs' own
+  // pickErrand has always read localPrice - this was the one check that did
+  // not, and the hotel is the shop most likely to move its board.)
+  const afford = (b) => (r) => k.wallet >= menuPrice(b, r) + res;
   const add = (b, need, pickR) => {
     if (!visOpen(b) || !visRoomFor(k, b)) return;
-    const rs = BIZ[b].recipes.filter(afford);
+    const rs = BIZ[b].recipes.filter(afford(b));
     if (!rs.length) return;
     cand.push({ biz: b, need, recipe: pickR(rs) });
   };
@@ -6209,7 +6557,7 @@ function visPick(k) {
   // TEN overnighters ended up on the sand. Now an overnighter drops their bag
   // on the way in from the boat if nothing is more pressing, and past ROOM_HOUR
   // the bed outranks geography outright - the same escape hatch a DIRE need has.
-  if (wantsRoom(k) && k.wallet >= ROOM_RATE && visOpen("hotel") && visRoomFor(k, "hotel") && freeRoom())
+  if (wantsRoom(k) && k.wallet >= roomPrice() && visOpen("hotel") && visRoomFor(k, "hotel") && freeRoom())
     cand.push({ biz: "hotel", need: "room", recipe: BIZ.hotel.recipes[0] });
   let best = null, bestScore = 0;
   for (const e of cand) {
@@ -9729,7 +10077,11 @@ function drawReport() {
   // THE RIVALRY gets its own lane and its own colour: a peer owner coming for
   // one of your shops is the loudest thing that can happen in a day
   for (const n of (report.rival || []))
-    smallText(ctx, n, x + 6, ly, [200, 120, 40]), ly += 7;
+    // TRIM BY WIDTH (the standing rule): the card is 176 wide and these lines
+    // are drawn at x+6, so they get 164px and lose their tail rather than the
+    // card losing its margin. Pre-existing: a long rivalry line printed past
+    // the edge, and the hotelier writes lines of the same shape every night.
+    smallText(ctx, fitSmall(n, w2 - 12), x + 6, ly, [200, 120, 40]), ly += 7;
   // IDLE HANDS' late stage, announced the night BEFORE it costs anything
   for (const n of (report.walked || []))
     smallText(ctx, n + " HAS HAD ENOUGH - OFF TOMORROW", x + 6, ly, [110, 120, 180]), ly += 7;
@@ -9935,6 +10287,8 @@ function frame(now) {
     // ...and the peer owner who wants a shop that is NOT for sale reads her
     // own books, one move a night (see THE RIVALRY)
     runRivalAmbition();
+    // ...and the one who came for the hotel and got it reads hers (THE HOTELIER)
+    runHotelier();
     for (const c of npcs) {
       c.p.hunger = Math.min(1, (c.p.hunger || 0) + 0.1);
     }
@@ -10033,7 +10387,14 @@ function frame(now) {
       today.walked.push(k.p.name);
       toast = { text: k.p.name + " HAS HAD ENOUGH - TAKING TOMORROW OFF", t: 8 };
       popText("I NEED A DAY", k.x - 14, FLOOR_Y - 34, [150, 150, 210]);
-      if (window._stats) window._stats.walkouts = (window._stats.walkouts || 0) + 1;
+      // ONE SHAPE FOR ONE COUNTER. The pay walkout (runWageRelations) records a
+      // ROW here and this one used to record a COUNT, so a town that took a
+      // bored walkout and then a pay walkout threw
+      // `_stats.walkouts.push is not a function` and killed the seed - which
+      // is a headless-only path, but the headless matrix is how every balance
+      // number in PLAN is measured. Both write rows now.
+      if (window._stats) (window._stats.walkouts = window._stats.walkouts || [])
+        .push({ day: day + 1, name: k.p.name, why: "bored" });
     }
     // the day's labor policy: peer owners (and delegating players) make at
     // most one move each, on the same convergent-rules pattern as SUDSY's hours
