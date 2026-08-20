@@ -3215,6 +3215,128 @@ weekends economy; financing probed and ruled out (proportional minimum,
 payroll-scaled limit 90 + 70/crew, both inert); the collapse is growth-town
 unit economics.
 
+## THE NAV STRIP (shipped 2026-08-20, worktree) — the town got a map
+
+**Matt, verbatim:** *"i know the town view needs to be more obvious; that's hard
+to get to"* / *"the management screen is too important to be a graphic in the
+game, neesd more central positioning"* / *"maybe it's not obvious enoug hthat
+the crab shack is the central place moneh comes from ?"* / *"i know it's kinda
+hard to nav there"* / *"a minimap nav thingy would be nice"*. And from the first
+outside playtest: *"click through and theres pinchy and claudi. What do they
+do?? NOBODY KNOWS."* … *"Go to the shop. WHAT DO THESE THINGS DO?"*
+
+### The fault, stated plainly
+The town is **2512px wide behind a 256px window** and there was no index to it.
+You navigated by holding an arrow key or dragging, and you found a place by
+recognising it as it went past. Worse, the two screens that matter most were
+reached by **clicking a picture of a building**: the management card off a
+shopfront's sign (a 22x7 blue chip on a roofline you have to find first), and
+the **town census filed as a TAB INSIDE that card** — so the whole town was a
+page of one shop. A new player could not find either, and nothing anywhere said
+that the CRAB SHACK is the engine of the economy.
+
+### The strip
+Seven rows, full width, in **the only rows the world has never used**: FLOOR_MAX
+is 168 and PANEL_Y is 176, and nothing has ever been painted between them — so
+the map covers **not one pixel of a single crab**. That constraint drove the
+whole design; a taller strip was measured against the shack's front travel lane
+(y=168, crabs draw y-12..y) and rejected, and the top of the screen was rejected
+because the character card owns x2..130, y2..60 whenever anybody is selected.
+
+It is a **CROSS-SECTION, not a floorplan** — water, shore, promenade, lots, top
+to bottom, the same order your eye reads the real screen in, so the map and the
+town agree about which way is out to sea. Heights are the legend: houses are two
+rows (roof + wall), the shelter three, a shop four, and the **CRAB SHACK six**,
+rising through the promenade and out onto the sand. Colour is ownership: gold is
+the shack, orange is yours, mauve is somebody else's.
+
+**ONE WORD IS PRINTED ON THE MAP AND IT IS "SHACK".** At 1:9.8 the shack's 340px
+lot is 35 strip pixels — the only building both wide enough to carry a name and
+tall enough to hold one — and pure geography lands it within a pixel of the
+middle. The label prints only if `smallTextWidth("SHACK") + 2 <= blockW`
+(measured, never counted), so a shack that ever shrinks loses its label rather
+than spilling onto its neighbours. That is the answer to "is it obvious the
+shack is where the money comes from": on the map it is the tallest thing, the
+only gold thing and the only named thing, dead centre.
+
+And **money arriving is drawn**: every time one of your shops takes a payment,
+its block flashes for 0.22s. This is read-only bookkeeping — the draw watches
+`today.biz[key].take`, which the till already keeps for the management card, and
+remembers what it saw. Note the plain lookup rather than `bizDayBook()`, which
+would CREATE a day-book entry for a shop that has not traded and put a phantom
+line in the night's report. The sim does not know the flash exists.
+
+Also on it: the crew, one pixel each in their own shell colour on the promenade
+line (the answer to "where did PINCHY go" without opening a card), and the
+selected crab in white.
+
+**The window is the point.** Everything you are not looking at goes under a
+0.2 wash and the slice you ARE looking at is bracketed in white — so the bright
+26 pixels of coast simply IS the screen above it, no legend required. A half
+wash was tried first and turned a seven-pixel map to mud; a third still lost the
+sea. The white (rather than gold) brackets are because the thing they most often
+cross is the shack.
+
+**Navigation:** a tap anywhere on the strip puts the camera there, and a tap on
+a landmark centres the LANDMARK rather than the pixel you hit — a beach cottage
+is six strip pixels wide and nobody can aim at that. The slop is exactly one
+strip pixel of world. A DRAG scrubs freely instead, with no snapping, using the
+tip slider's own idiom (`navDrag`, and past the 4px threshold it sets
+`dragMoved` so the click that follows a scrub never also snaps).
+
+### MANAGE and TOWN
+Two chips on the left of the row above the map — the left, because the right of
+that row is already spoken for by the debt and bankruptcy warnings (which now
+stack up from above the strip).
+- **MANAGE** opens the management card for the player-owned business the camera
+  is looking at, and the SHACK when it is looking at anything else. NEXT> on the
+  card still reaches the rest.
+- **TOWN** opens the census directly. It is still drawn on the management card —
+  one card, three tabs — but you no longer go through a shopfront to reach it,
+  the card **retitles itself TOWN CENSUS** when you arrive there, and NEXT> (which
+  steps to the next SHOP, and means nothing on a page about the TOWN) is hidden
+  by one predicate, `manageBizCycler()`, that feeds both the draw and the hit
+  test so no dead zone is left behind.
+
+The strip is live on exactly the terms the crab cycler is (`navLive()`): the
+town is on screen, nothing is being read on top of it, the game is not over. A
+reading surface owns the screen.
+
+### The receipts
+- New scenario **"the nav strip: one table draws it, hit-tests it and jumps the
+  camera"** (suite 144). Five clauses: `navMarks()` is what gets drawn AND what
+  gets hit (every landmark's own middle hits itself); the shape of the town is
+  actually on it (shack, a neighbour's shop, shelter, houses, pier, boat); a tap
+  at a place leaves that place inside the window; nothing draws off the canvas
+  in EITHER screen height; the chips open the two screens; and the strip is dead
+  behind all five reading surfaces and game over. Mutation-tested three ways
+  (moved the strip onto the crabs, disabled the TOWN chip, pushed a house 30px
+  left) — it caught all three.
+- `createSim({ screenH })` is new in **simlib**: index.html sets `window.SCREEN_H`
+  before ppu.js derives H, and a scenario that has to prove a surface fits in
+  BOTH modes needs the same switch. Unset (the default) the sim is the classic
+  240 it has always been.
+- `drawNav` added to both UI sweeps ("no surface prints off the canvas" and
+  "no card prints text on top of its own text").
+- Balance: `--days 30 --seeds 16 --jobs 4` unchanged — this is draw and input
+  only, and the one read into the sim (`today.biz[k].take`) does not write.
+
+### Rejected
+- **A strip at the top of the screen.** Zero world occlusion, but the character
+  card is x2..130 y2..60 whenever a crab is selected, and REP + the little sun
+  own the top right. It would have been half-covered most of the time.
+- **A strip at the bottom of the PANEL.** The crew tab has ten free rows below
+  the cards, but the SHOP tab's second button row ends at y237 of 240 — a
+  panel-bottom strip would have printed through the upgrade prices.
+- **Chips in the panel's tab row.** Measured: CREW/SHOP end at 70, the rate
+  readout runs to ~118, SAVE is 128..158 and the BILL chip is right-aligned and
+  reaches x170 once there is debt on it. There is no 50px hole in that row.
+- **A "where am I" label lane** above the map (place name as you pan). It read
+  well but cost another 8 rows, and the map already answers it: the shack is
+  always visible on the strip, so where you are is always visible relative to it.
+- **Hooking the flash into `creditBiz`.** It would have been one line, but the
+  draw can watch the day book instead and the sim stays untouched.
+
 ## Backlog (rough priority)
 - **THE FIRST OUTSIDE PLAYTEST (2026-08-19), verbatim.** Matt's friend, new to
   the game, played the opening. This is the most valuable feedback the project
@@ -3259,9 +3381,14 @@ unit economics.
     exists.
   - **KEYS**: `m` mute, `n` music, `b` next track, `f` fast-forward, `[` / `]`
     cycle crabs, arrows pan, `Escape` backs out. All undocumented in-game.
+    (Arrow-key panning is no longer the ONLY way around town — see the nav strip
+    entry — but the keys themselves are still unlisted anywhere.)
   - **THE TRADE LEDGER LIVES INSIDE THE JOB BOARD.** A player looking for the
-    town's imports has no reason to click a HELP WANTED board. Likewise the
-    **census is a tab inside the management card**.
+    town's imports has no reason to click a HELP WANTED board. ~~Likewise the
+    **census is a tab inside the management card**~~ — **half-shipped
+    2026-08-20** by the nav strip: the census (and the management card) now have
+    a front door on the HUD, and the card retitles itself TOWN CENSUS when you
+    arrive that way. The TRADE LEDGER is still filed behind HELP WANTED.
   - **`MORE>`** is the only hint that a crab has a full dossier and a diary
     behind the character card.
   - **The little sun** fast-forwards to morning; the **`>> >>> >>>>`** chips
