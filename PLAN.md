@@ -407,6 +407,71 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- **THE FLICKERING HOTEL** (owner report, 2026-08-19, verbatim: *"some kind of
+  crazy flashing happens at night at the hotel, where if I click on a crab the
+  character panel and the crab flicker like crazy"*). `updateVisitor()` had a
+  branch for every visitor state EXCEPT `inRoom`, so a sleeping guest fell
+  through to the ROAM block at the bottom, which reads "past BED_HOUR, has a
+  key" and sends them back to `toRoom` — and they are stood at their own door,
+  so the very next frame put them back to `inRoom`. **Every frame, all night.**
+  What the player saw is exactly what that does: `drawCustomer` skips an
+  `inRoom` guest (the hotel door draws them), so the body blinked in and out of
+  the world at 60Hz, and the card alternated between `OFF TO ROOM 4` and
+  `ASLEEP IN ROOM 4`. The click itself was part of it — the world's click
+  handler skips `inRoom`, so an in-room guest was only ever selectable on the
+  half of the frames the bug produced. **Fixed with a one-line `inRoom` guard**
+  in the mover; `visTick()` already owned the night (bed drain + the morning
+  checkout) and always had.
+  - **It was not only cosmetic.** `visTick` skips the needs loop only on an
+    `inRoom` frame, so half of every night in a paid $13 bed was billed as a
+    night on the promenade: hunger, thirst, dirt and boredom all climbed while
+    the guest slept, and tiredness drained at half rate. The fix restores what
+    the code was written to do rather than compensating for it, so **the frozen
+    day-2 fingerprint was re-baselined with the receipt in the scenario** — a
+    rested guest wants less, and day two sells a little less of everything
+    (seed 1337: serves 66→63, till 228.8→188.6; seed 4242: serves and rep
+    unmoved, one walkout fewer). Over thirty days it reads the other way, which
+    is the point of measuring: **`--days 30 --seeds 16` control 0/16, median
+    11** (6,8,9,9,10,11,11,11,11,12,12,13,13,13,14,15, lifetime $52,842 — an
+    exact re-measure of the merged visitor pass's figure) **vs fixed 0/16,
+    median 12** (10,11,11,11,11,11,11,11,12,12,12,13,13,13,13,14, lifetime
+    $57,069). **Lose-by-default is untouched**; a guest who actually sleeps
+    wakes up rested rather than ruined, stays a little longer and leaves a
+    little happier, so the tails tighten (worst seed 6 days → 10) and lifetime
+    is +8%. Nothing was tuned — no price, wage or rent moved.
+  - Pinned by scenario **"hotel: a guest asleep in their room holds ONE state,
+    and the card holds still"**, asserted THROUGH THE DRAW PATH — rendering
+    switched back on against the stub ctx, each frame signed by what the card
+    printed and whether the guest's body was blitted. On the unfixed build it
+    reports two distinct frames and prints both cards side by side.
+  - **One fixture repaired on the way past, and it was already broken.**
+    `fish market: floor-price week` froze SUDSY's till under the $260 posting
+    threshold so a $2 fish price could not simply poach SALTY off the pier —
+    but the visitor pass gave the town a SECOND peer owner and nobody extended
+    the freeze. REEF was hiring SALTY onto the hotel desk on day 4 of that
+    fixture on BOTH sides of this fix; the "$45" it was passing on and the
+    "$67" it failed on are both a $23 hotel wage, and neither was ever about
+    fish. The freeze now walks `Object.values(OWNERS)` — it passes on the
+    unfixed build too, which is how you tell a repaired fixture from a moved
+    goalpost. **Any new peer owner has to be added to that pattern, or the
+    scenario quietly stops testing what it says it tests.**
+  - **FOUND, NOT FIXED — "ROOM undefined" on the visitor card.** `k.room` is
+    reserved the moment a visitor sets off for the hotel (`visGo`), but
+    `k.roomN` is only set by `checkIn()` at the desk. If the desk shuts while
+    they walk, `updateVisitor`'s toBiz branch drops them to `roam` and clears
+    `k.biz` — and leaves the reservation on. At BED_HOUR they let themselves
+    into a room they never paid for: `custStatus` reads `ASLEEP IN ROOM ?` and
+    the card's money row prints a literal **`ROOM undefined`** (measured on
+    seeds 1337 / 4242 / 909, ~200-340 sampled ticks each over five days, every
+    one `served: false`). Left alone deliberately: the honest fix releases the
+    reservation when the desk shuts, which is a SIM change — it takes a free
+    bed away, pushes those guests onto the sand and moves reputation, and that
+    is a balance call with its own matrix run, not a rendering fix.
+  - Two things deliberately left alone: an in-room guest is **not** clickable
+    in the world any more (behind a door, exactly like a bather behind a
+    curtain — the click handler always said so, the bug was what made it
+    reachable), and tourists are still out of the cycler for the reasons in the
+    CYCLE THE FOCUS entry below.
 - **CYCLE THE FOCUS + SUDSY WANTS THE JUICE BAR** (two owner directives, built
   2026-08-19, worktree — verbatim: *"need a single small pictorial next/prev
   crab button to cycle focus"* and *"sudsy needs to want to buy the juice shop,

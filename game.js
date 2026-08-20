@@ -6464,6 +6464,19 @@ function updateVisitor(k, dt) {
     if (visStep(k, r.x + 2, 148, dt)) { k.state = "inRoom"; visLog(k, "home", "TURNED IN FOR THE NIGHT"); }
     return;
   }
+  // ASLEEP, AND THERE IS NOWHERE TO WALK. This guard is not decoration: with
+  // no `inRoom` case the state fell through to the ROAM block at the bottom,
+  // which reads "it is past BED_HOUR and they have a key" and sends them back
+  // to `toRoom` - and they are already stood at their own door, so the very
+  // next frame put them back to `inRoom`. That two-state loop ran EVERY FRAME
+  // all night: the guest blinked in and out of the world (the door draws an
+  // inRoom guest, so drawCustomer skips them) and their card alternated
+  // between OFF TO ROOM n and ASLEEP IN ROOM n. It also cost them the bed:
+  // visTick's needs loop ran on every `toRoom` frame, so a paid room accrued
+  // hunger, thirst, dirt and boredom overnight and drained tiredness at half
+  // rate. visTick owns the night - the bed drain and the morning checkout -
+  // so there is nothing for the mover to do here.
+  if (k.state === "inRoom") return;
   if (k.state === "onSand") { visStep(k, k.target == null ? k.x : k.target, FLOOR_Y, dt); return; }
   if (k.state === "toBiz") {
     if (!visOpen(k.biz)) { k.state = "roam"; k.biz = null; k.target = null; return; }
@@ -10471,7 +10484,10 @@ function frame(now) {
     } });
   }
   for (const k of customers) paint.push({ base: (k.state === "dining" || k.state === "seatedWaiting") && k.table ? (k.table.y + 1) : (k.isCrab ? 165 : custY(k)), f: () => drawCustomer(k) });
-  if (sel && !sel.hidden) paint.push({ base: sel.y - 0.1, f: () => {
+  // ...and the ring goes wherever the body goes. drawCustomer hands a bathing
+  // or sleeping guest over to the stall and the hotel door and draws nothing
+  // itself, so without these two the ring blinks on bare wall.
+  if (sel && !sel.hidden && sel.state !== "showering" && sel.state !== "inRoom") paint.push({ base: sel.y - 0.1, f: () => {
     // a soft ring under whoever you've picked: it stays put while you pan
     const bx = sel.x + 8 - camX, by = (sel.p ? sel.y : custY(sel) - 4 - 26 * (sel.climb || 0)) + 2;
     const blink = 0.55 + 0.45 * Math.sin(time * 4);
