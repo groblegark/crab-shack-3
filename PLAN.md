@@ -3216,6 +3216,33 @@ payroll-scaled limit 90 + 70/crew, both inert); the collapse is growth-town
 unit economics.
 
 ## Backlog (rough priority)
+- **A UI PASS AND A HELP SCREEN (Matt, 2026-08-19):** *"need a pass at the UI
+  and perhaps a help screen; my friend says the UI isn't so intuitive."* This
+  is the project's FIRST outside playtest signal — a person who did not build
+  it could not read it. Before designing anything, get the friend's specific
+  moments (where they stuck, what they expected, what they tried); a redesign
+  aimed at the wrong confusion is worse than none. What is measurably
+  undiscoverable today, from a build-session audit — every one of these is a
+  real feature with NO on-screen affordance:
+  - **RIGHT-CLICK to redirect a crab** (`contextmenu` handler). A whole
+    interaction Matt specifically asked for, with nothing anywhere saying it
+    exists.
+  - **KEYS**: `m` mute, `n` music, `b` next track, `f` fast-forward, `[` / `]`
+    cycle crabs, arrows pan, `Escape` backs out. All undocumented in-game.
+  - **THE TRADE LEDGER LIVES INSIDE THE JOB BOARD.** A player looking for the
+    town's imports has no reason to click a HELP WANTED board. Likewise the
+    **census is a tab inside the management card**.
+  - **`MORE>`** is the only hint that a crab has a full dossier and a diary
+    behind the character card.
+  - **The little sun** fast-forwards to morning; the **`>> >>> >>>>`** chips
+    are speeds. Neither says so.
+  - **The goal is not stated anywhere** — deliberately, since the ferry office
+    only appears once the arcade is fitted, and the town's name is embargoed
+    until the ending. A help screen must respect BOTH: it can teach the
+    controls without naming the island or spoiling the win.
+  The last point is the constraint that makes this interesting: the game hides
+  its ending ON PURPOSE, so "explain the game" and "keep the reveal" have to be
+  satisfied at once.
 - **THE DEPARTURE CARD (Matt, 2026-08-19):** *"we should also have a view at
   end of day of folks leaving on the ferry and how they are feeling, with a
   'quote' based on stats."* The visitors already carry everything this needs —
