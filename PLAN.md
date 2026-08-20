@@ -3225,20 +3225,55 @@ thing you do if the table is on your way — and in the last `VOTE_URGE_HRS` it
 climbs and crabs who have not got there start making a special trip. Capped
 below `DIRE` (0.9) so nobody ever walks off a shift to vote.
 
-**MEASURED, 24 polls across 6 seeds and 29 days: turnout 82%.**
+**MEASURED on the shipped build, 24 polls across 6 seeds and 29 days:
+turnout 82%.**
 
 | by shift | | by trade | |
 |---|---|---|---|
-| M | 96% | shack | 94% |
-| E | 92% | fishing | 87% |
-| D (off) | 83% | hotel | 74% |
-| D | 76% | showers | 67% |
+| M | 92% | shack | 92% |
+| E | 92% | showers | 80% |
+| D (off) | **89%** | hotel | 79% |
+| D | **73%** | fishing | 78% |
 
-The crab who struggles is the **owner-operator on the long D shift** — SUDSY,
-9:30 to 17:30, with the box 256px up the promenade. Not a wall (she makes it
-two times in three) and not a bias nobody can act on: the D shift derives from
-the shop's OPEN HOURS, and **the hours sign is a lever the player already
-holds**. Shorten your crew's polling-day shift and they vote.
+**SHIFT PREDICTS TURNOUT. TRADE BARELY DOES.** By trade the spread is 78–92
+and most of it is noise; by shift it is 73 against 92 and it is structural.
+The crab who struggles is not a fisher or a shower attendant, it is **anybody
+on the long D shift** — the owner-operator's 8:30-to-18:30 day, which the polls
+(07:00–19:00) bracket by half an hour at each end.
+
+**The two D rows are the proof, and they are the same crabs.** On a working day
+they vote 73%; on a day off, 89%. Sixteen points of turnout is not who they
+are, it is what their day is. And the D window derives from the shop's OPEN
+HOURS, so **the hours sign is a lever the player already holds** — you can run
+a business whose staff cannot reach a ballot box, and nobody will stop you or
+mention it.
+
+> **An earlier version of this table read 96/92/76/67 with fishing at 87%, and
+> it is WRONG — do not cite it.** Those numbers came from a build whose tables
+> stood at 684 and 1844; fixing a furniture collision moved both (see below)
+> and the gradient moved with them. The shape survived every re-measure; the
+> digits did not. Written out rather than quietly overwritten, because a
+> superseded measurement that stays plausible is exactly how PLAN's illness
+> figure survived long enough to be recommended as a fix.
+
+### THE PROMENADE IS FULL, and it cost the fleet 17 points
+
+Every x in this feature was measured against the town's own furniture, not
+picked. Taking the occupied spans — houses, the shelter, the memorial, both
+standpipes, the notice board, five shopfronts, three bus stops, the pier —
+there is **not one 74px gap left on 2512px of coast**. The first cut put a
+table at 684 under a 66px board and it printed **straight through the JOB
+BOARD's sign**; the card sweeps do not cover the world, so nothing caught it
+but a screenshot. (There is a world sweep now, and it caught the second
+collision immediately.)
+
+The fix has a price tag, which is the part worth remembering: a 44px board
+forced the pier table 48px west of the rail to clear the pier tap's WATER
+label, and **that cost the fishing fleet 17 points of turnout — 87% to 70%** —
+because 48px is eight real seconds off the end of a shift that finishes thirty
+minutes before the polls shut. Cutting the board to 40px bought the table its
+place back at the rail. **Four pixels of signage was the difference between a
+fisher voting and not.**
 
 ### TWO TABLES, and why — the measurement that changed the design
 
