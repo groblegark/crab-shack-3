@@ -5191,10 +5191,22 @@ function nearestSail(want) {
   }
   return best == null ? want : best;
 }
-function ferryDepartCall(sailAbs) {   // who is going home on this one
+// how long this visitor needs to reach the boat from where they are standing,
+// in game minutes, with a little slack for the queue at the plank
+function visWalkMins(k) {
+  return Math.abs(k.x - FERRY.gangway) / VIS_SPEED * TS + 25;
+}
+// WHO IS GOING HOME ON THIS ONE - and, just as importantly, WHEN THEY SET OFF.
+// `minsLeft` is how long until she sails; a guest leaves when the walk needs
+// them to and not a minute before. A flat call was tried first and it read
+// wrong in the diary: a guest with a room 200px from the pier was checking out
+// at 05:15 for an 08:00 boat, because the call had to be sized for somebody at
+// the far end of the promenade.
+function ferryDepartCall(sailAbs, minsLeft) {
   for (const k of visitorsInTown()) {
     if (k.state === "toPier" || k.leaveT > sailAbs) continue;
     if (!VIS_STATES[k.state] || k.state === "toBiz") continue;   // finish what you're queueing for
+    if (minsLeft != null && minsLeft > visWalkMins(k)) continue;
     visLeave(k);
   }
 }
@@ -5263,7 +5275,8 @@ function runFerry(dtMin) {
   for (let i = 0; i < FERRY_TIMES.length; i++) {
     if (i <= ferrySail) continue;
     const abs = day * 1440 + FERRY_TIMES[i];
-    if (tmin >= FERRY_TIMES[i] - FERRY_CALL && tmin < FERRY_TIMES[i]) ferryDepartCall(abs);
+    if (tmin >= FERRY_TIMES[i] - FERRY_CALL && tmin < FERRY_TIMES[i])
+      ferryDepartCall(abs, FERRY_TIMES[i] - tmin);
     if (tmin >= FERRY_TIMES[i]) { ferrySail = i; ferryDock(null, i); ferryDepartCall(abs); }
   }
   if (ferryT > 0) {

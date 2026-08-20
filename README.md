@@ -11,12 +11,21 @@ Play: https://groblegark.github.io/crab-shack-3/
 You run the CRAB SHACK, but you're not the only one who matters. Fisher-crabs
 work the pier — fishing is the town's default profession — and the day's catch
 stocks your kitchen ($4 fresh off the pier, $7 imported when the bucket runs
-dry). SUDSY owns the beach showers outright: her own till, her own rent, her
-own dinner at your shack. Every crab has a wallet, needs, a home, a commute,
-and opinions.
+dry). SUDSY owns the beach showers outright and REEF keeps the hotel: their own
+tills, their own rents, their own dinners at your shack. Every crab has a
+wallet, needs, a home, a commute, and opinions — and so does every visitor who
+steps off the ferry.
 
 - **Businesses**: the shack, plus THE CLAWCADE (claw machines + skeeball,
-  $650) to buy. SUDS SHOWERS is SUDSY's.
+  $650) to buy. SUDS SHOWERS is SUDSY's, and the DRIFTWOOD HOTEL is REEF's —
+  seven rooms at the far end of the promenade, and he'll sell if the offer is
+  right.
+- **Visitors**: the ferry runs four times a day. Holidaymakers come ashore in
+  batches, walk down the pier into town with real money in their pockets and
+  real needs on their bars, spend a day or two here, take a room at the
+  Driftwood (or sleep on the sand if it's full) and sail home on a later boat.
+  Click one to follow them; open their record to see the purse, the bars and
+  the little diary of their visit. A good name fills the boat.
 - **Crew**: hire crabs, assign them between your businesses, watch them
   commute (walk / bike / beach buggy / the SAND BUS), work shifts, and live in
   houses you can see inside. Broke crabs move into the shelter and climb back
@@ -32,9 +41,9 @@ and opinions.
 Start small on purpose: one grill, one board, two tables. The shop sells
 physical things — HIRE CRAB, GRILL+, BOARD+, TABLE+, unlocks and gear.
 
-**You lose by default, but just barely.** Sim-verified over 8 seeds: doing
-nothing gets you evicted around day 9–20 (median 13); hiring and seating
-guests survives 7/8 runs past day 40.
+**You lose by default, but just barely.** Sim-verified over 16 seeds: doing
+nothing gets you evicted around day 9–15 (median 11); hiring and seating
+guests escapes on roughly 6 runs in 16 past day 40.
 
 ## Controls
 
@@ -50,7 +59,7 @@ regression work happens in the headless simulator, which runs the real game
 code at ~10 sim-days/second:
 
 ```
-node tools/suite.mjs                                   # 18 scenarios, keep green
+node tools/suite.mjs                                   # 122 scenarios, keep green
 node tools/headless.mjs --days 30 --seeds 8 --quiet    # baseline curve
 node tools/headless.mjs --days 40 --seeds 8 --buy chef,table --quiet
 ```

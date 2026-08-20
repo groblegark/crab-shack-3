@@ -22,9 +22,19 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ### Systems (all in game.js unless noted)
 - **Businesses** (`BIZ` table, data-driven): CRAB SHACK (player), THE
   CLAWCADE ($650), JUICE BAR ($400, player — shipped with T2 in the old
-  laundromat's lot AND shop slot), SUDS SHOWERS (NPC-owned by SUDSY).
-  (SUDS N BUBBLES, the $400 laundromat, was removed 2026-08-18 — see the
-  shipped note below.) Each: stations, recipes, queue, rent, owner.
+  laundromat's lot AND shop slot), SUDS SHOWERS (NPC-owned by SUDSY),
+  DRIFTWOOD HOTEL (NPC-owned by REEF, seven rooms, buyable off its own
+  shopfront — see the visitor entry). (SUDS N BUBBLES, the $400 laundromat,
+  was removed 2026-08-18 — see the shipped note below.) Each: stations,
+  recipes, queue, rent, owner.
+- **VISITORS, and the ferry that brings them** (2026-08-19): tourist demand is
+  a POPULATION, not a timer. Named visitors land in ferry batches (four
+  sailings a day, batch size off reputation), walk down the pier into town,
+  carry a wallet of real money and the same five needs a crab carries, sleep
+  at the hotel or on the sand, and go home a day or two later on a later boat.
+  A visitor is a persistent `customers` entry (`k.visitor`), so the queue,
+  seating, tipping, busing, follow-cam and dossier all work on them unchanged.
+  `window.onFerry(kind)` is the seam for the horizon/mainland work.
 - **Owner layer**: `OWNERS` registry + `creditBiz`/`debitBiz`/`ownerFunds`.
   The player's till IS `coins`. NPC revenue never touches player books.
   The registry GROWS: `BIZ[k].owner` is a key into it, `null` means nobody
@@ -197,7 +207,15 @@ compounds or collapses → the landlord collects at 20:00 either way.
   leaving a zombie autosave.
 
 ### Verified balance (8 seeds, tools/headless.mjs)
-- **CURRENT (2026-08-19, after the table-service economy):** baseline
+- **CURRENT (2026-08-19, after the ferry/visitor/hotel pass):** baseline
+  `--days 30 --seeds 16` **0/16, median 11**
+  (9,10,10,10,10,11,11,11,11,12,13,13,14,14,14,15); growth
+  `--buy chef,table --days 40 --seeds 8` **2/8 alive** (9,10,10,11,14,14,41,41)
+  and **4/8 on the second seed block** (`--seedbase 8`: 10,11,11,12,41x4).
+  ACROSS BOTH BLOCKS the growth curve is **6/16 before and 6/16 after** — the
+  8-seed figure is block noise, which is why the second block exists. See the
+  visitor entry for the full before/after and the propped demand probe.
+- (superseded) after the table-service economy: baseline
   `--days 30 --seeds 16` **0/16, median 13** (10-19); growth
   `--buy chef,table --days 40 --seeds 8` **3/8 alive**
   (13,13,13,14,15,41,41,41). The growth drop from 6/8 is the busing labour
@@ -229,7 +247,10 @@ compounds or collapses → the landlord collects at 20:00 either way.
   showers 5/10, fish pay 13. **Rent is charged from night one** — you open
   with $150 in your pocket and have to trade your way to the first payment.
 - **Queue**: 5 slots, of which tourists may fill 4 — the 5th is reserved for
-  locals (crew + neighbours). Staff claim paying guests first and serve locals
+  locals (crew + neighbours). Still the binding constraint on the whole
+  economy: with the ferry model a visitor leaves town with about HALF their
+  purse unspent, and the commonest reason they are offered nothing is that the
+  line already holds its four. That is the growth incentive, made of money. Staff claim paying guests first and serve locals
   in the lulls — and a local past HALF patience jumps the line (T2: the juice
   bar's additive tourist stream never lulls on its own; without the jump,
   locals starved in its queue and raged out parched).
@@ -245,15 +266,9 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-<<<<<<< HEAD
-- `node tools/suite.mjs` — **107 scenarios, must stay green before any push.**
-- `node tools/suite.mjs` — **103 scenarios, must stay green before any push.**
-- `node tools/suite.mjs` — **109 scenarios, must stay green before any push.**
-=======
-- `node tools/suite.mjs` — **108 scenarios, must stay green before any push.**
->>>>>>> worktree-agent-a27942d1aa747a62f
-
-- `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
+- `node tools/suite.mjs` — **122 scenarios, must stay green before any push.**
+  (Tidied 2026-08-19: this line had been left as an unresolved merge conflict
+  carrying five different historic counts. The number above is the live one.)
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
   distributions per housing tier. Paired arms per seed: the care ladder live
   vs collapsed back onto the pre-seam CARED odds *inside the same build*, plus
@@ -261,8 +276,6 @@ vm — never fork game logic into tools/) and perf expectations live there.
   on an identical RNG stream. This is where the cared-seam numbers in the
   labor-policy bullet come from.
 
-- `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
-- (count above is the live one; the two older figures in this file are historic.)
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
   detection (baseline + full town), 6x-dt stability, homeless recovery,
@@ -324,7 +337,260 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
-<<<<<<< HEAD
+- **TOURISTS BECOME REAL: THE FERRY, THE VISITORS AND THE DRIFTWOOD HOTEL**
+  (Matt's directive, built 2026-08-19, worktree — verbatim: *"tourists become
+  real; real money, come in on a cruise ship with status bars in various
+  conditions, disembark, stay for a day or two. New business is hotel, run by
+  an NPC (tho we should have a mechanism for owning it)"*, plus the correction
+  he issued a minute later: *"say ferry, forget about cruise ships"*.)
+
+  **THE FAULT.** A tourist blinked into existence beside a queue on a
+  reputation-paced timer, waited, ate, and walked off the right-hand edge of
+  the world. There was no such person: `spawnEvery` WAS the demand curve,
+  wearing a name for four characters' worth of queue label. Everything else in
+  this town is a population — crabs with wallets, needs, homes and opinions —
+  and the thing paying all the bills was a clock.
+
+  **DEMAND IS A POPULATION NOW.** Visitors land in BATCHES off the ferry, walk
+  down the pier into town, and stay a day or two. They carry a WALLET of real
+  money and spend it down; when it is gone they stop buying, and whatever they
+  did not spend goes home in their pocket. They carry the same five NEEDS every
+  crab carries, in various conditions off the boat, and those needs are what
+  sends them to a counter — a ferry-load of hungry, filthy visitors is a good
+  day for the shack and for SUDSY. At night they need somewhere to sleep, which
+  is what the hotel is for.
+
+  **A VISITOR IS A CUSTOMER OBJECT THAT PERSISTS.** That is the whole trick and
+  it is why the diff is small: the queue, patience, seating, table service,
+  tipping, busing, the reserved local slot, click-to-follow and the tourist
+  dossier all already operate on customer objects, so a VISIT is a longer life
+  with the shop pipeline as its sub-machine. `k.visitor` marks them; the states
+  in `VIS_STATES` (ashore / roam / toBiz / toRoom / inRoom / onSand / toPier)
+  are theirs; every state the counter owns is untouched.
+
+  **THE MONEY NEVER INFLATES.** A wallet is minted when the ferry lands and
+  destroyed when it sails; between those two moments the only thing that
+  happens to it is `creditBiz`. Add to the OWNERS block's audit:
+  `visitor wallets (ferry in) -> outside money IN, only as spent` and
+  `unspent wallets (ferry out) -> DESTROYED, exactly like rent`.
+
+  ### The arrival model, and its numbers
+  `FERRY_TIMES` **8:00 / 10:30 / 13:00 / 15:30**, `FERRY_STAY` 75 game-minutes
+  alongside, batch `FERRY_BASE 2.0 + rep x FERRY_REP 0.013` scaled by
+  `FERRY_LOAD [1.2, 1.1, 0.9, 0.8]`. `window.onFerry(kind)` is the SEAM for the
+  agent building the island's horizon and the run to the mainland — everything
+  this system needs is two events, `ferryDock()` and `ferryGo()`, and anything
+  richer should call those and delete `FERRY_TIMES`.
+
+  **FOUR SAILINGS, NOT TWO, AND THAT IS MEASURED.** A boat is a BURST where the
+  spawn timer was a trickle, and this town is short of TABLES: with two big
+  sailings the whole boat hit one counter at once, every table was taken by the
+  third guest, and the rest were handed a plate over the pass. The SEATED share
+  fell **88% -> 61%** and with it the **$9 table tip**, which is most of a
+  guest's value. Four smaller boats put the same people through the same dining
+  room and the share comes back (10.9 seatings a day against the pre-pass
+  build's 11.1). `VIS_PATIENCE` went **50 -> 100** for the same reason: somebody
+  who crossed on a boat to be here waits longer than a passer-by, and at 50 the
+  burst cost two seated guests a day their table tip.
+
+  | measured, 6 solvent towns x 14d | value |
+  |---|---|
+  | sailings a day | 4 |
+  | visitors per sailing | 3.0 (2-4, by reputation) |
+  | arrivals a day | 12.0 |
+  | average stay | **25.9 hours** |
+  | average spend | **$29.19** of an ~$85 purse |
+  | ...left unspent, going home | $53.27 |
+  | purchases per visitor | 1.57 |
+  | tourist serves a day, town-wide | 19.5 |
+  | rage-quits a day | 3.1 (pre-pass build: 3.4) |
+
+  **THE UNSPENT HALF IS THE POINT, not a leak.** Visitors are not
+  wallet-limited; they are QUEUE-limited. Instrumented over six days, the
+  commonest reason `visPick` hands back nothing is `|full` — the shack's line
+  already holds its four tourists. The town is leaving half of every purse on
+  the table because a two-crab shack cannot serve it, and that is exactly the
+  incentive the growth strategy is supposed to feel.
+
+  ### The hotel as data
+  `BIZ.hotel` — DRIFTWOOD HOTEL, x2200-2428 past the last beach cottage, rent
+  **$35**, owner **REEF** (a new `OWNERS` entry and a new founding NPC), hours
+  **10:00-22:00**, wage `WAGE_STD`, `autoLabor` on like any peer owner. Its
+  "dish" is A NIGHT'S STAY: the linen press makes up a room, the front desk
+  hands over the key at **$13**, and the guest walks to a door on the back wall.
+  - **THE ROOMS ARE `stalls` ON PURPOSE.** Every wedge guard, cleaning dispatch
+    and abort path in this game already knows what to do with a facility a
+    guest OCCUPIES and staff must CLEAN afterwards — it is the shower stalls'
+    cycle with a longer occupancy. `lodging: true` is the one bit that says
+    "the guest keeps this until morning" instead of "for showerT seconds".
+    Seven rooms; a let room goes DIRTY at 07:30 checkout and housekeeping turns
+    it, so a badly-staffed hotel loses rooms to its own laundry.
+  - **CHECKING IN IS NOT GOING TO BED.** They take the key in the afternoon and
+    go back out with a bed waiting — which is what makes the room worth its $13:
+    an evening in town instead of a walk to the last boat.
+  - **A BED IS RANKED BELOW EVERYTHING** until `ROOM_HOUR` (15:00), when it
+    outranks geography outright. Measured with the room above a meal: a visitor
+    came off the boat, walked the length of the promenade to drop a bag, and had
+    half a day left to spend — the shack's peak till fell **$70** and the growth
+    town could no longer afford its first chef.
+  - **REEF LIVES IN THE COTTAGE NEXT DOOR** (lot 8). An owner-operator
+    commuting to the far east end from the shelter would spend a ten-hour day on
+    the road; founders differ in the stuff they start with, exactly as SUDSY
+    opens with a shop and a $200 till.
+  - Measured: **4.8 room-lets a night against seven rooms (69% occupancy)**,
+    **~$63 a night** of room money plus tips against the $35 lease.
+
+  ### The mechanism for owning it
+  The failure path already let the player take on a SHUTTERED shop. `sellable`
+  on a BIZ adds the other half: a trading shop whose owner would sell grows an
+  **OFFER $N** chip on its shopfront, in the slot the MANAGE chip occupies on a
+  shop you already own, on the same two-tap arm the FOR SALE chip uses. It is
+  the SAME PATH, not a second one — `buyOutOwner` lists the shop (laying the
+  owner and staff off, killing his postings) at `offerPrice = askingPrice x
+  OFFER_MULT 1.5`, then runs the ordinary player purchase. The one thing it adds
+  is that somebody is on the other side of the deal: **the seller banks exactly
+  what leaves the player's pocket**, and walks down to the pier a rich crab.
+  Priced around **$570-700** in a trading town — CLAWCADE territory, i.e. a
+  mid-game decision rather than a lottery. The bankruptcy path still works too:
+  a hotel that misses three settlements shutters and goes on the market at the
+  ordinary asking price.
+
+  ### The unhoused answer, and why it is an ENVIRONMENT answer
+  A visitor with nowhere to sleep does not misbehave — they bed down on the
+  sand, and **the sand banks no rest**, which is the rule `sleepRough()` already
+  applies to crabs. Every consequence falls out of that one fact: they wake
+  tired and grubby, they take the **next boat** instead of a second night, and
+  they cost the town **-1.2 reputation** on the way out (a served guest is
+  +0.4/+0.8, so this is small and one-sided on purpose). Nothing is scripted.
+  The fix is to have rooms free — which is a staffing, housekeeping and
+  ownership problem the player can actually solve, and which the player feels
+  directly the moment they own the hotel and a full house is lost revenue.
+  Measured: **3.2 unhoused a night against 4.8 let**, i.e. **25% of departing
+  visitors slept out at least once**, and the nights it happens are the nights
+  the hotel is BADLY RUN (the keeper's rest day, housekeeping behind, the shop
+  gone dark) rather than a standing fact about the town.
+
+  ### Four faults found by watching rather than measuring
+  1. **`OFF_BASE` had no row for the hotel**, so it fell through to base 0 —
+     MONDAY — and day 1 is a Monday. REEF took the town's opening day off, the
+     Driftwood stood unstaffed 07:00 to midnight, and every overnighter off the
+     first day's boats slept on the sand. **`juicebar` is still missing the same
+     row** — a pre-existing fault of the same shape, left alone because fixing
+     it moves the measured juice-bar curves and this pass has enough numbers of
+     its own. Worth one line in a quiet pass.
+  2. A guest called to the boat straight out of bed never CHECKED OUT, so the
+     night was never credited and the room went back dirty uncounted.
+  3. The departure call was a flat 165 game-minutes, so a guest with a room
+     200px from the pier was checking out at **05:15** for an 08:00 boat. It is
+     now sized per visitor off the walk they actually face.
+  4. Visitors came off the plank at boardwalk height and rose to the rail.
+
+  ### A THIRD FISHER, and why the hotel needed one
+  The job board lets a flush NPC owner hire a jobless fisher, and with a SECOND
+  peer owner in town **both** of the founding pair were signed on the same
+  morning: measured on seed 1337, SALTY went to the hotel and DRIFT to the
+  showers on day 4, the pier landed **ZERO** fish for the rest of the run, and
+  the shack was buying $7 import fish from day nine — about **$30 a day** at
+  exactly the wrong moment. The price mechanism does correct it (a $7 ceiling
+  posts HELP WANTED: THE PIER and a drifter answers) but it corrects a week
+  late, which is the whole do-nothing window. A town with a hotel, twice the
+  visitors and twice the appetite supports three fishers, so it has three —
+  **KELP**, on the rail's third spot — and the labour market has slack. After:
+  the pier holds all three, the price sits at $2-4, landings run 9-22/day.
+
+  ### Balance
+  Measured on this tree, before -> after:
+
+  | matrix | before | after |
+  |---|---|---|
+  | baseline `--days 30 --seeds 16` | 0/16, median **10** | **0/16, median 11** (9,10,10,10,10,11,11,11,11,12,13,13,14,14,14,15) |
+  | growth `--buy chef,table` 40d x 8 | **4/8** | **2/8** (9,10,10,11,14,14,41,41) |
+  | growth, second block `--seedbase 8` | **2/8** | **4/8** (10,11,11,12,41x4) |
+  | growth, both blocks (16 seeds) | **6/16** | **6/16** |
+
+  **The growth curve is UNCHANGED at 16 seeds and the 8-seed block is noise** —
+  which is the honest reading and the reason the second block was run at all.
+  Lose-by-default is absolute (0/16) and the median sits inside CLAUDE.md's
+  documented 11-13 band. Propped 6-town probe (the demand, isolated from the
+  eviction): player takings **$300.4/day -> $299.3/day**, seatings 11.1 -> 10.9,
+  rage 3.43 -> 3.33, SUDSY's showers **4.3 -> 5.4 guests a day** and she keeps
+  her shop in 3 towns of 6 against 4 of 6 (a wash, and she is BUSIER).
+
+  **What was tuned, and it was all my own knobs** (never a price, a wage or a
+  rent that existed before this pass): the sailing timetable, the batch curve,
+  visitor need rates, `VIS_PATIENCE`, the purse, `ROOM_RATE`/the hotel's lease,
+  `ROOM_RANK`, and the hotel's opening float.
+
+  ### Suite 116 -> 122
+  New: `ferry: a batch lands, walks down the pier, and reaches the town`;
+  `visitors: the wallet is real money, and it runs out`; `visitors: a guest
+  stays the night and leaves on a later ferry (and roundtrips save/load)`;
+  `hotel: it lets rooms, takes the money, and the player can buy it`; `hotel: a
+  full house is handled sanely - nobody wedges, nobody vanishes`; `visitors: the
+  reserved local slot still feeds the neighbours`. They go red on the pre-pass
+  build with a ReferenceError rather than a behavioural failure — honest but
+  weaker, and noted as such, because the entities they test do not exist there.
+
+  **Re-pointings (11, every one with its receipt written into the scenario):**
+  1. `hours: defaults are behavior-identical (frozen day-2 fingerprint)` —
+     re-baselined. It could not possibly have survived: the pass replaces the
+     entire demand model AND adds two founders, so even the SHAPE of the
+     fingerprint changes. Drift reads like the change it is (serves 35 -> 50 and
+     33 -> 57 town-wide, SUDSY's till up on both seeds, the player's till down
+     on one and up on the other).
+  2. `hours: shortened hours really close the shop` — the MEASURE, twice.
+     ADMISSIONS counted anybody in the line, "arriving" OR "waiting", so the
+     tail of a legitimate pre-close queue (visitors are more patient now) read
+     as six admissions after close; an admission is a crab WALKING INTO the
+     line. And duty is sampled from close+90 rather than close+60, because a
+     crab who was mid-plate at the last-call bell finishes it, stands idle for a
+     frame and walks home.
+  3. `taps: free and always reachable, and the juice bar still sells` — the
+     floor was calibrated against the retired spawn timer, which sent a fixed
+     ~27% of a much faster stream to the bar. Drinks are bought because a
+     visitor is THIRSTY now, so the bar's trade is a share of a real population:
+     $789/$886/$851/$868 over 4 seeds x 14d. Floor re-measured, AND the property
+     the gate exists for is now asserted directly — the bar's trade is mostly
+     TOURISTS, and tourists do not use taps.
+  4. `housing: npcs sleep at the shelter, then move up` — REEF excluded; a
+     starting ASSET, like SUDSY's shop and till.
+  5. `all 9 lots stand` — the founders are three now, and REEF opens in cottage
+     8. The rule under test (hiring never conjures a house) is unchanged.
+  6. `save/load: townsfolk keep wallets and houses` — reached for `npcs[1]` and
+     meant SALTY; the townsfolk list grew. Named lookup, and a free lot.
+  7. `tired: a workday accrues it; sleep drains it, bed beating cot` — the
+     fixture pinned the RUNG but not the BED; a busier evening left the crew
+     crab still walking home at 21:30 and it was measuring the commute.
+  8. `hiring with no tourists books a morning-bus arrival` — a town is no longer
+     EMPTY before it opens (`seedVisitors`), so the fixture sends them home
+     rather than asserting they were never there.
+  9. `wage: the shipped defaults are behaviour-identical` — one more row in the
+     opening-rates roster. The hotel opens on WAGE_STD.
+  10. `mortality: a dead townsfolk crab leaves the town in a sane state` — two
+     receipts. "Still dark on reload" was only ever true by poverty (succession
+     can now clear the market); and DRIFT, on SUDS SHOWERS' opening $20 in a $23
+     town, was POACHED by the Driftwood at 20:00 on the night she died, because
+     `runWageRelations` runs earlier in the same settlement than the illness
+     roll.
+  11. `staff meals` (both) — they waited for `customers.length === 0`, and a
+     visitor never leaves that list. Asked as "nobody is mid-order" instead.
+
+  ### Story beat (organic, browser, seed unseeded — day 2 of a full house)
+  Six guests, seven rooms, and you can read every one of their days off the
+  dossier. **PEARL** came ashore on the 08:00 boat with $97. She had a DELUXE
+  SOAK at SUDS SHOWERS at 10:08, checked into **room 2** at 13:41, ate a FISH
+  TACO at the shack at 17:17, went back to the showers at 19:40 and **gave up
+  waiting** — the evening queue — turned in at 23:14, and sailed home the next
+  morning having spent **$57 of her $97**. **PLANKTON PETE**, off the same boat
+  with $80, checked into room 1 before lunch and did it the other way round:
+  soak at 13:45, grilled fish at 18:26, bed at 21:35, $52 spent. **BIG PALP**
+  landed with $104, ate at 14:31, took room 5 at 17:36, and bought a juice at
+  20:33 on his way back to it. And **MISTY**, two nights booked, four purchases
+  in and still in room 1 — got hired. The SHOP's recruitment path prefers a
+  visitor who is in town right now, so the guest you had been watching for two
+  days put on an apron and joined the crew, keeping her name and her shell.
+  Shots: `ferry-unloading`, `visitor-dossier`, `hotel-night`,
+  `hotel-full-house`, `hotel-player-owned`, `no-room-on-the-beach` under shots/.
 - **THE CRAB DIARY — a per-crab activity log, and the record that shows it**
   (Matt's directive, built 2026-08-19, worktree: *"We need a detail view of
   the character where we can see all of their recent actions, because that is
@@ -612,7 +878,6 @@ vm — never fork game logic into tools/) and perf expectations live there.
     site marked `// DIARY HOOK:` — the player moving a rate, a deal lapsing,
     the first grumble, the warning, a walkout, a quit, a poach, and a peer
     owner's move.
-=======
 - **THE TABLE SERVICE ECONOMY** (Matt's four directives, built 2026-08-19,
   worktree — verbatim: *"Decrease or eliminate tips on counter service it
   makes tables pointless; also make a setting for tip sharing (slider). Also
@@ -806,7 +1071,6 @@ vm — never fork game logic into tools/) and perf expectations live there.
   tables in use at the new cap) and `day-report-tips-bused` (TIPS TO THE CREW
   $74, TABLES BUSED 13) under shots/.
 
->>>>>>> worktree-agent-a27942d1aa747a62f
 - **Needs fail in their own character: THE TRUDGE and THE WIDE BERTH** (built
   2026-08-19, worktree — realizes `design/needs-failure-patterns.md` for three
   of the five needs, to Matt's pick, verbatim: *"Dirt boredom and tiredness are
