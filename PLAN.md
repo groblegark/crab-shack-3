@@ -278,15 +278,9 @@ compounds or collapses → the landlord collects at 20:00 either way.
 ## Tools (the load-bearing part)
 See also CLAUDE.md: the sim contract (simlib runs the REAL game files in a
 vm — never fork game logic into tools/) and perf expectations live there.
-<<<<<<< HEAD
-- `node tools/suite.mjs` — **107 scenarios, must stay green before any push.**
-- `node tools/suite.mjs` — **103 scenarios, must stay green before any push.**
-- `node tools/suite.mjs` — **109 scenarios, must stay green before any push.**
-=======
-- `node tools/suite.mjs` — **108 scenarios, must stay green before any push.**
->>>>>>> worktree-agent-a27942d1aa747a62f
+- `node tools/suite.mjs` — **the full suite, and it must stay green before any
+  push** (currently 122 scenarios; every feature pass adds its own).
 
-- `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - `node tools/illness.mjs [--seeds N] [--days D] [--quiet]` — illness-duration
   distributions per housing tier. Paired arms per seed: the care ladder live
   vs collapsed back onto the pre-seam CARED odds *inside the same build*, plus
@@ -294,9 +288,7 @@ vm — never fork game logic into tools/) and perf expectations live there.
   on an identical RNG stream. This is where the cared-seam numbers in the
   labor-policy bullet come from.
 
-- `node tools/suite.mjs` — **87 scenarios, must stay green before any push.**
 - (count above is the live one; the two older figures in this file are historic.)
-- `node tools/suite.mjs` — **122 scenarios** after the ferry/horizon pass
   (116 + 6). THIS is the live count.
 
   Covers balance curves, dishes/dining, errands, staff meals, stuck-crab
@@ -359,7 +351,6 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
-<<<<<<< HEAD
 - **THE CRAB DIARY — a per-crab activity log, and the record that shows it**
   (Matt's directive, built 2026-08-19, worktree: *"We need a detail view of
   the character where we can see all of their recent actions, because that is
@@ -647,7 +638,6 @@ vm — never fork game logic into tools/) and perf expectations live there.
     site marked `// DIARY HOOK:` — the player moving a rate, a deal lapsing,
     the first grumble, the warning, a walkout, a quit, a poach, and a peer
     owner's move.
-=======
 - **THE TABLE SERVICE ECONOMY** (Matt's four directives, built 2026-08-19,
   worktree — verbatim: *"Decrease or eliminate tips on counter service it
   makes tables pointless; also make a setting for tip sharing (slider). Also
@@ -840,8 +830,6 @@ vm — never fork game logic into tools/) and perf expectations live there.
   follow card reading BUSING A TABLE), `dining-room-full` (five of the six
   tables in use at the new cap) and `day-report-tips-bused` (TIPS TO THE CREW
   $74, TABLES BUSED 13) under shots/.
-
->>>>>>> worktree-agent-a27942d1aa747a62f
 - **THE FAR SHORE, THE MIST, AND THE FERRY** (the owner's world, built
   2026-08-19, worktree — verbatim: *"for the record, we are on the island of
   Crabalina, and the shore should be visible but often obscured by mist in the
