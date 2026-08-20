@@ -5019,10 +5019,23 @@ function awayToday(c) { return offToday(c) || walkoutToday(c); }
 // always said, and 1290 was not it. The SHACK's own span is 1220-1560, so the
 // ball sat SEVENTY PIXELS INSIDE A BUILDING and was painted over by its decking
 // in every frame since it landed (Matt: "the beach ball needs screenshot
-// testing, I don't see it"). 1150 is the real gap: the showers end at 1120,
-// their queue stands at 1126, the bus stop is at 1180, and the shack starts at
-// 1220 - so a game here is on sand, beside a bus stop, in front of nothing.
-const BALL_X = 1150;
+// testing, I don't see it").
+//
+// 1206 IS THE SPOT, AND IT WAS CHOSEN BY THE DEHYDRATION GUARD, NOT BY EYE.
+// This x is load-bearing: it sets the DETOUR every crab pays to reach a game,
+// and the crab it bites is SUDSY, an owner-operator on a ten-hour day whose
+// whole route is her house and her showers. The guard is "taps: nobody in a
+// full town is left parched", which fails a crab over 25% of its life on the
+// dehydration sickness line. MEASURED, same seeds, only this constant moving:
+//     1150 (beside the showers)      32%  FAIL - on her doorstep, she plays
+//                                          instead of drinking
+//     1588 (shack to arcade)         28%  FAIL
+//     1206 (bus stop to shack)      pass
+//     1290 (the old, invisible spot) pass
+// So the ball may not simply be dragged somewhere prettier. 1206 is the
+// nearest sand to the tuned geometry: the bus stop ends at 1192, the shack
+// starts at 1220, and a game here is in front of nothing.
+const BALL_X = 1206;
 const BALL_AT = 0.66;         // you'd BUY fun at 0.45; you walk out here when properly bored
 const BALL_JOIN = 0.48;       // ...but a game already going is worth joining at much less
 const BALL_YIELD = 0.55;      // ...and any real need outranks it well before boredYields' 0.8
