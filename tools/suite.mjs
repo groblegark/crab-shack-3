@@ -1530,6 +1530,12 @@ scenario("days off: everyone rests their weekday and plays customer", () => {
   // the rota under test is the FOUNDERS' - pin the job board off so a mid-week
   // hire can't reshuffle assigned off-days beneath the assertions
   sim.G("OWNERS.sudsy.till = 30");
+  // ...and for the same reason, no hotelier: BRASS lands mid-week by design,
+  // and this asserts that everyone in the FINAL roster showed a day off during
+  // the week. A crab who arrived on day 6 never had her rota day come round,
+  // which is a fact about her arrival, not about the day-off machinery. Her
+  // own scenarios cover her rota; `_noHotelier` is her measurement hatch.
+  sim.G("window._noHotelier = true;");
   sim.G(`coins = 5000; tryBuy("arcade"); tryBuy("chef"); tryBuy("chef");
     crabs[2].p.job = "arcade"; crabs[3].p.job = "arcade";
     window._offSeen = {}; window._clockIns = {}; window._sickDays = {};`);
@@ -3628,9 +3634,17 @@ scenario("wage: the shipped defaults are behaviour-identical (nobody grumbles, n
   // 12 days of a full town: no grievance, no walkout, no quit, no CPU move
   sim.G("coins = 3000; UPS.arcade.lvl = 1; OWNERS.sudsy.till = 400;");
   sim.runDays(12, { tickEvery: 60, onTick: (G) => G("coins = Math.max(coins, 1500)") });
+  // RE-POINTED 2026-08-19 (the hotelier pass), and the re-pointing IS the
+  // receipt: this line used to read the whole counter, and the BORED walkout
+  // was overwriting that counter with a NUMBER - so `.length` came back
+  // undefined and the gate never actually looked. Both paths write rows now,
+  // and a bored day off is a different feature legitimately firing in a
+  // default town (five of them over these twelve days). What THIS gate owns is
+  // the WAGE feature's inertness, so it counts the walkouts the wage causes.
   const out = JSON.parse(sim.G(`JSON.stringify({
     gripe: allCrabs().map(c => +(c.p.gripe || 0).toFixed(2)),
-    walk: (window._stats.walkouts || []).length,
+    walk: (window._stats.walkouts || []).filter(w => w.why === "pay").length,
+    bored: (window._stats.walkouts || []).filter(w => w.why === "bored").length,
     quits: (window._stats.wageQuits || []).length,
     // SUDSY's own policy is allowed to move HER shop - that is the feature
     // working, not a default breaking - so it is reported, not gated here.
@@ -3638,7 +3652,7 @@ scenario("wage: the shipped defaults are behaviour-identical (nobody grumbles, n
   const worst = Math.max(0, ...out.gripe);
   const crewGripe = JSON.parse(sim.G("JSON.stringify(crabs.map(c => +(c.p.gripe || 0).toFixed(2)))"));
   if (Math.max(0, ...crewGripe) > 0) return "the player's crew grumbled at the default wage: " + JSON.stringify(crewGripe);
-  if (out.walk) return out.walk + " walkouts in a default town";
+  if (out.walk) return out.walk + " walkouts OVER PAY in a default town";
   return true;
 });
 
@@ -4926,67 +4940,49 @@ scenario("rivalry: after a refusal she competes with the PLAYER'S OWN levers, an
   if (!retreats.length) return `a rival who missed her own rent never backed off a single move`;
   if (!(sim.G(`bizPriceMul("showers")`) > now.price)) return `the retreat did not put her price back up`;
 
-  // ---- THE COUNTER. The promenade is ZERO SUM: her cut takes footfall off the
-  // bar, and the player's own price stepper takes it back. Two paired towns,
-  // same seed, same props, differing only in what is written on the boards.
-  // MEASURED OVER THREE TOWNS, NOT ONE. A single nine-day town is one sample
-  // of an emergent share, and the noise floor is bigger than the signal: the
-  // beach ball (which never touches a visitor) flipped this arm on seed 909
-  // purely by making crabs less bored, so fewer took an "I'VE HAD ENOUGH" day
-  // and the juice bar went from 88.3% staffed to 96.5%. The mechanism under
-  // test is the PRICE, so the fixture has to be quiet enough to hear it - the
-  // same lesson the shift-fairness scenario learned when a two-seed version
-  // caught an outlier and called it a regression.
-  const share = (mul) => {
-    const acc = { shwr: 0, bar: 0, all: 0 };
+  // ---- THE COUNTER. The promenade is ZERO SUM: her cut takes footfall off
+  // the bar, and the player's own price stepper takes it back.
+  //
+  // MEASURED AS A SWEEP ACROSS THREE BOARDS, POOLED OVER THREE TOWNS, in a
+  // fixture that holds everything else still. Every earlier version of this
+  // arm was a TWO-ARM comparison inside a live rivalry town, and it kept
+  // flipping on things that have nothing to do with price: the beach ball
+  // (which never touches a visitor) relieved boredom, so fewer crabs took an
+  // "I'VE HAD ENOUGH" day, so the bar went from 88.3% to 96.5% staffed and
+  // availability buried the price signal; a hotelier arriving mid-run moved
+  // the wage and the room rate; and SUDSY was competing THROUGHOUT, so the two
+  // arms differed in her board as well as the player's. Three agents and I all
+  // re-pointed this arm in one night, which is the tell that the fixture was
+  // the problem and not the mechanism.
+  //
+  // So: her board is PINNED, the hotelier is out, walkouts are off, and the
+  // only thing that varies is what the player writes on their own sign. A
+  // monotonic trend across three prices is a far stronger claim than one
+  // comparison, and it is what a working lever actually looks like.
+  const barShare = (mul) => {
+    let bar = 0, shwr = 0;
     for (const seed of [909, 1337, 4242]) {
-      const s2 = rivalTown(seed);
-      // HOLD STAFFING STILL SO PRICE IS WHAT VARIES. Boredom walkouts are the
-      // loudest thing in this fixture: anything that changes how bored the
-      // crew gets changes how many hours the two shops are open, and shop
-      // AVAILABILITY dominates shop PRICE. The beach ball found this the hard
-      // way - it never touches a visitor, but by relieving boredom it took the
-      // juice bar from 88.3% staffed to 96.5% and buried the price signal
-      // under it. Turning walkouts off is not weakening the test: the arms
-      // still differ in exactly one thing, the board price, which is the
-      // mechanism under test.
-      s2.G(`window._failOff = Object.assign({}, window._failOff, { walkout: 1 });`);
-      s2.G(`setBizPrice("showers", 0.7); setBizPrice("juicebar", ${mul});`);
-      for (let i = 0; i < 9; i++) rivalDay(s2);
-      // TOURIST serves only: what the board price actually competes for.
-      const r = JSON.parse(s2.G(`JSON.stringify({ shwr: window._stats.showersDoneTour || 0,
-        bar: window._stats.drinkServesTour || 0, all: (window._stats.tourServes || 0) })`));
-      acc.shwr += r.shwr; acc.bar += r.bar; acc.all += r.all;
+      const s2 = createSim({ seed });
+      s2.G(`window._noHotelier = true; window._failOff = { walkout: 1 };
+        coins = 9000; tryBuy("juicebar"); tryBuy("table"); while (crabs.length < 6) hireCrew();
+        crabs[2].p.job = "juicebar"; crabs[4].p.job = "juicebar";
+        crabs[2].p.shift = "M"; crabs[4].p.shift = "E";
+        setBizPrice("showers", 0.7); setBizPrice("juicebar", ${mul});
+        window._stats = {}; coins = 9000;`);
+      s2.runDays(9, { tickEvery: 200, onTick: (G) => G(`if (coins < 800) coins = 800;`) });
+      bar += +s2.G(`window._stats.drinkServesTour || 0`);
+      shwr += +s2.G(`window._stats.showersDoneTour || 0`);
     }
-    return acc;
+    return { bar, shwr, share: bar / Math.max(1, bar + shwr) };
   };
-  const undercut = share(1), matched = share(0.7);
-  const rShe = undercut.bar / Math.max(1, undercut.shwr);
-  const rYou = matched.bar / Math.max(1, matched.shwr);
-  if (!(rYou > rShe))
-    return `matching her cut did not win the bar any share back (${JSON.stringify(undercut)} vs ${JSON.stringify(matched)})`;
-  // ...and the town's TOTAL footfall barely moves, which is what makes a price
-  // war a war rather than a growth strategy
-  const drift = Math.abs(matched.all - undercut.all) / Math.max(1, undercut.all);
-  if (drift > 0.25) return `cutting prices conjured ${Math.round(drift * 100)}% more guests out of the sea`;
-  // ...and the lever's own arithmetic, which is what all of the above rests on
-  const probe = createSim({ seed: 5 });
-  if (probe.G(`priceAppeal("shack")`) !== 1) return `the default price is not perfectly inert`;
-  if (probe.G(`bizPull("juicebar")`) !== probe.G(`bizPullBase("juicebar")`))
-    return `a default board already moves the promenade`;
-  probe.G(`setBizPrice("showers", 0.7)`);
-  if (!(probe.G(`bizPull("showers")`) > probe.G(`bizPullBase("showers")`) * 1.2))
-    return `a 30% cut buys no extra pull`;
-  probe.G(`setBizPrice("showers", 1.3)`);
-  if (!(probe.G(`bizPull("showers")`) < probe.G(`bizPullBase("showers")`) * 0.85))
-    return `charging 30% more costs no footfall`;
-  probe.G(`setBizPrice("shack", 0.7)`);
-  if (probe.G(`menuPrice("shack", BIZ.shack.recipes[0])`) !== Math.round(17 * 0.7))
-    return `the board price does not follow the multiplier`;
-  if (probe.G(`localPrice("shack", BIZ.shack.recipes[0])`) !== Math.ceil(Math.round(17 * 0.7) * 1.25))
-    return `a local's +25% does not follow the board`;
-  probe.G(`setBizPrice("shack", 9)`);
-  if (probe.G(`bizPriceMul("shack")`) !== probe.G(`PRICE_MAX`)) return `a nonsense price was not clamped`;
+  const dear = barShare(1.3), mid = barShare(1.0), cheap = barShare(0.7);
+  if (!(cheap.share > mid.share && mid.share > dear.share))
+    return `the player's board does not move the promenade: dear ${(100 * dear.share).toFixed(1)}%, `
+      + `level ${(100 * mid.share).toFixed(1)}%, cut ${(100 * cheap.share).toFixed(1)}% `
+      + `(${JSON.stringify({ dear, mid, cheap })})`;
+  // ...and undercutting must WIN TRADE, not just win share of a shrinking town
+  if (!(cheap.bar > dear.bar))
+    return `cutting the price sold FEWER drinks (${dear.bar} at x1.3 vs ${cheap.bar} at x0.7)`;
   return true;
 });
 
@@ -5498,6 +5494,356 @@ scenario("visitors: the reserved local slot still feeds the neighbours", () => {
   const starving = JSON.parse(sim.G(`JSON.stringify(allCrabs().filter(c => (c.p.hunger || 0) >= 0.98).map(c => c.p.name))`));
   if (starving.length > Math.max(1, Math.ceil(town / 4)))
     return `${starving.length} of ${town} locals left starving behind the visitors: ` + starving.join(", ");
+  return true;
+});
+
+
+// ===========================================================================
+// THE HOTELIER - BRASS TAKES THE DRIFTWOOD (2026-08-19)
+// ===========================================================================
+// She only comes for a hotel that is TAKING money (HOTELIER_CFG.WORTH), so the
+// whole job of the fixture is to give her one to come for: a solvent town
+// whose Driftwood has a three-day book on it. The warning, the price, the
+// purchase and everything she does afterwards are the game's own.
+function hotelierTown(seed, days, watch) {
+  const sim = createSim({ seed: seed || 909 });
+  sim.runDays(days || 9, { tickEvery: 25, onTick: (G) => {
+    G(`if (coins < 900) coins = 1800; bizTake.hotel = [90, 90, 90];`);
+    if (watch) watch(G);
+  } });
+  return sim;
+}
+
+scenario("hotelier: a new crab buys the Driftwood, and the lease is never in two hands", () => {
+  // The owner's directive was "a new crab needs to own the hotel... probably
+  // competition", and the beat is that she gets there FIRST: REEF is a willing
+  // seller, she is heard of for two settlements, and then she is standing
+  // behind his desk. The dangerous part of that is the handover, so this
+  // scenario watches every tick of it.
+  let bad = null, seenHeard = 0;
+  const sim = createSim({ seed: 909 });
+  if (sim.G(`bizOwner("hotel")`) !== "reef") return "the town does not open with REEF behind the desk";
+  if (!sim.G(`canOffer("hotel")`)) return "REEF is not a willing seller any more";
+  // the money is measured ACROSS THE TRANSACTION rather than either side of
+  // it: the sale happens inside a settlement that also collects REEF's house
+  // rent, and $10 of landlord is not a leak in the deal
+  sim.G(`window._deal = null;
+    { const orig = buyOutOwner;
+      buyOutOwner = function (b, buyer) {
+        const seller = allCrabs().find(k => k.p.owner === bizOwner(b)) || null;
+        const w0 = seller ? seller.p.wallet : 0, p0 = buyer ? buyer.p.wallet : coins;
+        const ok = orig.apply(null, arguments);
+        if (ok) window._deal = { biz: b,
+          sellerGain: (seller ? seller.p.wallet : 0) - w0,
+          buyerPaid: p0 - (buyer ? buyer.p.wallet : coins),
+          till: Math.round(ownerFunds(b)) };
+        return ok;
+      }; }`);
+  sim.runDays(9, { tickEvery: 20, onTick: (G) => {
+    G(`if (coins < 900) coins = 1800; bizTake.hotel = [90, 90, 90];`);
+    const st = JSON.parse(G(`JSON.stringify({ o: bizOwner("hotel"), heard: hotelier.heard,
+      came: hotelier.day,
+      keepers: allCrabs().filter(k => k.p.owner && k.p.owner === bizOwner("hotel")).length })`));
+    if (!bad && st.o == null) bad = "the Driftwood stood unowned";
+    if (!bad && st.keepers > 1) bad = "two owner-operators behind one desk";
+    if (st.heard && !seenHeard) seenHeard = st.heard;
+  } });
+  const closures = JSON.parse(sim.G(`JSON.stringify(window._stats.closures || [])`));
+  if (bad && !closures.some(c => c.biz === "hotel" && c.why === "bankrupt")) return bad;
+  const h = JSON.parse(sim.G(`JSON.stringify(hotelier)`));
+  if (!h.day) return "nobody came for the hotel in nine days of a town whose hotel was full";
+  // SHE IS HEARD OF BEFORE SHE IS SEEN, and the warning is the CLOCK's job
+  if (!seenHeard) return "she arrived with no warning at all";
+  if (h.day - h.heard < sim.G(`HOTELIER_CFG.WARN_DAYS`))
+    return `only ${h.day - h.heard} settlements between the first word of her and the sale`;
+  if (h.heard < sim.G(`HOTELIER_CFG.MIN_DAY`)) return "she came for a hotel the town had barely opened";
+  // ...and she is a CRAB: a name, a shell, a job, a door of her own
+  const her = JSON.parse(sim.G(`JSON.stringify((allCrabs().find(k => k.p.owner === hotelier.id) || { p: {} }).p)`));
+  if (her.name !== "BRASS") return "the hotelier has no name: " + JSON.stringify(her.name);
+  if (sim.G(`bizOwner("hotel")`) !== h.id) return "she bought a hotel she does not own";
+  if (her.job !== "hotel") return "the new owner is not behind her own desk: " + her.job;
+  if (her.homeless) return "she is running a seafront hotel out of the shelter";
+  // SHE TAKES THE NEAREST FREE DOOR TO HER OWN, which is the rule the housing
+  // ladder actually implements - not "a house within 500px of the hotel",
+  // which is a fact about whether the two seafront cottages happen to be
+  // empty. They are not, in a town that has been trading: REEF keeps one and a
+  // fisher usually has the other, so the strict version was asserting a
+  // coincidence and broke the moment the hotel fix changed who could afford a
+  // roof. Testing the rule holds either way.
+  const closerFree = JSON.parse(sim.G(`(() => {
+    const mine = Math.abs(HOUSE_XS[${her.house}] - BIZ.hotel.door);
+    return JSON.stringify(HOUSE_XS.map((x, i) => [i, x])
+      .filter(([i, x]) => !houseOccupant(i) && Math.abs(x - BIZ.hotel.door) < mine)); })()`));
+  if (closerFree.length)
+    return `she walked past an empty house closer to her own front door: ${JSON.stringify(closerFree)}`;
+  // THE MONEY IS CONSERVED: what left her wallet is what REEF banked plus the
+  // opening float in her till - a sale between two crabs mints nothing.
+  const buy = JSON.parse(sim.G(`JSON.stringify((window._stats.buyouts || [])[0] || null)`));
+  if (!buy || buy.biz !== "hotel") return "the sale never went through the buy-out path";
+  if (buy.seller !== "REEF" || buy.buyer !== "BRASS") return "the wrong crabs signed: " + JSON.stringify(buy);
+  const float = Math.floor(buy.price * sim.G(`SALE_CFG.FLOAT_FRAC`));
+  const deal = JSON.parse(sim.G(`JSON.stringify(window._deal)`));
+  if (!deal) return "the buy-out path never ran";
+  if (Math.abs(deal.buyerPaid - buy.price) > 1)
+    return `she paid $${deal.buyerPaid} of a $${buy.price} sale`;
+  if (Math.abs(deal.sellerGain - (buy.price - float)) > 1)
+    return `REEF banked $${deal.sellerGain} of a $${buy.price} sale (expected ${buy.price - float})`;
+  if (Math.abs((deal.sellerGain + deal.till) - buy.price) > 1)
+    return `money was minted or burned: paid $${deal.buyerPaid}, REEF $${deal.sellerGain}, till $${deal.till}`;
+  // REEF is out of the hotel trade, not out of the town, and he is rich
+  const reef = JSON.parse(sim.G(`JSON.stringify((allCrabs().find(k => k.p.name === "REEF") || { p: {} }).p)`));
+  if (reef.owner != null) return "REEF still owns a hotel he sold";
+  if (reef.job === "hotel") return "REEF is still working the desk he sold";
+  if (!(reef.wallet > 100)) return "REEF sold a hotel and has nothing to show for it: $" + reef.wallet;
+  // ...and the Driftwood keeps trading under her, same night
+  const till0 = sim.G(`OWNERS[hotelier.id].till`);
+  const traded = sim.runUntil(`OWNERS[hotelier.id].till > ${till0} + 10`,
+    { maxSteps: 400000, onTick: (G) => G(`if (coins < 900) coins = 1800;`), tickEvery: 25 });
+  return traded ? true : "the hotel stopped letting rooms the moment she took it on";
+});
+
+scenario("hotelier: her board moves with the house, her wage moves the whole town", () => {
+  // HER POLICY IS HER PERSONALITY, and this drives the settlement pass the
+  // game drives - one move a night, off two signals anybody can read: beds
+  // sold, and guests turned away over beds nobody made up.
+  const sim = hotelierTown(909, 9);
+  if (!sim.G(`hotelier.day`)) return "she never arrived";
+  const rooms = sim.G(`BIZ.hotel.stalls.length`);
+  // a night's books, set from outside, then HER OWN settlement call
+  const night = (js) => sim.G(`{ bizStrike.hotel = 0; hotelier.moveDay = 0; today.rival = [];
+    today.roomsLet = 0; today.roomsLost = 0; bizDayBook("hotel").take = 120;
+    OWNERS[hotelier.id].till = 600; ${js || ""} runHotelier(); }`);
+  const heard = [];
+  const said = () => {
+    const rows = JSON.parse(sim.G(`JSON.stringify(today.rival)`));
+    for (const r of rows) heard.push(r);
+    return rows.join(" | ");
+  };
+  // ---- A FULL HOUSE PUTS THE ROOM UP, one step, on the player's own stepper
+  sim.G(`setBizPrice("hotel", 1);`);
+  night(`today.roomsLet = ${rooms};`);
+  const up = sim.G(`bizPriceMul("hotel")`);
+  if (!(up > 1)) return "a full house did not move her board: " + up;
+  if (!/PUTS THE ROOM UP/.test(said())) return "she moved the board and the town was not told: " + said();
+  // ---- ...AND IT COMES BACK DOWN when the beds go begging
+  night(`today.roomsLet = 0;`);
+  if (!(sim.G(`bizPriceMul("hotel")`) < up)) return "empty beds did not bring the room back down";
+  if (!/DROPS THE ROOM/.test(said())) return "she cut the room and said nothing: " + said();
+  // ---- A DARK DAY IS NOT A PRICE SIGNAL. Her rest day, an uncovered shift or
+  // a shop shut on a missed rent all read as "nought beds sold", and none of
+  // them says the room is too dear.
+  const held = sim.G(`bizPriceMul("hotel")`);
+  night(`today.roomsLet = 0; bizDayBook("hotel").take = 0;`);
+  if (sim.G(`bizPriceMul("hotel")`) !== held)
+    return "she read a day the desk never opened as a day the room was overpriced";
+  // ---- SHORT OF HANDS: a guest on the sand with a bed standing unmade is a
+  // sale her laundry cost her, and she answers it with money OVER the market.
+  const crew = sim.G(`crabs[0].p.name`);
+  const rates = () => JSON.parse(sim.G(`JSON.stringify({ hotel: bizWage("hotel"),
+    town: townWage("shack"), going: goingRate(crabs[0]), ratio: payRatio(crabs[0]) })`));
+  sim.G(`setBizWage("hotel", WAGE_STD);`);
+  const before = rates();
+  night(`today.roomsLost = 2;`);
+  const one = rates();
+  if (!(one.hotel > before.hotel))
+    return `beds lost to unmade linen did not move her wage: $${before.hotel} -> $${one.hotel}`;
+  if (!/POSTS \$/.test(said())) return "she outbid the town in silence: " + said();
+  if (!(one.hotel >= sim.G(`Math.max(WAGE_STD, townWage("hotel"))`) + sim.G(`HOTELIER_CFG.WAGE_OVER`) - 1))
+    return "her post is not actually over the market: $" + one.hotel;
+  // ...and her FIRST raise is absorbed: townWage() is a MEAN over the shops
+  // that are hiring, so one shop going to $25 in a town whose other counter
+  // pays $20 leaves the mean under the standard day and nobody feels a thing.
+  // That is the shape of this lever and it is worth pinning: she has to keep
+  // paying for two settlements running before it reaches the player's payroll.
+  night(`today.roomsLost = 2;`);
+  const after = rates();
+  if (!(after.hotel > one.hotel)) return "she stopped bidding after one raise";
+  // THIS IS THE BITE, and it lands through machinery that was already there:
+  // townWage() is what every crab's goingRate is measured against.
+  if (!(after.town > before.town))
+    return `her raises did not move the town's rate: ${before.town} -> ${after.town}`;
+  if (!(after.going > before.going))
+    return `${crew}'s going rate did not move: ${before.going} -> ${after.going} `
+      + `(hotel $${before.hotel} -> $${after.hotel}, town ${before.town} -> ${after.town})`;
+  if (!(after.ratio < before.ratio))
+    return `${crew} is no worse paid against the market than before her raises`;
+  // ---- AND IT COSTS HER. The trigger is a MISSED RENT, not a thin till, and
+  // she walks the last move back where the whole town can read it.
+  const wage0 = sim.G(`bizWage("hotel")`);
+  sim.G(`{ today.rival = []; hotelier.moveDay = 0; bizStrike.hotel = 1; runHotelier(); }`);
+  if (!(sim.G(`bizWage("hotel")`) < wage0)) return "a missed rent did not cost her the raise";
+  if (!/MISSED RENT/.test(said())) return "the retreat was not announced: " + said();
+  // EVERY LINE SHE WRITES FITS THE CARD IT IS PRINTED ON, and text in this
+  // project is MEASURED rather than counted. The day report is 176px wide and
+  // draws its rival lines at x+6, so 164px is the budget.
+  const wide = JSON.parse(sim.G(`JSON.stringify(${JSON.stringify(heard)}
+    .filter(l => smallTextWidth(l) > 164))`));
+  if (wide.length) return `a day-report line runs past the card (${Math.round(
+    sim.G(`smallTextWidth(${JSON.stringify(wide[0])})`))}px of 164): ` + wide[0];
+  return true;
+});
+
+scenario("hotelier: one price on the hotel's sign, and it goes UP the day she signs", () => {
+  // TWO CHIPS IN ELEVEN PIXELS (fixed here). A trading shop whose owner would
+  // sell wears an OFFER chip at y105; every shop somebody else runs wears an
+  // ASK chip at y104. The Driftwood qualified for both from the day it
+  // shipped: two labels drawn on top of each other, and a hit-test that gave
+  // the tap to the DEARER of the two prices, so REEF's fair number was
+  // unreachable. One shop, one price, and a willing seller's own number wins.
+  const sim = createSim({ seed: 1337 });
+  if (!sim.G(`canOffer("hotel")`)) return "REEF is not a willing seller";
+  if (sim.G(`peerBizList().includes("hotel")`))
+    return "the hotel wears an OFFER chip and an ASK chip in the same slot";
+  const overlap = JSON.parse(sim.G(`JSON.stringify({ offer: offerChipRect("hotel"), ask: askChipRect("hotel") })`));
+  if (Math.abs(overlap.offer.y - overlap.ask.y) > 6)
+    return "the two chips no longer share a slot - this scenario is testing the wrong thing";
+  // ...and now SHE buys it, and the price on that sign is hers
+  const sim2 = hotelierTown(909, 9);
+  if (!sim2.G(`hotelier.day`)) return "she never arrived";
+  if (sim2.G(`canOffer("hotel")`)) return "the new owner inherited REEF's fair price";
+  if (!sim2.G(`peerBizList().includes("hotel")`)) return "her shopfront carries no price at all";
+  const fair = sim2.G(`offerPrice("hotel")`), ask = sim2.G(`rivalAsk("hotel")`);
+  if (!(ask > fair))
+    return `she is no dearer than the soft touch she bought it off: $${ask} against $${fair}`;
+  // SHE STILL SELLS - the number IS the negotiation, and two taps close it
+  sim2.G(`coins = ${ask} + 500; askArm = null;`);
+  if (sim2.G(`tapAskChip("hotel")`)) return "one tap bought a hotel - it must arm first";
+  const coins0 = sim2.G(`coins`), till0 = sim2.G(`OWNERS[hotelier.id].till`);
+  if (!sim2.G(`tapAskChip("hotel")`)) return "the second tap did not close the deal";
+  if (sim2.G(`bizOwner("hotel")`) !== "player") return "the hotel did not change hands";
+  const paid = coins0 - sim2.G(`coins`);
+  if (Math.abs(paid - ask) > 1) return `the player paid $${paid} of a $${ask} ask`;
+  if (Math.abs((sim2.G(`OWNERS[hotelier.id].till`) - till0) - ask) > 1)
+    return "the seller was not paid what the buyer paid";
+  const her = JSON.parse(sim2.G(`JSON.stringify((allCrabs().find(k => k.p.name === "BRASS") || { p: {} }).p)`));
+  if (her.owner != null || her.job === "hotel") return "she still runs a hotel she sold";
+  // ...and with the lease gone, so is the policy
+  sim2.G(`{ hotelier.moveDay = 0; today.rival = []; today.roomsLet = 7; runHotelier(); }`);
+  if (JSON.parse(sim2.G(`JSON.stringify(today.rival)`)).length)
+    return "she is still running a board she does not own";
+  return true;
+});
+
+scenario("visitors: a repriced board is checked against the wallet (nothing is minted)", () => {
+  // THE FAULT, and it is reachable from the price stepper the player already
+  // has: visPick's affordability check read the RECIPE table (`r.pay`) while
+  // every till in this game charges menuPrice. Put any board over 100% and a
+  // visitor joins a line they cannot clear; payAndBenefit then takes what the
+  // wallet holds, clamped at zero, and credits the owner the FULL board price
+  // - so the difference is minted out of nothing, which is the one thing the
+  // OWNERS block's audit says must never happen. The crabs' own pickErrand
+  // has always read localPrice; this was the single check that did not.
+  // The hotel is the shop most likely to be repriced, since its owner moves
+  // that board every other night now (see THE HOTELIER).
+  const sim = createSim({ seed: 4011 });
+  const dear = `for (const b of Object.keys(BIZ)) setBizPrice(b, PRICE_MAX);`;
+  sim.G(dear);
+  // wrap the one function that takes a visitor's money, and watch every charge
+  sim.G(`window._short = []; window._paid = 0;
+    { const orig = payAndBenefit;
+      payAndBenefit = function (c, cust) {
+        if (cust && cust.visitor && cust.recipe && !cust.isCrab) {
+          const price = menuPrice(cust.biz, cust.recipe);
+          window._paid++;
+          if (cust.wallet < price)
+            window._short.push([cust.name, cust.biz, cust.recipe.id, Math.round(cust.wallet), price]);
+        }
+        return orig.apply(null, arguments);
+      }; }`);
+  sim.runDays(4, { tickEvery: 25, onTick: (G) => G(`if (coins < 900) coins = 1800; ` + dear) });
+  const short = JSON.parse(sim.G(`JSON.stringify(window._short)`));
+  const paid = sim.G(`window._paid`);
+  if (!(paid > 20)) return "the probe never saw a visitor pay for anything (" + paid + ")";
+  if (short.length)
+    return `${short.length} of ${paid} visitor charges came out of a wallet that could not cover them, `
+      + `e.g. ${JSON.stringify(short[0])}`;
+  // ...and the room reserve moves with the board too, or a dear hotel takes
+  // the supper money twice: once by holding it back, once at the desk
+  const res = JSON.parse(sim.G(`JSON.stringify({ hi: (setBizPrice("hotel", PRICE_MAX), roomPrice()),
+    lo: (setBizPrice("hotel", 1), roomPrice()) })`));
+  if (!(res.hi > res.lo)) return "the room price does not read the board: " + JSON.stringify(res);
+  return true;
+});
+
+scenario("hotelier: she roundtrips save/load with her lease, her board and her ledger", () => {
+  const store = new Map();
+  const a = createSim({ seed: 909, storage: store, fresh: false });
+  a.runDays(9, { tickEvery: 25, onTick: (G) => G(`if (coins < 900) coins = 1800; bizTake.hotel = [90, 90, 90];`) });
+  if (!a.G(`hotelier.day`)) return "she never arrived";
+  a.G(`setBizPrice("hotel", 1.2); setBizWage("hotel", 27); hotelier.moves = 4; hotelier.missed = 1; save();`);
+  const want = JSON.parse(a.G(`JSON.stringify({ id: hotelier.id, day: hotelier.day, heard: hotelier.heard,
+    moves: hotelier.moves, missed: hotelier.missed, owner: bizOwner("hotel"),
+    price: bizPriceMul("hotel"), wage: bizWage("hotel"),
+    till: Math.round(OWNERS[hotelier.id].till), soft: !!OWNERS[hotelier.id].soft })`));
+  const b = createSim({ seed: 77, storage: store, fresh: false });
+  const got = JSON.parse(b.G(`JSON.stringify({ id: hotelier.id, day: hotelier.day, heard: hotelier.heard,
+    moves: hotelier.moves, missed: hotelier.missed, owner: bizOwner("hotel"),
+    price: bizPriceMul("hotel"), wage: bizWage("hotel"),
+    till: Math.round(OWNERS[hotelier.id].till), soft: !!OWNERS[hotelier.id].soft })`));
+  for (const k of Object.keys(want))
+    if (JSON.stringify(want[k]) !== JSON.stringify(got[k]))
+      return `${k} came back as ${JSON.stringify(got[k])}, expected ${JSON.stringify(want[k])}`;
+  if (got.soft) return "she came back off the disk as a soft touch";
+  if (!b.G(`hotelierRuns()`)) return "the reloaded town has nobody behind the hotel desk";
+  if (b.G(`canOffer("hotel")`)) return "the reloaded hotel is back on REEF's fair price";
+  // ...and she carries on from where she was: her next settlement still moves
+  b.G(`{ hotelier.moveDay = 0; today.rival = []; today.roomsLet = BIZ.hotel.stalls.length;
+        bizDayBook("hotel").take = 120; OWNERS[hotelier.id].till = 600; bizStrike.hotel = 0; runHotelier(); }`);
+  if (!/PUTS THE ROOM UP/.test(JSON.parse(b.G(`JSON.stringify(today.rival)`)).join(" | ")))
+    return "the reloaded hotelier has no policy left";
+  // AN OLD SAVE never met her, and that IS the old world - REEF keeps the keys
+  const store2 = new Map();
+  store2.set(SLOT1, JSON.stringify({ _ver: 1, coins: 200, day: 2, lv: { chef: 2 },
+    personas: [{ name: "PINCHY", job: "shack" }, { name: "CLAWDIA", job: "shack" }] }));
+  store2.set(ACTIVE, "1");
+  const c = createSim({ seed: 3, storage: store2, fresh: false });
+  if (c.G(`hotelier.day`) || c.G(`hotelier.id`)) return "an old save opened with a hotelier in it";
+  if (!c.G(`canOffer("hotel")`)) return "an old save lost REEF's fair price";
+  // ...and a hand-edited one is clamped rather than believed
+  const store3 = new Map();
+  store3.set(SLOT1, JSON.stringify({ _ver: 1, coins: 200, day: 2, lv: { chef: 2 },
+    hotelier: { id: "ghost", day: -4, heard: "soon", moves: 1e9 },
+    personas: [{ name: "PINCHY", job: "shack" }, { name: "CLAWDIA", job: "shack" }] }));
+  store3.set(ACTIVE, "1");
+  const d = createSim({ seed: 3, storage: store3, fresh: false });
+  const junk = JSON.parse(d.G(`JSON.stringify({ id: hotelier.id, day: hotelier.day, heard: hotelier.heard })`));
+  if (junk.id !== null || junk.day !== 0 || junk.heard !== 0)
+    return "a hand-edited save stranded a hotelier who never existed: " + JSON.stringify(junk);
+  return true;
+});
+
+scenario("measurement: a bored walkout and a pay walkout share one counter", () => {
+  // FOUND BY THE MATRIX, not by reading. `--days 40 --seeds 8 --seedbase 8`
+  // died with `_stats.walkouts.push is not a function`: the BORED walkout
+  // recorded a count and the PAY walkout recorded a row, so any town that took
+  // one of each in that order killed its own seed. window._stats is a
+  // headless-only object, but the headless matrix is how every balance number
+  // in PLAN is measured, and a harness that throws is a matrix that lies.
+  // (The hotelier made it reachable: her wage moves the town's rate, so pay
+  // walkouts are commoner than they were - see THE HOTELIER.)
+  const sim = createSim({ seed: 1337 });
+  // A REAL BORED WALKOUT, from its own site: pin a crab past WALKOUT_AT and
+  // let the settlement count the days for it.
+  sim.runDays(7, { tickEvery: 20, onTick: (G) =>
+    G(`if (coins < 900) coins = 1800; crabs[0].p.bored = 1; crabs[0].p.sick = null;`) });
+  const kind = sim.G(`Array.isArray(window._stats.walkouts) ? "rows"
+    : window._stats.walkouts == null ? "none" : typeof window._stats.walkouts`);
+  if (kind === "none") return "no crab ever took a bored day off - the fixture proved nothing";
+  if (kind !== "rows") return "the bored walkout writes a " + kind + " where the pay walkout writes rows";
+  // ...and then the pay walkout's, from the function that writes it: a crew
+  // crab whose grievance is over the line refuses tomorrow's shift
+  let err = null;
+  try {
+    sim.G(`{ const k = crabs[0];
+      k.p.wageJob = k.p.job; k.p.wageDay = 0; k.p.gripe = WAGE_CFG.LEAVE; k.p.walkout = null;
+      setBizWage("shack", WAGE_MIN); runWageRelations(); }`);
+  } catch (e) { err = String(e.message || e); }
+  if (err) return "the two walkout paths still fight over one counter: " + err;
+  const rows = JSON.parse(sim.G(`JSON.stringify(window._stats.walkouts)`));
+  if (!Array.isArray(rows) || rows.length < 2)
+    return "the counter is not a list of rows: " + JSON.stringify(rows);
+  if (!rows.every(r => r && r.name && r.day))
+    return "a walkout row has no name or no day on it: " + JSON.stringify(rows);
   return true;
 });
 

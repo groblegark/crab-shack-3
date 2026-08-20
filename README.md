@@ -16,10 +16,17 @@ tills, their own rents, their own dinners at your shack. Every crab has a
 wallet, needs, a home, a commute, and opinions — and so does every visitor who
 steps off the ferry.
 
+And somebody else wants in. A week or so after you open, a crab called **BRASS**
+gets off the morning bus, buys the DRIFTWOOD out from under REEF, and starts
+running seven rooms for money: the board goes up on a full house, and she pays
+over the odds for staff when a guest ends up sleeping on the sand. Every dollar
+a guest spends on a room is a dollar that never reaches your counter. You get
+two nights' warning, and REEF's price is on the sign the whole time.
+
 - **Businesses**: the shack, plus THE CLAWCADE (claw machines + skeeball,
   $650) to buy. SUDS SHOWERS is SUDSY's, and the DRIFTWOOD HOTEL is REEF's —
   seven rooms at the far end of the promenade, and he'll sell if the offer is
-  right.
+  right. Be quick about it: he is not the only one who thinks so.
 - **Visitors**: the ferry runs four times a day. Holidaymakers come ashore in
   batches, walk down the pier into town with real money in their pockets and
   real needs on their bars, spend a day or two here, take a room at the
@@ -59,7 +66,7 @@ regression work happens in the headless simulator, which runs the real game
 code at ~10 sim-days/second:
 
 ```
-node tools/suite.mjs                                   # 122 scenarios, keep green
+node tools/suite.mjs                                   # every scenario, keep green
 node tools/headless.mjs --days 30 --seeds 8 --quiet    # baseline curve
 node tools/headless.mjs --days 40 --seeds 8 --buy chef,table --quiet
 ```

@@ -57,6 +57,21 @@ compounds or collapses → the landlord collects at 20:00 either way.
   credit line) over what the bar is WORTH (the succession pricer plus a
   going-concern premium, smoothed) is the intent, and it walks EYEING -> OFFER
   -> COMPETE with a warning at every step. See the feature entry below.
+- **THE HOTELIER** (`HOTELIER_CFG` + the `THE HOTELIER` block in game.js,
+  2026-08-19): **BRASS**, a new crab, gets off the morning bus around day 7-12
+  with $800 and buys the DRIFTWOOD HOTEL off REEF through the player's own
+  OFFER chip, then runs it for money. REEF was written as a soft touch ("no
+  heir, and a fair price will always tempt him"), which made the hotel a shop
+  the player BUYS rather than a rival; `soft` now sits on the OWNER row rather
+  than the lease, so the crab who buys him out does NOT inherit his fair price.
+  Two levers, both settings the player also holds, one move every two nights,
+  every one of them named in the day report: the ROOM RATE moves with the beds
+  she sold (`today.roomsLet`), and the WAGE goes over the best rate in town
+  when a guest sleeps on the sand with a bed standing unmade. She competes for
+  the VISITOR'S PURSE (a dearer room is held back before anything else is
+  bought) and for LABOUR (`townWage()` is a mean, so her raise moves the
+  player's crew's `payRatio`). A missed lease payment makes her walk the last
+  move back in public. See the feature entry below.
 - **THE PRICE IS A SETTING** (`BIZ[k].priceMul` / `menuPrice` / `localPrice`,
   2026-08-19): the last frozen business number. 0.70-1.30 in 5% steps, a
   stepper on the management screen, and tourists read boards - `bizPull(b)` is
@@ -343,6 +358,11 @@ vm — never fork game logic into tools/) and perf expectations live there.
   on an identical RNG stream. This is where the cared-seam numbers in the
   labor-policy bullet come from.
 
+- `--nohotelier` on `tools/headless.mjs` keeps REEF behind the Driftwood's desk
+  (game.js reads `window._noHotelier` through `hotelierOn()` and never sets it),
+  which is the paired arm behind every number in the hotelier entry. The seed
+  matrix's summary line carries `hotelier N/K` - how many towns she reached -
+  plus `roomLets` and `unhoused`.
 - `--norival` on `tools/headless.mjs` switches THE RIVALRY off (game.js reads
   `window._noRival` through `rivalOn()` and never sets it), which is how the
   paired arms behind the rivalry numbers were measured.
@@ -472,6 +492,283 @@ vm — never fork game logic into tools/) and perf expectations live there.
     curtain — the click handler always said so, the bug was what made it
     reachable), and tourists are still out of the cycler for the reasons in the
     CYCLE THE FOCUS entry below.
+- **THE HOTELIER: BRASS TAKES THE DRIFTWOOD** (Matt's directive, built
+  2026-08-19, worktree - verbatim and complete: *"also a new crab needs to own
+  the hotel"* ... *"probably competition"*.)
+
+  **THE FAULT.** REEF keeps the Driftwood, and REEF was written as a SOFT
+  TOUCH - *"an old crab with no heir, and a fair price will always tempt him"*.
+  That is a lovely sentence and it made the hotel a SHOP THE PLAYER BUYS: seven
+  rooms sitting at the far end of the promenade with a price on them, and
+  nobody on the other side of the counter who wanted anything. The directive
+  asks for the other thing.
+
+  ### 1. WHO SHE IS
+  **BRASS** - red shell, sunglasses, drives a beach buggy, keeps a tidy house.
+  She gets off the morning bus at the west stop with **$800**, drives the
+  length of the town, and buys the Driftwood off REEF at REEF's own price. Then
+  she runs it: the board goes up when the house fills, the board comes down
+  when the beds go begging, and when a guest ends up on the sand because
+  housekeeping never got to a room, she posts a wage over the best rate in town
+  until somebody answers. **Her policy IS her personality** and you learn it
+  the way you learn SUDSY's - by reading what she does in the day report, every
+  night she does something, with the number that caused it printed beside it.
+  She is not a villain: she is the first crab in this town who treats it as a
+  business, and everything she does is a setting the player also holds.
+
+  ### 2. SHE GETS THERE FIRST, and that is the competition starting
+  - **SHE IS HEARD OF BEFORE SHE IS SEEN** (`WARN_DAYS` 2). Two settlements of
+    *"A BUYER WANTS THE HOTEL - $552"* and *"THE HOTEL HAS A BUYER WAITING -
+    $581"* in the day report before she signs, on the rivalry's own rule that a warning is guaranteed by the CLOCK
+    and not by money happening to cross a line. If the player buys the
+    Driftwood off REEF in that window, she never comes at all - the race is
+    real, and winning it is the cleanest counter there is.
+  - **SHE ONLY COMES FOR A HOUSE THAT IS TAKING MONEY** (`WORTH` 60 against the
+    same three-day book `askingPrice` reads, and never before `MIN_DAY` 5).
+    Competition arrives in a town that is working. A town whose hotel never got
+    going never meets her, which is a large part of why the do-nothing baseline
+    barely moves.
+  - **SHE BRINGS A FIXED NUMBER, NOT "WHATEVER IT COSTS"** (`BANKROLL` 800). A
+    Driftwood trading well enough is genuinely out of her reach and the report
+    says so with both numbers on it, rather than quietly inventing the money.
+    Her bankroll is the only place besides a visitor's ferry wallet where money
+    enters this town and it happens ONCE. The price leaves her wallet the same
+    evening and none of it is destroyed - half into REEF's pocket, half into
+    the hotel's own drawer as its opening float - and the change is an ordinary
+    crab wallet from then on, drained by house rent and counters like anybody's.
+    It is written into the OWNERS block's inflation audit.
+  - **SHE BUYS IT THROUGH THE PLAYER'S OWN PATH.** `buyOutOwner(b, buyer)` took
+    a buyer argument and nothing else changed: the same listing, at the same
+    `offerPrice`, in the same transaction, with the seller banking exactly what
+    left the buyer's pocket. Suite-measured across the transaction itself
+    (settlement also collects REEF's house rent, and $10 of landlord is not a
+    leak in the deal). It is one settlement call, so the lease is never seen
+    unowned and never seen held twice - pinned by a per-tick watcher.
+
+  ### 3. A SOFT TOUCH IS A FACT ABOUT THE OWNER, NOT ABOUT THE LEASE
+  `sellable` stayed on the BIZ, but the willingness moved to the OWNERS row
+  (`soft: true`, and it saves). REEF is a willing seller; the crab who buys him
+  out is not, and neither is a fisher who takes the hotel on after a failure.
+  The payoff is that the whole change is legible on one 11-pixel chip:
+  - while REEF has it, the sign wears **OFFER $N** - his fair price, and on
+    seed 1337 that is what she pays him: **$608** on day 7;
+  - the moment she signs it wears **BUY $N** instead - `goingConcern` plus the
+    hold-out premium every peer shop's ASK already carries. Same seed, day 23,
+    same seven rooms: REEF's rule would read **$584** and hers reads **$749**.
+  **A pre-existing fault fell out of this**: a trading shop with a willing
+  owner qualified for the OFFER chip (y105) *and* the peer ASK chip (y104), so
+  the Driftwood drew two labels on top of each other from the day it shipped -
+  and the hit-test, which checks `peerBizList()` first, gave the tap to the
+  DEARER of the two prices. REEF's fair number was unreachable. `peerBizList()`
+  now excludes a shop that `canOffer`: one shop, one price, and the willing
+  seller's own number wins.
+
+  ### 4. THE TWO LEVERS, and what they cost the player
+  One move every `STEP_DAYS` 2, announced by name, and never two in a night.
+  | lever | her signal | what it does to the player |
+  |---|---|---|
+  | **THE BOARD** `setBizPrice("hotel", +-5%)` | beds SOLD tonight (`today.roomsLet`): `FULL` 0.70 of the rooms puts it up, `SLACK` 0.30 brings it down | `visPick` holds the BOARD price of a bed back before a visitor buys anything else, so every step she takes is a step off the town's supper money. Zero sum, exactly like the promenade. |
+  | **THE WAGE** `setBizWage("hotel", best + 2)` | a guest asleep on the beach with a bed standing UNMADE (`today.roomsLost`) - a sale her laundry cost her, not her demand | `townWage()` is a MEAN over the shops that are hiring, so her raise moves every crab's `goingRate`, which moves the crew's `payRatio`, which is the grievance ladder that was already there. She poaches by moving the market, not by a special case. |
+  - **A DARK DAY IS NOT A PRICE SIGNAL.** Her own rest day, an uncovered shift,
+    a shop shut on a missed rent - all of them read as "nought beds sold" and
+    none of them says the room is too dear. The day book is the honest test
+    (`bizDayBook("hotel").take > 0`), and it is suite-pinned.
+  - **IT CONVERGES, and it costs her.** The dead band between FULL and SLACK is
+    wide, and the loop self-limits from both ends: a dearer room sells fewer
+    beds. When the Driftwood takes a rent STRIKE she walks the last move back
+    in public - the wage first, because the wage is the only one of the two
+    that costs cash on the night. Reading her TILL instead was rejected for the
+    reason the rivalry already measured: a seven-room lease settles all over
+    the place, so a till gate makes a rival who never moves.
+  - **THE FIRST RAISE IS ABSORBED.** One shop going to $25 in a town whose
+    other counter pays $20 leaves `townWage()` under the standard day and
+    nobody feels a thing; the SECOND one lands. That is the honest shape of
+    this lever and the suite pins it rather than pretending otherwise.
+
+  ### 5. WHERE YOU READ HER - no new panel, anywhere
+  The day report's RIVAL block (every move, plus a quiet-night line carrying
+  beds-sold and her rate), a named toast on the night, her own DIARY page
+  (*"PUTS THE ROOM UP TO $15 - 5/7 SOLD"*), her dossier and the TOWN
+  census like any owner-operator, the job board's payroll list, the SCHEDULE
+  tab's `TOWN $x / PIER $y` line - which is exactly where her raise shows up
+  against the player's own rate - and the ASK chip on her shopfront.
+
+  ### 6. TWO MORE FAULTS FOUND ON THE WAY, both reachable before this pass
+  (three, with the day report's own trimming - see the suite note below)
+  1. **A REPRICED BOARD WAS NOT CHECKED AGAINST THE WALLET.** `visPick`'s
+     affordability test read the RECIPE table (`r.pay`) while every till in the
+     game charges `menuPrice`, and the room money a visitor holds back
+     (`roomReserve`) read `ROOM_RATE` for the same reason. Put any board over
+     100% - the player's own stepper does it - and a visitor joins a line they
+     cannot clear; `payAndBenefit` then takes what the wallet holds, clamped at
+     zero, and credits the owner the FULL board price. **The difference is
+     minted**, which is the one thing the OWNERS audit says can never happen.
+     The crabs' own `pickErrand` has always read `localPrice`; this was the
+     single check that did not, and the hotel is now the shop most likely to be
+     repriced. Everything reads `roomPrice()` now. Default 1 is untouched
+     (`Math.round(pay * 1) === pay`).
+  2. **THE TWO WALKOUT PATHS FOUGHT OVER ONE COUNTER.** The bored walkout wrote
+     `_stats.walkouts` as a COUNT and the pay walkout wrote it as a ROW, so a
+     town that took one of each in that order died with
+     `_stats.walkouts.push is not a function`. Found by the matrix, on the
+     `--seedbase 8` growth block, because her wage lever makes pay walkouts
+     commoner than they were. `window._stats` is headless-only, but the
+     headless matrix is how every balance number in this file is measured and a
+     harness that throws is a matrix that lies. Both write rows now.
+
+  ### 7. Balance - the hatch is the attribution
+  `--nohotelier` keeps REEF behind the desk, and the OFF arm of the baseline
+  reproduces the documented HEAD list **exactly**, which is the receipt that
+  everything above is behaviour-identical when she is switched off:
+
+  | matrix | `--nohotelier` | live | documented HEAD |
+  |---|---|---|---|
+  | baseline `--days 30 --seeds 16` | 0/16, median **11** (6,8,9,9,10,11,11,11,11,12,12,13,13,13,14,15), lifetime $52,842 | **0/16, median 11** (6,8,9,9,9,10,10,11,11,12,12,13,14,14,14,16), lifetime $52,358 (**-0.9%**) | 0/16, median 11, same list as the OFF arm |
+  | growth `--buy chef,table` 40d x 8 | 2/8, 6,8,9,10,14,15,41,41 (median 14), lifetime $65,460 | **2/8, 6,8,9,9,13,19,41,41 (median 13), lifetime $65,752 (+0.4%)** | 2/8 |
+  | growth, second block `--seedbase 8` | 3/8, 11,11,12,15,17,41,41,41 (median 17), lifetime $77,148 | **3/8, 10,12,12,13,18,41,41,41 (median 18), lifetime $76,859 (-0.4%)** | 3/8 |
+
+  Across both growth blocks the escape count is **5/16 with her and 5/16
+  without**, and BOTH `--nohotelier` arms reproduce this file's documented HEAD
+  lists character for character (baseline 6,8,9,9,10,11,11,11,11,12,12,13,13,
+  13,14,15; growth 6,8,9,10,14,15,41,41; second block 11,11,12,15,17,41,41,41).
+  That is the receipt that the two bug fixes above are behaviour-identical at
+  the default board price - `Math.round(pay * 1) === pay` - and that every
+  difference in the live column is HER.
+
+  **She lands in most towns**: 13 of 16 baseline seeds and 14 of 16 growth
+  seeds, around **day 7-12**. Lose-by-default is absolute (0/16) and the median
+  sits inside CLAUDE.md's documented 11-13 band.
+
+  **WHAT SHE ACTUALLY COSTS, paired arms inside the same build** (4 propped
+  towns x 20 days, coins held up so the eviction cannot confound the demand;
+  she lands on day 9.5 on average):
+
+  | | `--nohotelier` | BRASS |
+  |---|---|---|
+  | the room rate she settles on | $13 | **$16 (+23%)** |
+  | visitor money spent in town | $40,492 | **$42,118 (+4.0%)** |
+  | ...of which the PLAYER's lifetime | $37,028 | $36,967 (**-0.2%**) |
+  | seatings | 1,363 | 1,335 (-2.1%) |
+  | rooms let | 438 | 479 (+9.4%) |
+  | crew grievance, town-wide | **0.00** | **0.34** (GRUMBLE is 0.35) |
+
+  Read those rows together and the design is in the table. She takes about
+  **$20 a town-day more out of the same purses** and the shack's takings do not
+  rise to meet it, because the promenade is zero sum and a bed is paid for
+  before a supper is. The labour half of it shows up in the growth matrix,
+  where the second block measured both arms after the counter fix:
+  **175 walkout-days against 126, +39%** (that counter holds pay walkouts AND
+  bored ones, so it is the town's total refusal-to-work, not a pay-only
+  number - the pay half is what her wage lever owns and the crew grievance row
+  above is the cleaner read of it).
+
+  **AND WHAT THE PLAYER CAN DO ABOUT IT**, cheapest first:
+  1. **WIN THE RACE.** Two settlements of warning with REEF's price on the sign
+     the whole time. On seed 1337 that window reads **$552, $581, $608** - it
+     goes UP while you think about it, because the Driftwood is trading - and
+     by day 23 her own sign reads **$749** for the same seven rooms. Waiting
+     cost **$165**, and it is painted on the shopfront both times.
+  2. **PAY THE CREW.** Her raise reaches them through `townWage()`, and the
+     SCHEDULE tab has printed `TOWN $x / PIER $y` beside the player's own rate
+     since the wage pass. It is a bill, not a trap: two of her raises put the
+     crew on the GRUMBLE line, and a dollar puts them back.
+  3. **BUY HER OUT.** The number on her sign IS the negotiation - it is
+     `goingConcern`, so a Driftwood taking less money is a cheaper Driftwood.
+     Honest caveat, and it is measured rather than hoped: the player has far
+     less leverage over a hotel's books than over a juice bar's, so this is the
+     expensive door rather than the clever one.
+
+  **What was tuned, and it was all my own knobs** (never a price, a wage or a
+  rent that existed before this pass): `MIN_DAY`, `WORTH`, `WARN_DAYS`,
+  `BANKROLL`, `FULL`/`SLACK`, `STEP_DAYS`, `WAGE_OVER` and `TILL_FLOOR`.
+
+  ### 8. REEF is kept, and he does not retire quietly
+  Replacing him at founding would have been a rename plus a re-pointing for
+  every fixture that names him (the housing exclusion, the lot table, the
+  save/load roster, the opening-rates roster, the hotel's own scenario) and a
+  re-baselined day-2 fingerprint, for a worse story. Keeping him costs
+  **zero re-pointings**: BRASS does not exist on day 3, so every founding
+  fixture, the housing row, the lot table and the frozen fingerprint are
+  untouched - and his soft-touch line becomes the door she walks through
+  instead of a dead end. He is laid off by the sale like any other staff (the
+  same thing happens when the PLAYER buys him out), banks his half of the
+  price, and goes back to the rail a rich crab - and the succession layer takes
+  it from there. On seed 1337 he bought SUDS SHOWERS for $180 three days later
+  when SUDSY died, which quietly makes the old hotelier the JUICE BAR's rival,
+  because THE RIVALRY keys on that lease and not on SUDSY. Nobody wrote that.
+
+  ### Story beat (organic, reproducible - seed 1337, no buys)
+  `node tools/headless.mjs --days 22 --seeds 1`, and it is all in the day
+  report. **D5**: *A BUYER WANTS THE HOTEL - $552.* **D6**: *THE HOTEL HAS A
+  BUYER WAITING - $581* - the Driftwood is trading, so the price of it climbs
+  while you think about it. **D7**: **$608**, and *BRASS BOUGHT THE HOTEL OFF
+  REEF - $608.* **D8**: *BRASS PUTS THE ROOM UP TO $14 - 7/7 SOLD*, and
+  the board walks $14, $15, $16, $17 across a fortnight of full houses - every
+  step announced with the count that caused it. **D20**: *BRASS DROPS THE ROOM
+  TO $16 - 2/7 SOLD*, and **D22** she puts it straight back. And in the middle of that,
+  **D10**: *REEF HAS THE SHWR NOW.* SUDSY died, and the old hotelier - flush
+  with the $304 BRASS paid him - bought the shower house off the market three
+  days after losing his own. Nobody wrote that beat: THE RIVALRY keys on the
+  showers LEASE, so the crab BRASS bought out is now the one standing outside
+  the player's juice bar.
+
+  ### 9. Suite 139 -> 145, and ONE re-pointing worth reading
+  New: `hotelier: a new crab buys the Driftwood, and the lease is never in two
+  hands` (the warning before the sale, a per-tick watch for an unowned or
+  double-held lease, conservation measured ACROSS the transaction, and REEF
+  landing on his feet); `hotelier: her board moves with the house, her wage
+  moves the whole town` (both levers, the dark-day guard, the first raise being
+  absorbed and the second one reaching the player's crew, and the retreat on a
+  missed rent); `hotelier: one price on the hotel's sign, and it goes UP the
+  day she signs` (the two-chip overlap, her hold-out premium, and the player
+  buying her out); `visitors: a repriced board is checked against the wallet
+  (nothing is minted)` (a wrapper on `payAndBenefit` watching every visitor
+  charge with every board at 130%); `hotelier: she roundtrips save/load with
+  her lease, her board and her ledger` (plus an old save that never met her and
+  a hand-edited one); `measurement: a bored walkout and a pay walkout share one
+  counter`. **THREE of them go RED on the pre-pass build for BEHAVIOURAL reasons
+  rather than a ReferenceError** (checked by reverting the three fixes on this
+  tree and running them): *"the hotel wears an OFFER chip and an ASK chip in
+  the same slot"*, *"4 of 105 visitor charges came out of a wallet that could
+  not cover them, e.g. PEARL, shack, fish, $17 of $17"*, and *"the bored
+  walkout writes a number where the pay walkout writes rows"*.
+  A fourth pre-existing overflow was fixed on the way and is pinned by
+  measurement rather than by eye: the day report never trimmed a RIVAL line to
+  the card, and every line the hotelier writes is now checked against the
+  card's own 164px with `smallTextWidth` inside the scenario.
+
+  **THE ONE RE-POINTING, and it is the counter fix paying for itself.**
+  `wage: the shipped defaults are behaviour-identical` gated on
+  `(_stats.walkouts || []).length` - and the BORED walkout was overwriting that
+  counter with a NUMBER, so `.length` came back `undefined` and **the gate had
+  never once looked**. With both paths writing rows it saw five bored days off
+  in a default town and went red, correctly. A bored walkout is a different
+  feature legitimately firing (boredom DRIFTS, 2026-08-19); what that gate owns
+  is the WAGE feature's inertness, so the pay row now carries `why: "pay"` and
+  the gate counts those. The default town still has ZERO wage walkouts.
+
+  ### 10. What was deliberately NOT built
+  - **A SECOND RIVALRY STATE MACHINE.** `rival` is one object, one PRIZE, one
+    SHOP, and making it a keyed map so BRASS could run EYEING -> OFFER ->
+    COMPETE against a player-owned Driftwood is a refactor of ~600 lines and
+    every scenario that pokes `rival.*`, to re-tell a beat the town already
+    has. She plugs into the pieces instead: the same three levers, the same
+    retreat rule, the same `goingConcern`/ASK machinery, the same day-report
+    channel. If the player owns the hotel she simply never comes - they won the
+    race, and that is a clean outcome rather than a hole.
+  - **THE HOTEL SERVING FOOD.** It only becomes a real decision if a guest can
+    prefer it to the shack for a reason, which means recipes, a kitchen
+    station, staff to cook them and a second dining room competing for the same
+    four tourist queue slots - and drawn furniture in the one shopfront this
+    pass is not allowed to touch. Bolted on as a bizPull weight it is either
+    inert or a straight tax with no lever against it, which is a number that
+    drifts rather than a rivalry.
+  - **AN HOURS LEVER.** The hotel still has no `HOURS_POLICY` row. A third
+    lever would have needed its own attribution arm and the two measured ones
+    are enough to feel.
+  - **ANY CHANGE TO THE HOTEL'S DRAW CODE** (another agent is on a night-time
+    flicker there), and nothing at all near the shelter, the town fund or
+    charity.
 - **CYCLE THE FOCUS + SUDSY WANTS THE JUICE BAR** (two owner directives, built
   2026-08-19, worktree — verbatim: *"need a single small pictorial next/prev
   crab button to cycle focus"* and *"sudsy needs to want to buy the juice shop,
@@ -3385,6 +3682,15 @@ unit economics.
   chatter. Whatever the surf spot is, "limited" is the load-bearing word — a
   free unlimited cure for boredom would flatten the arcade and the need with
   it.
+0. **Two small text nits, both spotted 2026-08-19 and both left alone on
+   purpose** (a suite run costs 20 minutes on a loaded machine, and neither is
+   worth invalidating one): (a) the diary's serve line is `"SERVED A " +
+   ITEM_NAMES[icon]`, and `roomkey` is `"A ROOM FOR THE NIGHT"` - so the
+   Driftwood's own keeper writes *"SERVED A A ROOM FOR THE NIGHT TO EBB"*. The
+   article belongs to the item name (every other surface reads correctly with
+   it), so the fix is at the SERVE site, not in the table. (b) `OFF_BASE` still
+   has no `juicebar` row - flagged when the hotel landed without one, still
+   true, still one line.
 1. ~~**Business settings**~~ — **shipped**: shop hours + the management screen
    (2026-08-18), per-business and per-crab WAGES (2026-08-19, "THE WAGE IS A
    SETTING"), and per-business **PRICES** (2026-08-19, with the rivalry — it
