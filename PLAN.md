@@ -83,16 +83,13 @@ landed in one night. Everything below is merged, pushed and live.
 **NEXT UP (Matt's queue, in his order):**
 - **The departure card** — end-of-day view of who is leaving on the ferry and
   how they feel, with a quote DERIVED from their stats. See the backlog entry.
-- **The onboarding/UI pass** — off Ben Lewis's playtest, under the two-kinds-
-  of-not-knowing rule below. The wall-of-text opening, tooltips on shop
-  upgrades, seeing a hire actually arrive, and making "is my money going up?"
-  answerable at a glance. **Now carries a required section** (Matt,
-  2026-08-20): *"there should be a help screen for public functions and
-  roles"* — who every crab in this town is FOR (crew, owner-operators,
-  fishers, the mayor, Mr. Pincherton, the rival, the hotelier, visitors) and
-  what the town does that is nobody's business (the shelter, the fund, the
-  pot, polling day). Plus the plain sentence that you cannot set the town's
-  policy unless one of your crabs is wearing the hat.
+- ~~**The onboarding/UI pass**~~ — **MOSTLY SHIPPED 2026-08-20** (see THE
+  ONBOARDING PASS below): shop tooltips, a five-page HELP card with three
+  front doors, a hire you can actually see arrive, TODAY +$N in place of the
+  $/S readout, a TILL TODAY board on your own shopfront, and the tips-slider
+  mush plus the class behind it. **Still open from Ben's list: the wall-of-
+  text opening** — the lease card is the first screen and it explains terms
+  to somebody who does not yet care. It wants a hook, not more words.
 - **A surf spot mid-beach** — explicitly deferred by Matt behind the ball.
 
 **THE THREE RULINGS THAT CONSTRAIN NEW WORK** (each has its own section
@@ -4669,6 +4666,271 @@ reading surface owns the screen.
 - **Hooking the flash into `creditBiz`.** It would have been one line, but the
   draw can watch the day book instead and the sim stays untouched.
 
+## THE ONBOARDING PASS (shipped 2026-08-20, worktree) — the machine says what it is
+
+**The brief, in one line:** Ben Lewis's playtest listed six defects and four of
+them are "I cannot tell what this does". This pass answers those four, and
+leaves the economy exactly as frightening as it was. Of the other two, the
+fifth (*"PAUSE ANYONE?"*) was answered by removing the idea rather than
+building it, and the sixth — the lease card's wall of text with no hook — is
+still open.
+
+**THE LINE EVERY DECISION HERE WAS TAKEN AGAINST** is the ruling above:
+*interface opacity is a bug; economic uncertainty is the game*. Restated as the
+test that was actually applied to each change: **a player who cannot tell WHAT
+A BUTTON DOES is a bug to fix; a player who is losing money while they work it
+out is the design.** Anything that would have bought the player TIME was
+rejected on those grounds — including, explicitly, an early version of the help
+card that stopped the clock while it was open. That went in the bin the same
+day the pause chip did (Matt: *"remove the pause button, it's against the
+spirit of the game"*), and a scenario now pins it: the help copy may not
+contain PAUSE, SPACE BAR, STOP THE CLOCK or FREEZE, and the clock is asserted
+to keep running with the card open.
+
+### 1. SHOP TOOLTIPS — "WHAT DO THESE THINGS DO? TOOLTIP TIME!"
+
+Every rung of the shop grid was a NAME and a PRICE and nothing else. A tooltip
+card now hangs off the bottom of the world, directly above the MANAGE/TOWN
+chips (the only band that is sky on the shop tab), and it says exactly four
+things:
+
+| | | |
+|---|---|---|
+| **NAME** | `HIRE CRAB` | the button |
+| **PRICE** | `$60`, green if you can afford it, red if not | what it costs once |
+| **WHAT CHANGES** | `CREW 2 -> 3` | derived, see below |
+| **EVERY NIGHT AFTER** | `+$23 A SHIFT ON TONIGHT'S BILL` | the standing order |
+
+The fourth row is the one that earns its keep. HIRE CRAB and ARCADE are both
+one-off prices on the button and both of them are really a commitment against
+every future 20:00, and nothing on screen said so.
+
+**WHAT IT MAY NOT SAY** is whether the thing will pay for itself. No projected
+income, no payback period, no "recommended". That decision is the game.
+
+**IT IS DERIVED, NOT TYPED.** `upEffect()` reads the same functions the sim
+reads — `stationCap`, `bizTables`, `crabs.length`, `ownedBizList` — and
+`upOngoing()` reads `bizWage()` and `BIZ[k].rent`. So dropping the shack's wage
+on the management card changes what the HIRE CRAB button promises, because it
+changes what a hire costs. The scenario tests the mechanism rather than the
+string: read the promise, buy the thing, assert the town now holds the number
+the promise named. All seven rungs.
+
+**ONE RULE, TWO INPUT DEVICES.** `tapShopButton` buys the button whose tooltip
+is ALREADY ON SCREEN and otherwise puts the tooltip on screen. On a mouse that
+is a single click, because moving the pointer over the button showed the
+tooltip on the way in — hover does the arming for free. On a touchscreen it is
+read-then-buy. Neither device has a mode the other lacks. `tryBuy` is untouched
+and is still the one function that moves money, which is why every tool and
+every existing scenario keeps driving it directly.
+
+### 2. THE HELP CARD — eight pages, and two constraints pulling against each other
+
+Matt, mid-pass: *"there should be a help screen for public functions and
+roles"* — which is the same defect Ben found from the other end (*"theres
+pinchy and claudi. What do they do?? NOBODY KNOWS"*). The town is full of
+crabs and only SOME of them are yours, and before this there was no surface
+anywhere that said which was which or who was paying them.
+
+`HELP_PAGES`, in reading order — your business, your staff, the deadline,
+everyone else, what the town does, the vote, where things are, the keys:
+
+1. **THE SHACK** — the loop in four steps, and that the shack is the only thing
+   in town that puts money in your pocket.
+2. **THE CRABS** — what they do for you, and what they need out of their own
+   wages.
+3. **THE CLOCK** — 20:00 is the only deadline; and it only runs forward.
+4. **WHO IS WHO** — the ROLES page, as a key/value table: YOUR CREW (you hire
+   them, you pay them at 20:00) / OWNERS (run their own shop, pay themselves) /
+   FISHERS (self-employed, they sell you the fish) / VISITORS (off the ferry
+   with real money) / THE MAYOR (elected, top hat, runs the shelter) / RIVAL
+   OWNERS / THE LANDLORD (Mr. Pincherton, never seen, always paid). Plus why an
+   owner-operator works the long D shift, and that any crab's own card answers
+   this for that crab.
+5. **THE TOWN HALL** — the PUBLIC FUNCTIONS page. The shelter (and that it pays
+   the landlord rent like you do), the town fund and its four purses with the
+   mayor's pick between them, why the purses falling on different crabs is what
+   makes the vote worth casting, and the iron rule underneath all of it:
+   *nothing here is free, every bowl in that pot was bought from a real shop the
+   night before.*
+6. **POLLING DAY** — Sunday. Nominations close at Saturday's settlement, two
+   ballot tables, polls 07:00-19:00, finite paper, hand count, and a long shift
+   can cost a crab its vote. Then the sentence Matt asked for by name:
+   **you cannot set the town's policy unless one of your crabs is wearing the
+   hat; until then those dials are your manifesto, nothing more.** The HALL
+   tab's mechanism was always right (the dials only ever write `hall.plat`, and
+   `hall.policy` is written only under `playerMayor()`) — the card never SAID
+   so, which made it read as an economic bug when it was an interface one.
+7. **FINDING THINGS** — the nav strip, MANAGE, TOWN, the shop tab.
+8. **CONTROLS** — right-click, the bracket keys, `f`, `m`/`n`/`b`, `esc`, `h`.
+
+- **THE EMBARGO.** The town's name is not on it and neither is the way out: a
+  scenario greps the whole card for FERRY OFFICE / TICKET / FARE / ESCAPE /
+  PASSAGE / MAINLAND and fails on any of them. The BOAT's existence is fine —
+  she lands tourists four times a day in plain sight and the game's own toast
+  says THE FERRY IS IN — it is the office at the pier head that is the reveal.
+- **THE RULING.** The same scenario fails on RECOMMEND / SHOULD BUY / PROFIT /
+  PAYS FOR ITSELF / WILL EARN — and, since 2026-08-20, on PAUSE / SPACE BAR /
+  STOP THE CLOCK / FREEZE, because a help screen is exactly where the pause
+  chip would quietly come back as a promise that reading is free.
+- **AND IT HAS TO KEEP SAYING THE LOAD-BEARING THINGS.** The same scenario
+  requires 20:00 / RENT / WAGES / TIP / CRAB SHACK / REP / YOUR CREW / FISHERS /
+  VISITORS / THE MAYOR / THE LANDLORD / SHELTER / TOWN FUND / SUNDAY /
+  MANIFESTO. That list is Matt's brief turned into a gate: an edit that quietly
+  drops the roles page fails here rather than being found by the next player who
+  cannot tell what a fisher is.
+
+**Doors in:** a HELP chip third on the nav strip's chip row (its x is a
+constant, so it does not move when a player with no shop left loses MANAGE and
+TOWN — and unlike those two it stays live for that player), the `h` and `?`
+keys, and a HOW TO PLAY button on the title screen. The chip pulses on day one
+until the card has been opened once (`helpSeen`, persisted), and fires one
+toast: *"NEW HERE? TAP HELP - OR PRESS H"*.
+
+**Doors out:** DONE, a tap off the card, `esc`, or the chip again — all four
+through one `closeHelp()`.
+
+**AND ONE OPACITY GAP CLOSED IN COPY RATHER THAN CODE:** page 5 ends with
+*"THE HELP WANTED BOARD IN THE MIDDLE OF TOWN ALSO CARRIES THE TOWN'S TRADE
+LEDGER"*, which PLAN has had on the undiscoverable list since 2026-08-19.
+
+**THE BUG THE FONT CAUGHT:** the controls page originally listed `[  ]` for the
+crab cycler. `FONT_SMALL` has no bracket glyphs, so it printed `??  ??` — on
+the one screen whose entire job is explaining the controls. The scenario now
+checks every character of every line against the font table it will be drawn
+in, in both fonts, and the keys are named ("BRACKET KEYS") instead.
+
+### 3. A HIRE YOU CAN SEE — "Don't even see the crab. He just joined the crew."
+
+Three things now happen, and the order matters: the camera **snaps** to the new
+hire (the follow lerp is `dt * 5`, so a hire across town would slide past while
+the card was already up); a green **pointer bobs over their head** in the world
+for as long as the card is up; and a **card** says who they are, how they got
+here (a tourist who stayed, or a face off the morning bus), what they will do
+all day, the shift window they are on, `$23 A SHIFT, ON TONIGHT'S BILL AT
+20:00`, and that they sleep at the shelter — because a hire starts homeless
+like everybody else in this town and nothing anywhere said so.
+
+**The card runs on the WALL clock, not the sim clock.** A card you are meant to
+read must not get six times shorter because the speed chips are on. This buys
+the player nothing: the day underneath it is running at whatever speed they
+chose. `raw` is computed beside the `dt` line rather than out of it, so the
+speed row's own arithmetic is untouched.
+
+### 4. "IS MY MONEY GOING UP?" — history, not a forecast
+
+The panel slot he was looking at read **`$1.1/S`**: dollars per second of REAL
+time, a number that changes when you press a speed chip. It reads
+**`TODAY +$159`** now — `coins - dayOpen`, green up, red down.
+
+That is a **FACT ABOUT TODAY**, and the distinction is the whole ruling. It does
+not project tonight; the BILL chip already states what is owed and whether the
+two meet is the game. After 20:00 it goes hard negative, because the landlord
+just took the rent — the loop being taught rather than hidden.
+
+`dayOpen` is set at midnight and rides the save (an old save opens the day at
+the till it came back with, which reads `+$0` rather than a phantom fortune).
+`incomeRate()` is still called for its side effect: it is the only thing that
+prunes `earnHist`.
+
+Measured, not counted: the label is dropped rather than the number when a rich
+town makes the pair too wide for the 52px between the SHOP tab and the SAVE
+chip. Worst case checked at `-$123.5K`.
+
+### 5. THE TILL BOARD — where the money comes from, said in the town
+
+Matt: *"maybe it's not obvious enough that the crab shack is the central place
+money comes from?"* The nav strip answers that on the MAP (tallest block, only
+gold one, only named one, dead centre). This answers it at STREET LEVEL: a
+board chalked **TILL TODAY $295** hung on your own shopfront, going up while
+you watch the plates go out, flashing in step with the strip off the same
+watcher.
+
+It takes the slot the CLOSED placard uses and cannot fight it (that branch is
+`!bizOpenNow`, this one is the else). It is on YOUR shops only — a peer's
+takings are not your business and have never been on any surface the player can
+read. And it reads `today.biz[key].take` through `navTill`'s **plain lookup**
+rather than `bizDayBook()`, which would CREATE a day-book row for a shop that
+has not traded and put a phantom line in tonight's report.
+
+### 6. THE MUSHED TEXT — and the third sweep
+
+Matt: *"the tips slider is mushed up with the other text; might be a couple of
+instances like that."* There was, and this is the cause: the SCHEDULE tab's
+right-hand column ran **TONIGHT $92** (y+45), **TOWN/PIER** (y+54), a
+**"TAP A ROW"** hint (y+60) and the slider's own readout (y+66) — four strings
+at a 6px pitch in a 5px font, none of them technically overlapping, all of them
+unreadable as a group. **The existing sweep cannot see this**: it fires on two
+pixels of overlap and this was one pixel of gap.
+
+The hint went, because it was already said — the foot of the same card carries
+the full sentence, next to the roster it is about. That leaves the slider's
+readout a row of its own.
+
+**AND THE OTHER TWO INSTANCES, which the sweep found once it was pointed at a
+LONG NAME.** The character card prints the crab's name at x29 and its mood
+right-aligned to x104, and nothing measured the gap - so **PLANKTON PETE
+printed straight through DOWN**, and TIDEPOOL TIM through it on the visitor's
+card. Both had a `slice(0, 9)` where a measurement belonged, which is the exact
+guess-about-a-proportional-budget this file already has a paragraph about; the
+5x7 font simply had no `fitSmall` equivalent, so **`fitText` is new**. The
+reason it survived this long is the fixture: every sweep ran the card on
+`crabs[0]`, who is PINCHY, six characters, and the row only breaks at about
+ten. The sweep now runs it on the widest name in `CRAB_NAMES.concat(
+CUSTOMER_NAMES)` against the widest mood, measured rather than typed - so a new
+name added to the roster is checked the day it lands.
+
+**AND THE OTHER CLASS.** Three of the SCHEDULE card's footer sentences were over
+budget and were being silently cut off by `fitSmall` — a line that fits because
+its tail was removed still reads as a sentence nobody finishes. New scenario
+**"no fixed sentence on a card is trimmed to a pair of dots"** sweeps the copy
+that is WRITTEN (help pages, tooltips, hire card, roster hints) against the
+game's own rect tables, and leaves alone the copy that is ASSEMBLED (menus,
+report lines, ballot lines out of crab names) — trimming is the right answer
+for those, which is what `fitSmall` is for. `rosterHint()` was hoisted out of
+the draw so the suite measures the same strings the card prints rather than a
+copy of them.
+
+### The receipts
+
+- **Two real pre-existing bugs found by the extended sweep and fixed**: a long
+  crab name printing through its own mood on both character cards. See the mush
+  section - the fix is `fitText`, and the sweep now uses the roster's widest
+  name so it cannot regress quietly.
+- **13 new scenarios** (the suite goes 167 -> 180), all mutation-tested. The three worth naming: the
+  tooltip promise is verified by BUYING the thing and re-reading the counter;
+  the hire pointer is verified by PANNING THE CAMERA and checking it moved by
+  exactly as much the other way (a pointer parked at a screen coordinate passes
+  "it drew" and fails that); and the help card's character set is checked
+  against `FONT_SMALL` itself.
+- **Both existing UI sweeps extended.** The overlap sweep gained all eight help
+  pages, all seven tooltips, the hire card, and — a class it had never been
+  pointed at — **WORLD text on a shopfront** (`drawBusiness`, at midday so the
+  till board is actually up). Mutation-tested by moving the till board onto the
+  MANAGE chip: caught, both as text-on-text and as rect-on-text. The off-canvas
+  sweep gained the same surfaces plus the nav chip row.
+- **NOT swept: the management card's HALL tab.** It was being rebuilt in
+  parallel (polling day) and a finding there would have been stale before it
+  was read. It is the one full-screen surface neither sweep covers.
+- **Balance untouched by construction.** Every line of this is draw and input.
+  The one new piece of state the sim can see is `dayOpen`, which nothing reads
+  but the panel, and the one read INTO the sim (`today.biz[k].take`) does not
+  write. `tryBuy` is unchanged; the arming lives in `tapShopButton`.
+
+### Rejected
+
+- **A help card that stops the clock.** Built, then removed the same day on the
+  ruling above. It is the pause button under another name.
+- **An advisor / projected income / "recommended" purchases.** The thing that
+  would most obviously have "fixed" *"is my money going up?"*, and the thing
+  PLAN explicitly says not to build.
+- **A tooltip in the panel under the shop grid.** Measured: the second button
+  row ends at y237 of 240. There are thirteen rows there and a tooltip needs
+  thirty-six.
+- **An edge pointer to the shack** when it is off camera. The nav strip already
+  names it and the till board already speaks; a third answer to the same
+  question is clutter.
+
 ## Backlog (rough priority)
 - **THE FIRST OUTSIDE PLAYTEST (2026-08-19), verbatim.** Matt's friend, new to
   the game, played the opening. This is the most valuable feedback the project
@@ -4689,14 +4951,19 @@ reading surface owns the screen.
      reading its own UI. This is the biggest single miss.
   2. **The lease card is a wall of text with no hook** — it is the first
      screen, and it explains terms to someone who does not yet care.
-  3. **"What do they do?? NOBODY KNOWS"** — the crew cards name PINCHY and
-     CLAWDIA and never say what a crab is FOR.
-  4. **"WHAT DO THESE THINGS DO? TOOLTIP TIME!"** — shop upgrades are priced
-     and named and otherwise unexplained.
-  5. **Hiring has no visible consequence** — "Don't even see the crab. He just
-     joined the crew." A new hire should ARRIVE, visibly, and be pointed at.
-  6. **"Is my money going up?"** — the rate readout ($/S) is not legible as
-     income. The one number a player needs, unclear.
+  3. ~~**"What do they do?? NOBODY KNOWS"**~~ — **shipped 2026-08-20**: the
+     HELP card's page 2 is exactly this question ("THE CRABS: what they do
+     for you, what they need"), and page 1 says what the shack is for.
+  4. ~~**"WHAT DO THESE THINGS DO? TOOLTIP TIME!"**~~ — **shipped
+     2026-08-20**: every rung of the shop grid now carries a tooltip with
+     what it does, what changes, and what it costs you every night after.
+     See the onboarding-pass entry.
+  5. ~~**Hiring has no visible consequence**~~ — **shipped 2026-08-20**: the
+     camera snaps to the new hire, a pointer bobs over their head, and a
+     card says who they are and what they will cost at 20:00.
+  6. ~~**"Is my money going up?"**~~ — **shipped 2026-08-20**: the $/S slot
+     now reads TODAY +$159 (coins - dayOpen), which is history rather than a
+     forecast. The BILL chip is still the other half of the sum.
   Note what he got RIGHT with no help: *"I want to pay back my landlord."* The
   rent goal lands. It is everything around it that does not.
 
@@ -4735,9 +5002,8 @@ reading surface owns the screen.
   aimed at the wrong confusion is worse than none. What is measurably
   undiscoverable today, from a build-session audit — every one of these is a
   real feature with NO on-screen affordance:
-  - **RIGHT-CLICK to redirect a crab** (`contextmenu` handler). A whole
-    interaction Matt specifically asked for, with nothing anywhere saying it
-    exists.
+  - ~~**RIGHT-CLICK to redirect a crab**~~ — **shipped 2026-08-20**: it is on
+    the HELP card's controls page, with the rest of the keys.
   - **KEYS**: `m` mute, `n` music, `b` next track, `f` fast-forward, `[` / `]`
     cycle crabs, arrows pan, `Escape` backs out. All undocumented in-game.
     (Arrow-key panning is no longer the ONLY way around town — see the nav strip
