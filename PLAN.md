@@ -5372,3 +5372,176 @@ language is merely kept distinct so either reading still works.
 - Big features → fork subagents in git worktrees (they don't push; the parent
   reviews screenshots + suite output, merges, re-verifies, pushes).
 - Balance work happens in the sim, not by intuition — measure, then tune.
+
+## THE ILLNESS-ROLL CLOCK ARTIFACT (investigated 2026-08-20, worktree) — MEASURED, AND DELIBERATELY NOT FIXED
+
+**Matt:** *"clawdia still has supercrab powers of never getting sick btw, she
+keeps making all the money."* The standing diagnosis (STATE OF PLAY, "NEXT UP")
+was a clock artifact in the nightly sickness roll — it reads every crab's needs
+at the **instant** of the 20:00 settlement, which is late in a MORNING crab's
+day and early in an EVENING crab's — with a measurement attached: *morning
+crabs ill 9.2% of the time against evening's 1.9%.*
+
+**The mechanism is real. The 9.2 / 1.9 is not, and did not reproduce in any rig
+this was measured in.** The pass therefore ships a MEASUREMENT and a RECEIPT,
+not a rewrite. Behaviour is byte-identical: the 16×30 matrix comes back with
+every number the same, and the frozen day-2 fingerprint was never touched.
+
+**AND THIS IS THE SECOND TIME.** Matt's "*still* has supercrab powers" is the
+giveaway: the same complaint, read the same way ("the owner read it as 'CLAWDIA
+is OP'; she was simply the E-shift founder"), was investigated and fixed on
+2026-08-19 — sleep only repaired tiredness while `darkness() > 0.7`, so a
+morning crab lost recovery an evening crab kept, and `TIRED_NAP` was added and
+tuned by an M/E shift-fairness probe. The suite gate from that pass ("tired: the
+morning and evening shifts end the week level") still holds at a mean gap of
+0.007 over six seeds. **The clock half of the shift problem was already fixed;
+what remains under the same words is CLAWDIA herself.**
+
+### What was actually measured
+
+New rig: **`node tools/shiftill.mjs [--seeds N] [--days D] [--crew N]
+[--organic] [--swap] [--dump PATH]`**, driving the real game through simlib and
+reading the roll's own view of the town through a new `window._stats.rollLog`
+seam in the settlement (armed only when a rig asks; consumes no RNG; there is a
+suite gate proving a logged town is byte-identical to an unlogged one).
+
+Only the CREW has an M/E shift — townsfolk and fishers are all `D` — so the
+default rig hires the crew to six through the game's own `hireCrew()` (which
+alternates M/E by crew size) and keeps the town solvent, the same shape
+`tools/illness.mjs` uses. 12 seeds × 30 days = **2124 crew crab-nights**, ~1060
+a side.
+
+**THE HALF THAT IS TRUE — the roll reads a systematically different crab
+depending on the shift.** What the roll actually sampled:
+
+| shift | hunger | thirst | dirt | tired |
+|---|---|---|---|---|
+| M | 0.263 | 0.483 | 0.481 | 0.579 |
+| E | 0.152 | 0.266 | 0.446 | 0.693 |
+
+A morning crab carries **1.7× the hunger and 1.8× the thirst** of an evening
+crab at the moment of judgement. It is not soft: the settlement runs at the TOP
+of `frame()`, before the crab loop, so an E-shift crab (14:00–20:00) is still
+`working` when the roll reads them, and their whole clock-off bump — hunger,
+thirst, **+0.25 dirt** — lands *after* it, every night, with the 45-minute
+last-call grace window on top (measured: an evening crab's day routinely
+finishes at 20:45 or later, a full hour on the far side of the judgement).
+
+**THE HALF THAT IS NOT — it never reaches the outcome, because the two halves
+of the artifact point in opposite directions.** The morning crab carries the
+day's hunger and thirst into the roll; the evening crab carries the day's
+EXHAUSTION into it (0.693 vs 0.579 — they are read minutes after a six-hour
+shift, where the morning crab has had an afternoon of `TIRED_NAP`). Assembled
+into risk they cancel:
+
+| | M | E | M/E |
+|---|---|---|---|
+| mean risk the roll assembled | 0.00906 | 0.00926 | **×0.98** |
+| prevalence (nights ill) | 2.96% | 2.59% | ×1.14 |
+| incidence (new illnesses/at-risk night) | 2.00% | 1.52% | ×1.32 |
+
+on 21 and 16 events respectively. **PINCHY (M) was ill on 1.94% of 360 nights
+and CLAWDIA (E) on 1.39% of hers** — and in 16 ORGANIC towns × 30d (the losing
+town the player actually meets, ~170 nights a side) it runs the *other* way:
+PINCHY 0.00%, CLAWDIA 2.41%, risk ×1.12 in M's favour. The ratio wanders
+between 0.75 and 1.12 across trajectories at ~180 crab-nights an arm, i.e. the
+whole effect is noise. There is no supercrab.
+
+### The experiment that settles it: swap the founders' shifts
+
+`--swap` exchanges PINCHY's and CLAWDIA's shifts on day 2 and changes nothing
+else, so the question becomes a clean one: does the gap follow the SHIFT or the
+CRAB? 12 seeds × 30 days, 360 nights each, both arms:
+
+| | PINCHY | CLAWDIA |
+|---|---|---|
+| **as shipped** | M — ill **1.94%**, risk 0.02123, 4 illnesses | E — ill **1.39%**, risk 0.02213, 3 illnesses |
+| **shifts swapped** | E — ill **3.61%**, risk 0.03103, 7 illnesses | M — ill **2.50%**, risk 0.02317, 4 illnesses |
+
+**The gap follows the crab.** PINCHY is the sicker of the two on mornings *and*
+on evenings; CLAWDIA is the healthier one on evenings *and* on mornings. The
+roster-wide ratio meanwhile shrugs: M/E risk ×1.01 as shipped, ×0.93 with the
+founders swapped — a shift is not a thing that happens to you. (Honest sample
+note: these are 3–7 illnesses per cell. The *direction* survives the swap; the
+*size* of it is a coin, and the number with power in it is the ×0.98 risk ratio
+above.) Mean wallet at the roll is $12 vs $11 as shipped and $12 vs $12 swapped
+— "she keeps making all the money" does not show up as a savings gap either,
+because both founders spend what they earn on the same needs.
+
+### Two candidate fixes, measured on the same 4658 rolls, both rejected
+
+Every recorded roll was re-scored under each candidate rule (`--dump` writes the
+raw roll log; a throwaway scoring script reads it), so the three rules are
+compared on **identical** crab-nights rather than on three separate
+simulations. The `hours` and `peak` columns came from a throwaway build that
+banked them per crab alongside the same seam — six lines in `tickNeglect`,
+reverted with the rest; rebuild it there if this is reopened.
+
+| rule | M/E | town-wide mean risk |
+|---|---|---|
+| **shipped**: one instant sample at 20:00 | **×0.98** | **0.01678** |
+| the crab's own-day **PEAK** | ×1.03 | 0.03632 (**+116%**) |
+| **hours banked** over each line / 6h (the exposure integral) | **×1.43** | 0.02241 (+34%) |
+
+- The **exposure integral** — the obvious "judge their own day" fix, and the one
+  the brief pointed at — is **worse on the very thing it was meant to fix**. A
+  morning crab spends **2.48 hours a night** over the exhaustion line against an
+  evening crab's **1.41**, because they finish work at 14:00 exhausted and stay
+  awake for six hours, while an evening crab finishes at 20:00 and goes to bed.
+  That is a real difference in a real day, not a clock artifact, and integrating
+  over the day *surfaces* it instead of removing it. (It was built, shipped into
+  a working build, and measured end to end: 16×30 came back 0/16 with median
+  eviction 12 but a different tail, and town-wide infections 58 → 61. Then it
+  was reverted, because ×1.43 is worse than ×0.98.)
+- The **peak** rule is as fair as what we already have and **more than doubles**
+  the town's illness. Buying nothing for a full retune of the four most
+  documented numbers in the health model is not a trade.
+
+**So the roll stays as it is, on purpose.** The bar for anyone who reopens this
+is **×0.98**, not "better than nothing".
+
+### What CLAWDIA actually has
+
+Founder identity, fixed in `crabs.js` and nothing to do with her shift.
+`FOUNDERS` is a constant: PINCHY is always index 0 (**SPEEDY**, move 1.4, work
+1.0, tip 1.0, on foot) and CLAWDIA always index 1 (**TIDY**, work 1.1, tip 1.05,
+on a **bike**), and `makeCrabPersona` alternates shifts by index, so
+CLAWDIA is on evenings in every seed there has ever been — which is exactly why
+"evening" and "CLAWDIA" are impossible to tell apart by eye. She works 10%
+faster, tips 5% better, and rides at `MODES.bike` 75 where PINCHY walks at
+`crabMove` 40 × 1.4 ≈ 56. *"She keeps making all the money"* is the observation,
+and it is about the crab, not the clock — **the `--swap` arm above is the test
+that separates them, and it is the one to re-run if this comes back.**
+
+### What shipped
+
+- `tools/shiftill.mjs` — the rig, kept, with the finding written into its head.
+- `window._stats.rollLog` in the settlement roll — the seam, off by default,
+  RNG-free, with a suite gate proving it inert.
+- `illRisk(c)` — the roll's four need lanes split into a named function so a rig
+  can read them without re-implementing them (the sim contract), carrying the
+  full receipt above it.
+- `devlog/img/2026-08-20-illness-roll-clock-artifact.png` (what the roll reads
+  vs what comes out of it) and `.../2026-08-20-illness-roll-three-rules.png`
+  (the three candidate rules on the same 4658 rolls, plus the founder swap) —
+  drawn with the game's own 5x7 font, because the honest picture of this pass
+  is a distribution that refused to move.
+- Three suite scenarios under `THE ILLNESS-ROLL CLOCK ARTIFACT`: the ordering
+  probe (an evening crab is still on shift when the roll reads them, and their
+  clock-off bump lands after — a KNOWN unfixed property, pinned so the next
+  person has to read the receipt rather than rediscover it), the roster outcome
+  gate (M/E within 0.4–2.5 on the live rule), and the seam-is-inert gate.
+
+### Left undone, on purpose
+
+- **`careLane()` is the same class of read** and was not touched: it decides the
+  cure/death lane from `hunger >= 0.5`, `dirt >= 0.66`, `thirst >= 0.5` at the
+  same 20:00 instant, and the morning crab's instant hunger (0.263 vs 0.152)
+  sits in exactly that band. It was left alone because it lives next to the
+  shelter pot, it moves deaths rather than infections, and this pass's whole
+  finding is that this shape of read is not, in fact, biasing the outcome. If it
+  is ever revisited, measure it the same way — `rollLog` is one field away from
+  carrying the lane.
+- **PLAN's STATE OF PLAY still lists the illness roll under "NEXT UP"** with the
+  9.2/1.9 numbers in it. Left for the coordinator to retire, because the top of
+  this file is being edited by several sessions at once.
