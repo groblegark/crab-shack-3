@@ -3094,6 +3094,35 @@ them, rep is 5 points lower, and the player's till is $64/$105 down at the end
 of day two. Two fixtures that used to CLEAR the opening crowd are now no-ops
 and are kept as belts, with their comments re-pointed to say so.
 
+## SCREENSHOTS: THE HANDOFF (process, 2026-08-20)
+
+`shots/` is gitignored, and it is staying that way — two of them were the
+ENDING CARD, whole closing text and town-name reveal, sitting browsable in a
+public repo. That was the right fix and it had an unintended cost nobody
+noticed for a night: **agent screenshots stopped reaching the devlog at all.**
+Five overnight branches delivered none, and two devlog entries were written
+with no visuals — the writer shot their own or went without.
+
+**THE RULE, and it belongs in every agent brief:** take shots into `shots/`
+while you work, then **harvest the two or three that matter into
+`devlog/img/`** — which IS tracked — commit them on your branch, and **list the
+paths with a one-line caption in your final report.** The gitignore already
+said this was the intent; it just was not in anybody's instructions.
+
+    devlog/img/2026-08-20-<short-slug>.png
+
+The caption is not decoration. "What it shows and why it is the shot that shows
+it" is what lets somebody who was not there write about the work.
+
+**The embargo applies to every image**: no ending card, and the town's name
+must not appear in a screenshot.
+
+**What is worth shooting**, learned the hard way: BEFORE AND AFTER of the same
+view, same seed, one change apart, beats any number of representative single
+frames — it is the only honest way to show that something changed. For a
+systems fix with no visible face, the honest artefact is a chart or a table,
+not a manufactured dramatic screen.
+
 ## POLLING DAY — VOTING IS AN ACTION (Matt, 2026-08-20, shipped)
 
 > "voting is an action, polls have a closing time, and ballots are made and
