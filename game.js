@@ -513,6 +513,18 @@ const bizOwner = (b) => BIZ[b].owner === null ? null : (BIZ[b].owner || "player"
 // never let a draw path throw on an owner who has left the registry (sold up,
 // or - the death seam - left the town between one frame and the next settlement)
 const ownerName = (id) => id === "player" ? "YOU" : (OWNERS[id] && OWNERS[id].name) || "NOBODY";
+// EVERY TILL A CRAB KEEPS, with the debt against it. One reader, so the card
+// and the dossier can never disagree about what somebody is worth.
+function ownerTills(c) {
+  if (!c || !c.p || !c.p.owner) return [];
+  const out = [];
+  for (const b of Object.keys(BIZ)) {
+    if (!bizUnlocked(b) || bizOwner(b) !== c.p.owner) continue;
+    const o = OWNERS[c.p.owner];
+    out.push({ biz: b, amt: Math.max(0, ownerFunds(b)), debt: Math.max(0, (o && o.credit) || 0) });
+  }
+  return out;
+}
 function ownerFunds(b) {
   const o = bizOwner(b);
   return o === "player" ? coins : o && OWNERS[o] ? OWNERS[o].till : 0;   // an unowned shop has no till
@@ -11572,6 +11584,21 @@ function drawFollowCard() {
   // job + needs
   const jobTag = p.owner ? "OWN" : p.job === "fishing" ? "PIER" : BIZ[p.job].short;   // live job, not the old trade
   smallText(ctx, "JOB:" + jobTag, 6, 36, [70, 90, 130]);
+  // AN OWNER'S TILL, RIGHT BESIDE THE FACT THAT THEY OWN A SHOP - which is the
+  // only place on this card the number belongs, and the only slot with room.
+  // (Matt: "sudsy still isn't getting all the money that comes in, it should
+  // show right away." She was; see ownerTills. It was invisible: this card
+  // showed a WALLET and nothing else, so SUDSY read as holding $31 while her
+  // shop held $202.) Drawn in the till's own green so it cannot be mistaken
+  // for the pocket beside it, and measured against the JOB> chip at x58.
+  {
+    const tills = ownerTills(c);
+    if (tills.length) {
+      const tTxt = "$" + fmt(Math.round(tills.reduce((n, t) => n + t.amt, 0)));
+      const tx = 6 + smallTextWidth("JOB:" + jobTag) + 4;
+      if (tx + smallTextWidth(tTxt) <= 56) smallText(ctx, tTxt, tx, 36, [40, 150, 70]);
+    }
+  }
   if (Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player").length > 1) {
     rect(ctx, 58, 35, 28, 8, [96, 170, 220]);
     smallText(ctx, "JOB>", 60, 36, [255, 255, 255]);
@@ -12560,6 +12587,12 @@ function drawDossier() {
         x + 56, ly, [110, 100, 110]), ly += 9;
   }
   row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
+  // ...and the shop's money under it, because a crab who keeps a till holds
+  // her money in two places and only one of them was ever on this card.
+  for (const t of ownerTills(c))
+    row("TILL", BIZ[t.biz].short + " $" + fmt(Math.round(t.amt))
+      + (t.debt > 0 ? "  DEBT $" + fmt(Math.round(t.debt)) : ""),
+      t.debt > 0 ? [200, 110, 40] : [40, 150, 70]);
   const [hl, hcol] = homeLabel(p);
   row("HOME", hl, hcol);
   // THE OFFICE, on the record of whoever holds it - with the policy, because

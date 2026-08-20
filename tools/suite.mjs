@@ -9419,6 +9419,72 @@ scenario("nothing paints over an open card except another card", () => {
   return true;
 });
 
+// ===========================================================================
+// AN OWNER'S TILL IS ON THEIR CARD (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("a shop's takings show on its owner's card the moment they land", () => {
+  // Matt: "sudsy still isn't getting all the money that comes in, it should
+  // show right away."
+  //
+  // She was getting it. MEASURED before changing anything: creditBiz credits
+  // the till at the instant of sale, the showers' tip share is 0 so nothing is
+  // siphoned into a server's wallet, and 140 sales put $766 through at $5.47 a
+  // rinse on a $5 board. The money was never late and never short. It was
+  // INVISIBLE - a crab's card showed a WALLET and nothing else, so SUDSY read
+  // as holding $31 while her shop held $202, and ownerFunds appeared in
+  // exactly ONE place in the whole interface.
+  //
+  // So this asserts the two halves separately: the money lands immediately,
+  // and the surface a player looks at says so.
+  const sim = createSim({ seed: 1337 });
+  sim.runDays(3, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    const b = "showers", oid = bizOwner(b);
+    const c = allCrabs().find(k => k.p.owner === oid);
+    if (!c) return JSON.stringify({ err: "nobody owns the showers" });
+    // 1. IMMEDIACY: a sale moves the till on the same tick, not at settlement.
+    const before = ownerFunds(b);
+    creditBiz(b, 17, 0, 0, true);
+    const after = ownerFunds(b);
+    // 2. ...and the card says it. Both surfaces are driven off ownerTills, so
+    //    they cannot disagree; check the DRAWN strings, not the helper.
+    const seen = [];
+    const S = smallText, T = text;
+    smallText = (x2, str, x, y, col, sz) => { seen.push(String(str)); return S(x2, str, x, y, col, sz); };
+    text = (x2, str, x, y, col, sz) => { seen.push(String(str)); return T(x2, str, x, y, col, sz); };
+    const wasHeadless = window._headless; window._headless = false;
+    let err = null;
+    try {
+      sel = c; followNpc = c; dossier = null; manage = null; boardView = false; saveView = false;
+      drawFollowCard();
+      const card = seen.slice();
+      seen.length = 0;
+      dossier = c; dossierTab = "STATS"; drawDossier(); dossier = null;
+      var doss = seen.slice();
+      var cardSeen = card;
+    } catch (e) { err = e.message; }
+    window._headless = wasHeadless;
+    smallText = S; text = T;
+    const till = Math.round(ownerFunds(b));
+    return JSON.stringify({ err, before: Math.round(before), after: Math.round(after),
+      till, wallet: Math.round(c.p.wallet), who: c.p.name,
+      onCard: (cardSeen || []).some(t => t.indexOf(String(till)) >= 0),
+      onDossier: (doss || []).some(t => t.indexOf(String(till)) >= 0),
+      dossierHasTillLabel: (doss || []).some(t => t === "TILL") });
+  })()`));
+  if (got.err) return "drawing threw: " + got.err;
+  // the money is not late
+  if (got.after - got.before !== 17)
+    return `a $17 sale moved the till by ${got.after - got.before} - takings are not immediate`;
+  if (!(got.till > 0)) return "the fixture's owner has an empty till - nothing to show";
+  // ...and it is not invisible
+  if (!got.onCard) return `${got.who}'s card does not show her till of $${got.till} (wallet $${got.wallet})`;
+  if (!got.dossierHasTillLabel || !got.onDossier)
+    return `${got.who}'s dossier does not show her till of $${got.till}`;
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
