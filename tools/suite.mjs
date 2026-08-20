@@ -9029,6 +9029,114 @@ scenario("no fixed sentence on a card is trimmed to a pair of dots", () => {
   return true;
 });
 
+// ===========================================================================
+// SELLING TO AN NPC IS SOMETHING YOU CAN DO FROM THE CARD (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("a standing offer can be answered from the card that announces it", () => {
+  // Matt: "we need to make selling to an NPC more intuitive... I saw that an
+  // NPC was interested but couldn't sell." He was not missing a step. The
+  // management card already ANNOUNCED the offer and the only way to act on it
+  // was to close the card, find the shopfront and tap a 44x11 chip on its
+  // sign. A surface that tells you something and cannot act on it is the
+  // opacity bug in its purest form.
+  const sim = createSim({ seed: 909 });
+  const got = JSON.parse(sim.G(`(() => {
+    // stand a live offer up directly - the offer MACHINERY is asserted by the
+    // rivalry scenarios above; what is under test here is the affordance.
+    const b = RIVAL_CFG.PRIZE;
+    coins = 9000; tryBuy(b);   // prizeIsPlayers() wants it UNLOCKED, not just owned
+    rival.stage = "offer"; rival.offerDay = day; rival.lastOffer = day;
+    rival.offer = { price: 480, worth: 600, day };
+    manage = b; manageTab = "HOURS";
+    const R = manageRects();
+    const seen = [];
+    const S = smallText, T = text;
+    smallText = (c, str, x, y, col, sz) => { seen.push(String(str)); return S(c, str, x, y, col, sz); };
+    text = (c, str, x, y, col, sz) => { seen.push(String(str)); return T(c, str, x, y, col, sz); };
+    drawManage();
+    const withOffer = seen.slice();
+    // ...and the same card with nothing standing
+    seen.length = 0;
+    rival.stage = "eyeing"; rival.offer = null;
+    drawManage();
+    const without = seen.slice();
+    smallText = S; text = T;
+    const inCard = (r) => r.x >= R.x && r.y >= R.y && r.x + r.w <= R.x + R.w && r.y + r.h <= R.y + R.h;
+    const overlaps = (a, c) => a.x < c.x + c.w && a.x + a.w > c.x && a.y < c.y + c.h && a.y + a.h > c.y;
+    return JSON.stringify({
+      sellShown: withOffer.some(t => t.slice(0, 5) === "SELL "),
+      keepShown: withOffer.some(t => t === "KEEP IT"),
+      sellGone: !without.some(t => t.slice(0, 5) === "SELL "),
+      keepGone: !without.some(t => t === "KEEP IT"),
+      takeInCard: inCard(R.rtake), noInCard: inCard(R.rno),
+      hitsDone: overlaps(R.rtake, R.done) || overlaps(R.rno, R.done),
+      chipsOverlap: overlaps(R.rtake, R.rno),
+    });
+  })()`));
+  if (!got.sellShown) return "a standing offer draws no SELL chip on the management card";
+  if (!got.keepShown) return "a standing offer draws no KEEP IT chip";
+  if (!got.sellGone || !got.keepGone) return "the answer chips are drawn when there is no offer to answer";
+  if (!got.takeInCard || !got.noInCard) return "an answer chip is outside the card it is drawn on";
+  if (got.hitsDone) return "an answer chip overlaps DONE - a misclick sells the business";
+  if (got.chipsOverlap) return "SELL and KEEP IT overlap each other";
+
+  // ONE DOOR, TWO PLACES TO KNOCK. The card must not grow its own sale path:
+  // both surfaces route through tapRivalChip, so a change to what selling
+  // MEANS cannot land on the sign and miss the card.
+  const sold = JSON.parse(sim.G(`(() => {
+    const b = RIVAL_CFG.PRIZE;
+    coins = 9000; tryBuy(b);
+    // ...and she has to be able to actually PAY it. acceptRivalOffer settles out
+    // of rivalPurse() - her LIQUID money - not out of the war chest she could
+    // in principle raise, so a fixture that only stuffs rival.fund tests the
+    // refusal path by accident.
+    OWNERS[rivalOwnerId()].till = 5000; rival.fund = 5000;
+    rival.stage = "offer"; rival.offerDay = day; rival.lastOffer = day;
+    rival.offer = { price: 480, worth: 600, day };
+    const before = { owner: bizOwner(b), coins: Math.round(coins) };
+    const ok = tapRivalChip("take");
+    return JSON.stringify({ ok, before, after: { owner: bizOwner(b), coins: Math.round(coins) } });
+  })()`));
+  if (!sold.ok) return "the shared door refused a live offer";
+  if (sold.after.owner === "player") return "the business did not change hands";
+  if (!(sold.after.coins > sold.before.coins)) return "selling a business paid the player nothing";
+  return true;
+});
+
+scenario("EYEING only blames her wallet when her wallet is the problem", () => {
+  // The line read "CAN RAISE $574 OF $369" during EYEING, which names MONEY as
+  // what is holding the sale up. MEASURED over 24 days on two seeds with the
+  // player running the juice bar hard: her raise ran $574-$1150 against a
+  // worth of $369-$568 - ahead of it EVERY DAY of both runs - and she was
+  // offering by day 4. What she is short of during EYEING is intent, not cash,
+  // so the old line sent a player to watch a number that was already big
+  // enough. Both branches are checked, because saying "she can afford it" when
+  // she cannot would be the same bug pointing the other way.
+  const sim = createSim({ seed: 909 });
+  const got = JSON.parse(sim.G(`(() => {
+    coins = 9000; tryBuy(RIVAL_CFG.PRIZE);
+    rival.stage = "eyeing"; rival.offer = null; rival.intent = RIVAL_CFG.EYE;
+    const read = () => (rivalManageLines(RIVAL_CFG.PRIZE)[0] || "");
+    rival.fund = 100000;                       // she is flush
+    const flush = read();
+    // ...and she is not. rivalRaise() is fund + PURSE + credit, so her own
+    // pocket has to be emptied too or she is still good for the deposit.
+    rival.fund = 0;
+    for (const k in OWNERS) { OWNERS[k].till = 0; OWNERS[k].credit = 0; }
+    for (const c of allCrabs()) c.p.wallet = 0;
+    const broke = read();
+    return JSON.stringify({ flush, broke, worth: Math.round(rivalWorth()) });
+  })()`));
+  if (/CANNOT RAISE/.test(got.flush))
+    return "a flush rival is reported as unable to raise the money: " + got.flush;
+  if (!/CAN AFFORD/.test(got.flush))
+    return "a flush rival's line does not say she can afford it: " + got.flush;
+  if (!/CANNOT RAISE/.test(got.broke))
+    return "a broke rival's line does not say she is short: " + got.broke;
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

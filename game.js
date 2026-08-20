@@ -2414,8 +2414,19 @@ function rivalManageLines() {
       + fmt(rival.offer.worth) + ") - TAP THE SIGN", nums];
   if (rival.stage === "compete")
     return [who + " IS COMPETING FOR THE " + prize, nums];
-  return [who + " IS EYEING THE " + prize + " - CAN RAISE $" + fmt(rivalRaise()) + " OF $"
-    + fmt(rivalWorth()), nums];
+  // EYEING SAYS WHAT IS ACTUALLY HOLDING HER UP. This used to read "CAN RAISE
+  // $574 OF $369", which names MONEY as the gate - and money is almost never
+  // the gate. MEASURED over 24 days on two seeds with the player running the
+  // juice bar hard: her raise sat at $574-$1150 against a worth of $369-$568,
+  // ahead of it on every single day of both runs, and she was making offers by
+  // day 4. What she is short of is INTENT (RIVAL_CFG.OFFER, plus WARN_DAYS of
+  // standing outside your bar), so a player reading the old line watched a
+  // number that was already big enough and concluded the sale was blocked on
+  // her wallet. Only say "she cannot afford it" when she cannot afford it.
+  const short = rivalRaise() < rivalWorth() * RIVAL_CFG.LOWBALL;
+  return [who + " IS EYEING THE " + prize + (short
+    ? " - CANNOT RAISE A NUMBER YET ($" + fmt(rivalRaise()) + " OF $" + fmt(rivalWorth()) + ")"
+    : " - SHE CAN AFFORD IT ($" + fmt(rivalWorth()) + "); SHE HAS NOT ASKED YET"), nums];
 }
 function rivalChipRects(b) {
   const cx = Math.round((BIZ[b].x0 + BIZ[b].x1) / 2);
@@ -10082,6 +10093,14 @@ cv.addEventListener("click", (ev) => {
     const owned = ownedBizList();
     if (manageBizCycler() && hit(R.next)) { manage = owned[(owned.indexOf(manage) + 1) % owned.length]; sfx.ding(); return; }
     const onCard = pt.x >= R.x - 2 && pt.x < R.x + R.w + 2 && pt.y >= R.y - 2 && pt.y < R.y + R.h + 2;
+    // THE OFFER, ANSWERED FROM HERE. Same two calls the shopfront sign makes,
+    // so there is exactly one way to sell a business and two places to say so.
+    if (rivalOfferLive() && manage === RIVAL_CFG.PRIZE && prizeIsPlayers()) {
+      // ...through tapRivalChip, the SAME door the shopfront sign uses, so the
+      // two affordances cannot drift apart into two different sales.
+      if (hit(R.rtake)) { tapRivalChip("take"); return; }
+      if (hit(R.rno)) { tapRivalChip("no"); return; }
+    }
     if (hit(R.done) || !onCard) manage = null;
     return;
   }
@@ -12666,6 +12685,14 @@ function manageRects() {
     pbm: { x: x + 78, y: y + h2 - 18, w: 15, h: 13 },
     pbp: { x: x + 124, y: y + h2 - 18, w: 15, h: 13 },
     done: { x: x + w2 - 46, y: y + h2 - 15, w: 42, h: 13 },
+    // ANSWERING AN OFFER FROM THE CARD THAT ANNOUNCES IT (Matt, 2026-08-20:
+    // "we need to make selling to an NPC more intuitive... I saw that an NPC
+    // was interested but couldn't sell"). He was not missing a step: the line
+    // was already here, and the only way to act on it was to close the card,
+    // find the shopfront and tap a 44x11 chip on its sign. These sit on the
+    // rivalry row itself, clear of DONE below them.
+    rtake: { x: x + w2 - 94, y: y + h2 - 29, w: 44, h: 12 },
+    rno:   { x: x + w2 - 46, y: y + h2 - 29, w: 42, h: 12 },
   };
   MANAGE_TABS.forEach((t, i) => R.tab[t] = { x: x + 6 + i * 52, y: y + 16, w: 50, h: 12 });
   for (let i = 0; i < 7; i++) {
@@ -12768,8 +12795,17 @@ function drawManage() {
     // her own board, hours and wage to take your trade.
     const sale0 = saleList()[0];
     const riv = rivalManageLines(key);
-    smallText(ctx, riv[0] || (sale0 ? "FOR SALE: " + BIZ[sale0].name + " $" + fmt(salePrice(sale0)) + " - TAP ITS SIGN"
-      : "ROSTER + OT + SICK DAYS: SEE THE SCHEDULE TAB"), x + 8, y + h2 - 26,
+    // THE ANSWER CHIPS, on the row that carries the offer. Only for the shop
+    // she is actually bidding on, and only while a live offer is standing.
+    const answerable = rivalOfferLive() && key === RIVAL_CFG.PRIZE && prizeIsPlayers();
+    if (answerable) {
+      chip(R.rtake, "SELL $" + fmt(rival.offer.price), null, true);
+      chip(R.rno, "KEEP IT", null, false);
+    }
+    // ...and the line is trimmed to whatever is left of them, measured.
+    const rivW = (answerable ? R.rtake.x - 4 : x + w2 - 6) - (x + 8);
+    smallText(ctx, fitSmall(riv[0] || (sale0 ? "FOR SALE: " + BIZ[sale0].name + " $" + fmt(salePrice(sale0)) + " - TAP ITS SIGN"
+      : "ROSTER + OT + SICK DAYS: SEE THE SCHEDULE TAB"), rivW), x + 8, y + h2 - 26,
       riv[0] ? [180, 60, 40] : sale0 ? [180, 60, 40] : [150, 140, 160]);
     // ...and the numbers under it, kept clear of the DONE chip on the right
     if (riv[1]) smallText(ctx, riv[1].slice(0, 40), x + 8, y + h2 - 17, [110, 100, 110]);
