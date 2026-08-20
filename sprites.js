@@ -866,6 +866,24 @@ defItem("soap", [
   ".........",
   ".........",
 ]);
+defItem("linen", [
+  ".........",
+  ".KKKKKKK.",
+  "KLLLLLLLK",
+  "KWWWWWWWK",
+  "KCCCCCCCK",
+  ".KKKKKKK.",
+  ".........",
+]);
+defItem("roomkey", [
+  ".........",
+  "..KKK....",
+  ".KAAAK...",
+  "KAKKKAKKK",
+  ".KAAAKAKA",
+  "..KKK.KKK",
+  ".........",
+]);
 defItem("suds", [
   "..K.KK...",
   ".KVKLVK..",
@@ -1041,3 +1059,117 @@ const CATCH_FISH = parseArt([
   "KMMKKKKK.",
   ".KKK.....",
 ], PAL);
+
+// ---------------------------------------------------------------- the hotel
+// The DRIFTWOOD HOTEL: a room door on the back wall of the lot, numbered by
+// its own brass plate. Two frames - shut, and shut-with-the-lamp-on, which is
+// how a guest in residence reads from the promenade at night. A DIRTY room
+// (bed unmade, the maid hasn't been round) wears the third.
+const HOTEL_DOOR = [
+  parseArt([
+    "KKKKKKKKKKKKKKKK",
+    "KEEEEEEEEEEEEEEK",
+    "KEKKKKKKKKKKKKEK",
+    "KEKDDDDDDDDDDKEK",
+    "KEKDMMMMMMMMDKEK",
+    "KEKDMKKKKKKMDKEK",
+    "KEKDMKNNNNKMDKEK",
+    "KEKDMKNNNNKMDKEK",
+    "KEKDMKKKKKKMDKEK",
+    "KEKDMMMMMMMMDKEK",
+    "KEKDDDDDDDDDDKEK",
+    "KEKDDDDDDAKDDKEK",
+    "KEKDDDDDDDDDDKEK",
+    "KEKDDDDDDDDDDKEK",
+    "KEKKKKKKKKKKKKEK",
+    "KKKKKKKKKKKKKKKK",
+  ], PAL),
+  parseArt([
+    "KKKKKKKKKKKKKKKK",
+    "KEEEEEEEEEEEEEEK",
+    "KEKKKKKKKKKKKKEK",
+    "KEKDDDDDDDDDDKEK",
+    "KEKDMMMMMMMMDKEK",
+    "KEKDMKKKKKKMDKEK",
+    "KEKDMKAAAAKMDKEK",
+    "KEKDMKAYYAKMDKEK",
+    "KEKDMKKKKKKMDKEK",
+    "KEKDMMMMMMMMDKEK",
+    "KEKDDDDDDDDDDKEK",
+    "KEKDDDDDDAKDDKEK",
+    "KEKDDDDDDDDDDKEK",
+    "KEKDDDDDDDDDDKEK",
+    "KEKKKKKKKKKKKKEK",
+    "KKKKKKKKKKKKKKKK",
+  ], PAL),
+];
+// the linen press behind the desk: stacked sheets and towels, the hotel's
+// one working station
+const LINEN_PRESS = parseArt([
+  "KKKKKKKKKKKKKKKK",
+  "KEEEEEEEEEEEEEEK",
+  "KEKKKKKKKKKKKKEK",
+  "KEKLLLLKWWWWKKEK",
+  "KEKLLLLKWWWWKKEK",
+  "KEKKKKKKKKKKKKEK",
+  "KEKCCCCKPPPPKKEK",
+  "KEKCCCCKPPPPKKEK",
+  "KEKKKKKKKKKKKKEK",
+  "KEEEEEEEEEEEEEEK",
+  "KKKKKKKKKKKKKKKK",
+], PAL);
+// the front desk: a counter with a bell and the key rack behind
+const HOTEL_DESK = parseArt([
+  "..KKKKKKKKKKKK..",
+  "..KAKAKAKAKAKK..",
+  "KKKKKKKKKKKKKKKK",
+  "KEEEEEEEEEEEEEEK",
+  "KEDDDDDDDDDDDDEK",
+  "KEDDDDDMKDDDDDEK",
+  "KEDDDDMMMKDDDDEK",
+  "KEEEEEEEEEEEEEEK",
+  "KKKKKKKKKKKKKKKK",
+], PAL);
+// ---------------------------------------------------------------- the ferry
+// THE MAINLAND FERRY. Deliberately ONE sprite in ONE function: another agent
+// owns the island's horizon and the run to the mainland, so this is the hull
+// tied up at the pier and nothing more. Two frames for the wash at the stern.
+const FERRY_ART = [
+  parseArt([
+    "..........KKKKKK..........",
+    "..........KWWWWK..........",
+    "......KKKKKWWWWKKKKK......",
+    "......KWWWWWWWWWWWWK......",
+    "......KWCWCWCWCWCWCK......",
+    "KKKKKKKWWWWWWWWWWWWKKKKKKK",
+    "KRRRRRRRRRRRRRRRRRRRRRRRRK",
+    "KRRRRRRRRRRRRRRRRRRRRRRRRK",
+    "KTTTTTTTTTTTTTTTTTTTTTTTTK",
+    ".KKKKKKKKKKKKKKKKKKKKKKKK.",
+  ], PAL),
+  parseArt([
+    "..........KKKKKK..........",
+    "..........KWWWWK..........",
+    "......KKKKKWWWWKKKKK......",
+    "......KWWWWWWWWWWWWK......",
+    "......KWCWCWCWCWCWCK......",
+    "KKKKKKKWWWWWWWWWWWWKKKKKKK",
+    "KRRRRRRRRRRRRRRRRRRRRRRRRK",
+    "KRRRRRRRRRRRRRRRRRRRRRRRRK",
+    "KTTTTTTTTTTTTTTTTTTTTTTTTK",
+    "KKKKKKKKKKKKKKKKKKKKKKKKKK",
+  ], PAL),
+];
+// the funnel's smoke while she is alongside with the engine ticking over
+const FERRY_SMOKE = [
+  parseArt([
+    "..M.",
+    ".MM.",
+    ".M..",
+  ], PAL),
+  parseArt([
+    ".M..",
+    ".MM.",
+    "..M.",
+  ], PAL),
+];

@@ -24,3 +24,7 @@ numbers, backlog, and conventions. Don't duplicate it — update it there.
 - Balance changes need a headless matrix re-run. Baseline (buy nothing):
   0/N survive, median eviction ~11–13. Growth check: `--buy chef,table`
   can escape. Compare against the verified numbers in PLAN.md.
+- **The 8-seed growth block is noisy — run the second one.** Measured on the
+  visitor pass: the same build reads 2/8 on the default seeds and 4/8 on
+  `--seedbase 8`, and the pre-pass build reads 4/8 and 2/8 on the same two
+  blocks. Sixteen growth seeds is the honest number; eight is a coin.
