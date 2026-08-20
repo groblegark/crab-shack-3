@@ -9,11 +9,39 @@ Three games, all live on GitHub Pages, all built on the snescat toy PPU
 | CRAB SHACK 2 | groblegark/crab-shack-2 | groblegark.github.io/crab-shack-2 | done + refined |
 | CRAB SHACK 3 | groblegark/crab-shack-3 | groblegark.github.io/crab-shack-3 | active |
 
-## STATE OF PLAY — start here (written 2026-08-20, end of a very long night)
+## STATE OF PLAY — start here (rewritten 2026-08-20, after a second day)
 
-**Suite 167 scenarios, green. Baseline 0/16 (median eviction day 12). Growth
-`--buy chef,table` 3/8.** Lose-by-default is intact with five agent passes
-landed in one night. Everything below is merged, pushed and live.
+**Suite 207 scenarios. Baseline 0/16 (median eviction day 14).**
+
+**⚠ GROWTH IS AT 1/16 AND THAT IS THE OPEN QUESTION.** The documented pillar
+is 2–3 escapes per 8-seed block (~4–5/16). It is now **1/16**, and the
+attribution is the important part: **no single change broke it — four stacked.**
+
+| tree | growth (16 seeds) | baseline median |
+|---|---|---|
+| documented | ~4–5/16 | 12 |
+| + the empty opening day | 3/16 *(measured and accepted by its own pass)* | 11 |
+| + polling day | 2/16 | 12 |
+| + accommodation upgrades | **1/16** | 14 |
+
+Each step costs about one escape in sixteen — individually inside the noise
+`CLAUDE.md` warns about, which is exactly why each pass measured its own
+change, saw a coin flip, and passed it in good faith. **That is the trap worth
+naming: a pillar can be eroded entirely by changes that are each individually
+defensible.** Nobody was careless; the check was per-change and the damage was
+cumulative.
+
+**The intuitive suspect is CLEARED**: rebuilt with the shelter's capacity
+effectively unlimited, both growth blocks return *identical* results seed for
+seed. The four-bed wall is never reached.
+
+PLAN's own precedent says this matters — a rent change that restored the
+baseline was REJECTED because it took growth escape to 0/8. Driving growth
+toward zero is a documented red line, and we are one seed off it. The
+recommendation on the table (Matt's call, not made yet) is to restore headroom
+with one small named knob — **the opening purse, sized to the $34 the empty
+opening actually cost** — rather than weaken any of the four features, since
+three of them were asked for and all four are good.
 
 **LANDED 2026-08-19/20**, in merge order:
 1. **The visitor pass** — tourists are a POPULATION, not a spawn timer: four
@@ -80,9 +108,13 @@ landed in one night. Everything below is merged, pushed and live.
     it; an agent asked to reproduce it first found it was noise at ~180
     crab-nights an arm. Ask for the reproduction BEFORE the fix, every time.
 
-**NEXT UP (Matt's queue, in his order):**
-- **The departure card** — end-of-day view of who is leaving on the ferry and
-  how they feel, with a quote DERIVED from their stats. See the backlog entry.
+**NEXT UP:**
+- **THE GROWTH PILLAR** — the decision above. Nothing else should be measured
+  against a moving number until it is settled.
+- **The departure card** — the last of Matt's queue, in flight as of this
+  writing: built, screenshotted, rebasing onto main. End-of-day view of who is
+  leaving on the ferry and how they feel, with a quote DERIVED from their
+  stats.
 - ~~**The onboarding/UI pass**~~ — **MOSTLY SHIPPED 2026-08-20** (see THE
   ONBOARDING PASS below): shop tooltips, a five-page HELP card with three
   front doors, a hire you can actually see arrive, TODAY +$N in place of the
