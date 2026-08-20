@@ -8,6 +8,75 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-20, late — The measurement was the deliverable
+
+![The illness-roll clock artifact: what the roll reads vs what comes out of it](devlog/img/2026-08-20-illness-roll-clock-artifact.png)
+
+This entry ships no gameplay change at all. Behaviour is byte-identical;
+every eviction day is exactly where it was. What shipped is a rig and a
+receipt, and it is the most useful thing anybody did today.
+
+### The fact that wasn't
+
+Written into this project's own design notes, as settled fact: the nightly
+sickness roll reads everyone's needs at 20:00, which judges morning-shift
+crabs harshly because they've been awake and hungry for hours while evening
+crabs have barely started. Morning crabs ill **9.2%**, evening crabs
+**1.9%**. A fix was designed off that number and recommended.
+
+Then somebody was asked to *reproduce it before fixing it*. Three things
+came back, and all three were unwelcome.
+
+**One: the bias is real.** The roll genuinely does judge a morning crab
+carrying 1.7× the hunger and 1.8× the thirst of an evening crab. That part
+was right, and it's the part that felt obviously true.
+
+**Two: it doesn't matter.** The evening crab walks into the same roll
+carrying 1.2× the exhaustion. The halves point opposite ways and cancel.
+Assembled risk, morning against evening, over 2,124 crab-nights:
+**×0.98.** Shift predicts nothing. The original 9.2 vs 1.9 was noise — it
+came from about 180 crab-nights an arm.
+
+**Three: the supercrab isn't a shift, it's a crab.** Swap the two founders'
+shifts and the gap follows the *crab*, not the slot. PINCHY is the sicker
+of the two on mornings and on evenings alike, because CLAWDIA is TIDY — a
+founder trait sitting in plain sight in crabs.js. That's the whole mystery.
+
+![Three candidate rules scored on the same 4,658 rolls](devlog/img/2026-08-20-illness-roll-three-rules.png)
+
+### And the fix would have made it worse
+
+The recommended fix was built anyway and measured end to end: **+116% town
+risk.** Worse at precisely the thing it was meant to improve.
+
+The reason is a detail no clock-artifact theory could have reached: a
+morning crab clocks off at 14:00 and *stays up*. An evening crab clocks off
+at 20:00 and goes to bed. Measured, a morning crab spends 2.48 hours a
+night past the exhaustion line against an evening crab's 1.41. That isn't
+an artifact of when the dice are rolled. That's a real day, lived
+differently, and the roll was reading it correctly all along.
+
+### The bit worth keeping
+
+There was a tell, and it was in the original complaint: someone said a crab
+*"still* has supercrab powers." Still. The same complaint had been raised
+and fixed once already, the day before, and that gate was holding fine. The
+word "still" was doing the work of an entire investigation and nobody
+noticed until somebody went looking.
+
+So, the headline: **the measurement was the deliverable.**
+
+And the harder version, which is the true one — a number written down in a
+project's own brain is not a fact. It's a claim, wearing a fact's clothes,
+and it gets more believable every time it's cited rather than checked. The
+person most likely to be believed without checking is whoever wrote it
+there in the first place.
+
+We've been running this whole game on measurements for three days. It was
+about time one of them turned out to be a rumour.
+
+---
+
 ## 2026-08-20, evening — Polling day
 
 ![The box fills through the day, and tells you nothing](devlog/img/2026-08-20-ballot-box.png)
