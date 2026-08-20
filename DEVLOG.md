@@ -8,6 +8,85 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-20, night — What they thought of you
+
+![A bad day: 12 sailed, $822 went home in their pockets](devlog/img/2026-08-20-departures-bad-day.png)
+
+At eight o'clock the boat goes, and now it hands you a receipt.
+
+The departure card lists everyone who sailed, what they brought, what they
+spent, and — in their own words — why. The quotes are **derived, not
+decorative**: every line is assembled from what actually happened to that
+crab in your town, which is why they're so uncomfortable to read.
+
+> SNAPPY — 3 days, spent $109 of $110 — *"Couldn't afford a bed. I slept on
+> the beach."*
+>
+> MOLT — 2 days, spent **$0** of $111 — *"The hotel desk was dark. I slept
+> on the beach."*
+>
+> SALTINE — 2 days, spent $19 of $118 — *"$99 of my $118 went home unspent
+> — every line was full."*
+
+That day: twelve sailed, they brought $1,190, they spent $368, and **$822
+left the island in their pockets.** Three slept on sand. Four gave up in a
+queue. MOLT came for two days and spent nothing at all — he wasn't stingy,
+he just couldn't find anyone willing to take his money.
+
+![A good day: 15 sailed, $898 spent, and MAUDE had a proper holiday](devlog/img/2026-08-20-departures-good-day.png)
+
+And a good day, for contrast — near-identical purses, opposite outcome.
+Fifteen sailed, brought $1,309, spent **$898**, only $411 home. MAUDE spent
+$77 of the $79 she came with: *"Waited on at a table twice. A proper
+holiday."* NIPPY still went home sour — *"2 days of salt and sand and
+nowhere to wash it off"* — and TIDEPOOL TIM waited seventy-one minutes at
+the showers and left. Even a good day tells you exactly which shop was the
+bottleneck.
+
+We wrote a while ago that the money walking back onto the boat was the best
+growth incentive this game had. It now has a name attached, a number, and a
+sentence about you.
+
+### The shelter had no capacity
+
+![Four beds, all full, and a mayor's sign offering a fifth](devlog/img/2026-08-20-shelter-four-beds.png)
+
+A properly embarrassing bug: the shelter never had a bed *count*. Sleeping
+positions were handed out by cycling four cot spots with a modulo — so the
+fifth homeless crab in town slept **inside** the first one. Nobody was
+turned away because nobody was ever counted.
+
+It has four beds now, and they run out. When they do, the mayor can sign
+for another at **$3 a night, forever, on the town fund** — which means the
+shelter is not a building you buy, it's a standing charge the town votes to
+carry. A bigger shelter is literally a bigger election.
+
+The Driftwood grows the same way, out into its own forecourt as cabanas —
+seven rooms up to thirteen.
+
+### The machine says what it is
+
+The onboarding pass landed too, and it's the first cash-out of the line
+drawn when the pause button was deleted: *a player who can't tell what a
+button does is a bug we fix; a player who is losing money while they work
+it out is the game.*
+
+So: tooltips on the shop, a help card, and a hire you can actually see
+happen. Nothing was made slower, gentler, or pausable. The clock still
+runs while you read. The interface stopped being cryptic; the economy is
+still frightening. Those were always two different problems and only one
+of them was ours.
+
+### Small print
+
+Three tests went red on main and got triaged rather than patched: two were
+stale fixtures, and one was a test asserting a premise that had stopped
+being true. Zero were real regressions. Filed here mainly because "three
+reds, none of them bugs" is the kind of claim that deserves to be written
+down somewhere it can be checked.
+
+---
+
 ## 2026-08-20, late — The measurement was the deliverable
 
 ![The illness-roll clock artifact: what the roll reads vs what comes out of it](devlog/img/2026-08-20-illness-roll-clock-artifact.png)
