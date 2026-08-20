@@ -9,6 +9,68 @@ Three games, all live on GitHub Pages, all built on the snescat toy PPU
 | CRAB SHACK 2 | groblegark/crab-shack-2 | groblegark.github.io/crab-shack-2 | done + refined |
 | CRAB SHACK 3 | groblegark/crab-shack-3 | groblegark.github.io/crab-shack-3 | active |
 
+## STATE OF PLAY — start here (written 2026-08-20, end of a very long night)
+
+**Suite 167 scenarios, green. Baseline 0/16 (median eviction day 12). Growth
+`--buy chef,table` 3/8.** Lose-by-default is intact with five agent passes
+landed in one night. Everything below is merged, pushed and live.
+
+**LANDED 2026-08-19/20**, in merge order:
+1. **The visitor pass** — tourists are a POPULATION, not a spawn timer: four
+   ferry sailings a day, finite purses minted on arrival and destroyed on
+   departure, multi-day stays, and the DRIFTWOOD HOTEL (rooms held as
+   `stalls`). The unspent half of every purse is the growth incentive.
+2. **The sleeping guest** — `inRoom` had no branch in `updateVisitor`, so an
+   overnighter bounced state every frame all night; half of every paid night
+   was billed as a night on the promenade.
+3. **BRASS** — a rival hotelier who buys the Driftwood out from under REEF and
+   competes on board price and wages for the same visitor money.
+4. **The town hall** — the shelter's rent and its pot, funded from one of four
+   purses the elected mayor picks. Nothing is conjured; conservation is proved
+   per movement. The player can stand and win.
+5. **The nav strip** — the whole 2512px town to scale in the seven free rows
+   above the panel, SHACK named and flashing when the till takes money, MANAGE
+   and TOWN chips lifting both screens out from behind building-clicks.
+6. **The queue pass** — a place in line is stamped when you JOIN, the shuffle
+   steps both ways, locals aim at the back. 132k pairs: zero inversions.
+7. **Mine**: PAUSE (there was none), the beach ball, the ferry canon (ONE
+   boat), a save/load crash that bricked any town saved mid-errand, the
+   sick-day errand-window fix, and two automated UI sweeps.
+
+**NEXT UP (Matt's queue, in his order):**
+- **Accommodation upgrades** — *"now we have two multi accommodation places;
+  need to be able to make each pretty big by buying upgrades"* (the shelter and
+  the Driftwood).
+- **The departure card** — end-of-day view of who is leaving on the ferry and
+  how they feel, with a quote DERIVED from their stats. See the backlog entry.
+- **The illness-roll clock artifact** — the nightly sickness roll reads needs
+  at 20:00 for everybody, which is late in a MORNING crab's day and early in an
+  EVENING crab's. Morning crabs are ill 9.2% of the time against evening's
+  1.9%, and CLAWDIA is on evenings in all 8 seeds — which is the whole of
+  Matt's "CLAWDIA has supercrab powers of never getting sick". The fix is to
+  judge a crab's OWN day (its peak, or its own bedtime) rather than the wall
+  clock. NOT started; it is a core-system change wanting its own matrices.
+- **The onboarding/UI pass** — off Ben Lewis's playtest, under the two-kinds-
+  of-not-knowing rule below. The wall-of-text opening, tooltips on shop
+  upgrades, seeing a hire actually arrive, and making "is my money going up?"
+  answerable at a glance.
+- **A surf spot mid-beach** — explicitly deferred by Matt behind the ball.
+
+**THE THREE RULINGS THAT CONSTRAIN NEW WORK** (each has its own section
+below): resources are never conjured; the town's name is embargoed until the
+ending; and interface opacity is a bug while economic uncertainty is the game.
+
+**THE LESSON OF THE NIGHT, for whoever picks this up:** nearly every merge
+failure was **a test asserting a coincidence rather than a mechanism** — a
+house within 500px rather than the nearest free door; one specific funded
+fisher rather than whoever had the savings; one sampled voter rather than the
+roster; a two-arm price comparison inside a town where three other things were
+moving. Each held only while the town stayed small and predictable, and each
+broke the moment the town got richer. When a scenario fails after a merge, ask
+FIRST whether it was testing the rule or the coincidence. And when you relax
+one, mutation-test it: the rivalry counter-arm is only trustworthy because
+removing `priceAppeal` from the visitor's choice still makes it fail.
+
 ## CS3: what it is
 
 A simulation-style beach-town economy. Design call (Matt): **simulation, not
