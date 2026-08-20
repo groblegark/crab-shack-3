@@ -312,7 +312,11 @@ compounds or collapses → the landlord collects at 20:00 either way.
   showers 5/10, fish pay 13. **Rent is charged from night one** — you open
   with $150 in your pocket and have to trade your way to the first payment.
 - **Queue**: 5 slots, of which tourists may fill 4 — the 5th is reserved for
-  locals (crew + neighbours). Still the binding constraint on the whole
+  locals (crew + neighbours). WHERE those five stand is its own thing since
+  2026-08-20 — see STANDING IN LINE: a place is stamped when you JOIN a line
+  (`qSeq`), not by where you sit in `customers`, and the shuffle steps both
+  ways. The counts here are untouched by that pass.
+  Still the binding constraint on the whole
   economy: with the ferry model a visitor leaves town with about HALF their
   purse unspent, and the commonest reason they are offered nothing is that the
   line already holds its four. That is the growth incentive, made of money. Staff claim paying guests first and serve locals
@@ -407,6 +411,154 @@ vm — never fork game logic into tools/) and perf expectations live there.
   caches game files hard; only index.html gets a `?t=` bust.
 
 ## Gameplay features (recent)
+- **STANDING IN LINE** (owner directive, built 2026-08-20, worktree — verbatim
+  and complete: *"crabs need to stand in line nicely"*). Positional only: not
+  one capacity, price, wage or service rule moved, and two obvious-looking
+  companion changes were MEASURED AND REFUSED (below).
+
+  ### THE FAULT — three of them, and none was the spacing
+  A place in a line was `BIZ[k.biz].queueX + (qi[k.biz]++) * QUEUE_DX`, where
+  `qi` counts up the `customers` ARRAY. Since the ferry pass a visitor lives in
+  that array for their whole stay, so **the line was ordered by which boat you
+  came off**, not by when you walked up to the counter. A guest who landed on
+  the 09:00 ferry and strolled up fourth took the spot at the window and pushed
+  everyone already standing there back a place.
+  1. **NO STEP BACK.** The shuffle was `if (k.x > slot) k.x = Math.max(slot,
+     k.x - 45 * dt)` — one way, toward the counter. So anybody pushed back a
+     place never moved at all: they simply stood INSIDE the crab in front.
+  2. **LOCALS WERE NOT IN THE SYSTEM.** `startErrand` walked a crab to
+     `queueX + 4` and its customer record was created at that x. Being LEFT of
+     every slot it never moved again, so **every neighbour in a line stood on
+     the same pixel** — and a crab holding an `errandCust` is exempt from
+     `collide()`, so nothing pushed them apart either.
+  3. Visitors settled within visStep's 1px tolerance, so a line stood on five
+     different y values.
+
+  Measured on the shipped build, seed 4242, three sim-days, every frame, over
+  every pair of crabs waiting at the same counter:
+
+  | | before | after |
+  |---|---|---|
+  | pair-frames closer than 8px (half a body) | **57.7%** | **0.0%** |
+  | pair-frames on the SAME PIXEL (<1px apart) | **7900** | **0** |
+  | pairs in the wrong order (later arrival nearer the counter) | **25.5%** | **0.0%** |
+  | smallest gap between two waiting crabs, ever | **0.00px** | **13.00px** |
+  | mean \|gap − QUEUE_DX\| between neighbours | — | **0.05px** |
+  | y spread across a line | mean 0.32, max 0.90 | **0.00** |
+  | direction flips (the flicker class) | 5 | **0** |
+
+  Widened to 8 towns x 4 days (132k waiting pairs): **0 inversions against the
+  join order and 0 pairs inside a 12px body.** Shots, both at the shack window,
+  both frozen with `FF_SPEED[0] = 0` (TURBO is a `const`, so that is the way to
+  stop the world for a picture): `shots/queue-before.png` is the shipped build
+  with three guests and two neighbours joining in order — two crabs inside each
+  other at x1566/x1570 and a 26px hole further out; `shots/queue-after.png` is
+  this build with a line nobody staged at all, four guests at 1566/1579/1592/
+  1605 in join order, all facing the counter.
+
+  ### THE FIX — a queue is an ORDER, not an array
+  - `queueJoin(k)` stamps a monotonic `k.qSeq` **when you join a line** — the
+    local's customer record at the moment it is pushed, the visitor when
+    `toBiz` ends and they become `arriving`, a walk-in in `newCustomer()`.
+    `queueOrder(b)` sorts a shop's line by it (and lazily stamps anything that
+    got into a line without a ticket, so the order is always total).
+  - `updateCustomers` builds one Map of customer -> slot per frame, so a place
+    is a POSITION IN THE QUEUE. Rebuilt every frame is what compacts the line
+    when the front is served: everybody behind moves up exactly one place.
+  - The shuffle steps **both ways**, clamped to the distance left
+    (`Math.abs(dxq) <= QUEUE_STEP * dt` snaps). No overshoot means nothing to
+    correct next frame, which is the whole anti-jitter argument; and a settled
+    waiter faces the counter (`face = -1`), so a line reads as a line.
+  - `startErrand` aims a local at **the back of the line**
+    (`queueSlotX(e.biz, queueLen(e.biz))`), and `updateErrand` **re-aims while
+    the crab walks** — the line is alive, three guests can form up while you
+    cross the promenade, and a fixed aim lands you inside them. Re-aimed only
+    when the tail actually moves, so it is one comparison per crab.
+  - `drawCustomer` animates a waiter that is actually shuffling
+    (`k.qWalk`), so a step-up reads as walking rather than the whole line
+    sliding up the boardwalk on its belly.
+
+  ### TWO REFUSALS, both measured rather than argued
+  - **SERVING THE FRONT OF THE LINE — REFUSED.** The obvious companion change:
+    sort `pending` in `updateKitchen` into queue order so the crab who is
+    handed the plate is the crab standing at the window. It is an ECONOMIC
+    change, because the tip is `menuPrice x 0.5 x patience/maxPatience` — FIFO
+    takes every tip at the BOTTOM of the patience curve. Measured, 30d x 16
+    seeds x two blocks: lifetime **$53447/$57086 unsorted against
+    $49914/$48958 sorted (−8% and −14%)**, while the geometry alone reads
+    +2%/−1%. Reverted, with the receipt in a comment at the call site. If Matt
+    wants queue-order service it is a deliberate economy change, not a paint job.
+  - **QUEUE_DX / QUEUE_MAX / TOURIST_QUEUE_MAX — UNTOUCHED.** 13px is a shade
+    over the collider's own 12px body, so a line is spaced exactly the way
+    crabs stand everywhere else in town. The reserved 5th slot is untouched.
+
+  ### ONE THING FIXED NEXT DOOR — two chefs, one crate
+  Falling out of the same "everybody gets their own place" idea, and reported
+  loudly because it is outside the queue: **every crab that claims an order
+  walked to source slot ZERO**, and the source is the one station nothing
+  acquires. Two chefs converging on it shove each other off it, and the
+  standoff is invisible to every guard we have — the crab is 3px short of its
+  target, inside `STUCK_FAR`, so the no-progress watchdog reads it as arrived,
+  and no FURNITURE is involved so the bounce budget never ticks. Measured, the
+  suite's own "no crab freezes mid-walk (full town)" detector over 12 seeds:
+  **the pre-pass build already trips it (seed 4011, 23s), and the queue pass
+  moved which seed trips it (4242, 28s).** `sourceSpot()` stands the second
+  crab one body BEHIND the first, out on the walkway where no counter band
+  reaches. Two things make it FREE, and both were bought with a measurement:
+  - it is **decided on arrival**, re-read every frame of the walk to the crate,
+    not reserved at claim time. Reserving up front made the second chef of
+    every busy service walk an extra body-width whether or not anybody was
+    there: **−9% of lifetime take over 48 towns** (three 16-seed blocks:
+    $49775/$51680/$50854 against the geometry-only build's
+    $54494/$56501/$56176). Deciding late costs the steps only when it is
+    actually needed, and reads +3%/−11%/+1%.
+  - it is **scoped to that shop's own staff**. A first cut looked at every crab
+    in town within 10px, so a passer-by on the boardwalk could shove SUDSY off
+    her own counter: her time on the dehydration line went 10% → 36%. Scoped,
+    it is 17.7%, against the 18.7% the tap scenario already documents. A
+    ONE-STAFF shop is bit-identical to the shipped build.
+
+  After: **the worst freeze over those 12 seeds is 5 ticks, against the
+  pre-pass build's 23.**
+
+  ### Balance — flat, and the drift attributed
+  Baseline 30d x 16 on **three** seed blocks: **0/16, 0/16, 0/16** (0/48 on both
+  builds), median eviction 12/11/12 against the pre-pass build's 11/12/11,
+  lifetime $54956/$50608/$56177 against $53447/$57086/$55832 — +3%, −11%, +1%,
+  signs in both directions, which is what noise looks like. Growth 40d x 16
+  `--buy chef,table`: 4/16 against 5/16, inside the coin CLAUDE.md documents.
+  Paired arm, 8 propped towns x 4 days (same buys, coins held up): tourist
+  serves 953 -> 963, local serves 94 -> 101, seatings 535 -> 533, take
+  $14188 -> $14238.
+
+  ### Suite
+  One new scenario, **"queues: arrival order, even spacing, a smooth step-up
+  and no jitter"** — stages guests whose ARRAY order is the reverse of their
+  JOIN order plus a neighbour on an errand, then watches 120 frames of settling
+  and 120 more after the front walks off, asserting per frame that nobody moves
+  further than one shuffle (the teleport gate), nobody reverses direction (the
+  flicker gate), and on the settled frame that every crab stands on its own
+  slot in join order with no pair inside a 12px body. On the pre-pass build the
+  same staging settles **exactly reversed** — last to join at the window.
+  THREE existing scenarios were RE-POINTED, each with its receipt in the file,
+  and all three for the same reason: the pass moves the town by seconds, and a
+  scenario pinned to one seed of a chaotic sim flips.
+  - the **frozen day-2 fingerprint** — re-baselined; the 30-day curve above is
+    the receipt.
+  - the **shower fixture**, which sent crabs[0] on an 80-game-minute walk that
+    landed inside SUDSY's last hour, so she knocked off with the crab in
+    `waitStall` and the assertion read a tap rinse. A coin that failed **9 of
+    24 seeds on the pre-pass build** and 6 on this one. Staged at the counter
+    with the showers open, staffed, two hours off closing and a clean stall
+    free: 0/28 and 1/28. The assertion is untouched.
+  - the **rivalry counter probe** (`rivalry: after a refusal…`) — flagged
+    LOUDLY because rivalry belongs to another pass. Its price-war A/B turned on
+    one nine-day town and 30-80 drink serves: BAD on **2 of 6 single seeds on
+    the pre-pass build** and 3 of 6 on this one, and the seed it pinned (909)
+    was simply on the lucky side before. Now pooled over three towns
+    (1337/4242/5348), which reads 0.302 -> 0.342 on the pre-pass build and
+    0.387 -> 0.409 on this one. **The rivalry CODE was not touched.**
+
 - **CYCLE THE FOCUS + SUDSY WANTS THE JUICE BAR** (two owner directives, built
   2026-08-19, worktree — verbatim: *"need a single small pictorial next/prev
   crab button to cycle focus"* and *"sudsy needs to want to buy the juice shop,
