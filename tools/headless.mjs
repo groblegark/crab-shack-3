@@ -28,6 +28,11 @@ const QUIET = args.includes("--quiet");
 // of them at a time (game.js reads window._failOff through one helper and
 // never sets it). This is how the attribution table in PLAN was built.
 const FAILOFF = (opt("failoff", "") || "").split(",").filter(Boolean);
+// `--norival` switches THE RIVALRY off (game.js reads window._noRival through
+// rivalOn() and never sets it) so a matrix can attribute its own movement to a
+// peer owner coming for the player's juice bar - the paired arm behind the
+// numbers in PLAN.
+const NORIVAL = args.includes("--norival");
 const SEEDS = parseInt(opt("seeds", "1"));
 // THE WAGE LEVER. --wage N sets every PLAYER-owned shop's rate (the setting
 // the SCHEDULE tab exposes); --star N puts one named crab on a private deal
@@ -102,6 +107,7 @@ if (STAR != null)
 // ---- run ----------------------------------------------------------------
 G('soundOn = false; musicOn = false; screen = "play"; window._headless = true; window._stats = { tourServes: 0, crabServes: 0, tourRage: 0, crabRage: 0, bused: 0 };');
 if (FAILOFF.length) G(`window._failOff = ${JSON.stringify(Object.fromEntries(FAILOFF.map(k => [k, 1])))};`);
+if (NORIVAL) G(`window._noRival = true;`);
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);
 const buyScript = BUY.length ? new vm.Script(`
   if (tmin >= 9 * 60 && tmin <= 19 * 60 && Math.abs(tmin - Math.round(tmin / 60) * 60) < ${STEP} * TS / 2) {

@@ -4007,6 +4007,379 @@ scenario("cycler: < crab > steps the selection AND the camera, and wraps", () =>
   return hidden ? `the cycler still draws over the management card` : true;
 });
 
+// ---- THE RIVALRY: A PEER OWNER WANTS THE JUICE BAR --------------------------
+// The rivalry keys on the LEASE NEXT DOOR, not on SUDSY: whoever holds SUDS
+// SHOWERS is the rival. The fixture below props THAT owner's books, because
+// everything the ambition reads is theirs - and the paired arm inside the first
+// scenario, where the books are empty and the line is drawn, is what proves it.
+function rivalTown(seed, { bar = true } = {}) {
+  const sim = createSim({ seed });
+  sim.G(`coins = 4000; UPS.chef.lvl = 4;`);
+  sim.runDays(3);
+  if (bar) rivalOpenBar(sim);
+  return sim;
+}
+function rivalOpenBar(sim) {
+  sim.G(`UPS.juicebar.lvl = 1; crabs[1].p.job = "juicebar"; crabs[1].workBiz = "juicebar";`);
+}
+function rivalProp(sim) {   // a rival having a good month, and well enough to have one
+  sim.G(`{ const o = OWNERS[rivalOwnerId()] || OWNERS.sudsy;
+    o.till = 900; o.credit = 0; o.gone = 0;
+    bizTake.showers = [120, 120, 120]; bizStrike.showers = 0;
+    coins = Math.max(coins, 2500);
+    const k = rivalCrab(); if (k) { k.p.hunger = 0; k.p.thirst = 0; k.p.dirt = 0; k.p.sick = null; } }`);
+}
+function rivalStarve(sim) { // ...and one whose books are empty and whose line is drawn
+  sim.G(`{ const o = OWNERS[rivalOwnerId()] || OWNERS.sudsy;
+    o.till = 0; o.credit = creditLimit(); o.gone = 0;
+    rival.fund = 0; bizTake.showers = [0, 0, 0];
+    const k = rivalCrab(); if (k) { k.p.wallet = 0; k.p.hunger = 0; k.p.thirst = 0; k.p.dirt = 0; k.p.sick = null; } }`);
+}
+function rivalDay(sim, prop = true) {
+  if (prop === "starve") rivalStarve(sim); else if (prop) rivalProp(sim);
+  const d = sim.G("day");
+  sim.runUntil(`day > ${d}`, { maxSteps: 200000 });
+  return JSON.parse(sim.G(`JSON.stringify((report && report.rival) || [])`));
+}
+
+scenario("rivalry: her interest builds from HER OWN books, and it is visible long before the offer", () => {
+  // She is a rival with a balance sheet, not a random event. What she can raise
+  // - money put by, the till, her own pocket and the line of credit her lease
+  // buys her - against what the bar is worth IS how badly she wants it.
+  const sim = rivalTown(1337, { bar: false });
+  if (sim.G(`rival.stage`) !== "none") return `the rivalry did not start dormant`;
+  if (sim.G(`rivalIntent()`) !== 0) return `a town with no juice bar banked intent`;
+  rivalOpenBar(sim);
+  let eyedOn = 0, offeredOn = 0, sawLine = false, sawSum = false, diary = "";
+  for (let i = 0; i < 12 && !offeredOn; i++) {
+    const lines = rivalDay(sim);
+    const d = sim.G("day") - 1;
+    if (!eyedOn && sim.G(`rival.stage`) === "eyeing") {
+      eyedOn = d;
+      // read the diary AT THE MOMENT it is written: a shower attendant's ring
+      // buffer rolls over inside a fortnight of named rinses
+      diary = sim.G(`JSON.stringify((rivalCrab().p.log || []).map(e => e[3]))`);
+    }
+    if (!offeredOn && sim.G(`rival.stage`) === "offer") offeredOn = d;
+    if (lines.some(l => /EYEING/.test(l))) sawLine = true;
+    if (lines.some(l => /CAN RAISE \$\d+/.test(l))) sawSum = true;
+  }
+  if (!eyedOn) return `she never started eyeing the bar`;
+  if (!offeredOn) return `she never made an offer`;
+  if (!(eyedOn < offeredOn)) return `she offered on day ${offeredOn} without eyeing first (${eyedOn})`;
+  if (offeredOn - eyedOn < 3) return `only ${offeredOn - eyedOn} days of warning before the offer`;
+  if (!sawLine) return `the day report never named her interest`;
+  if (!sawSum) return `the day report never printed the arithmetic behind it`;
+  // ...the diary, and the surfaces that carry the numbers
+  if (!/LOOKING AT THE JUICE BAR/.test(diary)) return `nothing in her diary about the bar: ${diary}`;
+  const log = sim.G(`JSON.stringify((rivalCrab().p.log || []).map(e => e[3]))`);
+  if (!/OFFERED \$\d+ FOR THE/.test(log)) return `the offer itself is not on her record: ${log}`;
+  const lines2 = JSON.parse(sim.G(`JSON.stringify(rivalManageLines())`));
+  if (!lines2[0]) return `the management screen says nothing`;
+  if (!/TILL/.test(lines2[1] || "")) return `her books are not on the management screen (${lines2[1]})`;
+  // THE PAIRED ARM: same town, same seed, her books EMPTY and her line already
+  // drawn. Nothing may happen, because there is nothing to buy anything with.
+  const cold = rivalTown(1337, { bar: false });
+  rivalOpenBar(cold);
+  for (let i = 0; i < 12; i++) rivalDay(cold, "starve");
+  if (cold.G(`rival.stage`) === "offer")
+    return `a rival with no money and no credit still made an offer`;
+  if (cold.G(`rivalIntent()`) >= cold.G(`RIVAL_CFG.OFFER`))
+    return `a rival with empty books reached intent ${cold.G("rivalIntent()")}`;
+  return true;
+});
+
+scenario("rivalry: the offer is a real number, and it can be ACCEPTED or REFUSED", () => {
+  // THE MATHS: the succession layer already prices a business (lease + fixtures
+  // + goodwill). A GOING CONCERN is that plus a premium that scales with how
+  // well it actually trades, and the offer is capped by what she can raise - so
+  // a lowball is a real outcome and the card shows both numbers.
+  const sim = rivalTown(4242);
+  for (let i = 0; i < 14 && sim.G(`rival.stage`) !== "offer"; i++) rivalDay(sim);
+  if (!sim.G(`rivalOfferLive()`)) return `no offer after 14 propped days`;
+  const t = JSON.parse(sim.G(`JSON.stringify(offerTerms("juicebar", 0))`));
+  const asking = sim.G(`askingPrice("juicebar")`);
+  if (t.lease + t.fixtures + t.goodwill !== asking)
+    return `the itemized terms (${t.lease}+${t.fixtures}+${t.goodwill}) do not add to the asking price ${asking}`;
+  if (!(t.price > asking)) return `a going concern (${t.price}) is not dearer than the shuttered price (${asking})`;
+  if (t.prem < 15 || t.prem > 110) return `the premium reads ${t.prem}% - outside anything legible`;
+  const offer = sim.G(`rival.offer.price`), worth = sim.G(`rival.offer.worth`);
+  if (offer > worth) return `she offered ${offer} for something worth ${worth}`;
+  if (offer < worth * sim.G(`RIVAL_CFG.LOWBALL`)) return `she made an insulting offer (${offer} of ${worth})`;
+  // ...and the chips are real tap targets on the bar's own shopfront
+  const R = JSON.parse(sim.G(`JSON.stringify(rivalChipRects("juicebar"))`));
+  if (R.take.w < 20 || R.take.h < 10 || R.no.w < 20) return `the answer chips are too small to tap`;
+  if (R.take.x + R.take.w > R.no.x) return `the TAKE IT and NO chips overlap`;
+  // ---- ACCEPT: the money moves, the lease moves, and the bar keeps trading.
+  // She pays out of the war chest, the till and her pocket, and BORROWS the
+  // rest on the same line the player draws on - so what leaves her pots plus
+  // what she drew has to be the price exactly. Nothing is minted.
+  const before = JSON.parse(sim.G(`JSON.stringify({ coins: Math.round(coins), purse: Math.round(rivalRaise()),
+    pots: Math.round(rivalPurse() + (rival.fund || 0)), debt: Math.round((OWNERS[rivalOwnerId()] || {}).credit || 0),
+    life: Math.round(lifetime) })`));
+  const oid = sim.G(`rivalOwnerId()`);
+  if (!sim.G(`tapRivalChip("take")`)) return `the offer could not be accepted`;
+  const after = JSON.parse(sim.G(`JSON.stringify({ coins: Math.round(coins),
+    pots: Math.round(rivalPurse() + (rival.fund || 0)), debt: Math.round((OWNERS["${oid}"] || {}).credit || 0),
+    life: Math.round(lifetime), owner: String(bizOwner("juicebar")),
+    crew: crabs.map(c => c.p.job), stage: rival.stage })`));
+  if (after.owner !== oid) return `the bar did not change hands (owner ${after.owner})`;
+  if (Math.round(after.coins - before.coins) !== offer) return `the till moved ${after.coins - before.coins}, not ${offer}`;
+  const paid = (before.pots - after.pots) + (after.debt - before.debt);
+  if (Math.abs(paid - offer) > 1) return `she found ${paid} from somewhere, not ${offer}`;
+  if (after.life !== before.life) return `a business sale inflated lifetime TAKINGS by ${after.life - before.life}`;
+  if (after.crew.includes("juicebar")) return `crew were left working a shop the player no longer owns`;
+  if (after.stage !== "done") return `the ambition did not settle (stage ${after.stage})`;
+  // THE BAR KEEPS TRADING under new management - she staffs it off the same
+  // job board and runs it off the same policy tables
+  for (let i = 0; i < 8; i++) rivalDay(sim);
+  const took = JSON.parse(sim.G(`JSON.stringify(bizTake.juicebar || [])`));
+  if (!took.some(v => v > 0)) return `the bar took nothing at all under her (${took})`;
+  if (sim.G(`bizDark("juicebar")`)) return `the bar went dark the moment she bought it`;
+  // ---- REFUSE, on a second town: the bar stays yours, and she competes
+  const sim2 = rivalTown(4242);
+  for (let i = 0; i < 14 && sim2.G(`rival.stage`) !== "offer"; i++) rivalDay(sim2);
+  if (!sim2.G(`rivalOfferLive()`)) return `no offer on the refusal arm`;
+  const coins2 = sim2.G(`coins`);
+  if (!sim2.G(`tapRivalChip("no")`)) return `the offer could not be refused`;
+  if (sim2.G(`bizOwner("juicebar")`) !== "player") return `refusing lost the bar anyway`;
+  if (sim2.G(`coins`) !== coins2) return `refusing moved money`;
+  if (sim2.G(`rival.stage`) !== "compete") return `a refusal did not lead to competition (${sim2.G("rival.stage")})`;
+  return true;
+});
+
+scenario("rivalry: after a refusal she competes with the PLAYER'S OWN levers, and can be countered", () => {
+  const sim = rivalTown(1337);
+  for (let i = 0; i < 14 && sim.G(`rival.stage`) !== "offer"; i++) rivalDay(sim);
+  if (!sim.G(`rivalOfferLive()`)) return `no offer to refuse`;
+  const was = JSON.parse(sim.G(`JSON.stringify({ price: bizPriceMul("showers"),
+    close: BIZ.showers.hours.close, wage: bizWage("showers") })`));
+  sim.G(`tapRivalChip("no")`);
+  const said = [];
+  for (let i = 0; i < 20; i++) for (const l of rivalDay(sim)) said.push(l);
+  const moves = JSON.parse(sim.G(`JSON.stringify((window._stats.rivalMoves || []).map(m => m.move))`));
+  for (const lever of ["price", "hours", "wage"])
+    if (!moves.includes(lever)) return `she never used the ${lever} lever (${moves})`;
+  const now = JSON.parse(sim.G(`JSON.stringify({ price: bizPriceMul("showers"),
+    close: BIZ.showers.hours.close, wage: bizWage("showers") })`));
+  if (!(now.price < was.price)) return `her board price never moved (${was.price} -> ${now.price})`;
+  if (!(now.wage > was.wage)) return `her wage never moved (${was.wage} -> ${now.wage})`;
+  // EVERY move is announced the night it happens - nothing is hidden
+  if (!said.some(l => /CUTS THE SHWR PRICE/.test(l))) return `the price cut was never announced`;
+  if (!said.some(l => /POSTS \$/.test(l))) return `the wage push was never announced`;
+  // ...and it is SURVIVABLE: a missed rent is what says the war is costing her
+  // more than it is worth, and she walks a move back in public
+  sim.G(`bizStrike.showers = 1; rival.stepDay = day - RIVAL_CFG.STEP_DAYS; runRivalCompete();`);
+  const retreats = JSON.parse(sim.G(`JSON.stringify((window._stats.rivalMoves || [])
+    .filter(m => m.move === "retreat").map(m => m.line))`));
+  if (!retreats.length) return `a rival who missed her own rent never backed off a single move`;
+  if (!(sim.G(`bizPriceMul("showers")`) > now.price)) return `the retreat did not put her price back up`;
+
+  // ---- THE COUNTER. The promenade is ZERO SUM: her cut takes footfall off the
+  // bar, and the player's own price stepper takes it back. Two paired towns,
+  // same seed, same props, differing only in what is written on the boards.
+  const share = (mul) => {
+    const s2 = rivalTown(909);
+    s2.G(`setBizPrice("showers", 0.7); setBizPrice("juicebar", ${mul});`);
+    for (let i = 0; i < 9; i++) rivalDay(s2);
+    return JSON.parse(s2.G(`JSON.stringify({ shwr: window._stats.showersDone || 0,
+      bar: window._stats.drinkServes || 0, all: (window._stats.tourServes || 0) })`));
+  };
+  const undercut = share(1), matched = share(0.7);
+  const rShe = undercut.bar / Math.max(1, undercut.shwr);
+  const rYou = matched.bar / Math.max(1, matched.shwr);
+  if (!(rYou > rShe))
+    return `matching her cut did not win the bar any share back (${JSON.stringify(undercut)} vs ${JSON.stringify(matched)})`;
+  // ...and the town's TOTAL footfall barely moves, which is what makes a price
+  // war a war rather than a growth strategy
+  const drift = Math.abs(matched.all - undercut.all) / Math.max(1, undercut.all);
+  if (drift > 0.25) return `cutting prices conjured ${Math.round(drift * 100)}% more guests out of the sea`;
+  // ...and the lever's own arithmetic, which is what all of the above rests on
+  const probe = createSim({ seed: 5 });
+  if (probe.G(`priceAppeal("shack")`) !== 1) return `the default price is not perfectly inert`;
+  if (probe.G(`bizPull("juicebar")`) !== probe.G(`bizPullBase("juicebar")`))
+    return `a default board already moves the promenade`;
+  probe.G(`setBizPrice("showers", 0.7)`);
+  if (!(probe.G(`bizPull("showers")`) > probe.G(`bizPullBase("showers")`) * 1.2))
+    return `a 30% cut buys no extra pull`;
+  probe.G(`setBizPrice("showers", 1.3)`);
+  if (!(probe.G(`bizPull("showers")`) < probe.G(`bizPullBase("showers")`) * 0.85))
+    return `charging 30% more costs no footfall`;
+  probe.G(`setBizPrice("shack", 0.7)`);
+  if (probe.G(`menuPrice("shack", BIZ.shack.recipes[0])`) !== Math.round(17 * 0.7))
+    return `the board price does not follow the multiplier`;
+  if (probe.G(`localPrice("shack", BIZ.shack.recipes[0])`) !== Math.ceil(Math.round(17 * 0.7) * 1.25))
+    return `a local's +25% does not follow the board`;
+  probe.G(`setBizPrice("shack", 9)`);
+  if (probe.G(`bizPriceMul("shack")`) !== probe.G(`PRICE_MAX`)) return `a nonsense price was not clamped`;
+  return true;
+});
+
+scenario("rivalry: if the juice bar FAILS she is first in the queue", () => {
+  const sim = rivalTown(909);
+  for (let i = 0; i < 12 && sim.G(`rival.stage`) === "none"; i++) rivalDay(sim);
+  if (sim.G(`rival.stage`) === "none") return `she never took an interest`;
+  // A player's own shop cannot go bankrupt without ending the run, so the bar
+  // is handed to a pauper peer owner and allowed to fail exactly the way any
+  // peer's lease fails: three missed settlements and the shutters go up.
+  const oid = sim.G(`rivalOwnerId()`);
+  sim.G(`OWNERS.pauper = { id: "pauper", name: "PAUPER", till: 0, credit: 0, darkT: 0 };
+         BIZ.juicebar.owner = "pauper";
+         // ...and somebody DEEPER-POCKETED than her is standing right there
+         npcs.filter(n => n.p.owner !== "${oid}").forEach(n => { n.p.wallet = 5000; });`);
+  for (let i = 0; i < 8; i++) {
+    sim.G(`OWNERS.pauper.till = 0; OWNERS.pauper.credit = creditLimit();
+           npcs.filter(n => n.p.owner !== "${oid}").forEach(n => { n.p.wallet = 5000; });`);
+    rivalDay(sim);
+    if (sim.G(`bizOwner("juicebar")`) === oid) break;
+  }
+  const owner = String(sim.G(`String(bizOwner("juicebar"))`));
+  if (owner !== oid)
+    return `the bar failed and went to ${owner} instead of the crab who had been trying to buy it`;
+  const fr = JSON.parse(sim.G(`JSON.stringify(window._stats.rivalFirstRefusal || [])`));
+  if (!fr.length) return `she got it, but not through the first-refusal path`;
+  if (sim.G(`rival.stage`) !== "done") return `the ambition did not settle after she got it`;
+  return true;
+});
+
+scenario("rivalry: the player can buy HER shop - the ownership layer stays symmetric", () => {
+  const sim = rivalTown(4242);
+  for (let i = 0; i < 6; i++) rivalDay(sim);
+  // her ask is PUBLIC, itemized off the same pricer, and it MOVES with her books
+  const peers = JSON.parse(sim.G(`JSON.stringify(peerBizList())`));
+  if (!peers.includes("showers")) return `her shop is not offerable (${peers})`;
+  const rich = sim.G(`rivalAsk("showers")`);
+  if (!(rich > sim.G(`askingPrice("showers")`)))
+    return `a trading shop asks no more than a shuttered one`;
+  sim.G(`bizTake.showers = [0, 0, 0]`);
+  const poor = sim.G(`rivalAsk("showers")`);
+  if (!(poor < rich)) return `the ask did not fall when her books did (${rich} -> ${poor})`;
+  sim.G(`bizTake.showers = [120, 120, 120]`);
+  // ...too little money is refused, by name and with the number
+  sim.G(`coins = 10; askArm = null;`);
+  if (sim.G(`tapAskChip("showers")`)) return `a broke player bought a shop`;
+  if (sim.G(`bizOwner("showers")`) === "player") return `a refused buy still moved the lease`;
+  // ...and with the money, two taps does it
+  const oid = sim.G(`rivalOwnerId()`), her = sim.G(`rivalCrab().p.name`);
+  const price = sim.G(`rivalAsk("showers")`);
+  sim.G(`coins = ${price} + 500; askArm = null;`);
+  const c0 = sim.G(`coins`), t0 = sim.G(`OWNERS["${oid}"].till`);
+  if (sim.G(`tapAskChip("showers")`)) return `one tap bought a business - it must arm first`;
+  if (!sim.G(`tapAskChip("showers")`)) return `the second tap did not complete the buy`;
+  if (sim.G(`bizOwner("showers")`) !== "player") return `the lease did not move to the player`;
+  if (Math.round(c0 - sim.G(`coins`)) !== Math.round(price)) return `the player paid the wrong number`;
+  if (Math.round(sim.G(`OWNERS["${oid}"].till`) - t0) !== Math.round(price))
+    return `the SELLER was not paid - a sale between two owners is a transfer`;
+  // she is out of that shop and back on the town's default profession, and the
+  // ambition that stood on that balance sheet is over
+  const she = JSON.parse(sim.G(`JSON.stringify((() => { const k = allCrabs().find(c => c.p.name === "${her}");
+    return k ? { job: k.p.job, owner: k.p.owner || null } : null; })())`));
+  if (!she) return `the seller vanished from the town`;
+  if (she.job === "showers") return `she is still working a shop she no longer owns`;
+  if (she.owner) return `she still holds an owner key with no lease behind it`;
+  if (sim.G(`rival.stage`) !== "none") return `her ambition survived losing her own shop`;
+  if (sim.G(`rivalOwnerId()`) !== null) return `the player's own shop still has a rival behind it`;
+  // ...and the shop the player just bought still works
+  for (let i = 0; i < 4; i++) rivalDay(sim, false);
+  if (sim.G(`forSale("showers")`)) return `the shop the player bought fell straight off the market`;
+  // AN OWNER WITH TWO LEASES LOSES ONE AND KEEPS THE OTHER (the orphan seam):
+  // clearing p.owner outright would put the second shop on the market at the
+  // next settlement, which is exactly what stepDownOwner exists to prevent.
+  const s2 = rivalTown(4242);
+  s2.G(`OWNERS.duo = { id: "duo", name: "DUO", till: 400, credit: 0, darkT: 0 };
+        BIZ.showers.owner = "duo"; BIZ.arcade.owner = "duo"; UPS.arcade.lvl = 1;
+        npcs[1].p.owner = "duo"; npcs[1].p.job = "showers"; npcs[1].workBiz = "showers";
+        coins = 9000; askArm = null;`);
+  s2.G(`tapAskChip("showers"); tapAskChip("showers");`);
+  if (s2.G(`bizOwner("arcade")`) !== "duo") return `buying one lease orphaned the owner's other shop`;
+  if (s2.G(`npcs[1].p.owner`) !== "duo") return `the two-shop owner lost their registry key`;
+  if (s2.G(`npcs[1].p.job`) !== "arcade") return `they did not step down to the counter they still own`;
+  return true;
+});
+
+scenario("rivalry: THE LEASE IS THE RIVAL - a new owner next door inherits the ambition", () => {
+  // SUDS SHOWERS fails in most long runs and a fisher buys it off the market.
+  // The rivalry keys on the BUSINESS, exactly the way HOURS_POLICY and
+  // WAGE_POLICY do, so the new holder picks the ambition up - and the money the
+  // last one had put by goes back to the last one, because it is real money.
+  const sim = rivalTown(1337);
+  for (let i = 0; i < 10 && sim.G(`rival.stage`) === "none"; i++) rivalDay(sim);
+  if (sim.G(`rival.stage`) === "none") return `the founding owner never took an interest`;
+  const oid0 = sim.G(`rivalOwnerId()`);
+  sim.G(`rival.fund = 140; OWNERS["${oid0}"].till = 0;`);
+  // hand the lease to somebody else, the way succession does
+  sim.G(`OWNERS.newby = { id: "newby", name: "NEWBY", till: 300, credit: 0, darkT: 0 };
+         { const k = allCrabs().find(c => c.p.npc && c.p.owner !== "${oid0}");
+           k.p.owner = "newby"; k.p.job = "showers"; k.workBiz = "showers"; k.p.shift = "D"; }
+         BIZ.showers.owner = "newby";`);
+  sim.G(`rivalOwnerCheck()`);
+  if (sim.G(`rivalOwnerId()`) !== "newby") return `the rival did not follow the lease`;
+  if (sim.G(`rival.fund`) !== 0) return `the new owner inherited somebody else's savings`;
+  if (Math.round(sim.G(`OWNERS["${oid0}"].till`)) !== 140)
+    return `the war chest evaporated instead of going back to whoever saved it`;
+  if (sim.G(`rival.stage`) !== "none") return `the new owner started mid-rivalry`;
+  if (sim.G(`rivalName()`) !== "NEWBY") return `the town still names the old owner`;
+  // ...and NEWBY builds their own ambition from their own books
+  for (let i = 0; i < 10 && sim.G(`rival.stage`) === "none"; i++) rivalDay(sim);
+  if (sim.G(`rival.stage`) === "none") return `the new owner never took an interest of their own`;
+  // a lease in the PLAYER's hands has no rival behind it at all
+  sim.G(`BIZ.showers.owner = "player"; rivalOwnerCheck();`);
+  if (sim.G(`rivalOn()`)) return `the player's own shop is still plotting against them`;
+  return true;
+});
+
+scenario("rivalry: prices, ambition and a standing offer roundtrip save/load", () => {
+  const store = new Map();
+  const a = createSim({ seed: 3, storage: store, fresh: false });
+  a.G(`coins = 4000; UPS.juicebar.lvl = 1;`);
+  a.runDays(2);
+  a.G(`setBizPrice("showers", 0.85); setBizPrice("juicebar", 1.15);
+       rival.stage = "offer"; rival.refused = 2; rival.step = 5; rival.fund = 88;
+       rival.stepDay = 2; rival.noDay = 1; rival.lastOffer = 2; rival.offerDay = 2;
+       rival.eyeDay = 1; rival.val = 520; rival.who = "sudsy";
+       rival.offer = { price: 411, worth: 520, day: 2 };
+       save();`);
+  const b = createSim({ seed: 3, storage: store, fresh: false });
+  const got = JSON.parse(b.G(`JSON.stringify({ shwr: bizPriceMul("showers"), bar: bizPriceMul("juicebar"),
+    r: rival, live: rivalOfferLive() })`));
+  if (Math.abs(got.shwr - 0.85) > 1e-9) return `her price came back ${got.shwr}`;
+  if (Math.abs(got.bar - 1.15) > 1e-9) return `the bar's price came back ${got.bar}`;
+  if (got.r.stage !== "offer" || !got.r.offer) return `the standing offer did not survive (${JSON.stringify(got.r)})`;
+  if (got.r.offer.price !== 411 || got.r.offer.worth !== 520) return `the offer's numbers moved`;
+  if (got.r.fund !== 88 || got.r.val !== 520 || got.r.who !== "sudsy") return `the war chest did not roundtrip`;
+  if (got.r.refused !== 2 || got.r.step !== 5 || got.r.noDay !== 1 || got.r.eyeDay !== 1)
+    return `the escalation ledger did not roundtrip`;
+  if (!got.live) return `the reloaded offer is not answerable`;
+  // ...and it is still ANSWERABLE after the reload
+  b.G(`OWNERS.sudsy.till = 900;`);
+  const coins0 = b.G(`coins`);
+  if (!b.G(`tapRivalChip("take")`)) return `the reloaded offer could not be taken`;
+  if (b.G(`bizOwner("juicebar")`) !== "sudsy") return `the reloaded offer did not transfer the bar`;
+  if (Math.round(b.G(`coins`) - coins0) !== 411) return `the reloaded offer paid the wrong number`;
+  // AN OLD SAVE has neither key: the default price and a dormant rivalry ARE
+  // the old world, and a corrupt one is clamped rather than believed
+  const store2 = new Map();
+  store2.set(SLOT1, JSON.stringify({ _ver: 1, coins: 200, day: 2, lv: { chef: 2 },
+    personas: [{ name: "PINCHY", job: "shack" }, { name: "CLAWDIA", job: "shack" }] }));
+  store2.set(ACTIVE, "1");
+  const c = createSim({ seed: 3, storage: store2, fresh: false });
+  if (c.G(`bizPriceMul("shack")`) !== 1) return `an old save did not open on the board price`;
+  if (c.G(`rival.stage`) !== "none" || c.G(`rival.fund`) !== 0) return `an old save opened mid-rivalry`;
+  const store3 = new Map();
+  store3.set(SLOT1, JSON.stringify({ _ver: 1, coins: 200, day: 2, lv: { chef: 2 },
+    price: { shack: 12, showers: -4 },
+    rival: { stage: "NONSENSE", fund: -9, val: -1, who: "ghost", offer: { price: -1 } },
+    personas: [{ name: "PINCHY", job: "shack" }, { name: "CLAWDIA", job: "shack" }] }));
+  store3.set(ACTIVE, "1");
+  const d = createSim({ seed: 3, storage: store3, fresh: false });
+  const junk = JSON.parse(d.G(`JSON.stringify({ hi: bizPriceMul("shack"), lo: bizPriceMul("showers"),
+    stage: rival.stage, fund: rival.fund, val: rival.val, who: rival.who, offer: rival.offer })`));
+  if (junk.hi !== d.G(`PRICE_MAX`) || junk.lo !== d.G(`PRICE_MIN`)) return `hand-edited prices were not clamped`;
+  if (junk.stage !== "none" || junk.fund !== 0 || junk.val !== 0 || junk.who || junk.offer)
+    return `a hand-edited rivalry was believed (${JSON.stringify(junk)})`;
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;
@@ -4015,7 +4388,7 @@ const t0 = Date.now();
 for (const { name, fn } of list) {
   const s = Date.now();
   let out;
-  try { out = fn(); } catch (e) { out = "EXCEPTION: " + (e.stack || e).toString().split("\n")[0]; }
+  try { out = fn(); } catch (e) { out = "EXCEPTION: " + (e.stack || e).toString().split("\n").slice(0, 4).join(" / "); }
   const ms = Date.now() - s;
   if (out === true) { pass++; console.log(`  PASS  ${name} (${ms}ms)`); }
   else { fail++; console.log(`  FAIL  ${name} (${ms}ms)\n        ${out}`); }
