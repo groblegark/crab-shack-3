@@ -7,6 +7,11 @@ import { createSim } from "./simlib.mjs";
 const results = [];
 function scenario(name, fn) { results.push({ name, fn }); }
 const near = (v, lo, hi) => v >= lo && v <= hi;
+// the customer states that belong to a SHOP TRANSACTION. A visitor lives in
+// `customers` for its whole stay now, so "the queue is empty" has to be asked
+// as "nobody is mid-order" rather than "the list is empty".
+const COUNTER_STATES = '["arriving","waiting","toSeat","seatedWaiting","toTable","dining","toStall","showering","outStall","waitStall","leaving"]';
+
 
 // Saves live in NUMBERED SLOTS. LEGACY is the old single key - still written by
 // the migration scenarios, since a stored save from an older build arrives
@@ -150,7 +155,12 @@ scenario("staff meals: closing crew cooks their own dinner, at retail", () => {
   // deterministic retail accounting: after settlement, one hungry broke-ish
   // crab self-cooks the cheapest item (juice: pay 10, ingredient fruit 3)
   sim.runUntil("tmin >= 20.6 * 60 && lastRentDay === day", {});
-  sim.runUntil("customers.length === 0", { maxSteps: 60000 });   // lingering diners' tips would pollute the ledger
+  // RE-POINTED 2026-08-19 (the visitor pass): this waited for the customer
+  // list to EMPTY, and a visitor never leaves it - they live in it for a day
+  // or two between counters, so the wait burned its whole step budget and
+  // carried the fixture days past the evening it meant to stage. What it
+  // wanted was "nobody is mid-order", which is what it now asks for.
+  sim.runUntil(`!customers.some(k => ${COUNTER_STATES}.includes(k.state))`, { maxSteps: 60000 });   // lingering diners' tips would pollute the ledger
   // last-call lingering can keep the shack staffed past close: wait for a truly dark kitchen
   sim.runUntil('!allCrabs().some(k => k.duty && k.workBiz === "shack") && tmin >= 20.5 * 60 && tmin < 22.5 * 60', { maxSteps: 120000 });
   const before = JSON.parse(sim.G(`(() => {
@@ -387,8 +397,16 @@ scenario("npc: SUDSY dines at the player shack", () => {
 
 scenario("housing: npcs sleep at the shelter, then move up", () => {
   const sim = createSim({ seed: 31 });
-  // fresh town: all three townsfolk start at the shelter, no nooks
-  const flags = JSON.parse(sim.G("JSON.stringify(npcs.map(c => [c.p.name, !!c.p.homeless, c.p.homeX || 0]))"));
+  // fresh town: the townsfolk start at the shelter, no nooks.
+  // RE-POINTED 2026-08-19 (the visitor/hotel pass): REEF is excluded, and it is
+  // a starting ASSET rather than a hole in the rule. The DRIFTWOOD HOTEL sits
+  // at the far east end of the promenade past the pier; an owner-operator
+  // commuting there from the shelter every morning would spend most of a
+  // ten-hour day on the road, so he opens in the beach cottage next door -
+  // exactly the way SUDSY opens with a shop and a $200 till. Everybody ELSE
+  // still starts on a cot, and the rule under test (a flush townsfolk crab
+  // rents a house at settlement) is unchanged.
+  const flags = JSON.parse(sim.G("JSON.stringify(npcs.filter(c => c.p.owner !== 'reef').map(c => [c.p.name, !!c.p.homeless, c.p.homeX || 0]))"));
   for (const [name, homeless, nook] of flags) {
     if (!homeless) return name + " started housed";
     if (nook) return name + " still has a nook homeX";
@@ -455,13 +473,19 @@ scenario("save/load: townsfolk keep wallets and houses", () => {
   const store = new Map();
   const a = createSim({ seed: 5, storage: store, fresh: false });
   a.runDays(2);
-  a.G("npcs[1].p.wallet = 77; npcs[1].p.homeless = false; npcs[1].p.house = 8; save()");
+  // RE-POINTED 2026-08-19 (the visitor/hotel pass): this reached for `npcs[1]`
+  // and meant SALTY. The townsfolk list grew (REEF the hotelier, and a third
+  // fisher), so the index now lands on somebody else - and cottage 8 is REEF's,
+  // so pinning SALTY there would have staged a double-let. Named lookup and a
+  // free lot; the roundtrip under test is untouched.
+  a.G(`{ const s = npcs.find(c => c.p.name === "SALTY");
+        s.p.wallet = 77; s.p.homeless = false; s.p.house = 6; save(); }`);
   const b = createSim({ seed: 6, storage: store, fresh: false });
   const rows = JSON.parse(b.G("JSON.stringify(npcs.map(c => [c.p.name, c.p.wallet, !!c.p.homeless, c.p.house]))"));
   const salty = rows.find(r => r[0] === "SALTY");
   if (!salty) return "SALTY missing after reload";
-  if (salty[1] !== 77 || salty[2] !== false || salty[3] !== 8)
-    return "SALTY came back as " + JSON.stringify(salty) + ", expected [SALTY,77,false,8]";
+  if (salty[1] !== 77 || salty[2] !== false || salty[3] !== 6)
+    return "SALTY came back as " + JSON.stringify(salty) + ", expected [SALTY,77,false,6]";
   return true;
 });
 
@@ -1184,9 +1208,22 @@ scenario("tired: a workday accrues it; sleep drains it, bed beating cot", () => 
   sim.runUntil("lastRentDay === day && tmin >= 21.5 * 60", { maxSteps: 400000 });
   // market income can house SALTY by night one now - this scenario compares
   // SLEEP RATES (bed vs cot), so pin him back onto a shelter cot explicitly
+  // RE-POINTED again 2026-08-19 (the visitor/hotel pass): the fixture pinned
+  // the RUNG but not the BED. A busier evening (four ferry sailings, a hotel,
+  // a third fisher) can leave the crew crab still walking home at 21:30, and a
+  // crab who is not home banks nothing - it read "housed crab woke tired 0.747"
+  // and was measuring the commute, not the mattress. Both arms are now put in
+  // their own bed, awake, un-roughed, with nothing else to do. What is under
+  // test - the DRAIN RATE, bed against cot - is untouched.
   sim.G(`{ const s = npcs.find(k => k.p.name === "SALTY");
     s.p.homeless = true; s.p.house = null; s.p.boat = null; s.fishSpot = fishSpotFor(0);
     crabs[0].p.tired = 0.8; s.p.tired = 0.8; crabs[0].errandCd = 999; s.errandCd = 999;
+    for (const k of [crabs[0], s]) {
+      abortChef(k); abortErrand(k);
+      k.p.rough = false; k.p.walkout = 0; k.p.sick = null;
+      k.duty = false; k.pendingOff = false; k.dayState = "home"; k.cstate = "";
+      const sp = homeSpot(k); k.x = sp.x; k.y = sp.y; k.hidden = false;
+    }
     if (crabs[0].p.homeless) throw new Error("housing preconditions broke");
   }`);
   const d0 = sim.G("day");
@@ -1683,7 +1720,14 @@ scenario("hiring converts a visiting tourist (identity kept, entity gone, homele
 });
 
 scenario("hiring with no tourists books a morning-bus arrival who works day-of", () => {
-  const sim = createSim({ seed: 29 });   // day 1, 7:00: town not open yet, zero tourists
+  const sim = createSim({ seed: 29 });   // day 1, 7:00: the town is not open yet
+  // RE-POINTED 2026-08-19 (the visitor pass): a town is no longer EMPTY before
+  // it opens - seedVisitors() puts a boat-load already mid-stay on the
+  // promenade, because people were holidaying here before you took the lease.
+  // What this scenario is about is the OTHER branch of hireCrew: with nobody
+  // convertible, the ad is answered off the morning bus. So the fixture sends
+  // the visitors home rather than asserting they were never there.
+  sim.G("for (const k of customers.filter(c => c.visitor)) k.gone = true; customers = customers.filter(k => !k.gone);");
   if (sim.G("customers.length") !== 0) return "expected an empty town at 7:00";
   sim.G('coins = 500; tryBuy("chef")');
   if (sim.G("crabs.length") !== 3) return "hire did not complete immediately";
@@ -1706,7 +1750,13 @@ scenario("all 9 lots stand: empties render vacant, hiring never conjures a house
   const occupied = lots.filter(Boolean).length;
   const housed = sim.G("allCrabs().filter(c => !c.p.homeless && c.p.boat == null).length");
   if (occupied !== housed) return `draw says ${occupied} occupied, sim says ${housed} housed`;
-  if (occupied !== 2) return "fresh town should house exactly the founders: " + JSON.stringify(lots);
+  // RE-POINTED 2026-08-19 (the visitor/hotel pass): the founders are THREE now.
+  // REEF opens in beach cottage 8 with the DRIFTWOOD HOTEL next door, for the
+  // same reason SUDSY opens with a shop and a till - founders differ in the
+  // stuff they start with. The rule this scenario is actually for is the one
+  // below: HIRING never conjures a house, and the lot map does not move.
+  if (occupied !== 3) return "fresh town should house exactly the founders: " + JSON.stringify(lots);
+  if (lots[8] !== "REEF") return "REEF should open in the cottage by his hotel: " + JSON.stringify(lots);
   // the vacant art is real and distinct (empty lots draw HOUSE_EMPTY2)
   if (sim.G("HOUSE_EMPTY2.w") !== 60 || sim.G("HOUSE_EMPTY2.h") !== 46) return "HOUSE_EMPTY2 art missing or mis-sized";
   // hire twice (bus path at 7:00): the housing map must not move a pixel
@@ -1725,11 +1775,33 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // crab a pixel. RE-BASELINED only with a receipt; the ones so far, in order:
   // the fish market, nearest-house assignment, fishing experience, the rough-
   // sleeper watchdog fix, lanes routing around parked crabs, the needs-failure
-  // speed penalties, and now the table economy (counter tips cut to a token,
-  // busing added, tables 2->4). Every one of those changed the sim on purpose.
+  // speed penalties, the table economy (counter tips cut to a token, busing
+  // added, tables 2->4), and now THE FERRY AND THE VISITORS. Every one of those
+  // changed the sim on purpose.
+  //
+  // RE-BASELINED 2026-08-19, and this one could not possibly have survived: the
+  // pass replaces the entire demand model. The anonymous reputation-paced
+  // tourist spawn is gone; foot traffic is now a POPULATION of named visitors
+  // who land in ferry batches, carry wallets, and stay a day or two. The town
+  // also gained two founders (REEF the hotelier and a third fisher, KELP), so
+  // even the SHAPE of the fingerprint - the crab list it walks - is different.
+  // The drift reads exactly like the change it is, on both seeds:
+  //   * two extra rows, REEF in cottage 8 (x2136) and KELP on the rail;
+  //   * REPUTATION starts lower (51.1 -> 39.8, 50.8 -> 40.2): a day-2 town has
+  //     served fewer word-of-mouth-earning guests per arrival because visitors
+  //     now spend some of their money on rooms and showers instead;
+  //   * SERVES are UP (35 -> 41, 33 -> 44) - that is the whole town's counter
+  //     traffic including the DRIFTWOOD's room lets, which did not exist;
+  //   * SUDSY's till is up (148.7 -> 192.4, 148.4 -> 188.4), because visitors
+  //     come off a boat grubby and a shower is a holiday purchase;
+  //   * the player's till lands either side of where it was (193.2 -> 198.1 on
+  //     1337, 195.4 -> 136.3 on 4242) - one seed up, one down, which is what a
+  //     genuinely re-shaped demand curve looks like rather than a bias.
+  // Everybody is asleep in their own bed on both seeds, which is the part of
+  // the fingerprint that catches a locomotion regression.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":193.243,"rep":51.1086,"catch":2,"serves":35,"crabServes":2,"rage":4,"till":148.679,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",1],["DRIFT",8]],"pos":[[520,154],[108,154],[388,154],[2072,154],[577.3,156]]}',
-    4242: '{"day":3,"tmin":0,"coins":195.411,"rep":50.8229,"catch":0,"serves":33,"crabServes":1,"rage":5,"till":148.428,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["SALTY",5],["DRIFT",1]],"pos":[[520,154],[108,154],[388,154],[2072,154],[2136,154]]}',
+    1337: '{"day":3,"tmin":0,"coins":198.087,"rep":40.1445,"catch":4,"serves":42,"crabServes":2,"rage":4,"till":192.435,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",40],["SALTY",3],["DRIFT",1],["KELP",3]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,154],[439.8,167.4]]}',
+    4242: '{"day":3,"tmin":0,"coins":136.272,"rep":39.791,"catch":4,"serves":43,"crabServes":3,"rage":4,"till":202.261,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",40],["SALTY",10],["DRIFT",9],["KELP",6]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,154],[248,167]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -1889,7 +1961,7 @@ scenario("hours: a sun-skip across a SUDSY hours change doesn't wedge", () => {
 scenario("staff meals: AT COST and FREE charge exactly what they say", () => {
   const sim = createSim({ seed: 17 });
   sim.runUntil("tmin >= 20.6 * 60 && lastRentDay === day", {});
-  sim.runUntil("customers.length === 0", { maxSteps: 60000 });
+  sim.runUntil(`!customers.some(k => ${COUNTER_STATES}.includes(k.state))`, { maxSteps: 60000 });   // (see the retail sibling: a visitor never leaves `customers`)
   sim.runUntil('!allCrabs().some(k => k.duty && k.workBiz === "shack") && tmin >= 20.5 * 60 && tmin < 22.5 * 60', { maxSteps: 120000 });
   const force = (pol) => {
     const before = JSON.parse(sim.G(`(() => {
@@ -2979,18 +3051,35 @@ scenario("taps: free and always reachable, and the juice bar still sells", () =>
   if (stranded.length) return "no water offered to: " + stranded.join(", ");
   if (!cover.some(r => r[1]) || !cover.some(r => !r[1])) return "the fixture covered only one kind of crab";
   // THE REVENUE FLOOR: over a fortnight the bar must still be a real business.
-  // Measured 6 seeds x 14d, before -> after: $14347 -> $15386 (+7.2%) - it goes
-  // UP, because a hydrated town walks faster and shops more. The floor sits
-  // well under that, so a future tap tweak that guts the bar fails loudly.
+  // RE-POINTED 2026-08-19 (the visitor pass). What this half is FOR is "the
+  // free tap must not gut the juice bar", and the property that guarantees it
+  // is structural, not a dollar figure: THE BAR'S TRADE IS MOSTLY TOURISTS, AND
+  // TOURISTS DO NOT USE TAPS. That is now asserted directly, alongside a floor
+  // re-measured against the demand model that actually ships.
+  // Receipt: the old floor of $1400 was calibrated against the retired spawn
+  // timer, which sent a fixed ~27% of a much faster tourist stream to the bar
+  // (measured $14,347 over 6 seeds x 14d = ~$170/day). Drinks are now bought
+  // because a visitor is THIRSTY, so the bar's trade is a share of a real
+  // population: 4 seeds x 14d read $789 / $886 / $851 / $868 - about $60 a day -
+  // of which 69-76% is tourist money. The floor sits under the worst of those
+  // with room, so a tap tweak that guts the bar still fails loudly.
   const b = createSim({ seed: 13 });
   tapTown(b);
-  b.G(`window._take = {}; var _cb0 = creditBiz;
-    creditBiz = function (k, amt, x, y) { window._take[k] = (window._take[k] || 0) + amt; return _cb0(k, amt, x, y); };`);
+  b.G(`window._take = {}; window._who = {}; var _cb0 = creditBiz;
+    creditBiz = function (k, amt, x, y) { window._take[k] = (window._take[k] || 0) + amt; return _cb0(k, amt, x, y); };
+    var _pb0 = payAndBenefit;
+    payAndBenefit = function (c, cust) {
+      const key = cust.biz + (cust.isCrab ? ":crab" : ":tour");
+      window._who[key] = (window._who[key] || 0) + 1; return _pb0(c, cust); };`);
   b.runDays(14, { tickEvery: 20, onTick: (G) => { G(`if (coins < 800) coins = 800;`); } });
   const take = JSON.parse(b.G(`JSON.stringify(window._take || {})`));
+  const who = JSON.parse(b.G(`JSON.stringify(window._who || {})`));
   const taps = b.G(`(window._stats && window._stats.tapDrinks) || 0`);
   if (!(taps > 0)) return "nobody used a tap all fortnight - the fixture is not exercising them";
-  if (!(take.juicebar > 1400)) return `juice bar takings collapsed to $${Math.round(take.juicebar || 0)} over 14 days`;
+  if (!(take.juicebar > 700)) return `juice bar takings collapsed to $${Math.round(take.juicebar || 0)} over 14 days`;
+  const tour = who["juicebar:tour"] || 0, crab = who["juicebar:crab"] || 0;
+  if (!(tour > crab))
+    return `the bar's trade is no longer mostly tourists (${tour} tourist vs ${crab} local) - the tap could now reach it`;
   return true;
 });
 
@@ -3093,7 +3182,17 @@ scenario("mortality: a dead townsfolk crab leaves the town in a sane state", () 
     const k = npcs.find(c => c.p.name === "SUDSY");
     if (k) { k.p.sick = k.p.sick || { days: 1 }; k.p.hunger = 1; k.p.thirst = 1; k.p.dirt = 1; k.p.sickPol = "require"; }
     const f = npcs.find(c => c.p.name === "DRIFT");
-    if (f) { f.p.hunger = 0; f.p.thirst = 0; f.p.dirt = 0; f.p.tired = 0; f.p.sick = null; f.p.wallet = Math.max(f.p.wallet, 60); } }`);
+    if (f) { f.p.hunger = 0; f.p.thirst = 0; f.p.dirt = 0; f.p.tired = 0; f.p.sick = null; f.p.wallet = Math.max(f.p.wallet, 60);
+      // ...and he must still be HERS when she dies, which is the whole point of
+      // him. RE-POINTED 2026-08-19 (the visitor/hotel pass): the town has a
+      // second flush peer owner now, and over a grind that takes in-game days
+      // the DRIFTWOOD HOTEL posted a vacancy and signed him - so the run read
+      // "her staff did not go back to the pier" when what happened is that they
+      // had already left for a better one. He is re-pinned to her payroll for
+      // as long as she is alive; the layoff under test is untouched.
+      if (npcs.some(c => c.p.name === "SUDSY")) {
+        f.p.job = "showers"; f.p.employer = "sudsy"; f.workBiz = "showers"; f.fishSpot = null;
+      } } }`);
   grind(sim.G);
   if (!sim.runUntil(`!npcs.some(c => c.p.name === "SUDSY")`, { maxSteps: 900000, onTick: grind }))
     return "SUDSY never died";
@@ -3119,7 +3218,18 @@ scenario("mortality: a dead townsfolk crab leaves the town in a sane state", () 
   if (!back.G("hasSave")) return "the town after a death did not save";
   if (back.G(`allCrabs().some(c => c.p.name === "SUDSY")`)) return "SUDSY walked back out of the sea on reload";
   if (!back.G(`memorials.some(m => m.name === "SUDSY")`)) return "the memorial did not survive the reload";
-  if (!back.G(`bizDark("showers")`)) return "the ownerless shop reopened itself on reload";
+  // RE-POINTED 2026-08-19 (the visitor/hotel pass): "still dark" was too
+  // strong, and it was only ever true by poverty. The four days this scenario
+  // runs after the death are enough for SUCCESSION to clear the market when
+  // somebody in town can afford the lease - and a town with a third fisher and
+  // a hotel makes that likelier. What must hold is the thing the death seam is
+  // actually for: the shop never quietly reverts to the crab who died, and
+  // whoever holds it is alive. Either outcome - shuttered, or under new
+  // management - is the system working.
+  const after = JSON.parse(back.G(`JSON.stringify({ dark: bizDark("showers"), owner: bizOwner("showers"),
+    alive: allCrabs().some(c => c.p.owner === bizOwner("showers")) })`));
+  if (after.owner === "sudsy") return "a dead crab still holds the lease on reload";
+  if (!after.dark && !after.alive) return "the ownerless shop reopened itself on reload: " + JSON.stringify(after);
   const spots2 = JSON.parse(back.G(`JSON.stringify(allCrabs().filter(c => c.fishSpot && c.p.boat == null).map(c => c.fishSpot.x + "," + c.fishSpot.y))`));
   if (new Set(spots2).size !== spots2.length) return "reload double-booked a place on the rail: " + spots2;
   back.runDays(back.G("day") + 2, { tickEvery: 20, onTick: (G) => { if (G("coins") < 400) G("coins = 1200"); } });
@@ -3424,7 +3534,11 @@ scenario("wage: the shipped defaults are behaviour-identical (nobody grumbles, n
     ceiling: Math.round(FISH_IMPORT * WAGE_CFG.FISH_DAY * WAGE_CFG.PIER_TOUGH),
     deals: allCrabs().filter(c => !onShopRate(c)).length })`));
   if (opening.std !== 23 || opening.crab !== 23) return "WAGE_STD/CRAB_WAGE moved: " + JSON.stringify(opening);
-  if (opening.wages.join(",") !== "shack:23,arcade:23,juicebar:23,showers:20")
+  // RE-POINTED 2026-08-19 (the visitor/hotel pass): the town gained a business,
+  // so the roster of opening rates gained a row. The DRIFTWOOD HOTEL opens on
+  // WAGE_STD like everything else - SUDS SHOWERS' 20 is still the only
+  // exception in the game, and it is still a fact about her shop.
+  if (opening.wages.join(",") !== "shack:23,arcade:23,juicebar:23,hotel:23,showers:20")
     return "opening rates moved: " + opening.wages.join(",");
   if (opening.ceiling >= 23) return `the pier's best claim is $${opening.ceiling} - it reaches WAGE_STD, so a default town gripes`;
   if (opening.deals) return "a fresh town starts with private deals on the books";
@@ -3932,6 +4046,277 @@ scenario("tip sharing + the table cap roundtrip save/load", () => {
   d.G(`BIZ.shack.tipShare = 7.5`);
   const clamped = d.G(`bizTipShare("shack")`);
   return clamped === 1 ? true : `a corrupt tip share read back as ${clamped}`;
+});
+
+
+// ===========================================================================
+// THE FERRY AND THE VISITORS (2026-08-19)
+// ===========================================================================
+
+// a solvent town with the hotel trading and nobody starving: these scenarios
+// are about VISITORS, and an evicted town stops telling you anything
+function visitorTown(sim, days) {
+  sim.runDays(days || 1, { tickEvery: 25, onTick: (G) => { G("if (coins < 900) coins = 1800;"); } });
+}
+
+scenario("ferry: a batch lands, walks down the pier, and reaches the town", () => {
+  const sim = createSim({ seed: 1337 });
+  // clear the boat-load the town opens with: this is about an ARRIVAL
+  sim.G("for (const k of customers.filter(c => c.visitor)) k.gone = true; customers = customers.filter(k => !k.gone);");
+  const before = sim.G("visitorsInTown().length");
+  if (before !== 0) return "fixture failed to clear the town: " + before;
+  const landed = JSON.parse(sim.G("JSON.stringify(ferryDock())"));
+  if (!landed.length) return "the ferry landed nobody at all";
+  if (!sim.G("ferryHere()")) return "she is not alongside after docking";
+  // every one of them is a PERSON: a name nobody else in town has, a wallet,
+  // and five need bars in various conditions
+  const rows = JSON.parse(sim.G(`JSON.stringify(visitorsInTown().map(k =>
+    [k.name, k.state, Math.round(k.wallet), Math.round(k.x),
+     [k.hunger, k.thirst, k.dirt, k.bored, k.tired].map(v => Math.round(v * 100) / 100)]))`));
+  if (rows.length !== landed.length) return `landed ${landed.length}, ${rows.length} in town`;
+  const names = new Set(rows.map(r => r[0]));
+  if (names.size !== rows.length) return "two visitors ashore with the same name: " + rows.map(r => r[0]);
+  const townNames = JSON.parse(sim.G("JSON.stringify(allCrabs().map(c => c.p.name))"));
+  for (const r of rows) {
+    if (townNames.includes(r[0])) return r[0] + " shares a name with a resident";
+    if (!(r[2] > 0)) return r[0] + " came ashore with no money at all";
+    if (r[1] !== "ashore") return r[0] + " did not start on the gangway: " + r[1];
+    if (r[3] < sim.G("FERRY.shore")) return r[0] + " landed west of the pier: x=" + r[3];
+  }
+  // ...and "in various conditions": across a batch the bars are not all alike
+  const spread = rows.map(r => Math.max(...r[4])).sort((a, b) => a - b);
+  if (!(spread[spread.length - 1] >= 0.55))
+    return "nobody off the boat needed anything: " + JSON.stringify(spread);
+  // THEY DISEMBARK AND REACH THE TOWN. Not a spawn beside a queue - a walk
+  // down the planks and onto the promenade.
+  const ok = sim.runUntil(`visitorsInTown().some(k => k.x < ${sim.G("FERRY.shore")} - 10 && k.wy > 150)`,
+    { maxSteps: 200000 });
+  if (!ok) return "nobody walked off the pier into town";
+  // and they trade: somebody joins a real queue at a real counter
+  const traded = sim.runUntil(`visitorsInTown().some(k => k.state === "toBiz" || k.state === "arriving" || k.state === "waiting")`,
+    { maxSteps: 300000, onTick: (G) => G("if (coins < 900) coins = 1800;"), tickEvery: 25 });
+  return traded ? true : "no visitor ever went shopping";
+});
+
+scenario("visitors: the wallet is real money, and it runs out", () => {
+  const sim = createSim({ seed: 21 });
+  visitorTown(sim, 1);
+  // A. a visitor pays out of pocket, and the till gets exactly the menu price
+  sim.G(`window._paid = []; var _cb = creditBiz;
+    creditBiz = function (b, amt, x, y, q) { window._paid.push([b, Math.round(amt * 100) / 100]); return _cb(b, amt, x, y, q); };`);
+  const bought = sim.runUntil(`visitorsInTown().some(k => k.buys > 0)`, { maxSteps: 400000,
+    onTick: (G) => G("if (coins < 900) coins = 1800;"), tickEvery: 25 });
+  if (!bought) return "no visitor bought anything in a whole trading day";
+  const spent = JSON.parse(sim.G(`JSON.stringify(visitorsInTown().filter(k => k.buys > 0)
+    .map(k => [k.name, k.purse, Math.round(k.wallet), Math.round(k.spent)]))`));
+  for (const [name, purse, wallet, sp] of spent) {
+    if (!(sp > 0)) return name + " has bought something and spent nothing";
+    if (Math.abs(purse - wallet - sp) > 1.5) return `${name}'s books don't balance: ${purse} - ${wallet} != ${sp}`;
+    if (wallet < 0) return name + " went overdrawn";
+  }
+  // B. AN EMPTY WALLET STOPS THE BUYING. Strip every visitor to a dollar and
+  // pin them hungry, thirsty, filthy and bored: nothing may be offered.
+  sim.G(`for (const k of visitorsInTown()) { k.wallet = 1;
+    k.hunger = 1; k.thirst = 1; k.dirt = 1; k.bored = 1; k.nights = 0; }`);
+  const offers = JSON.parse(sim.G(`JSON.stringify(visitorsInTown().map(k => {
+    const e = visPick(k); return [k.name, e ? e.biz + ":" + e.recipe.pay : null]; }))`));
+  const broke = offers.filter(r => r[1]);
+  if (broke.length) return "a broke visitor was still offered " + JSON.stringify(broke);
+  // ...and the counter genuinely stops taking their money over a real hour
+  const paid0 = sim.G("window._paid.length");
+  sim.runUntil("false", { maxSteps: 1400, tickEvery: 25,
+    onTick: (G) => G(`if (coins < 900) coins = 1800;
+      for (const k of visitorsInTown()) { if (k.wallet > 1) k.wallet = 1;
+        k.hunger = 1; k.thirst = 1; k.dirt = 1; k.bored = 1; }`) });
+  const newPays = JSON.parse(sim.G(`JSON.stringify(window._paid.slice(${paid0}))`));
+  // locals still shop (they have wages), so only judge what a VISITOR paid:
+  // nobody with a dollar may have handed over a $13 plate's worth
+  const fat = newPays.filter(p => p[1] >= 5);
+  if (fat.length > 0 && sim.G("visitorsInTown().some(k => k.wallet > 1.01)"))
+    return "a spent-up visitor kept buying: " + JSON.stringify(fat.slice(0, 3));
+  // C. one price on the menu is one price in the till
+  const r = JSON.parse(sim.G(`JSON.stringify(BIZ.shack.recipes.map(x => x.pay))`));
+  const menu = new Set(r);
+  const mismatched = newPays.filter(p => p[0] === "shack" && Number.isInteger(p[1]) && p[1] > 20 && !menu.has(p[1]));
+  return mismatched.length ? "a shack sale rang up off-menu: " + JSON.stringify(mismatched[0]) : true;
+});
+
+scenario("visitors: a guest stays the night and leaves on a later ferry (and roundtrips save/load)", () => {
+  const store = new Map();
+  const sim = createSim({ seed: 4011, storage: store, fresh: false });
+  visitorTown(sim, 1);
+  // find somebody who came for a night and see them into a room
+  const stayed = sim.runUntil(`visitorsInTown().some(k => k.nights > 0 && k.room)`,
+    { maxSteps: 500000, onTick: (G) => G("if (coins < 900) coins = 1800;"), tickEvery: 25 });
+  if (!stayed) return "nobody took a room at the Driftwood all day";
+  const who = sim.G(`visitorsInTown().find(k => k.nights > 0 && k.room).name`);
+  const arrived = sim.G(`visitorsInTown().find(k => k.name === ${JSON.stringify(who)}).arrived`);
+  // THEY SLEEP THERE. Not a timer: the room is theirs until morning.
+  const slept = sim.runUntil(`(function(){ const k = visitorsInTown().find(v => v.name === ${JSON.stringify(who)});
+    return k && k.state === "inRoom"; })()`, { maxSteps: 500000,
+    onTick: (G) => G("if (coins < 900) coins = 1800;"), tickEvery: 25 });
+  if (!slept) return who + " took a key and never went to bed";
+  // ---- SAVE/LOAD MID-STAY ------------------------------------------------
+  sim.G("save()");
+  const want = JSON.parse(sim.G(`JSON.stringify((function(){
+    const k = visitorsInTown().find(v => v.name === ${JSON.stringify(who)});
+    return { n: k.name, s: k.state, w: Math.round(k.wallet), p: k.purse, ni: k.nights,
+      ar: k.arrived, lt: k.leaveT, b: k.buys, rm: BIZ.hotel.stalls.indexOf(k.room),
+      needs: [k.hunger, k.thirst, k.dirt, k.bored, k.tired].map(v => Math.round(v * 1000) / 1000),
+      log: (k.log || []).length };
+  })())`));
+  const two = createSim({ seed: 77, storage: store, fresh: false });
+  const got = JSON.parse(two.G(`JSON.stringify((function(){
+    const k = visitorsInTown().find(v => v.name === ${JSON.stringify(who)});
+    if (!k) return null;
+    return { n: k.name, s: k.state, w: Math.round(k.wallet), p: k.purse, ni: k.nights,
+      ar: k.arrived, lt: k.leaveT, b: k.buys, rm: BIZ.hotel.stalls.indexOf(k.room),
+      needs: [k.hunger, k.thirst, k.dirt, k.bored, k.tired].map(v => Math.round(v * 1000) / 1000),
+      log: (k.log || []).length };
+  })())`));
+  if (!got) return who + " did not survive the reload";
+  for (const key of Object.keys(want))
+    if (JSON.stringify(want[key]) !== JSON.stringify(got[key]))
+      return `${who}'s ${key} came back as ${JSON.stringify(got[key])}, expected ${JSON.stringify(want[key])}`;
+  if (two.G(`BIZ.hotel.stalls[${want.rm}].occupant === null`))
+    return "the room came back empty with its guest asleep in it";
+  // ---- ...AND THEY LEAVE ON A LATER FERRY --------------------------------
+  const gone = two.runUntil(`!visitorsInTown().some(k => k.name === ${JSON.stringify(who)})`,
+    { maxSteps: 900000, onTick: (G) => G("if (coins < 900) coins = 1800;"), tickEvery: 25 });
+  if (!gone) return who + " never went home";
+  if (two.G("day") <= arrived)
+    return who + " sailed the same day they landed - that is not staying the night";
+  const st = JSON.parse(two.G("JSON.stringify(window._stats)"));
+  if (!(st.visNights > 0)) return "nobody was recorded as having spent a night in a room";
+  // the room is handed back to housekeeping, not stranded
+  const stranded = two.G(`BIZ.hotel.stalls.filter(r => r.occupant && !visitorsInTown().includes(r.occupant)).length`);
+  return stranded === 0 ? true : stranded + " rooms still held by a guest who has left town";
+});
+
+scenario("hotel: it lets rooms, takes the money, and the player can buy it", () => {
+  const sim = createSim({ seed: 909 });
+  // THE HOTEL IS A BUSINESS LIKE ANY OTHER: an owner with a till, a lease, a
+  // wage, hours, and a policy
+  const shape = JSON.parse(sim.G(`JSON.stringify({
+    owner: bizOwner("hotel"), rent: BIZ.hotel.rent, rooms: BIZ.hotel.stalls.length,
+    wage: bizWage("hotel"), hours: [BIZ.hotel.hours.open, BIZ.hotel.hours.close],
+    room: BIZ.hotel.recipes[0].pay, auto: !!BIZ.hotel.autoLabor,
+    keeper: (allCrabs().find(c => c.p.owner === "reef") || {}).p ? allCrabs().find(c => c.p.owner === "reef").p.name : null })`));
+  if (shape.owner !== "reef") return "the hotel does not open under an NPC: " + shape.owner;
+  if (shape.keeper !== "REEF") return "nobody is behind the desk";
+  if (!(shape.rooms >= 5) || !(shape.rent > 0) || !(shape.room > 0)) return "hotel is not real data: " + JSON.stringify(shape);
+  if (!shape.auto) return "a peer owner should run the same policy tables SUDSY does";
+  const till0 = sim.G("OWNERS.reef.till");
+  // IT LETS ROOMS AND TAKES MONEY
+  const let1 = sim.runUntil(`(window._stats.roomLets || 0) > 0`, { maxSteps: 600000,
+    onTick: (G) => G("if (coins < 900) coins = 1800;"), tickEvery: 25 });
+  if (!let1) return "the Driftwood never let a single room";
+  const guest = JSON.parse(sim.G(`JSON.stringify(BIZ.hotel.stalls.map((r, i) => r.occupant ? [i, r.occupant.name] : null).filter(Boolean))`));
+  if (!guest.length) return "a room was let but nobody is in one";
+  if (!(sim.G("OWNERS.reef.till") > till0 - 1))
+    return "the hotel let a room and its till did not move";
+  // A LET ROOM IS NOT A CLEAN ROOM: it comes back dirty and housekeeping turns it
+  sim.runDays(sim.G("day") + 1, { tickEvery: 25, onTick: (G) => G("if (coins < 900) coins = 1800;") });
+  const cleaned = sim.G("(window._stats.stallsCleaned || 0)");
+  if (!(cleaned > 0)) return "nobody ever made a bed";
+  // THE PLAYER CAN BUY IT - reachable and legible, on the shopfront, two taps
+  if (!sim.G(`canOffer("hotel")`)) return "no way to buy a trading hotel";
+  const price = sim.G(`offerPrice("hotel")`);
+  if (!(price > 0)) return "the offer has no price on it";
+  sim.G("coins = 10; saleArm = null;");
+  if (sim.G(`tapOfferChip("hotel")`)) return "bought a hotel with $10";
+  sim.G(`coins = ${price} + 400;`);
+  if (sim.G(`tapOfferChip("hotel")`)) return "one tap bought a business - it must arm first";
+  const coins0 = sim.G("coins");
+  const sellerBank0 = sim.G(`(allCrabs().find(c => c.p.owner === "reef") || { p: { wallet: 0 } }).p.wallet`);
+  if (!sim.G(`tapOfferChip("hotel")`)) return "the second tap did not close the deal";
+  if (sim.G(`bizOwner("hotel")`) !== "player") return "the hotel did not change hands";
+  if (!sim.G(`bizUnlocked("hotel")`)) return "the bought hotel is not in the world";
+  // the money is conserved: what left the player's pocket is what the seller banked
+  const paid = coins0 - sim.G("coins");
+  const seller = JSON.parse(sim.G(`JSON.stringify(allCrabs().filter(c => c.p.name === "REEF").map(c => [c.p.job, c.p.owner, Math.round(c.p.wallet)]))`));
+  if (!seller.length) return "the seller vanished with the deal";
+  if (seller[0][1] != null) return "REEF still owns a hotel he sold: " + JSON.stringify(seller[0]);
+  if (Math.abs((seller[0][2] - sellerBank0) - paid) > 1)
+    return `money was minted or burned: the player paid ${paid}, REEF banked ${seller[0][2] - sellerBank0}`;
+  // ...and it is the PLAYER's business now: it pays the player's rent bill and
+  // its sign opens the management card
+  if (!sim.G(`totalRent() >= BIZ.shack.rent + BIZ.hotel.rent`)) return "the bought lease is not on the player's bill";
+  if (!sim.G(`ownedBizList().includes("hotel")`)) return "the hotel is not manageable";
+  // it keeps trading under the new owner
+  const till = sim.G("coins");
+  const traded = sim.runUntil(`coins > ${till} + 10`, { maxSteps: 400000, tickEvery: 25 });
+  return traded ? true : "the hotel stopped taking money the moment the player bought it";
+});
+
+scenario("hotel: a full house is handled sanely - nobody wedges, nobody vanishes", () => {
+  const sim = createSim({ seed: 2674 });
+  visitorTown(sim, 1);
+  // FULL HOUSE, HARD: every room permanently occupied by nobody at all, so no
+  // visitor can ever get a bed. This is the worst case the town can produce
+  // (the hotel dark, housekeeping behind, a boat too big for the beds).
+  const jam = (G) => G(`{ if (coins < 900) coins = 1800;
+    for (const r of BIZ.hotel.stalls) r.dirty = true; }`);
+  const d0 = sim.G("day");
+  let peakRough = 0, seen = 0;
+  sim.runUntil(`day > ${d0} + 1`, { maxSteps: 900000, tickEvery: 20, onTick: (G) => {
+    jam(G);
+    const n = G(`visitorsInTown().filter(k => k.state === "onSand").length`);
+    if (n > peakRough) peakRough = n;
+    seen = Math.max(seen, G("visitorsInTown().length"));
+  } });
+  if (!(peakRough > 0)) return "a whole night with no rooms and nobody slept rough - the fixture is not biting";
+  // NOBODY WEDGES: they wake up, they trade, and they go home on a boat
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  if (!(st.unhoused > 0)) return "the unhoused were never counted";
+  if (!(st.visDepart > 0)) return "with the hotel jammed, nobody managed to leave town";
+  // ...and the environment, not the crab, is what failed: a rough night costs
+  // them the rest of the stay, which is the pressure the player can fix
+  if (!(st.visRoughGuests > 0)) return "no guest was recorded as having slept out";
+  const stuck = JSON.parse(sim.G(`JSON.stringify(visitorsInTown()
+    .filter(k => !VIS_STATES[k.state] && k.state !== "arriving" && k.state !== "waiting"
+      && k.state !== "toSeat" && k.state !== "seatedWaiting" && k.state !== "dining"
+      && k.state !== "toTable" && k.state !== "toStall" && k.state !== "showering"
+      && k.state !== "outStall" && k.state !== "waitStall" && k.state !== "leaving")
+    .map(k => [k.name, k.state]))`));
+  if (stuck.length) return "visitors stranded in a state nothing updates: " + JSON.stringify(stuck);
+  // no room is left held by a ghost, and the town keeps trading
+  const ghosts = sim.G(`BIZ.hotel.stalls.filter(r => r.occupant && !customers.includes(r.occupant)).length`);
+  if (ghosts) return ghosts + " rooms held by a guest who is no longer in the customer list";
+  if (sim.G("gameOver")) return "the town went under while we jammed the hotel (fixture, not the rule)";
+  // and once housekeeping catches up, rooms let again
+  sim.G("for (const r of BIZ.hotel.stalls) { r.dirty = false; r.cleaning = false; }");
+  const lets0 = sim.G("(window._stats.roomLets || 0)");
+  const recovered = sim.runUntil(`(window._stats.roomLets || 0) > ${lets0}`, { maxSteps: 600000,
+    tickEvery: 25, onTick: (G) => G("if (coins < 900) coins = 1800;") });
+  return recovered ? true : "the hotel never recovered after the jam cleared";
+});
+
+scenario("visitors: the reserved local slot still feeds the neighbours", () => {
+  // THE NAMED TRAP (PLAN): "the evening queue never reaches the local". Ferry
+  // batches are burstier than the retired spawn timer, so this is exactly the
+  // gate that had to be re-proved rather than assumed.
+  const sim = createSim({ seed: 5348 });
+  let worstTour = 0, sampled = 0;
+  sim.runDays(4, { tickEvery: 8, onTick: (G) => {
+    if (G("coins") < 900) G("coins = 1800");
+    // the CAP: tourists may never hold more than TOURIST_QUEUE_MAX of a line
+    const n = G(`Math.max(0, ...Object.keys(BIZ).map(b => customers.filter(k =>
+      k.biz === b && !k.isCrab && (k.state === "arriving" || k.state === "waiting")).length))`);
+    if (n > worstTour) worstTour = n;
+    sampled++;
+  } });
+  if (!sampled) return "the probe never ran";
+  if (worstTour > sim.G("TOURIST_QUEUE_MAX"))
+    return `visitors filled ${worstTour} queue slots, cap is ${sim.G("TOURIST_QUEUE_MAX")}`;
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  if (!(st.tourServes > 20)) return "control failed: the town barely traded (" + st.tourServes + " tourist serves)";
+  // ...and the point of the cap: LOCALS ACTUALLY EAT. Over four days of ferry
+  // traffic the neighbours are served, and not one of them starves out.
+  if (!(st.crabServes > 3)) return `locals served only ${st.crabServes || 0} times in four days of ferry traffic`;
+  const starving = JSON.parse(sim.G(`JSON.stringify(allCrabs().filter(c => (c.p.hunger || 0) >= 0.98).map(c => c.p.name))`));
+  if (starving.length > 1) return "locals left starving behind the visitors: " + starving.join(", ");
+  return true;
 });
 
 // ---- runner

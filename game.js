@@ -10,7 +10,10 @@ const ctx = cv.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 
 // ---------------------------------------------------------------- geometry
-const WORLD_W = 2192;
+// The town grew east in 2026-08-19's visitor pass: past the last beach cottage
+// there is now the DRIFTWOOD HOTEL and, off the end of the pier, the mainland
+// ferry's berth. Everything west of 2192 is exactly where it always was.
+const WORLD_W = 2512;
 const SKY_H = 58, SHORE_Y = 86, FLOOR_Y = 166, PANEL_Y = 176;
 // Portrait phones get a taller canvas (index.html sets SCREEN_H before ppu.js
 // derives H). The world always keeps rows 0..PANEL_Y - every extra row goes to
@@ -183,6 +186,65 @@ const BIZ = {
         steps: [["juicer", 2.4, "cooler"]] },
     ],
   },
+  // ------------------------------------------------------------ the hotel
+  // THE DRIFTWOOD HOTEL. A business like any other - stations, a recipe, a
+  // queue, rent, an owner with a till, hours, staff, wages, a policy - whose
+  // "dish" is A NIGHT'S STAY: the linen press makes up a room, the front desk
+  // hands over the key, and the guest walks to a door on the back wall.
+  //
+  // THE ROOMS ARE `stalls` ON PURPOSE. Every wedge guard, cleaning dispatch
+  // and abort path in this game already knows what to do with a facility that
+  // a guest OCCUPIES and staff must CLEAN afterwards - it is the shower
+  // stalls' cycle with a longer occupancy. `lodging` is the one bit that says
+  // "the guest keeps this until morning" instead of "for showerT seconds".
+  hotel: {
+    name: "DRIFTWOOD HOTEL", short: "HOTEL", sign: "DRIFTWOOD HOTEL", kind: "shopfront",
+    // A ROOM IS THE PRICIEST THING IN TOWN ($22 against a $17 taco), and the
+    // rent on a seven-room seafront lease is priced to match: a full house is
+    // $154 against $60, five rooms is $110, four is break-even-plus, and a
+    // night when housekeeping falls behind genuinely hurts.
+    // THE RENT IS ALSO A LABOUR-MARKET KNOB, and that is measured. REEF's till
+    // is what decides when he posts on the job board (till >= 260), and the
+    // only crabs free to answer are the two FISHERS - so a hotel that got rich
+    // by day two took one of them off the rail, the catch halved, and the pier
+    // price pinned at the $7 import ceiling from day five, which cost the
+    // player's kitchen ~$30 a day at exactly the wrong moment. At rent 60 and
+    // an opening float of $140 he reaches the hiring line around day six, by
+    // which time the ceiling posting has pulled a drifter in to replace them.
+    rent: 45, owner: "reef", lodging: true,
+    // REEF has no heir and a fair price will always tempt him: this is the
+    // "mechanism for owning it" the directive asked for, and it is DATA - any
+    // business that carries `sellable` grows an OFFER chip on its shopfront.
+    sellable: true,
+    x0: 2200, x1: 2428, door: 2212,
+    stations: {
+      linen: [{ x: 2206, y: 136 }],
+      desk:  [{ x: 2234, y: 160 }],
+    },
+    // SEVEN rooms along the back wall, on the shower stalls' y so the two
+    // travel lanes keep their daylight by construction (band y127..142). Seven
+    // is a measured number, not a round one: at five, half of every night's
+    // overnighters ended up on the sand and the town's reputation - which is
+    // what fills the boat - never recovered. Seven sits just above a saturated
+    // town's demand, so the nights somebody sleeps rough are the nights the
+    // hotel was BADLY RUN (the owner's day off, housekeeping behind, a shop
+    // that has gone dark) rather than a standing fact about the town.
+    stalls: [
+      { x: 2244, y: 136, occupant: null, dirty: false, cleaning: false },
+      { x: 2272, y: 136, occupant: null, dirty: false, cleaning: false },
+      { x: 2300, y: 136, occupant: null, dirty: false, cleaning: false },
+      { x: 2328, y: 136, occupant: null, dirty: false, cleaning: false },
+      { x: 2356, y: 136, occupant: null, dirty: false, cleaning: false },
+      { x: 2384, y: 136, occupant: null, dirty: false, cleaning: false },
+      { x: 2412, y: 136, occupant: null, dirty: false, cleaning: false },
+    ],
+    source: "linen", out: "desk", queueX: 2432,
+    park: 2180, rack: 2196,
+    recipes: [
+      { id: "room", icon: "roomkey", pay: 17, raw: "linen",
+        steps: [["linen", 2.2, "roomkey"]] },
+    ],
+  },
   showers: {
     name: "SUDS SHOWERS", short: "SHWR", sign: "SUDS SHOWERS", kind: "shopfront", rent: 35, owner: "sudsy",
     // SUDSY OPENS BELOW THE MARKET, at the old flat NPC_WAGE. That is the ONLY
@@ -290,6 +352,13 @@ for (const k in BIZ) {   // one migration point: defaults = today's behavior
   // tab's PAY row. Peer owners keep their own number and start at 0 too.
   BIZ[k].tipShare = 0;
 }
+// A HOTEL KEEPS A LATE DESK, and it has to: the last ferry of the day lands at
+// 17:30 and its passengers are all overnighters, so a desk on the town's
+// standard 8-20 (an owner-operator's shift 8:30-18:30) gave them one hour to
+// check in. 10:00-22:00 evaluates to a 10:30-20:30 owner's day - exactly the
+// ten-hour SHIFT_SPAN cap, so nothing is left unstaffed - and it covers every
+// sailing. Mornings need no desk: checkout is automatic at 7:30.
+BIZ.hotel.hours = { open: 10 * 60, close: 22 * 60 };
 function setBizHours(b, open, close) {
   const h = BIZ[b].hours;
   open = Math.round(open / 30) * 30; close = Math.round(close / 30) * 30;
@@ -326,7 +395,13 @@ function staffMealCharge(b, r) {   // what a selfCooking staffer rings up
 // a business and BIZ[k].owner is the key into it. `owner: null` means NOBODY
 // owns that business - it is closed and on the market (see the business
 // failure & succession block below).
-const OWNERS = { sudsy: { id: "sudsy", name: "SUDSY", till: 200, credit: 0, darkT: 0 } };
+const OWNERS = {
+  sudsy: { id: "sudsy", name: "SUDSY", till: 200, credit: 0, darkT: 0 },
+  // REEF keeps the DRIFTWOOD HOTEL. A second peer owner, on exactly the same
+  // terms SUDSY is on - his own till, his own lease, his own wage and hours
+  // policy - because the owner layer is a registry, not a fixture.
+  reef: { id: "reef", name: "REEF", till: 140, credit: 0, darkT: 0 },
+};
 const bizOwner = (b) => BIZ[b].owner === null ? null : (BIZ[b].owner || "player");
 // never let a draw path throw on an owner who has left the registry (sold up,
 // or - the death seam - left the town between one frame and the next settlement)
@@ -631,6 +706,69 @@ function tapSaleChip(b) {
   if (ok) save();
   return ok;
 }
+// ---- BUYING A BUSINESS THAT IS STILL TRADING ------------------------------
+// The failure path above already lets the player take on a SHUTTERED shop.
+// The owner's directive on the hotel asks for something the town did not have:
+// "a mechanism for owning it" that does not require waiting for the owner to
+// go under. So a business can carry `sellable` - REEF is an old crab with a
+// hotel and no heir, and he will take a fair offer - and the shopfront grows an
+// OFFER chip beside the sign, on exactly the same two-tap arm the BUY chip uses.
+//
+// IT IS THE SAME PATH, NOT A SECOND ONE. `buyOutOwner` lists the shop (which
+// lays the owner and his staff off, kills his postings, and puts the lease on
+// the market exactly as a failure does), prices the listing at the going-concern
+// price, and then runs the ordinary player purchase. The one thing it adds is
+// that somebody is on the other side of this deal: the seller BANKS what the
+// player parts with, and walks down to the pier a rich crab.
+const OFFER_MULT = 1.5;   // a shop that is still taking money costs more than a shuttered one
+function offerPrice(b) { return Math.round(askingPrice(b) * OFFER_MULT); }
+function canOffer(b) {
+  return !!BIZ[b] && !!BIZ[b].sellable && bizUnlocked(b) && !forSale(b)
+    && bizOwner(b) !== "player" && !bizDark(b);
+}
+function offerChipRect(b) {
+  const w = 54, z = BIZ[b];
+  return { x: Math.round((z.x0 + z.x1) / 2 - w / 2), y: 105, w, h: 10 };
+}
+function tapOfferChip(b) {
+  if (!canOffer(b)) return false;
+  const price = offerPrice(b);
+  if (coins < price) {
+    toast = { text: "YOU CAN'T COVER $" + fmt(price) + " FOR " + BIZ[b].name, t: 5 };
+    if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+    return false;
+  }
+  if (saleArm !== b) {
+    saleArm = b; saleArmT = 3.5;
+    toast = { text: "TAP AGAIN TO BUY " + BIZ[b].name + " FOR $" + fmt(price), t: 4 };
+    if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+    return false;
+  }
+  saleArm = null; saleArmT = 0;
+  const ok = buyOutOwner(b);
+  if (ok) save();
+  return ok;
+}
+function buyOutOwner(b) {
+  if (!canOffer(b)) return false;
+  const price = offerPrice(b);
+  if (coins < price) return false;
+  const oid = bizOwner(b);
+  const seller = allCrabs().find(k => k.p.owner === oid) || null;
+  if (!listForSale(b, "soldup")) return false;
+  market[b].price = price;                       // at the going-concern price, not the fire-sale one
+  if (!buyBusiness(b, null)) return false;       // the player's own path: pays price, keeps the float
+  const banked = price - Math.floor(price * SALE_CFG.FLOAT_FRAC);
+  if (seller) {
+    seller.p.wallet += banked;                   // conserved: exactly what left the player's pocket
+    crabLog(seller, "money", "SOLD THE " + BIZ[b].name + " FOR $" + price, 0);
+    crabLog(seller, "life", "OUT OF THE HOTEL TRADE - BACK TO THE WATER", 0);
+    today.moved.push(seller.p.name + " SOLD UP - $" + banked + " IN THE BANK");
+  }
+  if (window._stats) (window._stats.buyouts = window._stats.buyouts || [])
+    .push({ day, biz: b, price, seller: seller ? seller.p.name : null });
+  return true;
+}
 function bizFixtures(b) {
   const z = BIZ[b];
   let n = 0;
@@ -688,11 +826,14 @@ function listForSale(b, why) {
   market[b] = { price, day, why: why || "bankrupt" };
   jobBoard = jobBoard.filter(j => j.biz !== b);
   const who = o ? o.name : "THE OWNER";
-  toast = { text: BIZ[b].name + " HAS CLOSED - FOR SALE, $" + price, t: 8 };
-  today.moved.push(BIZ[b].short + " CLOSED - FOR SALE $" + price);
+  // "soldup" is a WILLING seller, not a failure: same machinery, different news
+  const sold = why === "soldup";
+  toast = { text: sold ? who + " IS SELLING UP - " + BIZ[b].name + " CHANGES HANDS"
+    : BIZ[b].name + " HAS CLOSED - FOR SALE, $" + price, t: 8 };
+  today.moved.push(sold ? who + " SOLD " + BIZ[b].short : BIZ[b].short + " CLOSED - FOR SALE $" + price);
   if (laid.length) today.moved.push(laid.join(", ") + " LAID OFF - BACK TO THE PIER");
-  popText("FOR SALE $" + price, (BIZ[b].x0 + BIZ[b].x1) / 2 - 20, 100, [255, 190, 90]);
-  if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+  if (!sold) popText("FOR SALE $" + price, (BIZ[b].x0 + BIZ[b].x1) / 2 - 20, 100, [255, 190, 90]);
+  if (!sold && typeof sfx !== "undefined" && sfx.angry) sfx.angry();
   if (window._stats) (window._stats.closures = window._stats.closures || [])
     .push({ day, biz: b, price, why: why || "bankrupt", owner: who, laid: laid.slice() });
   return true;
@@ -1460,7 +1601,7 @@ function darkness() { // 0 = day, 1 = full night
 }
 
 // ---------------------------------------------------------------- recipes
-const INGREDIENT_COST = { fish_raw: 5, fruit: 3, token: 1, soap: 1 };
+const INGREDIENT_COST = { fish_raw: 5, fruit: 3, token: 1, soap: 1, linen: 2 };
 // ---- fish price discovery: the pier price FLOATS with scarcity. The $7
 // world price is the natural ceiling (at $7 imports supply the gap, so the
 // local price can never exceed it); a glut sags toward the $2 floor. The
@@ -1524,6 +1665,7 @@ const ITEM_NAMES = {
   taco: "FISH TACO", juice: "JUICE", cooler: "COOLER", plate_fish: "GRILL FISH",
   token: "TOKENS", plush: "CLAW PLUSH", tickets: "TICKET RUN", gold_plush: "GOLD PLUSH",
   soap: "SOAP", suds: "DELUXE SOAK", shine: "QUICK RINSE", dirty_dishes: "DIRTY DISHES",
+  linen: "FRESH LINEN", roomkey: "A ROOM FOR THE NIGHT",
 };
 
 const DRINKS = { juice: 1, cooler: 1 };   // recipes that quench THIRST wherever they're bought
@@ -1566,13 +1708,16 @@ function bizTables(key) {
   if (!t) return null;
   return key === "shack" ? t.slice(0, TABLE_BASE + UPS.table.lvl) : t;
 }
-const spawnEvery = () => 7.5 / (0.7 + 0.01 * rep);   // word of mouth drives foot traffic
+// (`spawnEvery` - the reputation-paced tourist timer - RETIRED 2026-08-19 with
+//  the visitor pass. Word of mouth still drives foot traffic; it now drives the
+//  SIZE OF THE FERRY'S BATCH rather than the gap between two anonymous
+//  spawns. See ferryBatch().)
 
 
 // ---------------------------------------------------------------- state
 let coins = 0, lifetime = 0, time = 0;
 let crabs = [], customers = [], floaters = [];
-let spawnT = 3, toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x, 3=6x
+let toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x, 3=6x
 const FF_SPEED = [1, 2, 3, 6];
 let camX = 1180, followIdx = -1, followNpc = null, followCust = null, tab = "crew";
 // SELECTION is not the camera. Click a crab to select (and focus) them; pan
@@ -1643,6 +1788,7 @@ const busy = {
   juicebar: { juicer: [false, false] },
   arcade: { claw: [false, false], skee: [false, false] },
   showers: {},
+  hotel: { linen: [false] },
 };
 const bus = { x: 360, dir: 1, state: "drive", dwellT: 0, riders: [] };
 let earnHist = [];
@@ -1678,9 +1824,31 @@ function initNpcs() {
     wallet: 25, job: "showers", hunger: 0, dirt: 0, bored: 0, tired: 0 };
   const c = newCrab(p);
   c.workBiz = "showers"; c.x = 1148; c.y = 158;
+  // REEF keeps the DRIFTWOOD HOTEL, and LIVES IN THE COTTAGE NEXT DOOR - the
+  // hotel sits at the far east end of the promenade, and an owner-operator
+  // commuting 1700px from the shelter would spend his whole ten-hour day on
+  // the road. Founders differ only in the stuff they start with (PLAN's
+  // "all crabs equal" reading), and a proprietor with a cottage by his own
+  // front door is a fact about his starting assets, not a rule about him.
+  const rp = { name: "REEF", npc: true, owner: "reef", trait: "tidy", mode: "walk",
+    acc: "cap", color: 3, shift: "D", house: 8, homeless: false,
+    wallet: 30, job: "hotel", hunger: 0.1, dirt: 0.1, bored: 0, tired: 0.2 };
+  const rc = newCrab(rp);
+  rc.workBiz = "hotel"; rc.x = 2210; rc.y = 158;
+  // THE RAIL HOLDS THREE NOW, and that is the hotel's doing rather than a
+  // flavour change. The job board lets a flush NPC owner hire a jobless fisher,
+  // and with a SECOND peer owner in town both of the founding pair were signed
+  // on the same morning: measured on seed 1337, SALTY went to the hotel and
+  // DRIFT to the showers on day 4, the pier landed ZERO fish for the rest of
+  // the run, and the shack was buying $7 import fish from day nine. The price
+  // mechanism does correct it (a $7 ceiling posts HELP WANTED: THE PIER and a
+  // drifter answers) but it corrects a week late, which is the whole do-nothing
+  // window. A town with a hotel, twice the visitors and twice the appetite
+  // supports three fishers - so it has three, and the labour market has slack.
   const fishers = [
     { name: "SALTY", trait: "grumpy", acc: "cap", color: 4, x0: 1840, spot: 0 },
     { name: "DRIFT", trait: "dreamy", acc: "none", color: 2, x0: 2010, spot: 1 },
+    { name: "KELP", trait: "lazy", acc: "flower", color: 5, x0: 1962, spot: 2 },
   ].map((f, i) => {
     const fp = { name: f.name, npc: true, fisher: true, trait: f.trait, mode: "walk",
       acc: f.acc, color: f.color, shift: "D", house: 0, homeless: true,
@@ -1690,7 +1858,7 @@ function initNpcs() {
     fc.x = f.x0; fc.y = 158;
     return fc;
   });
-  npcs = [c].concat(fishers);
+  npcs = [c, rc].concat(fishers);
 }
 // TIRED (replaces SANDY): accrued by shift work and errand legwork - never by
 // idling at home - and repaired only by SLEEP. The drain is proportional (an
@@ -2462,6 +2630,23 @@ function save() {
     mealPol: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].mealPol; return m; })(),
     tipShare: (() => { const m = {}; for (const k in BIZ) m[k] = BIZ[k].tipShare || 0; return m; })(),
     hoursPol: hoursPolicyState,
+    // THE VISITORS MID-STAY. A visit spans nights, so it has to survive a
+    // reload or "stay for a day or two" is a lie the moment you close the tab.
+    // Only the visit is written - never the shop pipeline's live objects
+    // (recipe, table, server): anybody who was standing in a line when you
+    // saved is put back on the promenade, which is honest and cannot wedge.
+    visitors: customers.filter(k => k.visitor && !k.gone).map(k => ({
+      n: k.name, c: k.color, a: k.acc, x: Math.round(k.x), y: Math.round(k.wy),
+      s: VIS_STATES[k.state] ? k.state : "roam",
+      w: Math.round(k.wallet), p: k.purse, sp: Math.round(k.spent),
+      ni: k.nights, nh: k.nightsHad, rn: k.roughNights, un: k.unhoused,
+      ar: k.arrived, lt: Math.round(k.leaveT), b: k.buys,
+      rm: k.room ? hotelRooms().indexOf(k.room) : -1,
+      hu: k.hunger, th: k.thirst, di: k.dirt, bo: k.bored, ti: k.tired,
+      log: k.log || [],
+    })),
+    ferry: { t: Math.round(ferryT), sail: ferrySail, d: ferryDay },
+    _vis: 1,   // "this save knows about the ferry" - see load()'s founder guard
     // THE WAGE: per-business rates here, per-crab deals (p.wage/p.wageOwner)
     // and grievance (p.gripe/p.wageJob/p.wageDay/p.walkout) inside the
     // personas above, and the CPU owners' move ledger.
@@ -2573,8 +2758,13 @@ function load(slot) {
     // fishers up before load() runs, so a townsfolk crab who died would walk
     // back out of the sea on the next reload. The saved persona list IS the
     // roll of the living: anybody missing from it is in the memorial row.
+    // ...with ONE exception, and it is a migration rather than a loophole: a
+    // save written before the hotel existed cannot possibly list REEF, and
+    // deleting him would orphan a hotel that same save has never heard of.
+    const preVis = !s._vis;
     if (Array.isArray(s.npc.personas))
-      npcs = npcs.filter(n => s.npc.personas.some(sp => sp && sp.name === n.p.name));
+      npcs = npcs.filter(n => (preVis && n.p.owner === "reef")
+        || s.npc.personas.some(sp => sp && sp.name === n.p.name));
   }
   jobBoard = Array.isArray(s.board) ? s.board : [];
   // pre-toggle saves had music on by default - keep their experience
@@ -2622,6 +2812,45 @@ function load(slot) {
     if (BIZ[b]) BIZ[b].autoLabor = !!s.autoLabor[b];
   if (s.laborPol) for (const b in s.laborPol)
     if (BIZ[b] && s.laborPol[b]) laborPolicyState[b] = { cd: s.laborPol[b].cd || 0 };
+  // THE VISITORS COME BACK. Rooms are re-linked by index (and the occupant
+  // re-hung on the room, which is what makes "asleep upstairs" survive a
+  // reload); anybody who was in a queue is stood back on the promenade with
+  // their needs, their wallet and their diary intact. An old save has no
+  // visitors at all and simply waits for the next ferry.
+  customers = customers.filter(k => !k.visitor);
+  if (Array.isArray(s.visitors)) for (const v of s.visitors) {
+    if (!v || typeof v.n !== "string") continue;
+    const k = newVisitor(false);
+    k.name = String(v.n).toUpperCase().slice(0, 14);
+    k.color = Math.max(0, Math.min(CRAB_COLORS.length - 1, +v.c || 0));
+    if (ACC_KEYS.includes(v.a)) k.acc = v.a;
+    k.x = Math.max(0, Math.min(WORLD_W, +v.x || 0));
+    k.wy = Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, +v.y || FLOOR_Y));
+    k.state = VIS_STATES[v.s] ? v.s : "roam";
+    k.wallet = Math.max(0, Math.round(+v.w || 0)); k.purse = Math.max(1, Math.round(+v.p || k.wallet));
+    k.spent = Math.max(0, Math.round(+v.sp || 0));
+    k.nights = Math.max(0, Math.min(3, +v.ni || 0)); k.nightsHad = Math.max(0, +v.nh || 0);
+    k.roughNights = Math.max(0, +v.rn || 0); k.unhoused = Math.max(0, +v.un || 0);
+    k.arrived = Math.max(1, +v.ar || day); k.leaveT = +v.lt || (gnow() + 600);
+    k.buys = Math.max(0, +v.b || 0);
+    for (const [key, sk] of [["hunger", "hu"], ["thirst", "th"], ["dirt", "di"], ["bored", "bo"], ["tired", "ti"]])
+      k[key] = Math.max(0, Math.min(1, +v[sk] || 0));
+    k.log = Array.isArray(v.log) ? v.log.filter(e => Array.isArray(e) && e.length >= 4
+      && typeof e[3] === "string").slice(-VIS_LOG_MAX)
+      .map(e => [+e[0] || 1, +e[1] || 0, LOG_CATS[e[2]] ? e[2] : "life", e[3].slice(0, LOG_TEXT)]) : [];
+    const ri = +v.rm;
+    const rooms = hotelRooms();
+    if (ri >= 0 && rooms[ri] && !rooms[ri].occupant) { k.room = rooms[ri]; rooms[ri].occupant = k; k.roomN = ri + 1; }
+    else if (k.state === "inRoom" || k.state === "toRoom") k.state = "roam";
+    if (k.state === "onSand") { k.rough = true; k.roughFlag = true; }
+    k.spawnX = k.x; k.y = k.wy; k.biz = null; k.recipe = null;
+    customers.push(k);
+  }
+  if (s.ferry) {
+    ferryT = Math.max(0, Math.min(FERRY_STAY, +s.ferry.t || 0));
+    ferrySail = Math.max(-1, Math.min(FERRY_TIMES.length - 1, s.ferry.sail == null ? -1 : +s.ferry.sail));
+    ferryDay = Math.max(0, +s.ferry.d || 0);
+  }
   // NO OFFLINE EARNINGS (owner, 2026-08-19: "eliminate that whole mechanic").
   // The town used to pay out for the hours the tab was closed - "WELCOME BACK!
   // THE CRABS MADE $35,000" - which is money nobody watched anybody earn, in a
@@ -3075,6 +3304,7 @@ function hireShift() {
 // checklist, tourist-side: stall, table + plate, any chef mid-claim), drop
 // the customer entity from the queue, and stand a crew crab up in its place
 function convertTourist(k) {
+  if (k.room) { k.room.occupant = null; k.room.dirty = true; k.room = null; }   // they've checked out for good
   if (k.stall) { k.stall.occupant = null; k.stall.dirty = true; k.stall = null; }
   if (k.table) { k.table.occupant = null; k.table.dishes = 0; k.table = null; }
   for (const w of allCrabs()) if (w.cust === k) abortChef(w);   // unclaim a mid-prep order
@@ -4569,8 +4799,20 @@ function payAndBenefit(c, cust) {
     // `seatedWaiting` is exactly "this plate is going out to a seated guest" -
     // serve() calls us before it flips them to dining.
     const seated = cust.state === "seatedWaiting";
-    const tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult
+    let tip = cust.recipe.pay * 0.5 * (cust.patience / cust.maxPatience) * tipMult
       * (seated || window._fullCounterTip ? 1 : TIP_COUNTER);   // the flag is the paired-arm probe
+    // A VISITOR PAYS OUT OF THEIR OWN POCKET. The wallet was checked before
+    // they ever joined the line (visPick), so the price always clears; the TIP
+    // is whatever is left of it, which is why a nearly-broke guest tips
+    // nothing and a flush one tips the lot. This is the only place outside
+    // money becomes town money now - see the ferry block's audit note.
+    if (cust.visitor) {
+      cust.wallet = Math.max(0, cust.wallet - cust.recipe.pay);
+      cust.spent += cust.recipe.pay;
+      tip = Math.max(0, Math.min(tip, cust.wallet));
+      cust.wallet -= tip; cust.spent += tip;
+      visBenefit(cust);
+    }
     // one price on the menu, one price on the pop: the base. The tip is its
     // own little moment (Matt: 'are tacos 17 or 23? there are discrepancies')
     creditBiz(cust.biz, cust.recipe.pay, cust.x, 126);
@@ -4584,6 +4826,20 @@ function payAndBenefit(c, cust) {
     payTip(cust.biz, c, tip, cust.x, 108);   // credited separately, popped separately
     popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
   }
+}
+// WHAT A VISITOR GOT FOR THEIR MONEY. Same vocabulary the crabs' errands use
+// (a meal zeroes hunger, any juice quenches, the arcade zeroes boredom) so a
+// visitor's bars mean exactly what a crab's bars mean - the dossier can show
+// them side by side and the player only has to learn one thing.
+function visBenefit(k) {
+  const r = k.recipe;
+  if (!r) return;
+  if (k.need === "room") return;                       // paid at the desk; the bed is the benefit
+  if (DRINKS[r.id]) k.thirst = 0;
+  if (k.need === "food" || (!DRINKS[r.id] && k.biz === "shack")) k.hunger = 0;
+  if (k.need === "fun" || k.biz === "arcade") k.bored = 0;
+  visLog(k, "need", "BOUGHT " + (ITEM_NAMES[r.icon] || "SOMETHING")
+    + " AT THE " + BIZ[k.biz].short + " - $" + r.pay);
 }
 function serve(c) {
   const cust = c.cust;
@@ -4617,7 +4873,12 @@ function serve(c) {
     const tables = bizTables(cust.biz), stalls = BIZ[cust.biz].stalls;
     const seat = tables ? pickSeat(tables, cust) : null;
     const stall = stalls ? stalls.find(t => !t.occupant && !t.dirty) : null;
-    if (stalls) {
+    // LODGING: the key is handed over and the guest walks to their own door.
+    // The room was reserved before they joined the line (nobody sells the last
+    // room twice), so there is nothing to find here - `leaving` sends them
+    // through visAfterCounter, which checks them in.
+    if (BIZ[cust.biz].lodging) { cust.state = "leaving"; }
+    else if (stalls) {
       if (stall) { stall.occupant = cust; cust.state = "toStall"; cust.stall = stall; }
       else { cust.state = "waitStall"; cust.waitT = 30; }
     }
@@ -4628,6 +4889,621 @@ function serve(c) {
       window._stats.npcServes = (window._stats.npcServes || 0) + 1;
   }
   c.cust = null; c.carrying = null; c.kstate = "idle"; c.stepIdx = 0;
+}
+
+// ===========================================================================
+// THE FERRY, AND VISITORS WHO ARE PEOPLE  (owner directive, 2026-08-19)
+//
+// Verbatim: "tourists become real; real money, come in on a cruise ship with
+// status bars in various conditions, disembark, stay for a day or two. New
+// business is hotel, run by an NPC (tho we should have a mechanism for owning
+// it)" - with his correction a minute later, "say ferry, forget about cruise
+// ships".
+//
+// WHAT WAS WRONG. A tourist used to blink into existence beside a queue on a
+// reputation-paced timer, wait, eat, and walk off the right-hand edge of the
+// world. There was no such person: the "spawn" WAS the demand curve, wearing a
+// name for four characters' worth of queue label.
+//
+// WHAT DEMAND IS NOW: A POPULATION. Visitors land in BATCHES off the ferry
+// (batch size scales with reputation - a town with a good name draws a fuller
+// boat), walk down the pier into town, and stay a day or two. They carry a
+// WALLET of real money and spend it down; when it is gone they stop buying,
+// and whatever they did not spend goes home in their pocket. They carry the
+// same five NEEDS every crab carries, in various conditions off the boat, and
+// those needs are what sends them to a counter - a ferry-load of hungry,
+// filthy visitors is a good day for the shack and for SUDSY. At night they
+// need somewhere to sleep, which is what the DRIFTWOOD HOTEL is for.
+//
+// A VISITOR IS A CUSTOMER OBJECT THAT PERSISTS. That is the whole trick, and
+// it is why this pass is small: the queue, patience, seating, table service,
+// tipping, busing, the reserved local slot, click-to-follow and the tourist
+// dossier all already operate on customer objects, so a VISIT is a longer life
+// with the shop pipeline as its sub-machine. `k.visitor` marks them, the
+// states listed in VIS_STATES are theirs, and every state the counter owns is
+// untouched.
+//
+// THE MONEY NEVER INFLATES. A wallet is minted when the ferry lands (this is
+// the outside money that has always entered this town through tourists - it
+// used to be minted one plate at a time) and is destroyed when the ferry takes
+// it away again. Between those two moments the only thing that happens to it
+// is `creditBiz`. Add it to the audit in the OWNERS block as:
+//     visitor wallets (ferry in)   -> outside money IN, only as it is spent
+//     unspent wallets (ferry out)  -> DESTROYED, exactly like rent
+// ===========================================================================
+
+// ---- THE FERRY -------------------------------------------------------------
+// THE SEAM, DELIBERATELY SMALL: another agent owns the island's horizon and the
+// run to the mainland. Everything this system needs from a ferry is two events
+// - SHE IS ALONGSIDE, and SHE HAS SAILED - so they are one call each, and
+// `window.onFerry(kind, info)` is the hook to hang art, sound or a win
+// condition off. If a richer ferry lands later it should call `ferryDock()` /
+// `ferrySail()` and delete FERRY_TIMES; nothing else here needs to know.
+const FERRY = {
+  hull: 2074,      // where she lies alongside, off the end of the pier
+  hullY: 46,
+  gangway: 2046,   // the pier's east end: the plank comes down here
+  shore: 1852,     // foot of the pier, where the deck meets the promenade
+  deckY: 100,      // visitors walk the planks at rail height
+};
+// FOUR SAILINGS, NOT TWO, and that is a measured number rather than a
+// timetable someone liked. A boat is a BURST where the retired spawn timer was
+// a trickle, and this town's tables are what it is short of: with two big
+// sailings a day the whole boat hit one counter at once, every table was taken
+// by the third guest, and the rest were handed a plate over the pass - the
+// SEATED share fell from 88% to 61% and with it the $9 table tip that is most
+// of a guest's value. Four smaller boats put the same people through the same
+// dining room and the share comes back.
+const FERRY_TIMES = [8 * 60, 10.5 * 60, 13 * 60, 15.5 * 60];
+const FERRY_STAY = 75;                   // game-minutes tied up
+const FERRY_CALL = 165;                  // ...and how long before a sailing a leaver sets off
+                                         // for the pier (the whole promenade, at a stroll)
+// A GOOD NAME FILLS THE BOAT. This replaces `spawnEvery`, and it makes the same
+// statement about reputation the old timer made: a rep-30 town gets about two a
+// sailing, a rep-100 town nearly three.
+const FERRY_BASE = 2.0, FERRY_REP = 0.013, FERRY_MAX = 6;
+// The morning boats are the busy ones, and the LAST sailing is the hotel's
+// whole demand: its passengers are overnighters by construction, because there
+// is no later boat for them to catch. So the size of that boat is what the
+// Driftwood's seven rooms are sized against.
+const FERRY_LOAD = [1.2, 1.1, 0.9, 0.8];
+let ferryT = 0;        // game-minutes she has left alongside (0 = at sea)
+let ferrySail = -1;    // index of the sailing already run today (-1 = none yet)
+let ferryDay = 0;
+function ferryHere() { return ferryT > 0; }
+function ferryNotify(kind) {
+  if (typeof window.onFerry === "function") { try { window.onFerry(kind, { day, tmin }); } catch (e) {} }
+}
+function gnow() { return day * 1440 + tmin; }
+function ferryBatch() {
+  const n = FERRY_BASE + rep * FERRY_REP + (Math.random() - 0.5);
+  return Math.max(1, Math.min(FERRY_MAX, Math.round(n)));
+}
+// ---- THE VISITOR -----------------------------------------------------------
+const VIS_STATES = { ashore: 1, roam: 1, toBiz: 1, toRoom: 1, inRoom: 1, onSand: 1, toPier: 1 };
+const VIS_SPEED = 42;            // a stroll: a shade under a walking crab's 40 x trait
+// A VISITOR WAITS LONGER THAN A PASSER-BY. The old anonymous tourist had 50;
+// somebody who crossed on a boat to be here and is staying the night will give
+// your kitchen half again as long. It is also a measured necessity: ferry
+// batches are BURSTY where the old spawn timer was a trickle, so five guests
+// hit one counter at once - at 50 the burst cost 2 seated guests a day their
+// $9 table tip and put rage 62% above the pre-pass build.
+const VIS_PATIENCE = 85;
+const VIS_THINK = 1.6;           // real seconds between "what do I fancy" checks
+// needs per GAME HOUR while awake. Pitched off the crabs' own cycle but a
+// little gentler: a visitor is not working a shift, and a visitor who needed
+// something every hour would simply queue all day.
+// (dirt runs faster than a crab's because a visitor spends the whole day on a
+//  beach; it is also what keeps SUDSY's stalls busy now that the anonymous
+//  spawn is gone - measured at 0.030 her shop washed 11 guests in 8 days.)
+// HUNGER LEADS. An early draft ran thirst faster than hunger and the town's
+// takings fell 30% a guest without a single price changing: a visitor's day
+// filled up with $10 juices instead of $17 tacos, the dining room saturated,
+// and the overflow was served over the pass for a token tip. Fewer, hungrier
+// visitors are worth more than more, thirstier ones, because SEATS are what
+// this town is short of.
+const VIS_RATE = { hunger: 0.115, thirst: 0.055, dirt: 0.090, bored: 0.045, tired: 0.048 };
+const VIS_WANT = { food: 0.45, drink: 0.40, clean: 0.45, fun: 0.45 };
+// A VISITOR'S PRIORITIES ARE NOT A LOCAL'S. ERRAND_RANK puts washing third
+// because a crab washes when the day allows; a holidaymaker who has spent the
+// afternoon on a beach goes and has a shower, and SUDSY's whole business used
+// to be 10% of an anonymous spawn table. Measured: at the crabs' rank of 2 she
+// washed 2.9 guests a day against the pre-pass build's 4.3 and lost the shop in
+// 4 towns of 6.
+const VIS_RANK = { food: 4, drink: 3, clean: 2.4, fun: 1.5 };
+const VIS_BED_DRAIN = 0.30;      // a hotel bed drains tiredness at TIRED_DRAIN.bed
+// THE STROLL IS LOCAL. An early draft picked a target anywhere in this span
+// and a visitor spent most of their holiday walking the length of the town
+// instead of buying anything (1.6 purchases a visit). A stroll is a few
+// hundred pixels of promenade; the shops are what pull them further.
+const VIS_ROAM = [700, 1900];    // the stretch of promenade a visitor will stroll
+const VIS_STROLL = 340;          // ...and how far from here one stroll takes them
+// the room rate is the hotel's menu price, read off the recipe so the price on
+// the sign and the money a visitor holds back can never disagree
+const ROOM_RATE = BIZ.hotel.recipes[0].pay;
+const ROOM_HOUR = 15 * 60;       // past this the bed outranks everything - the desk
+                                 // shuts with REEF's shift, and the sand is the alternative
+const ROOM_RANK = 6;             // ...before it, a bed pulls harder than a meal (4)...
+const ROOM_URGE = 4;             // ...and harder still as the afternoon wears on
+const BED_HOUR = 21 * 60;        // ...and turns in
+const WAKE_HOUR = 7.5 * 60;      // checkout: the room goes dirty and housekeeping gets it
+const VIS_DAYTRIP = 0.60;        // share of every boat BUT THE LAST who go home the same day
+                                 // (the last boat is overnighters by construction). Between
+                                 // this and FERRY_LOAD it is what sizes the hotel's demand.
+                                 // (the afternoon boat is overnighters by construction -
+                                 //  there is no later sailing for them to catch)
+const SAND_SPOTS = [600, 1160, 1590, 1836, 2110];   // where a visitor with no room beds down
+const VIS_LOG_MAX = 24;          // a visit is short; the diary is shorter than a crab's
+function visLog(k, cat, line) {
+  if (!k || !line) return;
+  const log = k.log || (k.log = []);
+  const txt = String(line).slice(0, LOG_TEXT);
+  if (log.length && log[log.length - 1][3] === txt) return;
+  log.push([day, Math.round(tmin), LOG_CATS[cat] ? cat : "life", txt]);
+  if (log.length > VIS_LOG_MAX) log.splice(0, log.length - VIS_LOG_MAX);
+}
+function visitorsInTown() { return customers.filter(k => k.visitor && !k.gone); }
+// names dedupe against everybody currently in town, crabs included, so no two
+// MISTYs are ever on the boardwalk at once - the whole point is a recognisable
+// face ("that's MISTY, she's been here since Tuesday")
+function freeVisitorName() {
+  const used = new Set(allCrabs().map(c => c.p.name));
+  for (const k of customers) if (k.visitor) used.add(k.name);
+  const free = CUSTOMER_NAMES.filter(n => !used.has(n));
+  if (!free.length) return CUSTOMER_NAMES[(Math.random() * CUSTOMER_NAMES.length) | 0];
+  return free[(Math.random() * free.length) | 0];
+}
+// STATUS BARS IN VARIOUS CONDITIONS (the directive's own words). Everybody
+// comes off the boat with a low baseline and ONE OR TWO needs genuinely
+// pressing, which is what makes a batch legible from the pier: this one is
+// starving, that one has been on a boat all morning and wants a wash.
+function visNeeds() {
+  const n = { hunger: 0, thirst: 0, dirt: 0, bored: 0, tired: 0 };
+  const keys = Object.keys(n);
+  for (const key of keys) n[key] = 0.08 + Math.random() * 0.32;
+  const loaded = 1 + ((Math.random() * 2) | 0);
+  for (let i = 0; i < loaded; i++) {
+    const key = keys[(Math.random() * keys.length) | 0];
+    n[key] = 0.55 + Math.random() * 0.40;
+  }
+  return n;
+}
+function newVisitor(overnightOnly) {
+  const nights = overnightOnly ? (Math.random() < 0.80 ? 1 : 2)
+    : Math.random() < VIS_DAYTRIP ? 0 : Math.random() < 0.78 ? 1 : 2;
+  const n = visNeeds();
+  // THE PURSE. A day-tripper brings lunch money; somebody staying two nights
+  // brings two nights' worth plus the room. A third of the boat is FLUSH and a
+  // few are down to their last few dollars - the "some flush and some nearly
+  // broke" the directive asked for, and the reason a full queue is not the
+  // same thing as a full till.
+  // The floor matters more than the mean, and it is measured: at 20 the broke
+  // tail of every boat ran out mid-meal and the $9 TABLE TIP was clipped to
+  // whatever was left, so a fifth of the shack's table money quietly vanished.
+  let wallet = 32 + Math.random() * 44 + nights * (ROOM_RATE + 24);
+  if (Math.random() < 0.30) wallet += 24 + Math.random() * 30;    // a flush third of the boat
+  if (Math.random() < 0.12) wallet *= 0.6;                        // ...and a few travelling light
+  const leaveT = nearestSail(gnow() + (nights === 0 ? 300 + Math.random() * 90
+    : nights * 1440 - 60 - Math.random() * 60));
+  return {
+    visitor: true, gone: false,
+    name: freeVisitorName(),
+    color: (Math.random() * CRAB_COLORS.length) | 0,
+    acc: ACC_KEYS[(Math.random() * ACC_KEYS.length) | 0],
+    animT: Math.random() * 9,
+    x: FERRY.gangway, y: FERRY.deckY, wy: FLOOR_Y, leg: 0,
+    state: "ashore",
+    // the shop pipeline's own fields, dormant until they join a line
+    biz: null, recipe: null, patience: VIS_PATIENCE, maxPatience: VIS_PATIENCE,
+    claimed: false, served: false, happy: false, server: null, table: null, stall: null,
+    // the visit
+    wallet: Math.round(wallet), purse: Math.round(wallet), spent: 0,
+    nights, nightsHad: 0, rough: false, roughNights: 0, unhoused: 0,
+    arrived: day, leaveT, room: null, buys: 0, thinkT: Math.random() * VIS_THINK,
+    idleT: 0, target: null, log: [],
+    hunger: n.hunger, thirst: n.thirst, dirt: n.dirt, bored: n.bored, tired: n.tired,
+  };
+}
+// THE TOWN IS NOT EMPTY WHEN YOU SIGN THE LEASE. A cold start with nobody
+// ashore costs a whole trading day while the first boats build a population -
+// measured at -29% revenue on day 1 - and it is also simply wrong: people were
+// holidaying here before you took the shack on. So a new town (and an old save
+// that predates the ferry) opens with a boat-load already mid-visit.
+function seedVisitors() {
+  if (customers.some(k => k.visitor)) return;
+  const n = ferryBatch() + 4;   // a day's worth: yesterday's overnighters and this morning's crowd
+  for (let i = 0; i < n; i++) {
+    // about half of them are mid-stay rather than day-tripping, so the town
+    // still has a population on DAY 2 (measured: seeding day-trippers only left
+    // day 2 thirty percent down on takings while the first boats rebuilt one)
+    const v = newVisitor(Math.random() < 0.45);
+    v.state = "roam"; v.leg = 1;
+    v.x = Math.round(VIS_ROAM[0] + Math.random() * (VIS_ROAM[1] - VIS_ROAM[0]));
+    v.wy = FLOOR_Y; v.y = FLOOR_Y;
+    v.wallet = Math.round(v.wallet * (0.55 + Math.random() * 0.45));   // part-way through the money
+    v.spent = Math.max(0, v.purse - v.wallet);
+    customers.push(v);
+    visLog(v, "life", "CAME OVER ON AN EARLIER FERRY");
+  }
+}
+// SHE IS ALONGSIDE. Land the batch, and call anybody whose visit is up.
+function ferryDock(n, idx) {
+  ferryT = FERRY_STAY;
+  // THE LAST BOAT OF THE DAY carries overnighters by construction - there is
+  // nothing left for them to catch - so the timetable, not a dice roll, is what
+  // decides how many beds the town needs tonight.
+  const i0 = idx == null ? Math.max(0, FERRY_TIMES.findIndex(t => tmin < t + FERRY_STAY)) : idx;
+  const last = i0 >= FERRY_TIMES.length - 1;
+  const count = n != null ? n
+    : Math.max(1, Math.round(ferryBatch() * (FERRY_LOAD[i0] != null ? FERRY_LOAD[i0] : 1)));
+  const landed = [];
+  for (let i = 0; i < count; i++) {
+    const v = newVisitor(last);
+    v.x = FERRY.gangway + 8 + i * 5;   // they come down the plank in a line
+    v.thinkT = i * 3 + Math.random() * 8;   // ...and they do not all want lunch at 9:01
+    customers.push(v);
+    visLog(v, "life", "CAME ASHORE OFF THE FERRY");
+    landed.push(v.name);
+  }
+  if (window._stats) {
+    window._stats.ferries = (window._stats.ferries || 0) + 1;
+    window._stats.arrivals = (window._stats.arrivals || 0) + count;
+  }
+  if (landed.length) {
+    toast = { text: "THE FERRY IS IN - " + landed.length + " VISITOR"
+      + (landed.length === 1 ? "" : "S") + " ASHORE", t: 5 };
+    popText("FERRY IN", FERRY.gangway - 20, 84, [140, 220, 255]);
+  }
+  ferryNotify("dock");
+  return landed;
+}
+// YOU BOOK A BOAT, NOT AN HOUR. A visitor's departure is pinned to an actual
+// SAILING the moment they land - the one nearest the end of the stay they came
+// for - which is what makes "a day or two" mean a day or two. (Rounding to the
+// NEXT sailing instead turned a quarter of every morning's day-trippers into
+// accidental overnighters twenty minutes past the boat, and every one of them
+// then wanted a bed nobody had built.)
+function nearestSail(want) {
+  let best = null, bd = Infinity;
+  const floor = gnow() + 60;   // has to be far enough off to walk to the pier
+  for (let d0 = 0; d0 <= 3; d0++) for (const t of FERRY_TIMES) {
+    const abs = (day + d0) * 1440 + t;
+    if (abs <= floor) continue;
+    const dd = Math.abs(abs - want);
+    if (dd < bd) { bd = dd; best = abs; }
+  }
+  return best == null ? want : best;
+}
+function ferryDepartCall(sailAbs) {   // who is going home on this one
+  for (const k of visitorsInTown()) {
+    if (k.state === "toPier" || k.leaveT > sailAbs) continue;
+    if (!VIS_STATES[k.state] || k.state === "toBiz") continue;   // finish what you're queueing for
+    visLeave(k);
+  }
+}
+function visLeave(k) {
+  if (k.room) { k.room.occupant = null; k.room.dirty = true; k.room = null; }
+  k.state = "toPier"; k.leg = 0; k.target = null;
+  visLog(k, "life", "HEADING BACK TO THE FERRY");
+}
+// SHE HAS SAILED. Anybody who made it aboard goes home with whatever is left
+// in their pocket - and that money leaves the town, which is what keeps the
+// wallet from being an inflation hole.
+function ferryGo() {
+  ferryT = 0;
+  const last = ferrySail >= FERRY_TIMES.length - 1;
+  for (const k of visitorsInTown()) {
+    if (k.state !== "toPier" || k.x < FERRY.gangway - 12) continue;
+    visBoard(k);
+  }
+  // MISSED THE LAST BOAT. A day-tripper who dawdled is an overnighter now,
+  // whether they packed for it or not - so they go looking for a room like
+  // everybody else rather than being quietly filed as "unhoused".
+  if (last) for (const k of visitorsInTown()) {
+    if (k.gone || k.nights > 0) continue;
+    k.nights = 1; k.leaveT = nearestSail(gnow() + 900);
+    visLog(k, "life", "MISSED THE LAST BOAT - STAYING OVER");
+  }
+  ferryNotify("sail");
+}
+function visBoard(k) {
+  k.gone = true;
+  if (k.room) { k.room.occupant = null; k.room.dirty = true; k.room = null; }
+  // WORD OF MOUTH IS THE WHOLE POINT OF A VISIT. A guest who ate, washed and
+  // slept somewhere talks the town up; one who spent the night on the sand
+  // talks it down harder. Small numbers on purpose - rep already saturates,
+  // and the serve/rage swings remain the loud ones.
+  // Deliberately SMALL and mostly one-sided. Word of mouth is already a
+  // calibrated currency (a serve is +0.4, a table serve +0.8, a rage-quit -3),
+  // and an early draft that also docked every merely-unremarkable visit -0.6
+  // put a systematic -4/day on a town that lives on this number: reputation
+  // collapsed to 43 by day 5, which shrank the boat, which shrank the takings.
+  // What ships is the one thing a player can actually fix.
+  const rough = k.roughNights > 0;
+  rep = Math.max(0, Math.min(100, rep + (rough ? -1.2 : k.buys >= 2 ? 0.5 : 0)));
+  if (window._stats) {
+    const s = window._stats;
+    s.visDepart = (s.visDepart || 0) + 1;
+    s.visSpend = (s.visSpend || 0) + k.spent;
+    s.visUnspent = (s.visUnspent || 0) + Math.max(0, Math.round(k.wallet));
+    s.visStayMin = (s.visStayMin || 0) + Math.max(0, gnow() - (k.arrived * 1440));
+    s.visBuys = (s.visBuys || 0) + k.buys;
+    s.visNights = (s.visNights || 0) + k.nightsHad;
+    s.visRough = (s.visRough || 0) + k.roughNights;
+    if (rough) s.visRoughGuests = (s.visRoughGuests || 0) + 1;
+  }
+  if (followCust === k) followCust = null;
+  if (sel === k) sel = null;
+  if (dossier === k) dossier = null;
+}
+// One clock, called from updateCustomers. Docks her on the timetable, calls
+// the leavers early enough to walk the promenade, and sails her.
+function runFerry(dtMin) {
+  if (ferryDay !== day) { ferryDay = day; ferrySail = -1; }
+  for (let i = 0; i < FERRY_TIMES.length; i++) {
+    if (i <= ferrySail) continue;
+    const abs = day * 1440 + FERRY_TIMES[i];
+    if (tmin >= FERRY_TIMES[i] - FERRY_CALL && tmin < FERRY_TIMES[i]) ferryDepartCall(abs);
+    if (tmin >= FERRY_TIMES[i]) { ferrySail = i; ferryDock(null, i); ferryDepartCall(abs); }
+  }
+  if (ferryT > 0) {
+    ferryT -= dtMin;
+    // board anybody standing on the plank while she is alongside
+    for (const k of visitorsInTown())
+      if (k.state === "toPier" && k.leg === 1 && k.x >= FERRY.gangway - 12) visBoard(k);
+    if (ferryT <= 0) ferryGo();
+  }
+}
+// ---- THE ROOMS -------------------------------------------------------------
+// THE ROOMS ARE `stalls`, so the housekeeping dispatch, the cleaning wedge
+// guards and the abort paths all already know what to do with them. What is
+// new is only the LENGTH of the occupancy: a shower is showerT seconds, a room
+// is until morning.
+function hotelRooms() { return (BIZ.hotel && BIZ.hotel.stalls) || []; }
+function freeRoom() { return hotelRooms().find(r => !r.occupant && !r.dirty && !r.cleaning) || null; }
+// THE INVARIANT, TRUE BY CONSTRUCTION (the tables' `dishes > 0` guard, one
+// facility over): a room whose guest is no longer in town is an empty room
+// with an unmade bed. Whatever route left it that way - a rage-quit, a
+// conversion to crew, a save reload, a bug I have not thought of - the sweep
+// hands it back to housekeeping instead of stranding it for the run.
+function sweepRooms() {
+  for (const r of hotelRooms()) {
+    const o = r.occupant;
+    if (!o) continue;
+    if (o.visitor && !o.gone && o.room === r) continue;
+    r.occupant = null; r.dirty = true;
+  }
+}
+// CHECKING IN IS NOT GOING TO BED. They take the key in the afternoon and go
+// back out into the town with a bed waiting for them - which is exactly what
+// makes the room worth its $22: an evening in town instead of a walk to the
+// last ferry.
+function checkIn(k) {
+  const r = k.room;
+  if (!r) return;
+  k.roomN = hotelRooms().indexOf(r) + 1;
+  visLog(k, "home", "CHECKED IN - ROOM " + k.roomN + " AT THE DRIFTWOOD");
+  if (window._stats) window._stats.roomLets = (window._stats.roomLets || 0) + 1;
+  today.roomsLet = (today.roomsLet || 0) + 1;
+}
+function checkOut(k) {
+  if (k.room) { k.room.occupant = null; k.room.dirty = true; k.room = null; }
+  k.nightsHad++;
+  k.state = "roam"; k.biz = null; k.target = null;
+  k.wy = FLOOR_Y; k.y = FLOOR_Y;
+  visLog(k, "home", "CHECKED OUT - SLEPT WELL");
+}
+// THE ANSWER TO A FULL HOUSE, and it is an ENVIRONMENT answer, not a scripted
+// sulk (PLAN's standing thesis). A visitor with nowhere to sleep does not
+// misbehave: they bed down on the sand, exactly the way an exhausted crab
+// does, and the sand banks NO rest - the same rule sleepRough() already
+// applies to crabs. The consequences fall out of that one fact: they wake
+// tired and grubby, they take the next ferry rather than a second night, and
+// they talk the town down on the way out. Nothing is scripted; the fix is to
+// have rooms free, which is a staffing and ownership problem the player can
+// actually solve.
+function sleepOnSand(k) {
+  let best = SAND_SPOTS[0];
+  for (const s of SAND_SPOTS) if (Math.abs(s - k.x) < Math.abs(best - k.x)) best = s;
+  k.state = "onSand"; k.target = best + ((Math.random() * 18) | 0) - 9;
+  k.rough = true;
+  if (!k.roughFlag) {
+    k.roughFlag = true; k.roughNights++;
+    k.unhoused++;
+    // they came for two nights; one on the sand is enough - the next boat will do
+    k.leaveT = Math.min(k.leaveT, nearestSail(gnow() + 540));
+    visLog(k, "peril", "NO ROOM AT THE HOTEL - SLEPT ON THE BEACH");
+    today.moved.push(k.name + " SLEPT ON THE BEACH - HOTEL FULL");
+    popText("NO ROOM!", k.x - 10, FLOOR_Y - 34, [255, 150, 130]);
+    if (window._stats) window._stats.unhoused = (window._stats.unhoused || 0) + 1;
+  }
+}
+// ---- WHAT A VISITOR FANCIES ------------------------------------------------
+// The crabs' own errand scorer, cut down to what a visitor has: no shift to
+// anchor the trip on, no self-cook privileges, no free tap (a visitor buys
+// their water like anybody on holiday). Urgency per unit of walking, with the
+// ROOM MONEY HELD BACK - which is the wallet mechanic in one line: a visitor
+// who still needs a bed will not spend their last $14 on a taco.
+function wantsRoom(k) {
+  return k.nights > 0 && !k.room && !k.rough && k.nightsHad < k.nights;
+}
+function roomReserve(k) { return wantsRoom(k) ? ROOM_RATE : 0; }
+function visLevel(k, need) {
+  return need === "food" ? k.hunger : need === "drink" ? k.thirst
+    : need === "clean" ? k.dirt : k.bored;
+}
+function visOpen(b) {
+  return bizUnlocked(b) && !bizDark(b) && bizOpenNow(b) && bizStaffed(b);
+}
+function visRoomFor(k, b) {   // is there a slot left in that line for a tourist?
+  const tourQ = customers.filter(c => c.biz === b && !c.isCrab && c !== k && c.state !== "leaving"
+    && (c.state === "arriving" || c.state === "waiting" || c.state === "toBiz")).length;
+  const allQ = customers.filter(c => c.biz === b && c !== k
+    && (c.state === "arriving" || c.state === "waiting" || c.state === "toBiz")).length;
+  return tourQ < TOURIST_QUEUE_MAX && allQ < QUEUE_MAX;
+}
+function visPick(k) {
+  const cand = [], res = roomReserve(k);
+  const afford = (r) => k.wallet >= r.pay + res;
+  const add = (b, need, pickR) => {
+    if (!visOpen(b) || !visRoomFor(k, b)) return;
+    const rs = BIZ[b].recipes.filter(afford);
+    if (!rs.length) return;
+    cand.push({ biz: b, need, recipe: pickR(rs) });
+  };
+  const cheap = (rs) => rs.slice().sort((a, b) => a.pay - b.pay)[0];
+  // exactly the crabs' own rule (pickErrand): treat yourself when flush, eat
+  // cheap when you are watching the money - measured against the same $40 line
+  // A VISITOR ORDERS WHAT THEY FANCY. The crabs' own "eat cheap when you are
+  // under $40" line is a LOCAL's rule - they have rent to make - and applying
+  // it here quietly turned the whole boat into a fish-and-juice crowd and took
+  // the average ticket down with it. Somebody on holiday orders off the menu;
+  // the only thing that stops them is not being able to afford it at all,
+  // which `add` has already checked (price + the room money held back).
+  const treat = (rs) => rs[(Math.random() * rs.length) | 0];
+  const plate = (rs) => { const f = rs.filter(r => !DRINKS[r.id]); return treat(f.length ? f : rs); };
+  if (k.hunger >= VIS_WANT.food) add("shack", "food", plate);
+  if (k.thirst >= VIS_WANT.drink) {
+    if (visOpen("juicebar")) add("juicebar", "drink", treat);
+    else add("shack", "drink", (rs) => cheap(rs.filter(r => DRINKS[r.id]).length ? rs.filter(r => DRINKS[r.id]) : rs));
+  }
+  if (k.dirt >= VIS_WANT.clean) add("showers", "clean", treat);
+  if (k.bored >= VIS_WANT.fun) add("arcade", "fun", treat);
+  // A BED IS AN ERRAND LIKE ANY OTHER, and putting it in this scorer rather
+  // than in a separate "it's five o'clock" block is what makes the hotel work
+  // at all. It sits at the far east end of the promenade, and the desk is only
+  // staffed while REEF is on his shift - an earlier build that sent visitors
+  // looking at 15:00 gave them a 3.5-hour window and a 1500px walk, and SIX IN
+  // TEN overnighters ended up on the sand. Now an overnighter drops their bag
+  // on the way in from the boat if nothing is more pressing, and past ROOM_HOUR
+  // the bed outranks geography outright - the same escape hatch a DIRE need has.
+  if (wantsRoom(k) && k.wallet >= ROOM_RATE && visOpen("hotel") && visRoomFor(k, "hotel") && freeRoom())
+    cand.push({ biz: "hotel", need: "room", recipe: BIZ.hotel.recipes[0] });
+  let best = null, bestScore = 0;
+  for (const e of cand) {
+    const d = Math.abs(k.x - BIZ[e.biz].queueX);
+    let s;
+    if (e.need === "room") {
+      if (tmin >= ROOM_HOUR) s = 99;   // the desk shuts before the town does: go now, wherever you are
+      else s = (ROOM_RANK + ROOM_URGE * Math.min(1, Math.max(0, (tmin - 9 * 60) / (ROOM_HOUR - 9 * 60))))
+        / (1 + d / DETOUR_SCALE);
+    } else s = (VIS_RANK[e.need] + visLevel(k, e.need)) / (1 + d / DETOUR_SCALE);
+    if (s > bestScore) { bestScore = s; best = e; }
+  }
+  return best;
+}
+function visGo(k, e) {
+  // the room is RESERVED the moment they set off for it - nobody sells the
+  // last room twice, and a held room is not a room housekeeping can strip
+  if (e.biz === "hotel" && !k.room) { const r = freeRoom(); if (!r) return; r.occupant = k; k.room = r; }
+  k.biz = e.biz; k.recipe = e.recipe; k.need = e.need;
+  k.state = "toBiz"; k.target = BIZ[e.biz].queueX + 46;
+  k.claimed = false; k.served = false; k.happy = false; k.server = null;
+}
+// ---- MOVEMENT + THE DAY ----------------------------------------------------
+function visStep(k, tx, ty, dt) {
+  const sp = VIS_SPEED * dt;
+  const dx = tx - k.x, dy = (ty == null ? k.wy : ty) - k.wy;
+  if (Math.abs(dx) > 1) { k.x += Math.sign(dx) * Math.min(sp, Math.abs(dx)); k.face = Math.sign(dx); }
+  if (Math.abs(dy) > 1) k.wy += Math.sign(dy) * Math.min(sp, Math.abs(dy));
+  return Math.abs(tx - k.x) <= 1 && Math.abs((ty == null ? k.wy : ty) - k.wy) <= 1;
+}
+// needs, the clock, and the wallet's own ticking - runs for EVERY visitor,
+// whatever state they are in, so a visitor stood in a queue still gets hungry
+function visTick(k, dt) {
+  const hrs = dt * TS / 60;
+  if (k.state === "inRoom") {
+    k.tired = Math.max(0, k.tired - VIS_BED_DRAIN * hrs);
+    if (tmin >= WAKE_HOUR && tmin < 12 * 60) checkOut(k);
+    return;
+  }
+  if (k.state === "onSand") {
+    // THE SAND BANKS NOTHING (sleepRough's rule, verbatim): exhaustion
+    // prevents its own cure, and a night out here is a night of it.
+    k.dirt = Math.min(1, k.dirt + VIS_RATE.dirt * hrs * 1.5);
+    if (tmin >= WAKE_HOUR && tmin < 12 * 60) {
+      k.state = "roam"; k.rough = false; k.roughFlag = false; k.target = null;
+      visLog(k, "peril", "WOKE UP ON THE SAND - NOT A GREAT NIGHT");
+    }
+    return;
+  }
+  for (const n of ["hunger", "thirst", "dirt", "bored", "tired"])
+    k[n] = Math.min(1, (k[n] || 0) + VIS_RATE[n] * hrs);
+}
+function updateVisitor(k, dt) {
+  if (k.state === "ashore") {
+    // down the planks and into town: along the deck, then onto the promenade
+    if (k.leg === 0) { if (visStep(k, FERRY.shore, FERRY.deckY, dt)) k.leg = 1; return; }
+    if (visStep(k, FERRY.shore - 18, FLOOR_Y, dt)) { k.state = "roam"; k.target = null; k.y = FLOOR_Y; }
+    return;
+  }
+  if (k.state === "toPier") {
+    if (k.leg === 0) {
+      if (visStep(k, FERRY.shore, FLOOR_Y, dt)) { k.leg = 1; }
+      return;
+    }
+    visStep(k, FERRY.gangway + 4, FERRY.deckY, dt);
+    return;
+  }
+  if (k.state === "toRoom") {
+    const r = k.room;
+    if (!r) { k.state = "roam"; return; }
+    if (visStep(k, r.x + 2, 148, dt)) { k.state = "inRoom"; visLog(k, "home", "TURNED IN FOR THE NIGHT"); }
+    return;
+  }
+  if (k.state === "onSand") { visStep(k, k.target == null ? k.x : k.target, FLOOR_Y, dt); return; }
+  if (k.state === "toBiz") {
+    if (!visOpen(k.biz)) { k.state = "roam"; k.biz = null; k.target = null; return; }
+    if (!visStep(k, k.target, FLOOR_Y, dt)) return;
+    if (!visRoomFor(k, k.biz)) {   // the line filled while they walked: come back later
+      k.state = "roam"; k.biz = null; k.target = null; k.thinkT = VIS_THINK * 4;
+      return;
+    }
+    k.state = "arriving"; k.spawnX = k.x; k.y = FLOOR_Y;
+    k.patience = VIS_PATIENCE; k.maxPatience = VIS_PATIENCE;
+    noteArrival(k.biz);
+    return;
+  }
+  // ---- ROAM: the whole rest of a visit lives here ---------------------------
+  k.thinkT -= dt;
+  // TURNING IN. A visitor with a key walks to their door; one without takes
+  // the beach, because the desk has shut and there is nowhere else to go.
+  if (tmin >= BED_HOUR || tmin < WAKE_HOUR) {
+    if (k.room) { k.state = "toRoom"; return; }
+    if (!k.rough) sleepOnSand(k);
+    return;
+  }
+  if (k.thinkT <= 0) {
+    k.thinkT = VIS_THINK;
+    const e = visPick(k);
+    if (e) { visGo(k, e); return; }
+  }
+  // nothing to buy: stroll the promenade. Imperfection is charming; standing
+  // still for eleven hours is not.
+  if (k.target == null || Math.abs(k.x - k.target) < 4) {
+    if (k.idleT > 0) { k.idleT -= dt; return; }
+    k.target = Math.round(Math.max(VIS_ROAM[0], Math.min(VIS_ROAM[1],
+      k.x + (Math.random() - 0.5) * 2 * VIS_STROLL)));
+    k.idleT = 0;
+  }
+  if (visStep(k, k.target, FLOOR_Y, dt)) k.idleT = 2 + Math.random() * 5;
+}
+// A VISIT DOES NOT END AT THE COUNTER. The shop pipeline's `leaving` state
+// means "walk away from this counter" for a visitor, not "walk out of the
+// world" - they have a day or two left to spend.
+function visAfterCounter(k) {
+  if (!k.served && k.biz === "hotel" && k.room) { k.room.occupant = null; k.room = null; }
+  if (k.served) {
+    k.buys++;
+    if (k.need === "room") checkIn(k);
+  } else {
+    visLog(k, "peril", "GAVE UP WAITING AT THE " + (BIZ[k.biz] ? BIZ[k.biz].short : "COUNTER"));
+    k.bored = Math.min(1, k.bored + 0.05);
+  }
+  k.state = "roam"; k.biz = null; k.recipe = null; k.need = null;
+  k.table = null; k.stall = null; k.server = null; k.claimed = false; k.served = false;
+  k.target = null; k.thinkT = VIS_THINK;
+  k.y = FLOOR_Y; k.wy = FLOOR_Y;
 }
 
 // ---------------------------------------------------------------- customers
@@ -4645,9 +5521,15 @@ function newCustomer(bizKey) {
 }
 function updateCustomers(dt) {
   trackCloseQueues();   // hours-policy signal: who was still in line when a shop shut
+  runFerry(dt * TS);    // the timetable: she docks, lands a batch, and sails
+  sweepRooms();         // a room whose guest has left town is an empty room, always
   const qi = {};
   for (const b of Object.keys(BIZ)) qi[b] = 0;
   for (const k of customers) {
+    if (k.visitor) {
+      visTick(k, dt);                                        // needs run wherever they are
+      if (VIS_STATES[k.state]) { updateVisitor(k, dt); continue; }
+    }
     if (k.state === "arriving" || k.state === "waiting") {
       const slot = BIZ[k.biz].queueX + (qi[k.biz]++) * QUEUE_DX;
       if (k.state === "arriving") {
@@ -4681,6 +5563,7 @@ function updateCustomers(dt) {
       if (k.showerT <= 0) {
         const st = k.stall;
         st.occupant = null; st.dirty = true; k.stall = null;
+        if (k.visitor) k.dirt = Math.max(0, k.dirt - (k.recipe.deep ? 0.7 : 0.5));   // same soap, same numbers
         if (k.isCrab) {   // dirt-only: TIRED is slept off, not scrubbed off
           k.crab.p.dirt = Math.max(0, (k.crab.p.dirt || 0) - (k.recipe.deep ? 0.7 : 0.5));
           crabLog(k.crab, "need", "TOOK A " + (k.recipe.deep ? "LONG SOAK" : "SHOWER")   // DIARY
@@ -4733,7 +5616,10 @@ function updateCustomers(dt) {
         if (window._selfBused) k.table.dishes = 0;        // paired-arm probe: the old outdoor rule
         else { k.table.dishes = 1; k.table.dirty = true; }   // the plates stay on the table
         if (!k.isCrab) {
-          const tt = tableTipOf(k.biz);
+          // the table tip comes out of the same pocket the plate did: a guest
+          // who has spent down to their last dollar leaves what they have
+          const tt = k.visitor ? Math.max(0, Math.min(tableTipOf(k.biz), k.wallet)) : tableTipOf(k.biz);
+          if (k.visitor) { k.wallet -= tt; k.spent += tt; }
           payTip(k.biz, k.server, tt, k.x, 130);   // table tip on the way out (tourists), split like any other
           if (window._stats) window._stats.tableTip = (window._stats.tableTip || 0) + tt;
           // (payTip pops the gold "+$N TIP" - a second label here was the
@@ -4744,32 +5630,18 @@ function updateCustomers(dt) {
     } else if (k.state === "leaving") {
       k.x += (k.happy ? 50 : 75) * dt;
       if (k.isCrab) { finishErrand(k); continue; }
+      // A VISITOR IS NOT LEAVING TOWN, they are leaving a COUNTER. A few paces
+      // clear of the line and the visit picks up where it left off.
+      if (k.visitor && Math.abs(k.x - (k.spawnX == null ? k.x : k.spawnX)) > 26) { visAfterCounter(k); continue; }
     }
   }
-  customers = customers.filter(k => k.isCrab ? !k.done : k.x < (k.spawnX || WORLD_W) + 20);
-  spawnT -= dt;
-  if (spawnT <= 0 && anyBizOpenNow()) {
-    // tourists pick a staffed business that is INSIDE its own open hours
-    const open = Object.keys(BIZ).filter(b => bizUnlocked(b) && !bizDark(b) && bizOpenNow(b) && allCrabs().some(c => c.duty && c.workBiz === b));
-    if (open.length) {
-      const weights = open.map(b => b === "shack" ? 0.5 : b === "arcade" ? 0.22 : b === "juicebar" ? 0.3 : 0.1);
-      const wsum = weights.reduce((a, v) => a + v, 0);
-      let r = Math.random() * wsum, pick = open[0];
-      for (let i = 0; i < open.length; i++) { r -= weights[i]; if (r <= 0) { pick = open[i]; break; } }
-      // tourists never take the last slot - your own crew and neighbours eat too
-      const tourQueue = customers.filter(k => k.biz === pick && !k.isCrab && k.state !== "leaving").length;
-      const allQueue = customers.filter(k => k.biz === pick && k.state !== "leaving").length;
-      if (tourQueue < TOURIST_QUEUE_MAX && allQueue < QUEUE_MAX) { customers.push(newCustomer(pick)); noteArrival(pick); }
-      // the juice bar is a NEW demand stream, not a split of the meal line:
-      // beachgoers who'd never wait for a plate still grab a drink. Its weight
-      // ADDS total traffic (interval shrinks so every other biz keeps the
-      // exact flow it had before the bar opened).
-      const jbw = open.includes("juicebar") ? 0.3 : 0;
-      spawnT = spawnEvery() * ((wsum - jbw) / wsum) * (0.7 + Math.random() * 0.6);
-      return;
-    }
-    spawnT = spawnEvery() * (0.7 + Math.random() * 0.6);
-  }
+  // A visitor stays until the ferry takes them; everybody else goes as before.
+  customers = customers.filter(k => k.visitor ? !k.gone : k.isCrab ? !k.done : k.x < (k.spawnX || WORLD_W) + 20);
+  // (THE OLD SPAWN TIMER LIVED HERE.) Tourist demand is no longer a clock: it
+  // is the visitors who are actually in town, deciding what they fancy. The
+  // reputation term the timer carried now sets the SIZE OF THE BOAT instead -
+  // see ferryBatch(). newCustomer() survives as the anonymous walk-in builder
+  // the suite's fixtures use to stage a queue.
 }
 
 // ---------------------------------------------------------------- status text
@@ -5157,7 +6029,7 @@ cv.addEventListener("click", (ev) => {
     const c = dossier;
     const inRow = (r) => r && pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h;
     // the bottom control bar first - it is live on BOTH pages and for tourists
-    const DR = dossierRects(c.p ? DOSS_H : CUST_H);
+    const DR = dossierRects(c.p ? DOSS_H : c.visitor ? VIS_H : CUST_H);
     if (inRow(DR.follow)) {   // camera AND selection, then get out of the way
       followCrab(c); dossier = null; manage = null; boardView = false; sfx.ding(); return;
     }
@@ -5354,6 +6226,15 @@ cv.addEventListener("click", (ev) => {
       tapSaleChip(b); return;
     }
   }
+  // ...and a TRADING shop whose owner would sell: the OFFER chip, same two-tap
+  // arm, in the slot the MANAGE chip occupies on a shop you already own
+  for (const b of Object.keys(BIZ)) {
+    if (!canOffer(b)) continue;
+    const r = offerChipRect(b);
+    if (wx >= r.x - 3 && wx <= r.x + r.w + 3 && p.y >= r.y - 2 && p.y < r.y + r.h + 2) {
+      tapOfferChip(b); return;
+    }
+  }
   // a player-owned shop's sign (and its MANAGE chip) is the owner's office door
   for (const b of ownedBizList()) {
     const bz = BIZ[b], signW = textWidth(bz.sign) + 14;
@@ -5374,8 +6255,8 @@ cv.addEventListener("click", (ev) => {
   }
   // tourists are people too: click to follow them around their visit
   for (const k of customers) {
-    if (k.isCrab || k.state === "showering") continue;
-    const ky = FLOOR_Y - 4 - 26 * (k.climb || 0);
+    if (k.isCrab || k.state === "showering" || k.state === "inRoom") continue;
+    const ky = custY(k) - 4 - 26 * (k.climb || 0);
     if (Math.abs(wx - (k.x + 8)) < 12 && Math.abs(p.y - ky) < 14) {
       sel = k; followCust = k; followIdx = -1; followNpc = null;
       return;
@@ -5533,6 +6414,29 @@ function drawPier() {
   }
 }
 
+// THE MAINLAND FERRY, alongside. Deliberately one hull in one function - the
+// horizon and the run out to sea belong to the agent building them; this is
+// only the boat the visitors walk off. She rides a little at her lines while
+// she is tied up, and the gangway is a plank down to the pier's east end.
+function drawFerry() {
+  if (!ferryHere()) return;
+  const x = FERRY.hull, y = FERRY.hullY;
+  if (x + 60 - camX < 0 || x - 60 - camX > W) return;
+  const bob = Math.sin(time * 0.9) > 0 ? 1 : 0;
+  wblit(FERRY_ART[0], x, y + bob);
+  wblit(FERRY_SMOKE[((time * 3) | 0) % 2], x + 11, y - 3 + bob);
+  // mooring lines + the gangway down to the planks
+  wrect(FERRY.gangway + 2, y + 10 + bob, x - FERRY.gangway - 2, 1, [140, 90, 50]);
+  for (let i = 0; i < 5; i++)
+    wrect(FERRY.gangway - 2 + i * 3, y + 11 + bob + i * 2, 4, 1, [206, 156, 94]);
+  const lbl = "FERRY";
+  const lx = x + 13 - smallTextWidth(lbl) / 2 - camX;
+  if (lx > -20 && lx < W) {
+    smallText(ctx, lbl, lx + 1, y - 11, [30, 20, 36]);
+    smallText(ctx, lbl, lx, y - 12, [235, 248, 255]);
+  }
+}
+
 function drawBoats() {
   // moored live-aboards ride the surf band off the seaward rail, bobbing on
   // their own beat; hull trim wears the owner's color like the house roofs do
@@ -5556,6 +6460,7 @@ function drawTown() {
   for (let x = 6; x < WORLD_W; x += 22) wrect(x, ROAD_Y0 + 9, 10, 2, [230, 220, 120]);
   wrect(0, ROAD_Y1, WORLD_W, 3, [214, 196, 156]);   // shoulder
   drawPier();
+  drawFerry();
   drawBoats();
   // houses face the promenade - ALL nine lots stand, always: an occupied
   // house wears its tenant's roof color, an empty one sits weathered-grey
@@ -5628,7 +6533,8 @@ function drawTown() {
 const STATION_ART = { crate: CRATE, board: BOARD, grill: GRILL, pass: PASS,
   taps: TAPS, stall: null, scrub: SCRUB, towel: COUNTER,
   booth: TOKEN_BOOTH, claw: null, skee: SKEEBALL, prize: PRIZE_COUNTER,
-  fruitbin: FRUIT_BIN, juicer: null, bar: JUICE_COUNTER };
+  fruitbin: FRUIT_BIN, juicer: null, bar: JUICE_COUNTER,
+  linen: LINEN_PRESS, desk: HOTEL_DESK };
 
 function drawBusiness(key) {
   const b = BIZ[key];
@@ -5698,6 +6604,17 @@ function drawBusiness(key) {
     wrect(mx + 1, 106, mw - 2, 7, [96, 170, 220]);
     if (mx - camX > -mw && mx - camX < W)
       smallText(ctx, "MANAGE", mx + 3 - camX, 107, [255, 255, 255]);
+  } else if (canOffer(key)) {
+    // THE OFFER CHIP. A trading shop whose owner would sell, priced on the
+    // sign, in the same slot the MANAGE chip lives in - so "the sign is the
+    // owner's office door" reads the same whether the office is yours yet.
+    const price = offerPrice(key), lbl = saleArm === key ? "TAP AGAIN" : "OFFER $" + fmt(price);
+    const r = offerChipRect(key);
+    wrect(r.x, r.y, r.w, r.h, [30, 20, 36]);
+    wrect(r.x + 1, r.y + 1, r.w - 2, r.h - 2,
+      coins >= price ? (saleArm === key ? [255, 200, 90] : [96, 200, 120]) : [150, 140, 140]);
+    if (r.x - camX > -r.w && r.x - camX < W)
+      smallText(ctx, lbl, r.x + ((r.w - smallTextWidth(lbl)) >> 1) - camX, r.y + 3, [30, 20, 36]);
   }
   if (forSale(key)) {
     // the shutters, the placard and the BUY chip are painted LAST (see
@@ -5876,26 +6793,39 @@ function drawCrab(c) {
   }
 }
 
+// the ground a customer is standing on: FLOOR_Y for anybody in a line, but a
+// visitor walking the pier planks is 66px higher up the screen
+function custY(k) { return k.visitor && k.wy != null ? k.wy : FLOOR_Y; }
 function drawCustomer(k) {
   {
     if (!k.isCrab) {
       k.animT += 0.016;
       const arts = CRAB_ARTS[k.color];
       if (k.state === "showering") return;   // behind the curtain (stall draws the bather)
-      const moving = k.state !== "waiting";
+      if (k.state === "inRoom") return;      // upstairs with the lamp on (the door draws them)
+      const moving = k.state !== "waiting" && k.state !== "onSand";
       const art = moving && ((k.animT * 8) | 0) % 2 ? arts.b : arts.a;
-      const flip = k.state !== "leaving";
-      const cy = FLOOR_Y - 12 - 26 * (k.climb || 0);
+      // a visitor faces the way they are walking; the old anonymous tourist
+      // only ever walked one way, which is why this used to be a state test
+      const flip = k.visitor ? (k.face == null ? true : k.face < 0) : k.state !== "leaving";
+      const base = custY(k);
+      const cy = base - 12 - 26 * (k.climb || 0);
       wblit(art, k.x, cy, flip);
       const acc = ACCESSORIES[k.acc];
       if (acc) {
         const ax = flip ? 16 - acc.dx - acc.art.w : acc.dx;
         wblit(acc.art, k.x + ax, cy + acc.dy, flip);
       }
-      if (k.state === "waiting") {
-        const nm = k.name.split(" ")[0].slice(0, 4);   // 4 chars fits the 13px queue slots
+      if (k.state === "onSand") {   // a night on the beach, and it shows
+        const ph = ((time * 0.7 + k.x * 0.01) % 1);
+        smallText(ctx, "Z", k.x + 11 - camX, cy - 4 - ph * 5, [200, 210, 255]);
+      }
+      if (k.state === "waiting" || (k.visitor && k.state === "roam" && k.idleT > 0)) {
+        // a NAME on the boardwalk is the whole point of making them real: you
+        // are meant to recognise MISTY on her second day in town
+        const nm = k.name.split(" ")[0].slice(0, k.state === "waiting" ? 4 : 8);
         const nx = k.x + 8 - smallTextWidth(nm) / 2 - camX;
-        if (nx > -30 && nx < W) smallText(ctx, nm, nx, FLOOR_Y + 2, [100, 80, 55]);
+        if (nx > -30 && nx < W) smallText(ctx, nm, nx, base + 2, [100, 80, 55]);
       }
     }
     if ((k.state === "waiting" || k.state === "seatedWaiting") && !k.served) {
@@ -5973,6 +6903,14 @@ function crabMood(c) {
 }
 function custStatus(k) {
   const b = BIZ[k.biz] ? BIZ[k.biz].name : "TOWN";
+  if (k.state === "ashore") return "WALKING DOWN THE PIER";
+  if (k.state === "toPier") return ferryHere() ? "BOARDING THE FERRY" : "WAITING FOR THE FERRY";
+  if (k.state === "toBiz") return "ON THEIR WAY TO THE " + BIZ[k.biz].short;
+  if (k.state === "toRoom") return "OFF TO ROOM " + (k.roomN || "?");
+  if (k.state === "inRoom") return "ASLEEP IN ROOM " + (k.roomN || "?");
+  if (k.state === "onSand") return "SLEEPING ON THE BEACH - NO ROOM";
+  if (k.state === "roam") return k.wallet < 6 ? "OUT OF MONEY, TAKING IT IN"
+    : k.idleT > 0 ? "WATCHING THE TOWN GO BY" : "STROLLING THE PROMENADE";
   if (k.state === "arriving") return "HEADING TO THE " + b;
   if (k.state === "waiting") return "IN LINE AT THE " + b;
   if (k.state === "toSeat") return "FINDING A SEAT";
@@ -5981,6 +6919,37 @@ function custStatus(k) {
   if (k.state === "waitStall" || k.state === "toStall" || k.state === "outStall") return "AT THE SHOWERS";
   if (k.state === "leaving") return k.happy ? "HEADING HOME HAPPY" : k.served ? "HEADING HOME" : "LEAVING IN A HUFF";
   return "ENJOYING THE BEACH";
+}
+// how long they have been here, in the words a player would use
+function visStayLabel(k) {
+  const d = day - k.arrived;
+  return d <= 0 ? "ARRIVED TODAY" : d === 1 ? "HERE SINCE YESTERDAY" : "HERE " + (d + 1) + " DAYS";
+}
+// the one thing about this visitor you would say first
+function visCondition(k) {
+  if (k.roughNights > 0 && k.state !== "inRoom") return ["SLEPT ROUGH", [190, 80, 80]];
+  if (k.wallet < 6) return ["SPENT UP", [150, 120, 90]];
+  if (k.hunger > 0.75) return ["STARVING", [200, 110, 40]];
+  if (k.thirst > 0.75) return ["PARCHED", [200, 110, 40]];
+  if (k.dirt > 0.75) return ["GRUBBY", [150, 110, 60]];
+  if (k.tired > 0.75) return ["WORN OUT", [110, 120, 175]];
+  if (k.bored > 0.75) return ["BORED STIFF", [110, 120, 175]];
+  if (k.wallet > 70) return ["FLUSH", [180, 140, 30]];
+  return ["ON HOLIDAY", [40, 150, 70]];
+}
+// the five bars, in the follow card's one-row idiom - the SAME five a crab
+// carries, in the same order, so the player learns one thing and reads two
+const VIS_BAR = [["FED", "hunger"], ["THR", "thirst"], ["CLN", "dirt"], ["FUN", "bored"], ["SPA", "tired"]];
+function visBars(k, x, y, w) {
+  const cw = ((w - 4) / 5) | 0;
+  for (let i = 0; i < VIS_BAR.length; i++) {
+    const [lbl, key] = VIS_BAR[i], v = Math.max(0, Math.min(1, k[key] || 0));
+    const bx = x + i * (cw + 1);
+    smallText(ctx, lbl, bx, y, [120, 110, 125]);
+    rect(ctx, bx, y + 6, cw, 3, [30, 20, 36]);
+    rect(ctx, bx, y + 6, Math.round(cw * (1 - v)), 3,
+      v > 0.8 ? [235, 90, 90] : v > 0.5 ? [235, 200, 90] : [96, 200, 120]);
+  }
 }
 function drawCustCard(k) {
   const wcard = 128;
@@ -5991,9 +6960,19 @@ function drawCustCard(k) {
   const acc = ACCESSORIES[k.acc];
   if (acc) blit(ctx, acc.art, 7 + acc.dx, 14 + acc.dy);
   text(ctx, k.name.split(" ")[0].slice(0, 9), 29, 5, [40, 30, 40]);
-  const mood = !k.served && k.patience < 15 ? ["STEAMED", [190, 80, 80]]
+  const mood = !k.served && k.recipe && k.patience < 15 ? ["STEAMED", [190, 80, 80]]
+    : k.visitor ? visCondition(k)
     : k.happy || k.served ? ["HAPPY", [40, 150, 70]] : ["VISITING", [110, 110, 130]];
   smallText(ctx, mood[0], 126 - smallTextWidth(mood[0]), 6, mood[1]);
+  if (k.visitor) {
+    smallText(ctx, "VISITOR - " + visStayLabel(k), 29, 13, [120, 90, 60]);
+    smallText(ctx, custStatus(k).slice(0, 26), 29, 21, [30, 110, 60]);
+    smallText(ctx, "$" + Math.round(k.wallet) + " LEFT OF $" + k.purse
+      + (k.room ? "  ROOM " + k.roomN : ""), 29, 28, [140, 110, 40]);
+    visBars(k, 6, 37, 118);
+    smallText(ctx, "MORE>", 126 - smallTextWidth("MORE>"), 48, [150, 140, 160]);
+    return;
+  }
   smallText(ctx, "TOURIST - IN TOWN FOR THE DAY", 29, 13, [120, 90, 60]);
   smallText(ctx, custStatus(k).slice(0, 26), 29, 21, [30, 110, 60]);
   smallText(ctx, "WANTS: " + (ITEM_NAMES[k.recipe.icon] || "?") + " $" + k.recipe.pay, 29, 28, [140, 110, 40]);
@@ -6326,7 +7305,7 @@ function art2(key, art) {   // lazily scaled 2x art for the dossier portrait
 // hit-test, so the tap targets can never drift from the pixels. Every offset
 // derives from the card, and the card sits inside rows 0..PANEL_Y, which is
 // the world area in BOTH canvas modes - so 240 and 288 get the same record.
-const DOSS_H = 168, CUST_H = 120;   // the crab record and the shorter tourist card
+const DOSS_H = 168, CUST_H = 120, VIS_H = 162;   // the crab record, the walk-in card, the visitor's
 const DOSS_TABS = ["PROFILE", "DIARY"];
 let dossierTab = "PROFILE", diaryPage = 0, diaryFor = null;
 const DIARY_ROWS = 12;
@@ -6409,7 +7388,57 @@ function drawDiary(c, R) {
     smallText(ctx, e[3], x + 48, ry, LOG_CATS[e[2]] || [60, 55, 65]);
   }
 }
+// THE VISITOR'S RECORD. A crab's dossier is a life; a visitor's is a VISIT -
+// who they are, what they came with, what they have spent it on, where they
+// slept, and the little diary of their two days in town. Same card geometry as
+// the tourist card it replaces, same bottom control bar (FOLLOW / CLOSE), so
+// nothing new had to be invented to inspect one.
+function drawVisDossier(k) {
+  const x = 24, y = 6, w2 = 208, h2 = VIS_H;
+  rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
+  rect(ctx, x, y, w2, h2, [255, 250, 235]);
+  rect(ctx, x, y, w2, 32, [58, 42, 38]);
+  rect(ctx, x + 4, y + 4, 40, 30, [245, 225, 200]);
+  blit(ctx, art2("c" + k.color, CRAB_ARTS[k.color].a), x + 8, y + 8);
+  const acc = ACCESSORIES[k.acc];
+  if (acc) blit(ctx, art2("a" + k.acc, acc.art), x + 8 + acc.dx * 2, y + 8 + acc.dy * 2);
+  text(ctx, k.name, x + 48, y + 5, [255, 240, 210]);
+  const cond = visCondition(k);
+  smallText(ctx, "VISITOR - " + visStayLabel(k), x + 48, y + 15, [210, 190, 170]);
+  smallText(ctx, cond[0] + " - " + custStatus(k).slice(0, 26), x + 48, y + 24, [255, 215, 150]);
+  let ly = y + 40;
+  const row = (label, val, col) => {
+    smallText(ctx, label, x + 8, ly, [120, 110, 125]);
+    smallText(ctx, val, x + 56, ly, col || [40, 30, 40]);
+    ly += 9;
+  };
+  row("PURSE", "$" + Math.round(k.wallet) + " LEFT OF THE $" + k.purse + " THEY BROUGHT",
+    k.wallet < 6 ? [190, 80, 80] : [140, 110, 40]);
+  row("SPENT", "$" + Math.round(k.spent) + " IN TOWN OVER " + k.buys + " VISIT" + (k.buys === 1 ? "" : "S"),
+    [40, 150, 70]);
+  row("SLEEPS", k.room ? "ROOM " + k.roomN + " AT THE DRIFTWOOD"
+    : k.roughNights ? "ON THE BEACH - THE HOTEL WAS FULL"
+    : k.nights > 0 ? "WANTS A ROOM TONIGHT" : "GOING HOME ON THE NEXT BOAT",
+    k.roughNights ? [190, 80, 80] : [70, 140, 200]);
+  row("FERRY", "SAILS HOME " + (k.leaveT - gnow() < 0 ? "ON THE NEXT BOAT"
+    : "IN " + Math.max(1, Math.round((k.leaveT - gnow()) / 60)) + "H"), [70, 90, 130]);
+  ly += 2;
+  visBars(k, x + 8, ly, w2 - 16); ly += 14;
+  const log = Array.isArray(k.log) ? k.log : [];
+  smallText(ctx, "THE VISIT", x + 8, ly, [110, 100, 110]); ly += 8;
+  if (!log.length) smallText(ctx, "JUST OFF THE BOAT.", x + 8, ly, [150, 140, 160]);
+  for (let i = 0; i < 5; i++) {
+    const e = log[log.length - 1 - i];
+    if (!e) break;
+    if (i % 2 === 0) rect(ctx, x + 4, ly - 1, w2 - 8, 8, [246, 241, 228]);
+    smallText(ctx, logStamp(e), x + 6, ly, [140, 132, 148]);
+    smallText(ctx, e[3], x + 48, ly, LOG_CATS[e[2]] || [60, 55, 65]);
+    ly += 8;
+  }
+  dossierBar(dossierRects(h2), k, false);
+}
 function drawCustDossier(k) {
+  if (k.visitor) { drawVisDossier(k); return; }
   const x = 24, y = 6, w2 = 208, h2 = 120;
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
   rect(ctx, x, y, w2, h2, [255, 250, 235]);
@@ -7693,6 +8722,26 @@ function frame(now) {
       }
     } });
     const stalls = BIZ[key].stalls;
+    // HOTEL ROOMS are stalls too, but they read as doors on a back wall: the
+    // lamp is on when a guest is in residence, and an unmade bed (the DIRTY
+    // flag housekeeping is about to clear) hangs its own little card.
+    if (stalls && BIZ[key].lodging) { for (const t of stalls) paint.push({ base: t.y, f: () => {
+      const guest = t.occupant && t.occupant.visitor ? t.occupant : null;
+      const lit = guest && (guest.state === "inRoom" || darkness() > 0.4);
+      wblit(HOTEL_DOOR[lit ? 1 : 0], t.x, t.y - HOTEL_DOOR[0].h);
+      const n = stalls.indexOf(t) + 1;
+      const nx = t.x + 7 - camX;
+      if (nx > -12 && nx < W) smallText(ctx, "" + n, nx, t.y - HOTEL_DOOR[0].h - 7, [235, 225, 200]);
+      if (guest && guest.state === "inRoom") {   // ZZZ over the transom
+        const ph = ((time * 0.7) % 1);
+        smallText(ctx, "Z", t.x + 12 - camX, t.y - HOTEL_DOOR[0].h - 2 - ph * 5, [200, 210, 255]);
+      }
+      if (t.dirty) {   // the maid hasn't been round
+        px(ctx, t.x + 3 - camX, t.y - 2, [220, 190, 130]);
+        px(ctx, t.x + 8 - camX, t.y - 1, [200, 170, 120]);
+        px(ctx, t.x + 12 - camX, t.y - 2, [220, 190, 130]);
+      }
+    } }); continue; }
     if (stalls) for (const t of stalls) paint.push({ base: t.y, f: () => {
       const bathing = t.occupant && t.occupant.state === "showering";
       wblit(STALL[bathing ? 1 : 0], t.x, t.y - STALL[0].h);
@@ -7726,10 +8775,10 @@ function frame(now) {
       if (t.dirty) { px(ctx, t.x + 3 - camX, t.y - 2, [130, 220, 110]); px(ctx, t.x + 7 - camX, t.y - 1, [110, 190, 110]); px(ctx, t.x + 11 - camX, t.y - 2, [130, 220, 110]); }
     } });
   }
-  for (const k of customers) paint.push({ base: (k.state === "dining" || k.state === "seatedWaiting") && k.table ? (k.table.y + 1) : (k.isCrab ? 165 : FLOOR_Y), f: () => drawCustomer(k) });
+  for (const k of customers) paint.push({ base: (k.state === "dining" || k.state === "seatedWaiting") && k.table ? (k.table.y + 1) : (k.isCrab ? 165 : custY(k)), f: () => drawCustomer(k) });
   if (sel && !sel.hidden) paint.push({ base: sel.y - 0.1, f: () => {
     // a soft ring under whoever you've picked: it stays put while you pan
-    const bx = sel.x + 8 - camX, by = (sel.p ? sel.y : FLOOR_Y - 4 - 26 * (sel.climb || 0)) + 2;
+    const bx = sel.x + 8 - camX, by = (sel.p ? sel.y : custY(sel) - 4 - 26 * (sel.climb || 0)) + 2;
     const blink = 0.55 + 0.45 * Math.sin(time * 4);
     const col = [Math.round(120 + 135 * blink), Math.round(200 + 30 * blink), 120];
     for (let i = -6; i <= 6; i++) {
@@ -7827,6 +8876,7 @@ if (!hasSave) {
   crabs = [newCrab(makeCrabPersona(0)), newCrab(makeCrabPersona(1))];
   coins = 150;   // a few bux in your pocket - rent is due tonight: ingredients + first rent buffer
 }
+seedVisitors();   // somebody is always already here (no-op if the save carried its own)
 requestAnimationFrame(frame);
 
 // console cheat for tinkering: cheat(500)
