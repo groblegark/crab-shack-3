@@ -1835,12 +1835,12 @@ scenario("hiring converts a visiting tourist (identity kept, entity gone, homele
 
 scenario("hiring with no tourists books a morning-bus arrival who works day-of", () => {
   const sim = createSim({ seed: 29 });   // day 1, 7:00: the town is not open yet
-  // RE-POINTED 2026-08-19 (the visitor pass): a town is no longer EMPTY before
-  // it opens - seedVisitors() puts a boat-load already mid-stay on the
-  // promenade, because people were holidaying here before you took the lease.
-  // What this scenario is about is the OTHER branch of hireCrew: with nobody
-  // convertible, the ad is answered off the morning bus. So the fixture sends
-  // the visitors home rather than asserting they were never there.
+  // RE-POINTED 2026-08-19 (the visitor pass), and UN-POINTED the same day (the
+  // empty-start pass): a new town opens with nobody ashore again, so 7:00 on
+  // day 1 is genuinely an empty town. The sweep below is kept as a BELT: what
+  // this scenario is about is the OTHER branch of hireCrew - with nobody
+  // convertible, the ad is answered off the morning bus - and it must keep
+  // proving that even if somebody later seeds the promenade again.
   sim.G("for (const k of customers.filter(c => c.visitor)) k.gone = true; customers = customers.filter(k => !k.gone);");
   if (sim.G("customers.length") !== 0) return "expected an empty town at 7:00";
   sim.G('coins = 500; tryBuy("chef")');
@@ -1975,9 +1975,42 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // queue pass. That is the honest thing a two-day fingerprint can be after
   // five passes land in one night - and the receipt for all of it is the
   // 30-day curve, which is checked separately and did not move.
+  // RE-BASELINED AGAIN 2026-08-19 - THE EMPTY START (owner: "the game should
+  // start with no tourists present"). A new town no longer opens with a
+  // boat-load already mid-stay; it opens deserted at 07:00 and the 08:00
+  // sailing lands the first tourists. This fingerprint runs the first TWO days,
+  // which is precisely the window that crowd used to cover, so it could not
+  // have survived - and the drift reads exactly like the change it is:
+  //   * SERVES roughly halve (66 -> 38, 61 -> 41). Day one lost its opening
+  //     crowd, and day two lost the ~45% of that crowd who were seeded as
+  //     multi-night stayers specifically to keep day two populated.
+  //   * SUDSY's till halves with them (300.4 -> 168.5, 263.8 -> 174.3):
+  //     visitors come off a boat grubby, and there were nine fewer of them.
+  //   * REPUTATION is down a few points on both (58.0 -> 53.0, 58.5 -> 53.7) -
+  //     fewer served guests is fewer word-of-mouth ticks.
+  //   * The player's till is down $64 and $105 at the end of day two, which is
+  //     the measured cost of the empty opening ($34 of the day-one till)
+  //     carried through a second settlement. It does NOT compound: the 30-day
+  //     baseline reads 0/16 median 11 on both sides of this change.
+  //   * Removing the seeding also removes its random draws, so every seed's
+  //     stream is shifted - positions and wallets differ for that reason alone.
+  // RE-BASELINED AT THE MERGE, 2026-08-20. The empty start above was branched
+  // before five other passes landed (the queue pass, the nav strip, the town
+  // hall, BRASS at the Driftwood, and pause + the beach ball), so NEITHER
+  // side's frozen numbers could survive the merge and the values here were
+  // re-MEASURED on the merged tree rather than picked from one branch. A
+  // fingerprint is measured, never merged.
+  //
+  // WHAT WAS PROVED BEFORE TOUCHING IT, because "re-baseline it" is how a
+  // frozen fingerprint stops being worth having: the POLLING DAY landed in
+  // the same merge, and it is byte-for-byte inert across this window - coins
+  // 146.811, rep 55.0153 and SUDSY's till 249.794 on seed 1337 on BOTH sides
+  // of that commit, and the same on 4242. It has to be: the first ballot is
+  // day 7 and this fixture runs two days. So every dollar of the drift here
+  // belongs to the empty opening meeting the five merges it had not seen.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":146.811,"rep":55.0153,"catch":0,"serves":59,"crabServes":3,"rage":7,"till":249.794,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",29],["DRIFT",1],["KELP",21]],"pos":[[520,154],[108,154],[388,154],[2136,154],[450,155],[2072,154],[318,154]]}',
-    4242: '{"day":3,"tmin":0,"coins":206.976,"rep":57.1115,"catch":3,"serves":56,"crabServes":4,"rage":5,"till":253.698,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",4],["DRIFT",7],["KELP",1]],"pos":[[520,154],[108,154],[388,154],[2136,154],[450,155],[2072,167],[248,154]]}',
+    1337: '{"day":3,"tmin":0,"coins":148.494,"rep":53.609,"catch":4,"serves":42,"crabServes":4,"rage":4,"till":180.466,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",1],["DRIFT",16],["KELP",1]],"pos":[[520,154],[108,154],[974.7,166.9],[2136,154],[2072,154],[894.7,167.8],[443.2,167.4]]}',
+    4242: '{"day":3,"tmin":0,"coins":112.651,"rep":54.2896,"catch":4,"serves":44,"crabServes":3,"rage":5,"till":186.001,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",40],["SALTY",1],["DRIFT",1],["KELP",8]],"pos":[[520,154],[108,154],[388,154],[646,163],[2072,154],[318,154],[478,155]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -5486,7 +5519,9 @@ function visitorTown(sim, days) {
 
 scenario("ferry: a batch lands, walks down the pier, and reaches the town", () => {
   const sim = createSim({ seed: 1337 });
-  // clear the boat-load the town opens with: this is about an ARRIVAL
+  // A new town opens EMPTY now (the empty-start pass), so this sweep is a BELT
+  // rather than the fixture it used to be - the scenario is about an ARRIVAL
+  // and must start from nobody ashore however the town got that way.
   sim.G("for (const k of customers.filter(c => c.visitor)) k.gone = true; customers = customers.filter(k => !k.gone);");
   const before = sim.G("visitorsInTown().length");
   if (before !== 0) return "fixture failed to clear the town: " + before;
@@ -6653,6 +6688,115 @@ scenario("a corrupt town hall in a save is clamped, not trusted", () => {
   if (!okMech(got.pmech) || got.pbowls > 6) return `the platform came back as ${got.pmech}/${got.pbowls}`;
   if (!got.seated) return "the office was left vacant by a corrupt save";
   if (got.poll !== null) return "a poll that was a string came back as something";
+  return true;
+});
+
+// ---- THE OPENING: THE TOWN, AND THEN THE BOAT ----------------------------
+// Owner, 2026-08-19: "the game should start with no tourists present". These
+// five pin the beat itself - empty at 07:00, the boat on time at 08:00 with
+// day one's whole timetable intact, the lease card holding the clock while Mr.
+// Pincherton talks, a SAVED town keeping every guest it went to bed with, and
+// the one migration case that still gets a seeded crowd.
+
+scenario("a new town opens EMPTY: nobody ashore, nobody mid-walk", () => {
+  const sim = createSim({ seed: 1337 });
+  if (sim.G("day") !== 1 || Math.round(sim.G("tmin")) !== 7 * 60)
+    return "a new town no longer opens at 07:00 on day 1";
+  const vis = sim.G("customers.filter(k => k.visitor).length");
+  if (vis) return `a new town opened with ${vis} visitors ashore`;
+  if (sim.G("customers.length")) return "somebody is already standing in a queue at 07:00";
+  // ...and nobody is MID-WALK either. A visitor lives in `customers` for their
+  // whole stay, so that list IS the population - but the boat, the timetable
+  // and the hotel all carry state that would give a stowaway away.
+  if (sim.G("visitorsInTown().length")) return "a visitor is in town but not in `customers`";
+  if (sim.G("ferryHere()")) return "the ferry is already alongside at 07:00";
+  if (sim.G("ferrySail") !== -1) return "a sailing had already run before the game began";
+  const beds = sim.G("hotelRooms().filter(r => r.occupant).length");
+  if (beds) return `${beds} hotel rooms are occupied in a town with no visitors`;
+  return true;
+});
+
+scenario("the first ferry still lands, on time, and day one keeps all four sailings", () => {
+  // THE TRAP THIS GUARDS: paying for the empty start by pushing the timetable.
+  // Day 1 opens at 07:00, one game-hour BEFORE the 08:00 sailing, so the
+  // opening beat costs the day nothing - all four boats still run, and the
+  // first one is the fattest (FERRY_LOAD[0] = 1.2).
+  const sim = createSim({ seed: 1337 });
+  if (!sim.runUntil("visitorsInTown().length > 0", { maxSteps: 200000 }))
+    return "no visitor ever came ashore";
+  const t = Math.round(sim.G("tmin"));
+  if (t < 8 * 60 || t > 8 * 60 + 20)
+    return `the first visitors landed at ${Math.floor(t / 60)}:${t % 60}, not off the 08:00 sailing`;
+  if (sim.G("ferrySail") !== 0) return "the first landing was not the FIRST sailing of the day";
+  if (!sim.G(`visitorsInTown().every(k => k.arrived === 1)`))
+    return "somebody ashore did not arrive today";
+  sim.runDays(1, { tickEvery: 25, onTick: (G) => { if (G("coins") < 900) G("coins = 1800"); } });
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  const sailings = sim.G("FERRY_TIMES.length");
+  if (st.ferries !== sailings) return `day one ran ${st.ferries} sailings, not ${sailings}`;
+  if (!(st.arrivals >= 8)) return `day one landed only ${st.arrivals} visitors in four sailings`;
+  return true;
+});
+
+scenario("the lease card holds the clock: no boat lands while Pincherton talks", () => {
+  // The intro is drawn at 07:00 with the sim frozen (`frame` only advances
+  // tmin while screen === "play"). If that ever stopped being true the 08:00
+  // boat would dock behind the card and the player would sign the lease into a
+  // town that had already had its first crowd.
+  const sim = createSim({ seed: 88 });
+  sim.G(`screen = "intro"`);
+  const t0 = sim.G("tmin");
+  sim.runUntil("false", { maxSteps: 6000 });   // ~5 game-hours' worth of frames
+  if (sim.G("tmin") !== t0) return "the clock ran while the lease was on screen";
+  if (sim.G("visitorsInTown().length")) return "the ferry landed behind the lease card";
+  sim.G(`screen = "play"`);
+  return sim.runUntil("visitorsInTown().length > 0", { maxSteps: 200000 })
+    ? true : "signing the lease did not start the day";
+});
+
+scenario("a loaded save keeps its guests: the empty start is a NEW-GAME rule", () => {
+  // The other half of the owner's directive, and the one that is easy to break
+  // by putting the rule in load(): a town in progress must reload with exactly
+  // the guests it was saved with - not an empty promenade, and not a fresh
+  // boat-load seeded on top of them.
+  const store = new Map();
+  const sim = createSim({ seed: 4242, storage: store, fresh: false });
+  sim.runDays(1, { tickEvery: 25, onTick: (G) => { if (G("coins") < 900) G("coins = 1800"); } });
+  sim.runUntil("day === 2 && tmin >= 12 * 60", { maxSteps: 400000,
+    onTick: (G) => { if (G("coins") < 900) G("coins = 1800"); }, tickEvery: 25 });
+  const before = JSON.parse(sim.G(`JSON.stringify(visitorsInTown().map(k =>
+    [k.name, Math.round(k.wallet), Math.round(k.spent)]).sort())`));
+  if (before.length < 2) return "the fixture town had no guests to keep: " + before.length;
+  sim.G("save()");
+  const back = createSim({ seed: 4242, storage: store, fresh: false });
+  const after = JSON.parse(back.G(`JSON.stringify(visitorsInTown().map(k =>
+    [k.name, Math.round(k.wallet), Math.round(k.spent)]).sort())`));
+  if (JSON.stringify(after) !== JSON.stringify(before))
+    return `the reloaded town's guest list changed:\n        before ${JSON.stringify(before)}\n        after  ${JSON.stringify(after)}`;
+  return true;
+});
+
+scenario("a PRE-FERRY save still gets a crowd: the one branch seedVisitors keeps", () => {
+  // The empty start turned seedVisitors() into a MIGRATION, and this is the
+  // only caller left. A save written before the visitor pass has no guest list
+  // (no `_vis` marker), and a fortnight-old town reloading onto a deserted
+  // promenade would read as a bug, not as an opening beat - so that one case
+  // is still handed the boat-load it would have had.
+  const store = new Map();
+  const sim = createSim({ seed: 909, storage: store, fresh: false });
+  sim.runDays(1, { tickEvery: 25, onTick: (G) => { if (G("coins") < 900) G("coins = 1800"); } });
+  sim.G("save()");
+  const key = sim.G("slotKey(activeSlot)");
+  const env = JSON.parse(store.get(key));
+  if (!env._vis) return "a modern save no longer carries the _vis marker";
+  delete env._vis; delete env.visitors; delete env.ferry;   // age it back before the pass
+  store.set(key, JSON.stringify(env));
+  const old = createSim({ seed: 909, storage: store, fresh: false });
+  if (!old.G("hasSave")) return "the aged save would not load at all";
+  if (!(old.G("visitorsInTown().length") > 0))
+    return "a pre-ferry save reloaded into a town with nobody in it";
+  if (!old.G(`visitorsInTown().every(k => k.state === "roam")`))
+    return "the seeded crowd is not standing on the promenade";
   return true;
 });
 

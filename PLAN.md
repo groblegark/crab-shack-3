@@ -360,9 +360,19 @@ compounds or collapses → the landlord collects at 20:00 either way.
   2026-08-19 on a pristine control tree. The 13-14 quoted in the older entries
   below is stale. Growth `--buy chef,table --days 40 --seeds 8` is **4/8**
   (9,10,12,13,41,41,41,41, lifetime $97,299).
-- **CURRENT (2026-08-19, after the ferry/visitor/hotel pass, RE-MEASURED ON
-  THE MERGED TREE and identical to the agent's own figures — the three merge
-  resolutions below cost the economy nothing):** baseline
+- **CURRENT (2026-08-19, after THE EMPTY START — see "THE OPENING: THE TOWN,
+  THEN THE BOAT"):** baseline `--days 30 --seeds 16` **0/16, median 11**
+  (9,9,10,10,11,11,11,11,11,12,12,12,13,14,16,17, lifetime $55,598); growth
+  `--buy chef,table --days 40 --seeds 8` **2/8** (10,11,11,11,13,26,41,41) and
+  **1/8 on the second block** (`--seedbase 8`: 8,9,9,10,11,12,18,41) — **3/16
+  across both blocks, against 5/16 on the same tree before the change**. The
+  control was measured on this worktree at `aefd7a0`, not read out of this
+  file: **0/16 median 11** (6,9,10,10,11,11,11,11,11,11,12,12,13,14,15,15) and
+  growth **3/8** then **2/8**. Lose-by-default is untouched; growth is one town
+  down in each block, which is what a day-one till $34 lighter buys you.
+- (superseded by the empty start) **after the ferry/visitor/hotel pass,
+  RE-MEASURED ON THE MERGED TREE and identical to the agent's own figures —
+  the three merge resolutions below cost the economy nothing:** baseline
   `--days 30 --seeds 16` **0/16, median 11**
   (6,8,9,9,10,11,11,11,11,12,12,13,13,13,14,15); growth
   `--buy chef,table --days 40 --seeds 8` **2/8 alive** (6,8,9,10,14,15,41,41)
@@ -402,6 +412,10 @@ compounds or collapses → the landlord collects at 20:00 either way.
   10, hires 60×2.0,
   showers 5/10, fish pay 13. **Rent is charged from night one** — you open
   with $150 in your pocket and have to trade your way to the first payment.
+  **Re-opened and re-closed 2026-08-19** when the empty start landed: a
+  rent-free first night reads 0/16 but **median eviction 16** (evictions 11-24)
+  against the documented 11-13, so it stays deleted. See "THE OPENING: THE
+  TOWN, THEN THE BOAT".
 - **Queue**: 5 slots, of which tourists may fill 4 — the 5th is reserved for
   locals (crew + neighbours). WHERE those five stand is its own thing since
   2026-08-20 — see STANDING IN LINE: a place is stamped when you JOIN a line
@@ -2979,6 +2993,96 @@ first, connect later. Don't build the network before the node is beautiful.
   shows the CREW in detail — portraits, names, jobs, housing, health — "for
   easy remembering" which town is which. Validate-before-mutate on import;
   a bad file must never touch the running game.
+
+## THE OPENING: THE TOWN, THEN THE BOAT (Matt, 2026-08-19, shipped worktree)
+
+Matt, verbatim and complete: *"the game should start with no tourists present;
+might want to bring back free first day of rent for that actually"* — one
+directive and one HEDGE. The first shipped. The second was measured and
+**declined**, and the number is below.
+
+### Half one: a new town opens EMPTY
+The visitor pass gave a new town a boat-load already mid-stay on the promenade
+(`seedVisitors`, `ferryBatch() + 6`), which robbed the opening of its beat: the
+player met the trade before they met the town. Now the game opens at **07:00
+with nobody ashore**, the intro/lease card holds the clock (the sim only
+advances while `screen === "play"`), and the **08:00 sailing** — one game-hour
+after the town wakes, the fattest boat of the day at `FERRY_LOAD[0]` 1.2 —
+lands the first tourists the player ever sees. The timetable was NOT touched:
+day one starts before the first sailing, so all four boats still run and day
+one loses no trade to the beat.
+
+What changed in code is three lines and a flag:
+- the boot call is now `if (hasSave && preVisSave) seedVisitors()`;
+- `preVisSave` is set in `load()` from the absence of the save's `_vis` marker;
+- `seedVisitors()` itself is unchanged, and survives for **exactly one job**:
+  migrating a PRE-FERRY save, which has no guest list to restore and would
+  otherwise reload a fortnight-old town onto a deserted promenade.
+**Deliberately not inside `load()`**: a modern save that legitimately holds no
+visitors (saved at midnight, say) must stay empty rather than have a crowd
+conjured onto it.
+
+### Half two: the free first night, and why it is NOT back
+**The history.** CS3's first commit (`df95139`) shipped with
+`rentAmount() { return day <= 1 ? 0 : BIZ.shack.rent; }` — a rent-free opening
+night. `e6e3476` (2026-08-18) deleted it: *"No more honeymoon: rent is charged
+from night one and you open with $150 in your pocket — pressure from the first
+minute."* It was a package, not a lone deletion — the same commit cut the rent
+**255 → 230** and pinned the opening purse at **$150**. The compensation for
+losing the honeymoon was a cheaper rent, and it is still in force.
+
+**The cost of the empty start, measured (16 seeds, days 1-3):**
+
+| day-one, mean over 16 seeds | seeded crowd | empty start | delta |
+|---|---|---|---|
+| takings | **$313.1** (median 313, 290-329) | **$275.5** (median 286, 202-342) | **-$37.6** |
+| till after the 20:00 settlement | **$144.9** (median 147, 130-156) | **$111.1** (median 114, 62-165) | **-$33.8** |
+| day-2 till | $156.4 | $115.9 | -$40.5 |
+| day-3 till | $193.1 | $162.3 | -$30.8 |
+
+**So the empty opening costs about $34** — a seventh of one night's rent. No
+seed ends day one underwater (worst till $62), nobody draws credit, and the
+hole is carried forward rather than compounded.
+
+**A free first night hands back $230 — 6.8x what the change took.** Measured as
+a probe on the empty-start tree (`--days 30 --seeds 16`, buy nothing): still
+**0/16**, but **median eviction 11 → 16**, evictions **11-24**, lifetime
+**$55.6k → $72.6k**. Five extra days of life for a do-nothing town, against a
+$34 hole, and straight past the documented **median 11-13** band. That is not
+compensation, it is a different game — a quiet softening of a baseline whose
+whole promise is to lose. **Declined.** The probe was reverted; the reasoning
+sits in the comment above `rentAmount()` so nobody re-opens it from memory.
+
+### Balance — before -> after (measured on this worktree, control at `aefd7a0`)
+
+| matrix | before | after (empty start) |
+|---|---|---|
+| baseline `--days 30 --seeds 16` | **0/16, median 11** (6,9,10,10,11,11,11,11,11,11,12,12,13,14,15,15) | **0/16, median 11** (9,9,10,10,11,11,11,11,11,12,12,12,13,14,16,17) |
+| growth `--buy chef,table` 40d x 8 | **3/8** (6,8,11,11,11,41,41,41) | **2/8** (10,11,11,11,13,26,41,41) |
+| growth, second block `--seedbase 8` | **2/8** (10,11,11,13,14,15,41,41) | **1/8** (8,9,9,10,11,12,18,41) |
+| growth, both blocks (16 seeds) | **5/16** | **3/16** |
+
+**LOSE-BY-DEFAULT IS UNTOUCHED** — 0/16 and median 11 on both sides, which is
+the promise that matters. **GROWTH IS ONE TOWN DOWN IN EACH BLOCK** (two across
+sixteen), and that is the honest cost of an opening that is $34 poorer at
+exactly the moment a growth town is saving for its first chef. Attribution is
+trivial because there is only one change in this pass; the knob that would undo
+it is a $230 handout for a $34 hole, which the probe above disqualified. If
+Matt wants those two escapes back, the honest lever is one sized to $34 (the
+opening purse, say) and chosen deliberately — not the free night.
+
+### Suite 142 -> 147 (green, exit code 0, 867s on a loaded machine)
+New: `a new town opens EMPTY: nobody ashore, nobody mid-walk`; `the first ferry
+still lands, on time, and day one keeps all four sailings`; `the lease card
+holds the clock: no boat lands while Pincherton talks`; `a loaded save keeps
+its guests: the empty start is a NEW-GAME rule`; `a PRE-FERRY save still gets a
+crowd: the one branch seedVisitors keeps`.
+RE-BASELINED, with the reason written in-scenario: **the frozen day-2
+fingerprint**, which runs exactly the two days that the seeded crowd used to
+cover — serves roughly halve (66 -> 38, 61 -> 41), SUDSY's till halves with
+them, rep is 5 points lower, and the player's till is $64/$105 down at the end
+of day two. Two fixtures that used to CLEAR the opening crowd are now no-ops
+and are kept as belts, with their comments re-pointed to say so.
 
 ## CANON: THERE IS ONE FERRY (Matt, 2026-08-19)
 

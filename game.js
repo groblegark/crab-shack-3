@@ -3937,6 +3937,17 @@ function loadSlot(i) {
 // is stuck with - see WAGE_STD / bizWage / wageRate. Kept as the name the rest
 // of the file (and the tools) already say when they mean "the town's wage".
 const CRAB_WAGE = WAGE_STD, HOUSE_RENT = 10;   // wage raised 22 -> 23 with T2 thirst: crews drink at retail, the wage keeps their wallets liquid
+// RENT IS DUE FROM NIGHT ONE, and the question was re-opened and re-closed
+// with a number on 2026-08-19. CS3 shipped its first commit with a rent-free
+// opening night (`day <= 1 ? 0 : rent`); e6e3476 deleted it - "no more
+// honeymoon ... pressure from the first minute" - and paid for it by cutting
+// the rent 255 -> 230 and pinning the opening purse at $150. When the empty
+// start landed, bringing the free night back was considered as compensation
+// and MEASURED instead: the empty opening costs about $34 of the day-one till,
+// and a free night hands back $230. The probe (16 seeds, 30 days, buy nothing)
+// read 0/16 but median eviction 11 -> 16, evictions 11-24, lifetime $55.6k ->
+// $72.6k. Five extra days of life for a do-nothing town is not compensation, it
+// is a different game, and the documented band is median 11-13. Not restored.
 function rentAmount() { return BIZ.shack.rent; }   // shack lease (legacy name); due from night one
 function totalRent() {   // the PLAYER's nightly property bill, due from night one
   return Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b) === "player")
@@ -5225,8 +5236,10 @@ function load(slot) {
   // THE VISITORS COME BACK. Rooms are re-linked by index (and the occupant
   // re-hung on the room, which is what makes "asleep upstairs" survive a
   // reload); anybody who was in a queue is stood back on the promenade with
-  // their needs, their wallet and their diary intact. An old save has no
-  // visitors at all and simply waits for the next ferry.
+  // their needs, their wallet and their diary intact. A PRE-FERRY save has no
+  // visitor list at all: it is flagged here and seeded a boat-load at boot,
+  // which is the only place that still happens.
+  preVisSave = !s._vis;
   customers = customers.filter(k => !k.visitor);
   if (Array.isArray(s.visitors)) for (const v of s.visitors) {
     if (!v || typeof v.n !== "string") continue;
@@ -7633,6 +7646,10 @@ const FERRY_BASE = 2.0, FERRY_REP = 0.013, FERRY_MAX = 6;
 // is no later boat for them to catch. So the size of that boat is what the
 // Driftwood's seven rooms are sized against.
 const FERRY_LOAD = [1.2, 1.1, 0.9, 0.8];
+// TRUE only for a save written before the ferry/visitor pass existed (no
+// `_vis` marker). It is the ONLY thing that still asks for a seeded crowd -
+// see the guarded seedVisitors() call at boot.
+let preVisSave = false;
 let ferryT = 0;        // game-minutes she has left alongside (0 = at sea)
 let ferrySail = -1;    // index of the sailing already run today (-1 = none yet)
 let ferryDay = 0;
@@ -7782,11 +7799,21 @@ function newVisitor(overnightOnly) {
     hunger: n.hunger, thirst: n.thirst, dirt: n.dirt, bored: n.bored, tired: n.tired,
   };
 }
-// THE TOWN IS NOT EMPTY WHEN YOU SIGN THE LEASE. A cold start with nobody
-// ashore costs a whole trading day while the first boats build a population -
-// measured at -29% revenue on day 1 - and it is also simply wrong: people were
-// holidaying here before you took the shack on. So a new town (and an old save
-// that predates the ferry) opens with a boat-load already mid-visit.
+// THE OPENING IS THE TOWN, AND THEN THE BOAT (owner, 2026-08-19: "the game
+// should start with no tourists present"). A new town no longer calls this at
+// all - it opens EMPTY at 07:00, the player meets their two crabs and the
+// neighbours, and the 08:00 sailing lands the first tourists they ever see.
+// What that costs is MEASURED and small (16 seeds): day-one takings $313 ->
+// $276 and the till after the 20:00 settlement $145 -> $111, so the empty
+// opening is worth about $34 - a seventh of one night's rent - and no seed
+// ends day one underwater. The 30-day baseline does not move at all: 0/16,
+// median eviction 11, both sides. (The older -29% figure quoted here predates
+// the ferry timetable; the boats now refill the town by lunchtime.)
+//
+// This function survives for exactly ONE job: MIGRATING A PRE-FERRY SAVE. Such
+// a save has no visitor list to restore, and a fortnight-old town that reloads
+// into a deserted promenade reads as a bug rather than as an opening beat, so
+// it gets the boat-load it would have had. See the guarded call at boot.
 function seedVisitors() {
   if (customers.some(k => k.visitor)) return;
   const n = ferryBatch() + 6;   // a day-and-a-bit: yesterday's overnighters and this morning's crowd
@@ -12914,7 +12941,13 @@ if (!hasSave) {
   crabs = [newCrab(makeCrabPersona(0)), newCrab(makeCrabPersona(1))];
   coins = 150;   // a few bux in your pocket - rent is due tonight: ingredients + first rent buffer
 }
-seedVisitors();   // somebody is always already here (no-op if the save carried its own)
+// A NEW TOWN OPENS EMPTY and waits for the 08:00 boat; a SAVED town keeps
+// exactly the guests it was saved with, and nothing is seeded on top of them.
+// The one exception is a save written before the ferry existed, which has no
+// guest list to restore - see seedVisitors(). Deliberately NOT inside load():
+// a modern save that legitimately holds no visitors (saved at midnight, say)
+// must stay empty rather than have a crowd conjured onto its promenade.
+if (hasSave && preVisSave) seedVisitors();
 requestAnimationFrame(frame);
 
 // console cheat for tinkering: cheat(500)
