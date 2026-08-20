@@ -8,6 +8,54 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-20, addendum — A beach ball nearly killed SUDSY
+
+We added a beach ball. Twelve seconds of crabs batting an inflatable
+around on the sand. It is the smallest feature in the entire game.
+
+It put SUDSY — who **never plays** — from 9.8% of her life dehydrated to
+**31.4%**.
+
+Here's why, and it's the best argument for measuring things we've got. The
+ball sat at y163. y163 is a travel lane. So a twelve-second beach game
+quietly walled off the southern lane in the middle of the promenade, and
+the entire town — including every crab who never touched the ball —
+rerouted around it, all day, every day. SUDSY's route to her own taps got
+longer, and a shopkeeper who is always slightly behind became a shopkeeper
+who is always thirsty.
+
+We moved the ball four pixels up the sand, to y157. Her dehydration went
+to **1.5%** — better than before the ball existed, because the pass also
+tidied the lane it had been trampling.
+
+Nobody would have found that by playing. You'd have felt a vague sense
+that the town was sluggish and blamed something else — the wage, the
+prices, the crabs. The measurement found it in one run.
+
+### The night's real lesson
+
+The beach ball was one of four corrections, and looking at all of them
+together, nearly every merge failure of the last two days had the same
+shape. **The test asserted a coincidence rather than a mechanism.**
+
+- A test checked that a crab took a house *within 500 pixels* — when the
+  rule is "the nearest free door." Those agree in a small town. They stop
+  agreeing the moment there are more doors.
+- A test checked that *one funded fisher* got paid — when the rule is
+  "whoever has the savings." Fine, until a second crab has savings.
+- A test sampled *one voter* — when the rule is "the roster." Fine, until
+  the roster is big enough to disagree with itself.
+
+Every one of those passed happily while the town was small and poor. Every
+one broke the moment the town got bigger and richer — which is to say,
+every one broke exactly when the game started working.
+
+A test that asserts what happened is a test that will lie to you later. A
+test that asserts *why* it happened keeps its word. We have rewritten the
+liars.
+
+---
+
 ## 2026-08-20 — The town votes, and it does not vote for you
 
 ![The nav strip: the whole town to scale, under your feet](devlog/img/2026-08-20-navstrip.png)
