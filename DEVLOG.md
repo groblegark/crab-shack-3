@@ -8,6 +8,121 @@ Play it: **[groblegark.github.io/crab-shack-3](https://groblegark.github.io/crab
 
 ---
 
+## 2026-08-19 — There is a way off this island
+
+![The ferry office: TO THE MAINLAND, $20,000, BUY HER](devlog/img/2026-08-19-ferry-office.png)
+
+*East end of the beach, past the pier. A ticket office, a price, and a
+button. Behind it, across the water: ridges, a lighthouse, and a city.*
+
+Yesterday we published a capstone declaring CRAB SHACK 3 finished. The
+town has since acquired a horizon, a rival, a win condition and a ferry,
+which we think says something about the difference between a game being
+finished and a game being *done with you*.
+
+### There is somewhere else
+
+Look up. Across the channel there are ridges, a lighthouse, and at night
+the lights of a town that is not yours. It is the *same* shore every time
+you look — drawn from the day itself, not re-rolled — so it behaves like
+geography instead of scenery.
+
+Most evenings you can't see it. Mist rolls in from about six, thick and
+day-specific, and it does not lift at midnight; the small hours belong to
+last night's weather. Roughly one night in five comes up genuinely clear,
+and that's the whole design: **on a clear night you can see where you are
+not.**
+
+![A clear evening: the far shore reads sharp](devlog/img/2026-08-19-clear-night.png)
+![A thick evening: the same shore, nearly gone](devlog/img/2026-08-19-thick-night.png)
+
+*Same stretch of water, two different evenings. The city is still there on
+the right-hand one. You just can't get to it tonight.*
+
+And there's traffic. On Thursdays a low white boat crosses the far
+channel, going about somebody else's business. On any day your trade
+ledger booked an import, a little freighter works the same water — because
+the corn and the fresh water and the electricity come from *somewhere*,
+and now you can watch the somewhere go by. The ledger has been implying
+that world since yesterday morning. Now it has ships in it.
+
+### The way out has a price
+
+The ferry is the win condition: **$20,000**, which is not a number this
+town reaches by accident. A do-nothing town never gets within eight times
+of it. A propped-up growth town never gets within three. It's priced
+against the long curve — day 105 to 130 for a strong town — and buying her
+doesn't slam a card over a frozen frame: the camera swings to the pier and
+she comes alongside first.
+
+The best decision in the whole feature is what's *gated*. You cannot see
+the way out until you've built something: the ticket office, the
+fingerpost, and the sale itself all require that your town has an arcade
+fitted. Forty thousand dollars buys you nothing from a town that never
+built anything. **But the boat is not gated.** She crosses every Thursday
+from your very first morning, when you have $150 and a rent bill and no
+idea she's a way out rather than a bit of weather.
+
+The world was always bigger than the town. It's the *exit* you have to
+earn the right to be offered.
+
+*(The discoverability trick is quietly lovely: the fingerpost outside your
+own shack turns green on the morning you can afford her. A player who
+never once panned east still finds out — from a sign on their own street.)*
+
+### SUDSY wants the juice bar
+
+The town has its first rivalry, and the design call behind it is sharper
+than it needed to be: **the ambition belongs to the lease, not the crab.**
+SUDSY fails in most long runs, and when a fisher buys her shop out, a
+rivalry wired to *her* would have died with her. Instead, whoever holds
+the lease next door inherits the wanting.
+
+Her interest is computed from her own books — war chest, till, pocket, and
+the headroom she has on the same credit line you draw from — weighed
+against what your bar is worth. You get three settlements of watching her
+EYE it before any offer arrives. Refuse, and she *competes*, using the
+levers you also hold: cuts her prices, opens longer, and raises her wages
+above the best rate in town — which moves the market, and your own crew's
+opinion of you along with it. She backs off when she misses a rent.
+
+Measured: competing costs the bar 6.2% of takings, and matching her price
+sells **11.6% more drinks**. Four of four surviving towns reach EYEING;
+three make an offer; one runs the whole arc.
+
+### Also in this batch
+
+- **The town no longer pays you for not playing it.** Offline earnings —
+  "while you were away the crabs made $35,000" — are deleted outright,
+  mechanic and save field both. The crabs do not run the town behind your
+  back. Whatever happens here, you were there for it.
+- **Tables are a business now.** Counter tips cut to a token, table tips
+  and the table cap raised, and tables get *dirty* — they need busing,
+  though never ahead of a waiting local. Tables went from decorative to
+  worth owning.
+- **Wages are per crab.** Town standard, then per business, then per
+  individual — which is precisely what gives the rival's wage war
+  something to bite.
+- **A < crab > cycler** under the sun button steps selection and camera
+  through everyone in town ([ and ] on a keyboard). Tourists are excluded
+  on purpose: they go home mid-cycle, and a list that changes length under
+  your thumb isn't a list.
+- **Every crab keeps a diary** — a ring buffer of what they've been doing,
+  in their detail view, with a FOLLOW button. And walkouts now record
+  *why*: a crab who quits over money says so; one who quit from boredom
+  says that instead.
+
+131 test scenarios, green. Baseline unchanged at 0/16 evicted, median day
+10; growth still 4 of 8 alive at day 40.
+
+Still to come: real tourists — arriving by ferry in batches, with wallets
+and needs and multi-day stays — and a hotel, NPC-run, that you might
+eventually be able to buy.
+
+We'll stop calling it finished.
+
+---
+
 ## 2026-08-18, last light — CRAB SHACK 3 is finished. Here's what the crabs taught us.
 
 ![The finished town at lunch: rep 100, tourists at the tables, a tip landing](devlog/img/2026-08-18-hero-town.png)
