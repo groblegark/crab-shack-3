@@ -4021,6 +4021,9 @@ scenario("no surface prints off the canvas", () => {
   // already shown the same mistake in a different card.
   const sim = createSim({ seed: 11 });
   sim.runDays(2);
+  // ...and drive it far enough to have a NIGHTLY REPORT and a trade ledger with
+  // real numbers in it, since an empty card proves nothing about a full one
+  sim.runUntil(`report && reportT > 0`, { maxSteps: 400000 });
   const bad = JSON.parse(sim.G(`(() => {
     const bad = [];
     const T = text, S = smallText;
@@ -4046,7 +4049,11 @@ scenario("no surface prints off the canvas", () => {
     run("manage-hours", () => { dossier = null; manage = "shack"; manageTab = "HOURS"; }, () => drawManage());
     run("manage-sched", () => { manage = "shack"; manageTab = "SCHEDULE"; }, () => drawManage());
     run("census", () => { manage = "shack"; manageTab = "TOWN"; }, () => drawManage());
-    run("board", () => { manage = null; boardView = true; }, () => drawJobBoard());
+    run("report", () => { manage = null; }, () => drawReport());
+    run("toast", () => { toast = { text: "THE FARE IS $20,000 - YOU HAVE $412", t: 3 }; },
+      () => drawToast());
+    // the job board card carries the TRADE LEDGER under the openings
+    run("board", () => { toast = null; boardView = true; }, () => drawJobBoard());
     run("save", () => { boardView = false; saveView = true; }, () => drawSaveScreen());
     run("gameover", () => { saveView = false; gameOver = true; bankrupt = false; }, () => drawGameOver());
     run("ending", () => { won = true; winT = 99; winRec = { day: 40, lifetime: 99999,
