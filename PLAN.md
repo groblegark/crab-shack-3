@@ -11,53 +11,41 @@ Three games, all live on GitHub Pages, all built on the snescat toy PPU
 
 ## STATE OF PLAY — start here (rewritten 2026-08-20, after a second day)
 
-**Suite 207 scenarios. Baseline 0/16 (median eviction day 14).**
+**Suite 223 scenarios, green. Baseline 0/16 (median eviction day 14).
+Growth `--buy chef,table` 1/16 — and that is the target, see below.**
 
-**⚠ GROWTH IS AT 1/16 AND THAT IS THE OPEN QUESTION.** The documented pillar
-is 2–3 escapes per 8-seed block (~4–5/16). It is now **1/16**, and the
-attribution is the important part: **no single change broke it — four stacked.**
+**GROWTH IS 1/16, AND THAT IS THE INTENDED DIFFICULTY** — ruled by Matt,
+2026-08-20: *"1/16 is ok, we'll do better than the tests, as players."*
 
-| tree | growth (16 seeds) | baseline median |
-|---|---|---|
-| documented | ~4–5/16 | 12 |
-| + the empty opening day | 3/16 *(measured and accepted by its own pass)* | 11 |
-| + polling day | 2/16 | 12 |
-| + accommodation upgrades | **1/16** | 14 |
+The documented pillar used to be 2–3 escapes per 8-seed block. It is now 1/16,
+and the drop was real: four changes in one day, each costing about one escape —
+the empty opening day (−2), polling day (−1), accommodation (inside the noise).
+Each was measured at 8 seeds where one town is a coin flip, so each passed
+honestly and the erosion only showed up when they were added together. **That
+trap is still worth knowing about** (see the note below), but the number itself
+is now the target rather than a regression.
 
-Each step costs about one escape in sixteen — individually inside the noise
-`CLAUDE.md` warns about, which is exactly why each pass measured its own
-change, saw a coin flip, and passed it in good faith. **That is the trap worth
-naming: a pillar can be eroded entirely by changes that are each individually
-defensible.** Nobody was careless; the check was per-change and the damage was
-cumulative.
+**AND THE REASON THE NUMBER IS NOT WHAT IT LOOKS LIKE.** `tools/headless.mjs`
+does not play well. It buys a fixed list in a fixed order and then trades on
+autopilot: it never re-prices against a rival, never moves an hours sign to get
+its crew to a ballot box, never fires a bad hire, never reads the departure
+card and works out that half of every purse went home unspent. **The growth
+matrix measures the FLOOR — what a town does when nobody is steering it.** A
+player who is actually paying attention is not that agent, and should beat it.
+So 1/16 is a statement about the naive line, not about whether the game is
+winnable.
 
-**WHERE IT ACTUALLY WENT.** Two suspects were arm-tested rather than argued
-about, and both came back smaller than the intuition:
+**WHAT THIS MEANS FOR FUTURE WORK:** the matrix stays exactly as valuable as it
+was — it is a REGRESSION detector, and a change that takes it to 0/16 has
+removed the floor and must be justified. What it is not is a difficulty dial to
+tune toward. Do not "fix" the growth number by making the game easier for a bot
+that is not trying.
 
-- **The finite shelter: CLEARED.** Rebuilt with capacity effectively unlimited,
-  both growth blocks return *identical* results seed for seed — in one block
-  bit-identical, because a four-bed shelter is exactly the size of a founding
-  town and the wall cannot bind in a town evicted on day 13.
-- **Accommodation as a whole: ~1 escape at most, i.e. noise.** A 2x2 on one
-  build, 16 growth seeds an arm (`--nodorm` / `--noannexe`, now on
-  `headless.mjs`): **both off 2/16 · dorm only 2/16 · annexe only 1/16 · both
-  on 1/16.** Every arm is within one town of every other. The pass's own
-  earlier "3/8 → 4/8" was the coin, measured at its branch point.
-
-So the erosion is mostly **the empty opening day** (−2), then **polling day**
-(−1), with accommodation inside the noise. And the empty opening is the one
-change that already came with a costed remedy: its own pass measured the hole
-at **$34 of the day-one till** and named the lever — the opening purse, sized
-to $34 — while explicitly rejecting a free first night as a $230 handout for a
-$34 problem.
-
-PLAN's own precedent says this matters — a rent change that restored the
-baseline was REJECTED because it took growth escape to 0/8. Driving growth
-toward zero is a documented red line, and we are one seed off it. The
-recommendation on the table (Matt's call, not made yet) is to restore headroom
-with one small named knob — **the opening purse, sized to the $34 the empty
-opening actually cost** — rather than weaken any of the four features, since
-three of them were asked for and all four are good.
+**THE TRAP, kept because it will happen again:** a pillar can be eroded
+entirely by changes that are each individually defensible. Every pass measured
+its own change against the documented baseline, saw a coin flip, and passed it
+in good faith. The check was per-change; the damage was cumulative. **Measure
+against the tree you are landing on, not against the number in this file.**
 
 **LANDED 2026-08-19/20**, in merge order:
 1. **The visitor pass** — tourists are a POPULATION, not a spawn timer: four
@@ -124,10 +112,11 @@ three of them were asked for and all four are good.
     it; an agent asked to reproduce it first found it was noise at ~180
     crab-nights an arm. Ask for the reproduction BEFORE the fix, every time.
 
-**NEXT UP:**
-- **THE GROWTH PILLAR** — the decision at the top of this section. It is now
-  the ONLY thing on this list, and nothing else should be measured against a
-  moving number until it is settled.
+**NEXT UP:** nothing is blocked. Matt's queue is clear. The standing backlog
+below still holds — a surf spot mid-beach (deferred behind the beach ball), the
+lease card's wall of text (the last item from Ben's playtest), and whether a
+player should be able to INVITE an offer for a business rather than only answer
+one, which is a design question rather than a UX fix.
 - ~~**The departure card**~~ — **SHIPPED 2026-08-20**: the day report's second
   page, naming every visitor who sailed on today's boats, with a quote DERIVED
   from a per-visit stay ledger — never random. See "THE DEPARTURE CARD" at the
