@@ -7386,6 +7386,24 @@ function drawFloaters(dt) {
   }
   floaters = floaters.filter(f => f.t > 0);
 }
+// MR. PINCHERTON'S TERMS, hoisted out of the draw so the suite can measure
+// them. The card is 200px wide and the 5x7 font is 6px a character, so a term
+// gets 31 characters INCLUDING its "- " - and four of the six shipped over
+// that, printing off the card and, in one case, off the canvas entirely. The
+// prices are interpolated, so the margin has to survive a three-digit wage and
+// a four-digit rent too; the scenario checks the rendered width, not the
+// character count.
+const LEASE_SIGNOFF = "GOOD LUCK. I'LL COME COLLECT.";
+function leaseTerms() {
+  return [
+    ["THE SHACK IS YOURS TO RUN", [70, 70, 90]],
+    ["RENT $" + BIZ.shack.rent + ", NIGHTLY AT 20:00", [170, 50, 50]],
+    ["IT IS DUE TONIGHT. GOOD LUCK.", [170, 50, 50]],
+    ["WAGES $" + bizWage("shack") + " A SHIFT, YOUR CALL", [70, 70, 90]],
+    ["CREW PAY $" + HOUSE_RENT + " HOME RENT EACH", [70, 70, 90]],
+    ["MISS RENT AND I TAKE IT BACK", [170, 50, 50]],
+  ];
+}
 function drawIntro() {
   ctx.fillStyle = "rgba(16,20,50,0.5)";
   ctx.fillRect(0, 0, W, H);
@@ -7396,17 +7414,10 @@ function drawIntro() {
   blit(ctx, LANDLORD_ART.a, cx2 + 8, 42);
   blit(ctx, ACCESSORIES.shades.art, cx2 + 8 + 1, 42 + 1);
   text(ctx, "MR. PINCHERTON'S TERMS:", cx2 + 30, 44, [90, 60, 40]);
-  const terms = [
-    ["THE SHACK IS YOURS TO RUN", [70, 70, 90]],
-    ["RENT: $" + BIZ.shack.rent + ", NIGHTLY AT 20:00", [170, 50, 50]],
-    ["RENT IS DUE TONIGHT. GOOD LUCK.", [170, 50, 50]],
-    ["CREW WAGES: $" + bizWage("shack") + " A SHIFT - YOUR CALL", [70, 70, 90]],
-    ["CREW PAY THEIR OWN $" + HOUSE_RENT + " HOME RENT", [70, 70, 90]],
-    ["MISS RENT AND I TAKE THE SHACK", [170, 50, 50]],
-  ];
+  const terms = leaseTerms();
   for (let i = 0; i < terms.length; i++)
     text(ctx, "- " + terms[i][0], cx2 + 6, 60 + i * 11, terms[i][1]);
-  text(ctx, "GOOD LUCK. I'LL COME COLLECT.", cx2 + 6, 60 + terms.length * 11 + 3, [110, 90, 80]);
+  text(ctx, LEASE_SIGNOFF, cx2 + 6, 60 + terms.length * 11 + 3, [110, 90, 80]);
   const bx = W / 2 - 56;
   rect(ctx, bx, 152, 112, 18, [30, 20, 36]);
   rect(ctx, bx + 1, 153, 110, 16, [190, 140, 80]);

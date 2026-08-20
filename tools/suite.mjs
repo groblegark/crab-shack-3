@@ -4012,6 +4012,26 @@ scenario("ferry: the win saves, and a reloaded town shows the same ending", () =
   return true;
 });
 
+scenario("the lease card: every term fits on the card it is printed on", () => {
+  const sim = createSim({ seed: 3 });
+  // The card is 200px wide at x28, terms start at x34, so a line has 190px.
+  // Measured with the game's OWN textWidth, at the same 5x7 size drawIntro
+  // uses - four of the six shipped terms ran off the card and one ran off the
+  // canvas, which is the first thing a new player reads.
+  const LIMIT = 190;
+  const measure = () => JSON.parse(sim.G(`JSON.stringify(
+    leaseTerms().map(t => ["- " + t[0], textWidth("- " + t[0])])
+      .concat([[LEASE_SIGNOFF, textWidth(LEASE_SIGNOFF)]]))`));
+  for (const [line, w] of measure())
+    if (w > LIMIT) return `"${line}" is ${w}px on a ${LIMIT}px card`;
+  // and it has to survive the interpolated numbers growing: a four-digit rent
+  // and a three-digit wage are both reachable through the game's own settings
+  sim.G(`BIZ.shack.rent = 1230; BIZ.shack.wage = 123;`);   // WAGE_STD is const; the per-business wage is the live one
+  for (const [line, w] of measure())
+    if (w > LIMIT) return `with a big rent and wage, "${line}" is ${w}px on a ${LIMIT}px card`;
+  return true;
+});
+
 scenario("ferry: the office is shut, and she is nameless, until the arcade is fitted", () => {
   const sim = createSim({ seed: 88 });
   if (sim.G("ferryKnown()")) return "a fresh town already knows about the ferry";
