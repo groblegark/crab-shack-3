@@ -666,10 +666,28 @@ const POLL_LINES = 24; // how many written vote reasons a ballot keeps (display 
 // east end. errandScore's detour term picks the near one for free, exactly the
 // way it picks between the two standpipes. The PAPER is still one supply for
 // one election, so running out is still running out.
+// ...AND THE PROMENADE IS FULL. Every x here was measured against the town's
+// own furniture rather than picked: taking the occupied spans (houses, the
+// shelter, the memorial, both standpipes, the notice board, five shopfronts,
+// three bus stops and the pier) there is NOT ONE 74px gap left on 2512px of
+// coast. The first cut put a table at 684 with a 66px board over it and it
+// printed straight through the JOB BOARD at 712 - which is the same class of
+// defect as the pause chip painting over the SND label, and the card sweeps do
+// not cover the world. So the tables live in the two real gaps, 662-712 and
+// 1820-1844, and their boards are cut to fit them.
 const POLL_PLACES = [
-  { x: 684, name: "THE NOTICE BOARD" },   // between the town tap (640) and the job board (716)
-  { x: 1844, name: "THE PIER HEAD" },     // beside the pier tap, where the fleet comes ashore
+  { x: 668, name: "THE NOTICE BOARD" },   // the 50px between the town tap (662) and the job board (712)
+  { x: 1804, name: "THE PIER HEAD" },     // between the arcade front (1800) and the pier tap (1844)
 ];
+// 40, AND THE FOUR PIXELS ARE PAID FOR. The first fix for the job-board
+// collision was a 44px board, which pushed the pier table west to 1796 to
+// clear the pier tap's WATER label at 1845 - and that cost the FISHING FLEET
+// 17 points of turnout (87% -> 70%), because 48px is eight real seconds of
+// walking off the end of a shift that finishes 30 minutes before the polls
+// shut. A narrower board buys the table its place back at the rail. Text is
+// measured against this, never counted, so a future state that does not fit
+// gets trimmed rather than printed through the furniture next door.
+const POLL_BW = 40;
 const POLL_OPEN = 7 * 60;        // AN HOUR BEFORE THE TOWN OPENS, and that hour is load-bearing.
                                  // A crab's errand window on a working day closes 30 minutes before
                                  // they leave (see updateSchedule), so an owner-operator on the D
@@ -3846,16 +3864,23 @@ function bizTables(key) {
 let coins = 0, lifetime = 0, time = 0;
 let crabs = [], customers = [], floaters = [];
 let toast = null, soundOn = true, ffMode = 0;   // 0=1x, 1=2x, 2=3x, 3=6x
-// PAUSE. From the game's first outside playtest (2026-08-19): "Meanwhile
-// theres a clock ticking. PAUSE ANYONE? I'm losing time here". He is right and
-// it was a straight omission - the speed chips went 1x/2x/3x/6x and never
-// stopped, so a new player reading the shop or a crab's dossier was being
-// charged rent for the privilege. Pausing freezes the SIM (dt is zeroed) and
-// nothing else: the frame still draws, every card still opens, and every chip
-// still takes a click, because half the reason to pause is to go and read
-// something. `last` is still advanced, so unpausing does not fast-forward the
-// hours you spent paused.
-let paused = false;
+// THERE IS NO PAUSE, AND THAT IS A RULING (Matt, 2026-08-20: "Remove the pause
+// button tho. It's against the spirit of the game.")
+//
+// One was built, on the first outside playtest's strongest complaint -
+// "Meanwhile theres a clock ticking. PAUSE ANYONE? I'm losing time here" - and
+// then taken out again by the owner, which is the right call and worth writing
+// down so nobody rebuilds it from that same quote. The playtester was
+// describing the game working. The clock running while you read the shop is
+// not an omission, it is the cost of reading the shop, and the same playtester
+// came back with "the secret sauce is incomprehensible UI and punishing you
+// for not understanding at pace" - you cannot keep the second sentence and fix
+// the first with a pause button.
+//
+// This does NOT relax the standing rule that interface OPACITY is a bug. A
+// player who cannot tell what a button does is a bug to fix; a player who is
+// losing money while they work it out is the game. The speed chips still go
+// 1x/2x/3x/6x, and they still never stop.
 const FF_SPEED = [1, 2, 3, 6];
 let camX = 1180, followIdx = -1, followNpc = null, followCust = null, tab = "crew";
 // SELECTION is not the camera. Click a crab to select (and focus) them; pan
@@ -9125,10 +9150,9 @@ cv.addEventListener("click", (ev) => {
       // new case wedged in at the top: that is how the pause chip ended up
       // eating SND's clicks, because a band inserted above the chain silently
       // takes its pixels from whatever was underneath.
-      if (p.x >= 238) { ffMode = ffMode === 3 ? 0 : 3; sfx.ding(); return; }   // >>>>
-      if (p.x >= 224) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }   // >>>
-      if (p.x >= 213) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }   // >>
-      if (p.x >= 202) { paused = !paused; sfx.ding(); return; }                // the pause chip
+      if (p.x >= 227) { ffMode = ffMode === 3 ? 0 : 3; sfx.ding(); return; }   // >>>>
+      if (p.x >= 213) { ffMode = ffMode === 2 ? 0 : 2; sfx.ding(); return; }   // >>>
+      if (p.x >= 202) { ffMode = ffMode === 1 ? 0 : 1; sfx.ding(); return; }   // >>
       if (p.x >= 189) { soundOn = !soundOn; if (soundOn) sfx.ding(); return; } // SND
       if (p.x >= 168) { toggleMusic(); return; }                               // MUS
       if (p.x >= 145) { toggleMute(); if (!muted) sfx.ding(); return; }        // the speaker
@@ -9288,10 +9312,6 @@ addEventListener("keydown", (e) => {
   if (e.key === "n") toggleMusic();
   if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
-  if (e.key === " " || e.key === "p") {                    // the key everybody tries first
-    paused = !paused; sfx.ding();
-    if (e.key === " " && e.preventDefault) e.preventDefault();   // space must not scroll the page
-  }
   // [ and ] step the selection through the town, exactly what the little crab
   // cycler's chevrons do - the camera comes along, unlike an arrow-key pan
   if (e.key === "[" && cyclerLive()) { cycleSel(-1); sfx.ding(); return; }
@@ -9802,17 +9822,21 @@ function drawPollingPlaces() {
         for (let k = 0; k < done; k++) wrect(px + 27, top - 1 - k, 7, 1, [255, 216, 96]);
       }
     }
-    const shut = !B.printed ? ["NO BALLOT PAPER", "NO POLL TODAY", [255, 190, 190]]
-      : B.declared ? ["DECLARED", fitSmall(hall.mayor || "-", 58), [255, 216, 96]]
-      : B.shut ? ["COUNTING", B.counted + " OF " + B.cast.length, [255, 216, 96]]
-      : tmin < POLL_OPEN ? ["POLLING DAY", "OPENS " + fmtHr(POLL_OPEN), [200, 235, 200]]
-      : B.papers > 0 ? ["VOTE HERE", B.papers + " PAPERS - SHUTS " + fmtHr(POLL_SHUT), [200, 235, 200]]
-      : ["NO PAPER LEFT", "SHUTS " + fmtHr(POLL_SHUT), [255, 190, 150]];
-    const sx = px + 1 - camX, sy = top - 30;
-    wrect(px - 1, sy - 2, 66, 18, [30, 20, 36]);
-    wrect(px, sy - 1, 64, 16, [58, 42, 38]);
-    smallText(ctx, fitSmall(shut[0], 60), sx + 1, sy + 1, [255, 250, 235]);
-    smallText(ctx, fitSmall(shut[1], 60), sx + 1, sy + 8, shut[2]);
+    // THREE SHORT ROWS, because 44px is what the gap gives and a board that
+    // says "4 PAPERS - SH.." says nothing. Every state keeps the two facts a
+    // crab walking past needs - what this is, and how long they have.
+    const b = !B.printed ? ["NO BALLOT", "NO PAPER", "NO POLL", [255, 190, 190]]
+      : B.declared ? ["ELECTED", fitSmall(hall.mayor || "-", POLL_BW - 4), "", [255, 216, 96]]
+      : B.shut ? ["COUNTING", B.counted + " OF " + B.cast.length, "BY HAND", [255, 216, 96]]
+      : tmin < POLL_OPEN ? ["POLLING DAY", "OPENS " + fmtHr(POLL_OPEN), "", [200, 235, 200]]
+      : B.papers > 0 ? ["VOTE HERE", B.papers + " PAPERS", "SHUTS " + fmtHr(POLL_SHUT), [200, 235, 200]]
+      : ["VOTE HERE", "NO PAPER", "SHUTS " + fmtHr(POLL_SHUT), [255, 190, 150]];
+    const rows = b[2] ? 3 : 2, sx = px + 1 - camX, sy = top - 12 - 7 * rows;
+    wrect(px - 1, sy - 2, POLL_BW + 2, 7 * rows + 4, [30, 20, 36]);
+    wrect(px, sy - 1, POLL_BW, 7 * rows + 2, [58, 42, 38]);
+    smallText(ctx, fitSmall(b[0], POLL_BW - 4), sx + 1, sy + 1, [255, 250, 235]);
+    smallText(ctx, fitSmall(b[1], POLL_BW - 4), sx + 1, sy + 8, b[3]);
+    if (b[2]) smallText(ctx, fitSmall(b[2], POLL_BW - 4), sx + 1, sy + 15, b[3]);
   }
 }
   // the crab shelter
@@ -10713,24 +10737,15 @@ function drawPanel() {
     }
   }
   smallText(ctx, "SND", 190, PANEL_Y + 3, !muted && soundOn ? [140, 220, 140] : [140, 120, 110]);
-  // the pause chip sits FIRST in the speed row, because it is the same
-  // question the row answers: how fast is time going?
-  // IT LIVES AT THE HEAD OF THE SPEED GROUP, and the speeds shifted right to
-  // make the room. The first cut put it at x191, which is ON TOP OF "SND" -
-  // the label draws at 190..201 and the chip painted over it, while the click
-  // band (`p.x >= 191`, tested before sound's) left SND two live pixels. That
-  // row has NO free space: mute, music and sound own every pixel from 145 to
-  // 203 in one unbroken `>` chain, so the only honest fix is to move the
-  // speeds along rather than squat in a gap that only LOOKS empty.
-  {
-    const on = paused;
-    rect(ctx, 203, PANEL_Y + 1, 9, 9, on ? [255, 230, 120] : [70, 58, 54]);
-    rect(ctx, 205, PANEL_Y + 3, 2, 5, on ? [40, 24, 16] : [190, 176, 166]);
-    rect(ctx, 208, PANEL_Y + 3, 2, 5, on ? [40, 24, 16] : [190, 176, 166]);
-  }
-  smallText(ctx, ">>", 214, PANEL_Y + 3, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
-  smallText(ctx, ">>>", 226, PANEL_Y + 3, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
-  smallText(ctx, ">>>>", 240, PANEL_Y + 3, ffMode === 3 ? [255, 230, 120] : [150, 132, 122]);
+  // THE SPEED ROW, and it has no stop on it - see the ruling at `FF_SPEED`.
+  // The three chips sit back where they were before a pause chip was briefly
+  // wedged in at their head; the row still has NO free space (mute, music and
+  // sound own every pixel from 145 to 201 in one unbroken chain), which is why
+  // the pause chip could only ever have been made room for by moving these,
+  // and why moving them back is the whole of taking it out again.
+  smallText(ctx, ">>", 203, PANEL_Y + 3, ffMode === 1 ? [255, 230, 120] : [150, 132, 122]);
+  smallText(ctx, ">>>", 215, PANEL_Y + 3, ffMode === 2 ? [255, 230, 120] : [150, 132, 122]);
+  smallText(ctx, ">>>>", 229, PANEL_Y + 3, ffMode === 3 ? [255, 230, 120] : [150, 132, 122]);
   // tabs
   for (const [i, t] of [["crew", 0], ["shop", 1]].map((v, i) => [i, v[0]])) {
     const x = 4 + i * 34, active = tab === t;
@@ -12424,8 +12439,7 @@ function drawToast() {
 // ---------------------------------------------------------------- main loop
 let last = performance.now(), saveT = 0;
 function frame(now) {
-  const dt = paused ? 0
-    : Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
+  const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)) * TURBO * (ffSleep ? 6 : FF_SPEED[ffMode]);
   last = now; time += dt;
   if (saveConfirmT > 0) { saveConfirmT -= dt; if (saveConfirmT <= 0) saveConfirm = null; }
   if (saleArmT > 0) { saleArmT -= dt; if (saleArmT <= 0) saleArm = null; }

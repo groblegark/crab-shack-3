@@ -33,9 +33,11 @@ landed in one night. Everything below is merged, pushed and live.
    and TOWN chips lifting both screens out from behind building-clicks.
 6. **The queue pass** — a place in line is stamped when you JOIN, the shuffle
    steps both ways, locals aim at the back. 132k pairs: zero inversions.
-7. **Mine**: PAUSE (there was none), the beach ball, the ferry canon (ONE
+7. **Mine**: the beach ball, the ferry canon (ONE
    boat), a save/load crash that bricked any town saved mid-errand, the
-   sick-day errand-window fix, and two automated UI sweeps.
+   sick-day errand-window fix, and two automated UI sweeps. (A PAUSE landed
+   here too and was **removed again on 2026-08-20** by owner ruling — see
+   THERE IS NO PAUSE below before you consider rebuilding it.)
 
 **LANDED 2026-08-20:**
 8. **POLLING DAY** — the election stopped being a function call. Two tables you
@@ -3093,6 +3095,36 @@ cover — serves roughly halve (66 -> 38, 61 -> 41), SUDSY's till halves with
 them, rep is 5 points lower, and the player's till is $64/$105 down at the end
 of day two. Two fixtures that used to CLEAR the opening crowd are now no-ops
 and are kept as belts, with their comments re-pointed to say so.
+
+## THERE IS NO PAUSE (Matt, 2026-08-20) — a ruling, and why it is one
+
+> "Remove the pause button tho. It's against the spirit of the game."
+
+A pause was built on 2026-08-19, off the strongest single line in the game's
+first outside playtest: *"Meanwhile theres a clock ticking. PAUSE ANYONE? I'm
+losing time here and I want to pay back my landlord!"* It shipped for one day
+and the owner took it out again.
+
+**He is right, and this is written down so nobody rebuilds it from that same
+quote.** Ben was describing the game WORKING. The clock running while you read
+the shop is not an omission, it is the cost of reading the shop — and it is the
+same thing he was praising two days later when he said the secret sauce is
+*"incomprehensible UI and punishing you for not understanding at pace"*. You
+cannot keep the second sentence and fix the first with a pause button.
+
+**The line this draws, and it is the line all onboarding work runs to:** a
+player who cannot tell WHAT A BUTTON DOES is a bug to fix. A player who is
+losing money while they work it out is the game. Tooltips, a help screen, a
+visible hire and a legible income are all on the right side of it. Anything
+that buys the player TIME is on the wrong side.
+
+Removed: the `paused` state, the chip, its click band, and the space/`p` keys.
+The speed chips slid back left into the room the chip had been given (>> at
+203, >>> at 215, >>>> at 229; bands at 202/213/227). The scenario **"the clock
+cannot be stopped: there is no pause, and no speed of zero"** pins the ruling
+as a mechanism rather than a grep — there must be no pause STATE to flip and no
+entry in `FF_SPEED` that stops time, and the clock is then checked to actually
+run, so a pause shipped as "speed 0 by default" fails it.
 
 ## SCREENSHOTS: THE HANDOFF (process, 2026-08-20)
 

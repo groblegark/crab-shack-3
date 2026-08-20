@@ -7067,7 +7067,7 @@ scenario("polling day draws in every state, on the canvas and never over itself"
   sim.runDays(6, { tickEvery: 200, onTick: (G) => { if (G("coins") < 400) G("coins = 900"); } });
   sim.runUntil(`pollCalled()`, { maxSteps: 400000 });
   const bad = JSON.parse(sim.G(`(() => {
-    const bad = [], T = text, S = smallText;
+    const bad = [], T = text, S = smallText, R = rect;
     let SURF = "?", box = [];
     const wrap = (fn, meas, h) => (c, str, x, y, col, sz) => {
       const w = meas(str, sz);
@@ -7079,12 +7079,25 @@ scenario("polling day draws in every state, on the canvas and never over itself"
       return fn(c, str, x, y, col, sz);
     };
     text = wrap(T, textWidth, 7); smallText = wrap(S, smallTextWidth, 5);
+    // ...AND A FILLED RECT PAINTED OVER SOMEBODY ELSE'S LABEL, which is how the
+    // first cut of the polling board printed straight through the JOB BOARD's
+    // sign - the town's furniture is one surface and a new piece of it can
+    // bury an old one. The card sweep upstream already learned this lesson (a
+    // pause chip over the SND label); the WORLD had never been swept for it.
+    rect = (c, x, y, w, h, col) => {
+      for (const b of box)
+        if (x < b.x1 && x + w > b.x0 && y < b.y1 && y + h > b.y0 && b.s.trim())
+          bad.push([SURF, "RECT OVER " + b.s, x + "," + y + " " + w + "x" + h]);
+      return R(c, x, y, w, h, col);
+    };
     const run = (name, setup) => {
       SURF = name; box = [];
       try {
         setup();
-        camX = clampCam(POLL_PLACES[0].x - 100);
-        drawTown();
+        // BOTH TABLES, and the camera parked on each in turn - a collision
+        // only exists where the camera can see it, and the pier head is a
+        // different neighbourhood with different furniture next to it.
+        for (const pl of POLL_PLACES) { box = []; camX = clampCam(pl.x - 100); drawTown(); }
         box = [];
         manage = "shack"; manageTab = "HALL"; hallView = "BALLOT"; drawManage();
         box = []; hallView = "BOOKS"; drawManage();
@@ -7107,10 +7120,43 @@ scenario("polling day draws in every state, on the canvas and never over itself"
       for (const c of allCrabs()) castVote(c);
       B.shut = true; finishCount(); });
     run("no-poll-at-all", () => { reset(0); tmin = POLL_OPEN + 200; });
-    text = T; smallText = S;
+    text = T; smallText = S; rect = R;
     return JSON.stringify(bad.slice(0, 8));
   })()`));
   if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
+  return true;
+});
+
+// ===========================================================================
+// THERE IS NO PAUSE (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("the clock cannot be stopped: there is no pause, and no speed of zero", () => {
+  // A RULING, pinned as a test, because it will otherwise be rebuilt from the
+  // same playtest quote that built it the first time - "Meanwhile theres a
+  // clock ticking. PAUSE ANYONE?" Matt's answer: "Remove the pause button tho.
+  // It's against the spirit of the game." The playtester was describing the
+  // game working.
+  //
+  // Asserted as a MECHANISM rather than a grep: there must be no pause STATE
+  // to flip, and no entry in the speed table that stops time. A future pause
+  // that dodges both of those is not a pause.
+  const sim = createSim({ seed: 1337 });
+  const got = JSON.parse(sim.G(`(() => {
+    // typeof on an undeclared name is SAFE - it returns "undefined" rather
+    // than throwing - so "undefined" is the pass here, and any other type
+    // means somebody declared a pause flag again. (No backticks in this
+    // comment: it lives inside a template literal.)
+    return JSON.stringify({ has: typeof paused, speeds: FF_SPEED,
+      zero: FF_SPEED.filter(v => !(v > 0)).length });
+  })()`));
+  if (got.has !== "undefined") return `there is a pause state again (typeof paused === "${got.has}")`;
+  if (got.zero) return `the speed table has ${got.zero} setting(s) that stop the clock: ${got.speeds}`;
+  // ...and the clock actually runs. A pause that shipped as "speed 0 by
+  // default" would pass both checks above and fail this one.
+  const t0 = sim.G("day * 1440 + tmin");
+  sim.runUntil(`day * 1440 + tmin > ${t0} + 120`, { maxSteps: 60000 });
+  if (!(sim.G("day * 1440 + tmin") > t0 + 120)) return "the town clock did not advance";
   return true;
 });
 
