@@ -615,6 +615,104 @@ const PURSE_KEYS = ["levy", "dues", "rents", "tin"];
 const TIN_KEEP = 30;   // nobody drops a coin in the tin who is not this far clear themselves
 const POLL_LINES = 24; // how many written vote reasons a ballot keeps (display + save only)
 
+// ---------------------------------------------------------------- POLLING DAY
+// (Matt, 2026-08-20: "voting is an action, polls have a closing time, and
+// ballots are made and counted on paper.")
+//
+// The first cut of this election was a FUNCTION CALL. Every crab in town voted
+// their interest at settlement, in one loop, in no time at all, and the result
+// was known the instant it was cast. That is a poll in the sense a weather
+// forecast is a poll: an aggregate of preferences nobody had to act on.
+//
+// So the vote is now a THING A CRAB DOES, with all three of the frictions a
+// real one has:
+//
+//   1. IT IS AN ERRAND. There is a table on the promenade with a box on it,
+//      and you have to walk there. It scores through the same detour machinery
+//      as a plate of food or a drink at the tap (see pickErrand), which means
+//      TURNOUT IS GEOGRAPHY AND SHIFTS: the crab whose commute passes the
+//      table votes on the way past, and the crab at the far end of the pier
+//      has to want it. Nobody is teleported to the ballot box.
+//   2. THE POLLS SHUT. POLL_SHUT is an hour before the town does, so a crab
+//      who leaves it until after work has to actually get there. An owner-
+//      operator on a 8:30-18:30 day has half an hour and a walk - which makes
+//      the HOURS SIGN a lever on turnout, and that is a lever the player
+//      already holds. Set your shop's hours so your crew can vote, or don't.
+//   3. THE BALLOTS ARE PAPER. They are bought - PAPER, off the ferry, on the
+//      trade ledger, out of the town fund, at BALLOT_PRICE a sheet - the night
+//      before, once nominations have closed. A fund that cannot afford a full
+//      set prints a short one, and the crabs at the back of the day find an
+//      empty pile. A fund that cannot afford ANY paper does not hold an
+//      election at all, and the incumbent stays in the hat by default.
+//      (This is why the paper is CHEAP. It is meant to bite in a genuinely
+//      destitute town, not to lock a poor town out of the only mechanism it
+//      has for stopping being poor.)
+//
+// ...and the count is by hand, one paper at a time, at COUNT_MINS a go. The
+// tally does not exist until it is counted: cands[].votes stays at zero all
+// day while the box fills, and the declaration comes when the last paper is
+// read out. A town of fourteen knows its own mind at about twenty to eight.
+// TWO TABLES, not one - the same answer this town already gave for water.
+// THE MEASUREMENT: with a single box on the promenade, seed 1337 polled TWO of
+// eight. Not because the crabs did not care: because a stop costs about a real
+// second per 11px of walking and this town is 2512px wide. The whole D-shift
+// fishing fleet works 8:30 to 18:30 at the PIER, 1200px from the notice board,
+// and the polls shut at 19:00 - so a fisher could not have voted if they had
+// sprinted. That is not a political outcome, it is a map. A structural bias
+// nobody can act on is not a choice, and this game is about choices.
+//
+// So the box goes where the people are, twice: the notice board for the
+// housing row and the promenade counters, the pier head for the fleet and the
+// east end. errandScore's detour term picks the near one for free, exactly the
+// way it picks between the two standpipes. The PAPER is still one supply for
+// one election, so running out is still running out.
+const POLL_PLACES = [
+  { x: 684, name: "THE NOTICE BOARD" },   // between the town tap (640) and the job board (716)
+  { x: 1844, name: "THE PIER HEAD" },     // beside the pier tap, where the fleet comes ashore
+];
+const POLL_OPEN = 7 * 60;        // AN HOUR BEFORE THE TOWN OPENS, and that hour is load-bearing.
+                                 // A crab's errand window on a working day closes 30 minutes before
+                                 // they leave (see updateSchedule), so an owner-operator on the D
+                                 // shift - 8:30 to 18:30 under the default hours - has no daylight
+                                 // at all between the town opening and their own front door. Polls
+                                 // open early in real towns for exactly this crab.
+const POLL_SHUT = 19 * 60;       // ...and shut an hour before the town does. This is the number that
+                                 // decides whether a working crab has a vote, and it is meant to be
+                                 // tight enough that the answer is sometimes no: the D-shift owner
+                                 // finishing at 18:30 has half an hour and a walk, which makes the
+                                 // HOURS SIGN a lever on turnout - and that lever is the player's.
+const BALLOT_PRICE = 0.25;       // a sheet of paper, landed by the ferry like every other import
+const BALLOT_SPARE = 2;          // the clerk always prints a couple over
+
+const VOTE_SECS = 5;             // real seconds at the table - ~20 game minutes to queue, mark a
+                                 // paper and drop it in the box. The same units as TAP_SIP and
+                                 // BALL_SECS, because it is the same kind of stop.
+const COUNT_MINS = 3;            // GAME minutes to read one paper back out again, by hand. Fourteen
+                                 // papers is forty-two minutes, so a town of fourteen knows its own
+                                 // mind at about twenty to eight - after the polls shut, before the
+                                 // office settles. A town that has grown finds out later.
+const VOTE_CD = 12;              // short on purpose: a civic duty must not crowd out lunch
+const VOTE_URGE_HRS = 3;         // the last three hours: now you make a special trip
+const VOTE_BASE = 0.30;          // ...before that it is a thing you do if you happen to be passing
+// WHAT THIS ACTUALLY PRODUCES, measured over 24 polls across 6 seeds and 29
+// days, once the second table went in: TURNOUT 82%, and the shape of the
+// missing 18% is the whole point of the feature -
+//     by shift:  M 96%   E 92%   D-off 83%   D 76%
+//     by job:    shack 94%   fishing 87%   hotel 74%   showers 67%
+// The crab who cannot get to a table is the OWNER-OPERATOR on the long D
+// shift - SUDSY at the showers, 9:30 to 17:30, with the box 256px up the
+// promenade. Not a wall (she makes it two times in three) and not a bias
+// nobody can act on: the D shift is derived from the shop's OPEN HOURS, and
+// the hours sign is a lever the player already holds. Shorten your own crew's
+// polling-day shift and they vote. That is the design in one number.
+const VOTE_MAX = 0.85;           // and never DIRE (0.9): nobody abandons a shift to vote
+const VOTE_DX = 11;              // voters space out along the table rather than standing in each other
+const VOTE_Y = 157;              // UP THE BEACH, CLEAR OF BOTH TRAVEL LANES - the lesson the beach
+                                 // ball paid for. LANES are y146 and y168 and a parked crab blocks a
+                                 // lane within 9px of it, so a queue at the tap stops' y163 would
+                                 // wall off the southern lane across the busiest civic hour of the
+                                 // week. y157 clears 146 by 11 and 168 by 11.
+
 // The fund is AN ACCOUNT WITH A LEDGER, not a number. Every row names its
 // counterparty, because "where did that bowl come from" has to have an answer.
 // (`youPaid` / `youGot` are the day's two numbers the PLAYER feels: what the
@@ -634,6 +732,53 @@ let hall = {
   stand: false, nominee: null,                    // is the player on the ballot, and who for
   plat: { mech: "levy", rate: 2, bowls: 3 },      // ...and the platform they run on
 };
+// THE BOX ITSELF. Null when there is no election in the diary. printBallots()
+// sets it at the settlement the NIGHT BEFORE polling day, which is also when
+// nominations close - you cannot print a ballot paper without knowing whose
+// names go on it, and that gives the player's decision to STAND a real
+// deadline (Saturday's settlement) instead of a vague intention.
+//
+// `voters` is keyed by NAME rather than held on the crab, for the same reason
+// `hall.mayor` is: a name survives a reload and a crab object does not. Without
+// it, a town saved at noon on polling day would reload with every paper still
+// in the box and the whole town free to vote a second time.
+let ballotBox = null;
+function pollWeekday(d) { return weekdayIdx(d) === POLL_WEEKDAY; }
+// AN ELECTION IS CALLED vs. A POLL IS OPEN FOR BUSINESS. The gap between those
+// two is the failure mode: a town that could not afford paper still HAS a
+// polling day, it just has nothing to vote with.
+function pollCalled() { return hallOn() && !!ballotBox && ballotBox.day === day; }
+function pollHeld() { return pollCalled() && ballotBox.printed > 0; }
+function pollOpen() { return pollHeld() && !ballotBox.shut && tmin >= POLL_OPEN && tmin < POLL_SHUT; }
+function pollCounting() { return pollHeld() && ballotBox.shut && !ballotBox.declared; }
+function hasVoted(c) { return pollCalled() && !!ballotBox.voters[c.p.name]; }
+function pollPapers() { return pollCalled() ? ballotBox.papers : 0; }
+// WHO IS STANDING AT THE TABLE right now - used to space voters out along it
+// so they queue rather than stand inside one another, and to draw the scene.
+function pollVoters(i) {
+  return allCrabs().filter(k => k.dayState === "atTap" && k.tapStop && k.tapStop.vote
+    && (i == null || k.tapStop.poll === i));
+}
+// HOW BADLY THIS CRAB WANTS TO GO AND VOTE, on the same 0-1 scale as hunger and
+// thirst, so it can be scored by the same errand machinery (see needLevel).
+//
+// It is a RAMP, not a constant, and the ramp is the whole behaviour: for most
+// of the day a vote is worth VOTE_BASE - a thing you do if the table happens to
+// be on your way, which through errandScore's detour term means the crabs whose
+// commute crosses the promenade vote early and easily. In the last VOTE_URGE_HRS
+// it climbs, and crabs who have not got there yet start making a special trip.
+// That is what a polling day actually looks like, and it is why the closing time
+// has teeth: the rush is real and some of it does not arrive.
+//
+// It is capped BELOW dire (0.9) on purpose. errandScore short-circuits anything
+// at or past DIRE straight to the top of the list regardless of distance, and
+// nobody in this town walks off a shift to vote.
+function civicUrge(c) {
+  if (!pollOpen() || hasVoted(c)) return 0;
+  const left = POLL_SHUT - tmin;
+  const rush = 1 - Math.max(0, Math.min(1, left / (VOTE_URGE_HRS * 60)));
+  return VOTE_BASE + (VOTE_MAX - VOTE_BASE) * rush;
+}
 function mayorCrab() { return hall.mayor ? allCrabs().find(c => c.p.name === hall.mayor) || null : null; }
 function isMayor(c) { return !!hall.mayor && c.p.name === hall.mayor; }
 // THE PLAYER HOLDS THE OFFICE when the crab in the hat is one of theirs. That
@@ -781,9 +926,32 @@ function potWant() {
   const ill = allCrabs().reduce((n, c) => n + (c.p.sick ? 1 : 0), 0);
   return Math.max(0, Math.min(POT_MAX, hall.policy.bowls | 0, ill + (ill > 0 ? 1 : 0)));
 }
+// WHAT TOMORROW'S ELECTION COSTS IN PAPER, and therefore what the purse has to
+// be struck for tonight. Without this line the office NEVER holds an election
+// and the reason is invisible: the fund is struck to cover its bill and
+// nothing else (see the note above), so it settles every night holding exactly
+// the rent float - and ballot paper only ever comes out of what is left ABOVE
+// that float. Measured before the fix: every seed, every week, "NO BALLOT
+// PAPER" - not because the town was poor, but because nobody had budgeted for
+// the election. A town raises the money for its own poll.
+function ballotBill() {
+  if (!hallOn()) return 0;
+  // TWO NIGHTS OUT, not one, and the reason is the collection lag. Only LEVY
+  // and TIN are collected inside collectPurse, right here at the office's own
+  // settlement. RENTS is taken out of each house rent on its way past in step
+  // 3 - AFTER this - and DUES land with the ferry during the day. So on the
+  // founding RENTS policy the fund's balance tonight is what LAST night's
+  // collection left, and asking for the paper money on the eve of the poll
+  // asks for it one night too late. Measured: with a one-night window, three
+  // of four seeds printed nothing at all on the founding policy while the
+  // town was perfectly solvent. A clerk orders paper the night before and has
+  // saved for it the night before that.
+  if (!pollWeekday(day + 1) && !pollWeekday(day + 2)) return 0;
+  return (allCrabs().length + BALLOT_SPARE) * BALLOT_PRICE;
+}
 function fundNeed() {
   return Math.max(0, SHELTER_RENT * (1 + SHELTER_FLOAT) + townFund.arrears
-    + potWant() * bowlCost() - townFund.bal);
+    + potWant() * bowlCost() + ballotBill() - townFund.bal);
 }
 // the attribution switch, the same shape as _failOff and _noRival: the balance
 // matrix turns the whole office off and reads its own movement back
@@ -1105,45 +1273,222 @@ function buildBallot() {
   }
   return cands;
 }
-// POLLING DAY. Every crab in town votes their own interest - no blocs, no
-// loyalty, and the player's own crew will vote against their employer's
-// platform if the shelter is where they sleep. Visitors do not vote: they are
-// tourists, and they are gone on Tuesday.
-function runElection() {
-  const cands = buildBallot();
-  if (!cands.length) return null;
-  const town = allCrabs(), lines = [];
-  for (const c of town) {
-    let pick = null, pv = -Infinity;
-    for (const k of cands) {
-      const v = platValue(c, k.plat);
-      // a dead heat in a voter's head goes to the crab already doing the job,
-      // then alphabetically - so the same town votes the same way every run
-      if (v > pv + 1e-9 || (Math.abs(v - pv) <= 1e-9 && pick
-          && !pick.inc && (k.inc || k.name < pick.name))) { pv = v; pick = k; }
-    }
-    if (!pick) continue;
-    pick.votes++;
-    lines.push(c.p.name + " -> " + pick.name + ": " + voteReason(c, pick.plat));
+// HOW ONE CRAB MARKS ONE PAPER. Every crab votes their own interest - no
+// blocs, no loyalty, and the player's own crew will vote against their
+// employer's platform if the shelter is where they sleep. Visitors do not
+// vote: they are tourists, and they are gone on Tuesday.
+function pickCandidate(c, cands) {
+  let pick = null, pv = -Infinity;
+  for (const k of cands) {
+    const v = platValue(c, k.plat);
+    // a dead heat in a voter's head goes to the crab already doing the job,
+    // then alphabetically - so the same town votes the same way every run
+    if (v > pv + 1e-9 || (Math.abs(v - pv) <= 1e-9 && pick
+        && !pick.inc && (k.inc || k.name < pick.name))) { pv = v; pick = k; }
   }
-  let win = cands[0];
-  for (const k of cands)
+  return pick;
+}
+
+// ---------------------------------------------------------------- the paper
+// NOMINATIONS CLOSE AND THE PAPER IS BOUGHT, at the settlement the night
+// before. Called from runTownHall AFTER the rent and the pot, which is the
+// order that matters: an election can never bolt the shelter, because paper
+// only ever comes out of what is left ABOVE the roof money (BALLOT_KEEP).
+//
+// A SHORT SET IS A REAL OUTCOME. The office prints one per crab in town plus
+// BALLOT_SPARE, and if it cannot afford that many it prints what it can - so a
+// poor town's late voters find an empty pile, by name, in their own diary. A
+// town that cannot afford a single sheet holds no election at all and the
+// incumbent keeps the hat by default. That is why the paper is CHEAP: it is
+// meant to bite in a genuinely destitute town, not to lock a poor one out of
+// the only mechanism it has for stopping being poor.
+// THE WHIP-ROUND, and it exists to kill a RATCHET rather than for the flavour.
+//
+// THE TRAP, found by a scenario and not by reading the code: a town where
+// everybody sleeps at the shelter pays NO house rent, so on the founding RENTS
+// policy the purse raises nothing, so the office cannot afford ballot paper,
+// so there is no election - and the only thing that could have moved that town
+// off RENTS was an election. A town could be locked out of the one lever it
+// has over the office BY the office's funding mechanism. PLAN's rule for this
+// whole system is that the town can vote itself into losing the shelter and
+// then vote itself back out: a corrective loop, never a ratchet. This was a
+// ratchet.
+//
+// So if the purse is short, the office passes the hat. It is the same movement
+// the collection tin already makes - money out of a named crab's own live
+// balance, through fundTake, audited like everything else - scoped to a
+// statutory purchase of a few pennies. Nobody gives who is not clear
+// themselves, the cap per crab is small, and the starting name rotates with
+// the day so the same crab at the top of the alphabet is not asked every week.
+// A town where NOBODY has WHIP_KEEP in their pocket still holds no election,
+// which is the destitute case this failure was always meant to be about.
+const WHIP_KEEP = 8;                 // nobody chips in for paper who is not this far clear
+const WHIP_MAX = BALLOT_PRICE * 4;   // ...and nobody is asked for more than a dollar of it
+function whipRound(short) {
+  let got = 0;
+  const givers = allCrabs().filter(c => (c.p.wallet || 0) >= WHIP_KEEP)
+    .sort((a, b) => (a.p.name < b.p.name ? -1 : 1));
+  for (let i = 0; i < givers.length && got < short - 0.005; i++) {
+    const c = givers[(i + day) % givers.length];
+    got += fundTake({ k: "crab", c }, Math.min(short - got, WHIP_MAX), "PAPER WHIP-ROUND");
+  }
+  return got;
+}
+function printBallots() {
+  ballotBox = null;
+  if (!hallOn()) return;
+  const cands = buildBallot();
+  if (!cands.length) return;
+  const roll = allCrabs().length;
+  const want = roll + BALLOT_SPARE;
+  // THE ONLY GUARD IS THE LANDLORD. A town that owes rent does not spend fund
+  // money on ballot paper - but a town that is square with him buys it out of
+  // what is in hand, because at BALLOT_PRICE a sheet the paper is never the
+  // marginal cause of a bolted door. The POT is, and the pot is a policy the
+  // town voted for.
+  let spare = townFund.arrears > 0 ? 0 : Math.max(0, townFund.bal);
+  const full = want * BALLOT_PRICE;
+  if (spare < full - 0.005) {
+    const raised = whipRound(full - spare);
+    if (raised > 0.005) {
+      spare += raised;
+      today.moved.push("THE TOWN PASSED THE HAT FOR BALLOT PAPER - $" + (Math.round(raised * 100) / 100));
+    }
+  }
+  const n = Math.max(0, Math.min(want, Math.floor(spare / BALLOT_PRICE + 1e-9)));
+  const cost = Math.round(n * BALLOT_PRICE * 100) / 100;
+  // ...and it comes off the ferry like every other import, on the trade
+  // ledger, out of a named purse. Nothing in this town is conjured.
+  if (n > 0) { fundRemit(cost, "THE FERRY", "BALLOT PAPER"); tradeImport("paper", n, cost); }
+  ballotBox = { day: day + 1, cands, papers: n, printed: n, want, roll,
+    voters: {}, cast: [], lines: [], turnedAway: [], late: [],
+    counted: 0, countT: 0, shut: false, declared: false };
+  today.moved.push(n >= want
+    ? n + " BALLOT PAPERS PRINTED FOR TOMORROW"
+    : n > 0 ? "ONLY " + n + " BALLOT PAPERS - THE FUND COULD NOT PRINT " + want
+    : "NO BALLOT PAPER - THE OFFICE CANNOT AFFORD AN ELECTION");
+  if (window._stats) (window._stats.printed = window._stats.printed || []).push({ day: day + 1, n, want });
+}
+
+// ---------------------------------------------------------------- the vote
+// ONE CRAB, ONE PAPER, IN PERSON. Called when a crab has finished their spell
+// at the table (see updateTap). Returns what happened to them, because all
+// three outcomes are things the player should be able to watch happen to
+// somebody by name.
+function castVote(c) {
+  const B = ballotBox;
+  if (!pollHeld()) return "none";
+  if (hasVoted(c)) return "twice";              // belt and braces; pickErrand already gates this
+  if (B.papers <= 0) { B.turnedAway.push(c.p.name); return "nopaper"; }
+  const pick = pickCandidate(c, B.cands);
+  if (!pick) return "none";
+  B.papers--;
+  B.voters[c.p.name] = pick.name;
+  // THE TALLY DOES NOT EXIST YET. The paper goes in the box face down and
+  // cands[].votes stays at zero until the count reads it back out - which is
+  // the whole difference between an election and a poll of opinion.
+  B.cast.push({ voter: c.p.name, pick: pick.name });
+  B.lines.push(c.p.name + " -> " + pick.name + ": " + voteReason(c, pick.plat));
+  return "cast";
+}
+
+// ---------------------------------------------------------------- the count
+// THE POLLS SHUT, AND THEN IT IS ARITHMETIC BY HAND. One paper every
+// COUNT_MINS on the game clock, in the order they went into the box, and the
+// result exists only when the last one has been read out.
+function updatePoll(dt) {
+  if (!pollCalled()) return;
+  const B = ballotBox;
+  // AN ELECTION WITH NO PAPER. The polling day is in the diary and the office
+  // could not afford to print, so there is nothing on the promenade to walk
+  // to. The town is told once, at opening time, because "why was there no
+  // election" has to have an answer.
+  if (!B.printed && !B.told && tmin >= POLL_OPEN) {
+    B.told = true;
+    toast = { text: "NO ELECTION TODAY - THE FUND COULD NOT AFFORD THE PAPER", t: 8 };
+    today.moved.push("NO BALLOT PAPER - " + (hall.mayor || "THE OFFICE") + " STAYS UNOPPOSED");
+    sfx.angry();
+  }
+  if (!B.shut && tmin >= POLL_SHUT) {
+    B.shut = true; B.countT = 0;
+    if (B.printed > 0) {
+      const n = B.cast.length;
+      today.moved.push("THE POLLS SHUT - " + n + " PAPER" + (n === 1 ? "" : "S") + " IN THE BOX");
+      toast = { text: "POLLS SHUT - COUNTING " + n + " PAPER" + (n === 1 ? "" : "S"), t: 5 };
+      sfx.ding();
+    }
+  }
+  if (!pollCounting()) return;
+  B.countT += dt * TS;   // the count runs on the town clock, not on frames
+  while (B.counted < B.cast.length && B.countT >= COUNT_MINS) {
+    B.countT -= COUNT_MINS;
+    const k = B.cands.find(x => x.name === B.cast[B.counted].pick);
+    if (k) k.votes++;
+    B.counted++;
+  }
+  if (B.counted >= B.cast.length) declarePoll();
+}
+// THE COUNT RAN LATE. A town big enough to take more than an hour to count
+// would otherwise still be counting when the office settles, and the fund
+// cannot strike a purse on a policy nobody has declared yet. The rest of the
+// papers are read at the settlement table.
+function finishCount() {
+  const B = ballotBox;
+  if (!pollCounting()) return;
+  while (B.counted < B.cast.length) {
+    const k = B.cands.find(x => x.name === B.cast[B.counted].pick);
+    if (k) k.votes++;
+    B.counted++;
+  }
+  declarePoll();
+}
+// THE DECLARATION. The office changes hands here, on the promenade, when the
+// last paper is read - not at the settlement table. So a town that votes for a
+// new purse at teatime is trading under it by nightfall.
+function declarePoll() {
+  const B = ballotBox;
+  if (!B || B.declared) return;
+  B.declared = true;
+  const rec = (winner, you, cands, lines) => ({
+    day: B.day, winner, you, turnout: B.cast.length, roll: B.roll,
+    printed: B.printed, away: B.turnedAway.length,
+    cands: cands.map(k => ({ name: k.name, line: policyLine(k.plat), votes: k.votes })),
+    lines: lines.slice(0, POLL_LINES),
+  });
+  // AN EMPTY BOX IS NOT A RESULT. Nobody got there - the shifts ate the day,
+  // or the paper ran out before anyone with a stake reached the table - so
+  // there is nothing to declare and the incumbent stays in the hat. The town
+  // is told, because "why is that crab still mayor" has to have an answer.
+  if (!B.cast.length) {
+    hall.poll = rec(hall.mayor, false, B.cands, []);
+    toast = { text: "NOT ONE PAPER IN THE BOX - " + (hall.mayor || "THE OFFICE") + " STAYS", t: 8 };
+    today.moved.push("THE POLL WAS EMPTY - " + (hall.mayor || "NOBODY") + " STAYS IN THE HAT");
+    if (window._stats) (window._stats.polls = window._stats.polls || []).push({
+      day: B.day, winner: hall.mayor, you: false, empty: true,
+      turnout: 0, roll: B.roll, printed: B.printed, away: B.turnedAway.length,
+      policy: policyLine(hall.policy), tally: "-" });
+    return;
+  }
+  let win = B.cands[0];
+  for (const k of B.cands)
     if (k.votes > win.votes || (k.votes === win.votes && !win.inc && (k.inc || k.name < win.name))) win = k;
-  const changed = hall.mayor !== win.name || policyLine(hall.policy) !== policyLine(win.plat);
   hall.mayor = win.name;
   hall.policy = { mech: win.plat.mech, rate: win.plat.rate | 0, bowls: win.plat.bowls | 0 };
   hall.termDay = day;
-  hall.poll = { day, winner: win.name, you: !!win.you, turnout: town.length,
-    cands: cands.map(k => ({ name: k.name, line: policyLine(k.plat), votes: k.votes })),
-    // one written line per voter, and the cap is generous rather than tidy: a
-    // grown town votes 14+ and the whole point of these is that a result can
-    // be argued with from the roster
-    lines: lines.slice(0, POLL_LINES) };
+  hall.poll = rec(win.name, !!win.you, B.cands, B.lines);
   if (window._stats) (window._stats.polls = window._stats.polls || []).push({
-    day, winner: win.name, you: !!win.you, policy: policyLine(hall.policy),
-    tally: hall.poll.cands.map(k => k.name + " " + k.votes).join(" "),
-  });
-  return { win, changed };
+    day: B.day, winner: win.name, you: !!win.you,
+    turnout: B.cast.length, roll: B.roll, printed: B.printed, away: B.turnedAway.length,
+    policy: policyLine(hall.policy),
+    tally: hall.poll.cands.map(k => k.name + " " + k.votes).join(" ") });
+  const you = win.you ? "YOUR " : "";
+  toast = { text: you + hall.mayor + " TAKES THE HAT - " + policyLine(hall.policy), t: 8 };
+  today.moved.push(hall.mayor + " ELECTED MAYOR - " + policyLine(hall.policy)
+    + " (" + B.cast.length + "/" + B.roll + " VOTED)");
+  const m = mayorCrab();
+  if (m) { popText("MAYOR!", m.x - 8, FLOOR_Y - 40, [255, 216, 96]); crabLog(m, "life", "ELECTED MAYOR - " + policyLine(hall.policy), 0); }
+  popText("DECLARED", POLL_PLACES[0].x - 12, 118, [255, 216, 96]);
+  sfx.ding();
 }
 
 // ---------------------------------------------------------------- the office's night
@@ -1184,19 +1529,20 @@ function runTownHall() {
       sfx.angry();
     }
   }
-  // 2. tomorrow's bowls, bought from a real business at a real price
+  // 2. THE PAPER FOR TOMORROW'S POLL, if there is one - BEFORE the soup, and
+  //    that ordering is the whole of it. The roof is statutory and the
+  //    election is statutory; the pot is what the mayor CHOSE. A budget spends
+  //    its obligations before its intentions, and a town that let a discre-
+  //    tionary bowl of soup cancel its own election would have no way back.
+  //    MEASURED with the pot first: three seeds in four printed nothing on the
+  //    founding policy, because an $8 bowl beat $2.25 of paper every time.
+  if (pollWeekday(day + 1)) printBallots();
+  // 3. tomorrow's bowls, bought from a real business at a real price
   stockPot();
-  // 3. ...and on polling day, the office changes hands (or doesn't)
-  if (weekdayIdx(day) === POLL_WEEKDAY && hall.poll && hall.poll.day === day) return;
-  if (weekdayIdx(day) !== POLL_WEEKDAY) return;
-  const r = runElection();
-  if (!r) return;
-  const you = r.win.you ? "YOUR " : "";
-  toast = { text: you + hall.mayor + " TAKES THE HAT - " + policyLine(hall.policy), t: 8 };
-  today.moved.push(hall.mayor + " ELECTED MAYOR - " + policyLine(hall.policy));
-  const m = mayorCrab();
-  if (m) { popText("MAYOR!", m.x - 8, FLOOR_Y - 40, [255, 216, 96]); crabLog(m, "life", "ELECTED MAYOR - " + policyLine(hall.policy), 0); }
-  sfx.ding();
+  // 4. THE COUNT, if the town is big enough that it ran past the settlement
+  //    table. The office cannot strike tomorrow's purse on a policy nobody has
+  //    declared yet, so the last papers are read here.
+  finishCount();
 }
 // A FRESH TOWN IS NOT AN EMPTY ONE. The shelter has been open since before the
 // player signed the lease, so somebody has been keeping it that way: the crab
@@ -3395,9 +3741,13 @@ const IMPORTS = {
   water: { name: "WATER", unit: "GAL", price: 1 },
   power: { name: "POWER", unit: "KWH", price: 2 },
   fruit: { name: "FRUIT", unit: "EA",  price: 2 },
+  // BALLOT PAPER. The only import in this table the TOWN buys rather than a
+  // shop - the office orders it the night before a poll and the ferry lands
+  // it, which is the whole reason an election has a price at all.
+  paper: { name: "PAPER", unit: "SHT", price: BALLOT_PRICE },
 };
-let trade = { total: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 },
-  day: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, spent: 0,
+let trade = { total: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 },
+  day: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 }, spent: 0,
   landedDay: 0, landed: 0,   // pier production - NOT an import
   // the fish market: today's price, fish eaten today (demand), 3-day
   // supply/demand windows, days pinned at the ceiling, and the price series
@@ -4556,6 +4906,12 @@ function save() {
       ledger: townFund.ledger.slice(-24) },
     hall: { mayor: hall.mayor, policy: hall.policy, termDay: hall.termDay, poll: hall.poll,
       stand: hall.stand, nominee: hall.nominee, plat: hall.plat },
+    // THE BALLOT BOX, because a town saved at noon on polling day has real
+    // paper in a real box. Without this a reload would hand the whole town a
+    // second vote and a fresh pile of paper nobody paid for - which is the
+    // same class of bug as the fund minting money, and the same rule catches
+    // it: what is in the box is a resource, so it rides in the envelope.
+    box: ballotBox,
     board: jobBoard, hireDay, trade, sudsRefund: sudsRefunded, firstPour,
     musicOn, musNudges,
     hours: (() => { const h = {}; for (const k in BIZ) h[k] = [BIZ[k].hours.open, BIZ[k].hours.close]; return h; })(),
@@ -4735,6 +5091,7 @@ function load(slot) {
   townFund = { bal: 0, bowls: 0, strikes: 0, shut: 0, arrears: 0,
     ledger: [], served: 0, cold: 0, wasted: 0, dayIn: 0, dayOut: 0, youPaid: 0, youGot: 0,
     potWhy: "ok" };
+  ballotBox = null;
   hall = { mayor: null, policy: { mech: "rents", rate: 4, bowls: 2 }, termDay: 0, poll: null,
     stand: false, nominee: null, plat: { mech: "levy", rate: 2, bowls: 3 } };
   if (s.fund && typeof s.fund === "object") {
@@ -4776,8 +5133,48 @@ function load(slot) {
       lines: (Array.isArray(H.poll.lines) ? H.poll.lines : []).slice(0, POLL_LINES).map(l => String(l).slice(0, 72)),
     };
   }
-  if (s.trade && s.trade.total) trade = { total: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, s.trade.total),
-    day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }, s.trade.day), spent: s.trade.spent || 0,
+  // THE BALLOT BOX. Hardened the same way as everything else that comes off
+  // disk: a candidate needs a name AND a platform the game can actually score
+  // (pickCandidate calls platValue on it), so a malformed entry is dropped
+  // rather than trusted. A box whose day has passed is simply ignored - the
+  // poll it belonged to is over.
+  ballotBox = null;
+  {
+    const B = s.box;
+    if (B && typeof B === "object" && Array.isArray(B.cands)) {
+      const cands = B.cands.slice(0, 6).map(k => {
+        const pl = (k && k.plat) || {};
+        return { name: String((k && k.name) || "").slice(0, 14),
+          plat: { mech: PURSES[pl.mech] ? pl.mech : "rents",
+            rate: Math.max(0, Math.min(4, Math.round(+pl.rate || 0))),
+            bowls: Math.max(0, Math.min(POT_MAX, Math.round(+pl.bowls || 0))) },
+          votes: Math.max(0, Math.round(+(k && k.votes) || 0)),
+          inc: !!(k && k.inc), you: !!(k && k.you) };
+      }).filter(k => k.name);
+      const cast = (Array.isArray(B.cast) ? B.cast : []).slice(0, 64)
+        .map(v => ({ voter: String((v && v.voter) || "").slice(0, 14), pick: String((v && v.pick) || "").slice(0, 14) }))
+        .filter(v => v.voter && cands.some(k => k.name === v.pick));
+      const voters = {};
+      for (const v of cast) voters[v.voter] = v.pick;
+      const nm = (a) => (Array.isArray(a) ? a : []).slice(0, 32).map(x => String(x).slice(0, 14)).filter(Boolean);
+      if (cands.length) ballotBox = {
+        day: Math.max(1, Math.round(+B.day || 1)), cands,
+        printed: Math.max(0, Math.round(+B.printed || 0)),
+        want: Math.max(0, Math.round(+B.want || 0)),
+        roll: Math.max(0, Math.round(+B.roll || 0)),
+        // the pile can never be larger than what was printed less what is
+        // already in the box: a reload does not conjure paper
+        papers: Math.max(0, Math.min(Math.max(0, Math.round(+B.printed || 0)) - cast.length,
+          Math.round(+B.papers || 0))),
+        voters, cast, turnedAway: nm(B.turnedAway), late: nm(B.late),
+        lines: (Array.isArray(B.lines) ? B.lines : []).slice(0, POLL_LINES).map(l => String(l).slice(0, 72)),
+        counted: Math.max(0, Math.min(cast.length, Math.round(+B.counted || 0))),
+        countT: 0, shut: !!B.shut, declared: !!B.declared,
+      };
+    }
+  }
+  if (s.trade && s.trade.total) trade = { total: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 }, s.trade.total),
+    day: Object.assign({ fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 }, s.trade.day), spent: s.trade.spent || 0,
     landed: s.trade.landed || 0, landedDay: s.trade.landedDay || 0,
     // fish market state; pre-market saves open at the old $4 with a blank chart
     price: typeof s.trade.price === "number"
@@ -5554,14 +5951,19 @@ function bizStaffed(b) { return bizUnlocked(b) && !bizDark(b) && allCrabs().some
 // ends regardless - the workplace while a shift is coming, otherwise home.
 // One comparison per candidate, no path search, and imperfection survives:
 // a genuinely desperate crab (need >= DIRE) still ignores the map entirely.
-const ERRAND_RANK = { food: 4, drink: 3, clean: 2, fun: 1 };   // the old priority order, as a number
+// THE PRIORITY ORDER, as a number. VOTE sits level with CLEAN: above a game
+// and below a meal or a drink, which is roughly where a civic duty sits in a
+// crab who is otherwise comfortable. It matters less than it looks, because
+// civicUrge is a ramp - the same errand is worth 2.3 at breakfast and 2.85 at
+// six in the evening, and it is the ramp that decides who actually turns up.
+const ERRAND_RANK = { food: 4, drink: 3, clean: 2, vote: 2, fun: 1 };
 const DETOUR_SCALE = 400;   // px of added walking that halves a stop's appeal
 const DETOUR_MAX = 900;     // ~half the promenade: not before a shift, it can wait
 const DIRE = 0.9;           // this needy and geography stops mattering
 const CHAIN_PX = 260;       // a second stop this close beats walking home and back out
 function needLevel(c, need) {
   return need === "food" ? (c.p.hunger || 0) : need === "drink" ? (c.p.thirst || 0)
-    : need === "clean" ? (c.p.dirt || 0) : (c.p.bored || 0);
+    : need === "clean" ? (c.p.dirt || 0) : need === "vote" ? civicUrge(c) : (c.p.bored || 0);
 }
 // where this trip ends no matter what: the job while a shift is still coming
 // (or under way), home the rest of the time
@@ -5574,6 +5976,7 @@ function anchorX(c) {
 // where a candidate stop physically is: a tap post, a shop's own door (staff
 // self-serve) or the public side of its counter
 function errandStopX(e) {
+  if (e.vote) return POLL_PLACES[e.poll].x;
   if (e.ball) return BALL_X;
   if (e.soup) return SOUP_X;
   if (e.tap != null) return WATER_TAPS[e.tap].x;
@@ -5756,6 +6159,27 @@ function pickErrand(c) {
     if (c.p.sick && potWarm() && (c.p.hunger || 0) >= at && !cand.some(e2 => e2.need === "food"))
       take({ soup: true, need: "food", appeal: TAP_APPEAL });
   }
+  // POLLING DAY IS AN ERRAND (see the POLLING DAY block). The table is at
+  // POLL_X and the crab has to walk there, which means turnout is decided by
+  // the same two things that decide every other stop in this game: WHERE you
+  // are and WHEN you are free. A crab whose commute crosses the promenade
+  // votes on the way past for almost nothing; a fisher on the rail has to
+  // want it. Nobody is teleported to the ballot box.
+  //
+  // NOT ON THE CLOCK, for the reason the beach ball is not: pickErrand also
+  // serves the on-shift paths (the fisher's break, the walk home past the
+  // counter), and a crab who leaves a counter unstaffed to go and vote is a
+  // crab whose employer pays for their civic duty. Vote before your shift or
+  // after it - and if your shift does not leave room for either, then your
+  // employer has taken your vote, which is a thing this town should be able
+  // to do to you.
+  //
+  // An ILL crab may still vote. They drag themselves to the taps and to the
+  // shelter pot already, and a sick day is their own time.
+  // Both tables are offered and the detour score picks the near one - the
+  // identical shape the two standpipes use, three blocks up.
+  if (pollOpen() && !hasVoted(c) && !c.duty && c.dayState !== "working")
+    for (let i = 0; i < POLL_PLACES.length; i++) take({ vote: true, poll: i, need: "vote" });
   // bed rest otherwise: no arcade nights while ill
   if (!c.p.sick && (c.p.bored || 0) >= (off ? 0.35 : 0.6) && staffed("arcade")) {
     const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
@@ -5836,20 +6260,62 @@ function startErrand(c, e) {
 // use it, walk on. Deliberately its own tiny state so nothing in the customer
 // pipeline has to learn about a stop that never pays anybody.
 function startTapStop(c, e) {
+  // THE POLLING TABLE TAKES A LINE. Voters space along it rather than standing
+  // inside one another - this town learned to queue in the queue pass and the
+  // ballot box is not an exception - and the slot is read BEFORE the crab
+  // enters the state, so they never count themselves.
+  const slot = e.vote ? POLL_PLACES[e.poll].x + 4 + VOTE_DX * Math.min(4, pollVoters(e.poll).length) : null;
   c.dayState = "atTap"; c.tapStop = e; c.tapT = 0;
   c.p.tired = Math.min(1, (c.p.tired || 0) + TIRED_ERRAND);
-  setT(c, e.soup ? SOUP_X : WATER_TAPS[e.tap].x + 6, 163);
+  if (slot != null) setT(c, slot, VOTE_Y);
+  else setT(c, e.soup ? SOUP_X : WATER_TAPS[e.tap].x + 6, 163);
 }
 function updateTap(c, dt) {
   const e = c.tapStop;
   if (!e) { c.dayState = "home"; return; }
   if (c.tapT <= 0) {                      // still walking over
-    if (routedStep(c, crabMove(c), dt)) c.tapT = e.soup ? SOUP_MINS : TAP_SIP;
+    if (routedStep(c, crabMove(c), dt)) {
+      // ARRIVING AFTER THE POLLS SHUT is a real way to lose your vote, and it
+      // is the whole point of there being a closing time. The rule is the one
+      // a real returning officer uses: standing at the table when it shuts
+      // counts, turning up at one minute past does not.
+      if (e.vote && !pollOpen()) {
+        if (pollCalled()) ballotBox.late.push(c.p.name);
+        crabLog(c, "peril", "GOT TO THE POLLS AND THEY HAD SHUT", 0);   // DIARY
+        popText("TOO LATE TO VOTE", c.x - 18, FLOOR_Y - 30, [190, 80, 80]);
+        c.quip = { text: ["SHUT? ALREADY?", "I HAD THE WHOLE DAY", "NEXT WEEK, THEN"][(Math.random() * 3) | 0], t: 2.8 };
+        c.tapStop = null; c.tapT = 0; c.errandCd = VOTE_CD;
+        c.dayState = "home"; afterErrand(c, false);
+        return;
+      }
+      c.tapT = e.vote ? VOTE_SECS : e.soup ? SOUP_MINS : TAP_SIP;
+    }
     return;
   }
   c.tapT -= dt;
   if (c.tapT > 0) return;
-  if (e.soup) {
+  if (e.vote) {
+    // A PAPER, A PENCIL, AND A BOX. The mark is made here and the tally does
+    // not move: cands[].votes stays at zero until the count reads it back out
+    // tonight, so nobody - not the crab, not the player - knows the result
+    // until the last paper is read.
+    const r = castVote(c);
+    if (r === "cast") {
+      crabLog(c, "life", "VOTED", 0);   // DIARY
+      popText("VOTED", c.x - 6, FLOOR_Y - 30, [255, 216, 96]);
+      c.quip = { text: ["THAT'S MY LOT", "MARKED AND IN", "WE'LL SEE TONIGHT"][(Math.random() * 3) | 0], t: 2.4 };
+      if (window._stats) window._stats.votesCast = (window._stats.votesCast || 0) + 1;
+    } else if (r === "nopaper") {
+      // THE PILE RAN OUT. A crab walked the promenade to exercise the one
+      // lever this town gives them over the office, and the office could not
+      // afford the paper. This is the failure mode the player is meant to see
+      // happen to somebody by name - the same shape as a cold pot.
+      crabLog(c, "peril", "CAME TO VOTE AND THE PAPER HAD RUN OUT", 0);   // DIARY
+      popText("NO PAPER LEFT", c.x - 14, FLOOR_Y - 30, [190, 80, 80]);
+      c.quip = { text: ["NO PAPER?", "WHAT KIND OF ELECTION IS THIS", "TYPICAL"][(Math.random() * 3) | 0], t: 2.8 };
+      if (window._stats) window._stats.votesRefused = (window._stats.votesRefused || 0) + 1;
+    }
+  } else if (e.soup) {
     // ...and the bowl only exists if the fund bought one. A crab who walked
     // the promenade to a COLD POT gets nothing and says so - which is the
     // failure mode the player is meant to see happen to somebody by name.
@@ -5876,7 +6342,7 @@ function updateTap(c, dt) {
     c.quip = { text: ["GLUG GLUG", "THAT'LL DO", "STRAIGHT FROM THE TAP"][(Math.random() * 3) | 0], t: 2.4 };
     if (window._stats) window._stats.tapDrinks = (window._stats.tapDrinks || 0) + 1;
   }
-  c.tapStop = null; c.tapT = 0; c.errandCd = e.soup ? SOUP_CD : TAP_CD;
+  c.tapStop = null; c.tapT = 0; c.errandCd = e.vote ? VOTE_CD : e.soup ? SOUP_CD : TAP_CD;
   c.dayState = "home";
   afterErrand(c, true);   // free water is a stop like any other: chain on from it
 }
@@ -5888,7 +6354,7 @@ function updateTap(c, dt) {
 function beginErrand(c, e, requireOpen) {
   if (!e) return false;
   if (e.ball) { startBallStop(c); return true; }
-  if (e.soup || e.tap != null) { startTapStop(c, e); return true; }
+  if (e.vote || e.soup || e.tap != null) { startTapStop(c, e); return true; }
   if (e.selfCook) { startSelfCook(c, e); return true; }
   if (requireOpen && !bizOpenNow(e.biz)) return false;
   startErrand(c, e);
@@ -5910,15 +6376,16 @@ function afterErrand(c, chain) {
   const sh = effShift(c);
   if (chain && !c.p.sick && (c.chainN || 0) < 2) {
     const e = pickErrand(c);
-    // three kinds of free stop now - the taps, the shelter pot and the beach
-    // ball - and none of them is "the same stop" as a shop counter
-    const free = (x) => !!x && (x.ball || x.soup || x.tap != null);
+    // four kinds of stop that never ring a till now - the taps, the shelter
+    // pot, the beach ball and the ballot box - and none of them is "the same
+    // stop" as a shop counter
+    const free = (x) => !!x && (x.ball || x.soup || x.vote || x.tap != null);
     const sameStop = e && (free(e) ? false : e.biz === c.errandBiz);
     if (e && !e.selfCook && !sameStop && (free(e) || bizOpenNow(e.biz))
         && errandDetour(c, e) <= CHAIN_PX) {
       c.chainN = (c.chainN || 0) + 1; c.errandCd = 0;
       if (e.ball) startBallStop(c);
-      else if (e.soup || e.tap != null) startTapStop(c, e);
+      else if (e.vote || e.soup || e.tap != null) startTapStop(c, e);
       else startErrand(c, e);
       return;
     }
@@ -7983,7 +8450,9 @@ function updateCustomers(dt) {
 
 // ---------------------------------------------------------------- status text
 function tapStatus(c) {
-  const e = c.tapStop, nm = !e ? "THE TAP" : e.soup ? "THE SHELTER POT" : WATER_TAPS[e.tap].name;
+  const e = c.tapStop;
+  if (e && e.vote) return (c.tapT > 0 ? "VOTING AT " : "OFF TO VOTE AT ") + POLL_PLACES[e.poll].name;
+  const nm = !e ? "THE TAP" : e.soup ? "THE SHELTER POT" : WATER_TAPS[e.tap].name;
   if (!e || c.tapT <= 0) return "WALKING TO " + nm;
   if (e.soup) return "IN THE LINE AT " + nm;
   return e.need === "clean" ? "RINSING OFF AT " + nm : "DRINKING AT " + nm;
@@ -11836,7 +12305,7 @@ function frame(now) {
     settleFishMarket();   // the day's landings vs the day's appetite set tomorrow's pier price
     townCatch = Math.min(townCatch, 4); rep = rep + (30 - rep) * 0.06;
     for (const c of allCrabs()) { c.workedToday = false; c.otMin = 0; }   // a new day's ledger
-    trade.day = { fish: 0, corn: 0, water: 0, power: 0, fruit: 0 }; trade.landedDay = 0;
+    trade.day = { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 }; trade.landedDay = 0;
     townFund.dayIn = 0; townFund.dayOut = 0; townFund.youPaid = 0; townFund.youGot = 0;   // the fund's own day book
     today = newDayLog(); today.repStart = rep;
   }
@@ -12207,6 +12676,7 @@ function frame(now) {
   if (!gameOver) {
   updateBus(dt);
   if (tmin >= 7.5 * 60 && hireDay !== day) { hireDay = day; runJobBoard(); }
+  updatePoll(dt);   // the polls shut on the clock, and then the count runs on it too
   updateCustomers(dt);
   runChatter(dt);   // its own pass over the crab list - NOT folded into collide()
   for (const c of allCrabs()) {
