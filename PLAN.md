@@ -6201,9 +6201,26 @@ same control flow, no RNG consumed differently. Full matrix on this tree:
 `--days 30 --seeds 16` → **0/16, median 12** (7,10,11,11,11,11,11,12,12,12,12,
 13,13,13,14,14), which is the documented baseline.
 
-### Suite 167 -> 180, ZERO re-pointings
+### Suite 207 -> 220, ZERO re-pointings
 
 Thirteen new scenarios, plus the card added to the two canonical sweeps.
+(167 -> 180 at the branch point; 207 -> 220 once merged onto `d0c0e0c`.)
+
+**The merged run is 217/220, and all three reds are INHERITED.** Each one
+reproduces on a clean `git archive main` export with **byte-identical numbers**:
+
+| scenario | on this branch | on clean main |
+|---|---|---|
+| `fish market: scarcity walks the price to the ceiling` | `$324.5 for 46` | `$324.5 for 46` |
+| `the beach ball is LIMITED fun` | `chose null instead of the ball` | `chose null instead of the ball` |
+| `rivalry: after a refusal she competes...` | dear 46.1% / level 48.3% / cut 44.5% | dear 46.1% / level 48.3% / cut 44.5% |
+
+The rivalry line is worth reading twice: it reports its raw sample counts (bar
+190/199/207, showers 222/213/258) and **every one of those integers is the same
+on both trees.** That is a stronger statement than "the card changed nothing" -
+it says this branch's demand model is bit-for-bit the same simulation as main's,
+measured over three 40-day towns, which is exactly what a display card should be
+able to claim. The three reds are main's to triage; none is this card's.
 
 `departures: every character the card prints exists in the font` — see below,
 it is the one defect here that no assertion could have found first;
