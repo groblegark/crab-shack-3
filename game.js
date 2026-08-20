@@ -2758,8 +2758,9 @@ const DORM_CFG = {
                   // crab who lost a house. Growth is what fills a shelter.
   MAX: 12,        // ...and the most Mr. Pincherton will let the town have: two more
                   // rows of four in the same footprint (see cotSpot - the building
-                  // cannot get wider, the promenade lots are 4px away on both sides,
-                  // so it gets DEEPER and it gets a storey).
+                  // cannot get wider: house 5 ends four pixels west of it and house 6
+                  // starts flush against its east wall, so it gets DEEPER and it gets
+                  // a storey).
   RENT: 3,        // a night, per bed past the base. The base is $10 for four, which
                   // is $2.50 a bed: the landlord does not do a bulk discount, and a
                   // twelve-bed dormitory is $34 a night against a $10 one. That is
@@ -2854,11 +2855,13 @@ function cotShort() { return Math.max(0, cotRoster().length - shelterBeds()); }
 function bunkKey() { return DORM_CFG.RENT; }
 // THE TEST, and the player-as-mayor sits exactly the same one the CPU mayor
 // does: would the purse the town VOTED FOR still cover the shelter's bill with
-// this bed on it? That is the whole fiscal argument in one line. A town on Mr.
-// Pincherton's cut at its cap raises about the rent and no more, so it cannot
-// grow the shelter at all; a town on an 8% levy in a trading week can carry
-// three or four more beds. The mayor does not have to be told this - they have
-// to be TOLD THE NUMBER, which is what the chip and the placard do.
+// this bed on it? That is the whole fiscal argument in one line. MEASURED over
+// four 40-day growth towns: a town on Mr. Pincherton's cut raises about the
+// rent and no more, so it stalls at five beds and the refusal says which purse
+// it was ("THE RENTS WON'T CARRY $16 A NIGHT"); only a purse that genuinely
+// raises more than the shelter costs can grow it. The mayor does not have to be
+// told this - they have to be TOLD THE NUMBER, which is what the chip and the
+// notice do.
 function bunkWhy() {
   if (!hallOn()) return "THERE IS NO TOWN HALL";
   if (dormFull()) return "THE SHELTER IS AS BIG AS IT GETS";
@@ -2913,8 +2916,8 @@ function tapBunkChip() {
   }
   if (upArm !== "bunk") {
     upArm = "bunk"; upArmT = 3.5;
-    toast = { text: "TAP AGAIN: A BED IS $" + DORM_CFG.RENT + " A NIGHT FOREVER (RENT $"
-      + shelterRent() + " -> $" + (shelterRent() + DORM_CFG.RENT) + ")", t: 5 };
+    toast = { text: "TAP AGAIN: $" + DORM_CFG.RENT + " A NIGHT FOREVER - RENT $"
+      + shelterRent() + ">$" + (shelterRent() + DORM_CFG.RENT), t: 5 };
     if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
     return false;
   }
@@ -2973,11 +2976,13 @@ function fitReport(s) { return fitSmall(s, 164); }
 //
 // AND THE LANDLORD TAKES HIS CUT. A cabana is built on Mr. Pincherton's land
 // under Mr. Pincherton's lease, so the build price goes to him and the rent
-// goes up for good. That is what stops "buy every room" being free: at 69%
-// occupancy (the measured figure for the seven) the marginal bed earns about
-// $9 a night against $4 of new rent, and occupancy FALLS with every room you
-// add. An owner who builds past their demand is paying rent on empty huts,
-// which is exactly the judgement the shop is meant to be about.
+// goes up for good. That is what stops "buy every room" being free, because
+// OCCUPANCY FALLS WITH EVERY ROOM YOU ADD: the seven ran at 69% (4.8 lets a
+// night), and eight growth seeds that built out to twelve and thirteen rooms
+// ran at about 56% (7.3 a night, 1,051 -> 1,471 lets over the block). More beds
+// sold, a thinner house - so the marginal hut earns less than the last one did
+// and the rent on it is the same. An owner who builds past their demand is
+// paying rent on empty huts, which is exactly the judgement the shop is for.
 const ROOM_CFG = {
   EXTRA: 6,        // cabanas the forecourt holds: 2266 to 2396 at a 26px pitch, and the
                    // last one ends at 2412 - clear of the queue slot at 2432. Seven rooms
@@ -3058,7 +3063,7 @@ function buildRoom(oid) {
   annexe.day = day; annexe.short = 0;
   const who = oid === "player" ? "THE DRIFTWOOD" : (OWNERS[oid] ? OWNERS[oid].name : "THE DRIFTWOOD");
   today.moved.push(who + " PUT UP CABANA " + annexe.built + " - RENT $" + BIZ.hotel.rent);
-  toast = { text: who + " PUTS UP A CABANA - " + hotelRooms().length + " ROOMS, RENT $" + BIZ.hotel.rent, t: 7 };
+  toast = { text: who + " PUTS UP CABANA " + annexe.built + " - RENT $" + BIZ.hotel.rent, t: 7 };
   popText("CABANA " + annexe.built, cabanaSpot(annexe.built - 1).x - 4, 128, [255, 216, 96]);
   const c = allCrabs().find(k => k.p.owner === oid);
   if (c) crabLog(c, "money", "BUILT CABANA " + annexe.built + " - $" + roomBuildCost(), 0);
@@ -3085,8 +3090,8 @@ function tapRoomChip() {
   }
   if (upArm !== "room") {
     upArm = "room"; upArmT = 3.5;
-    toast = { text: "TAP AGAIN: A CABANA IS $" + roomBuildCost() + " AND $" + ROOM_CFG.RENT
-      + " A NIGHT ON THE LEASE (" + hotelRooms().length + " -> " + (hotelRooms().length + 1) + " ROOMS)", t: 5 };
+    toast = { text: "TAP AGAIN: $" + roomBuildCost() + " NOW, $" + ROOM_CFG.RENT
+      + " A NIGHT - ROOMS " + hotelRooms().length + ">" + (hotelRooms().length + 1), t: 5 };
     if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
     return false;
   }
@@ -3129,8 +3134,9 @@ function runAccommodation() {
 }
 // ---- WHAT THE SHELTER LOOKS LIKE WHEN IT GROWS ---------------------------
 // An upgrade you cannot see is a number on a card, and the owner's rule is that
-// the town is the interface. The shelter cannot get wider - the promenade lots
-// are 4px away on both sides - so it gets a STOREY: one band of loft above the
+// the town is the interface. The shelter cannot get wider - house 5 ends four
+// pixels west of it and house 6 stands flush against its east wall - so it
+// gets a STOREY: one band of loft above the
 // roofline per row of beds bought, with a lit window for each bed up there, and
 // the mayor's placard rides up with it. The cots themselves are drawn one per
 // BED, so the count on the placard and the beds in the room are the same
@@ -9877,7 +9883,8 @@ function drawTown() {
     // THE NOTICE. Hung above the shelter's own sign rather than over it - the
     // sign says what the building is and the notice says who is running it, and
     // a screenshot with the word SHELTER half under a board is worse than
-    // either. Two 7px rows, so it clears the roof line at HOME_BOTTOM - h.
+    // either. 7px rows, and its BOTTOM edge is what is pinned clear of the roof
+    // line (see dormNoticeY) - it grows upward, so it never lands on the roof.
     // THE THIRD LINE IS THE BEDS. The notice grew a row with the dormitory
     // (ACCOMMODATION UPGRADES): a shelter you can enlarge has to say from the
     // boardwalk how big it is and who is sleeping outside it, or the chip
@@ -9892,13 +9899,15 @@ function drawTown() {
       ok > 0 ? [200, 235, 200] : ok < 0 ? [255, 190, 150] : [255, 190, 190]);
     smallText(ctx, fitSmall(dormLine(), 72), sx + 2, sy + 15,
       short > 0 ? [255, 150, 130] : [190, 205, 235]);
+    // ...and the BED+ chip hangs off the bottom of the same notice, but only
+    // while the player is the one wearing the hat (ACCOMMODATION UPGRADES).
+    drawBunkChip();
     // ...AND THE POT ITSELF. OUT ON THE BOARDWALK, immediately left of where
     // the queue stands (errandStopX puts a crab at SOUP_X, and a crab is 16
     // wide), because the first cut drew it inside among the cots and it read as
     // a black slab rather than a pot. A belly, a rim, a trestle and embers -
     // and STEAM only when there is something in it, which is the one glance
     // from the boardwalk that says whether the office is working.
-    drawBunkChip();
     const px0 = SOUP_X - 15, py = 157;
     wrect(px0, py + 7, 12, 1, [92, 62, 40]);                              // trestle
     wrect(px0 + 1, py + 6, 2, 2, [92, 62, 40]); wrect(px0 + 9, py + 6, 2, 2, [92, 62, 40]);

@@ -6802,6 +6802,11 @@ scenario("shelter: the BED+ chip is the mayor's, and it sits on the notice witho
   if (sim.G("tapBunkChip()")) return "one tap signed a permanent bill";
   if (sim.G("shelterBeds()") !== beds0) return "the arming tap built a bed";
   if (!/A NIGHT FOREVER/.test(sim.G("JSON.stringify(toast.text)"))) return "the arming toast hides the recurring cost: " + sim.G("JSON.stringify(toast.text)");
+  // ...AND IT HAS TO FIT ON THE CARD IT IS PRINTED ON (the standing rule: text
+  // is measured, not counted). drawToast clamps at 252px and the first cut ran
+  // the new rent off the end of it, which is the one thing this toast is for.
+  if (sim.G("textWidth(toast.text, 5) + 12") > 252)
+    return "the arming toast is wider than the card: " + sim.G("textWidth(toast.text, 5) + 12") + "px";
   if (!sim.G("tapBunkChip()")) return "the second tap did not build";
   if (sim.G("shelterBeds()") !== beds0 + 1) return "the second tap built nothing";
   return true;
@@ -6858,6 +6863,12 @@ scenario("hotel: a room is CAPITAL - it costs the owner's till and the landlord 
   sim.runUntil("tmin > 10 * 60", {});
   if (!sim.G("buyOutOwner('hotel')")) return "the fixture could not buy the hotel";
   if (sim.G("bizOwner('hotel')") !== "player") return "the player does not hold the lease";
+  // the ROOM+ chip's own arming toast, on the same 252px card
+  sim.G("upArm = null; tapRoomChip();");
+  if (sim.G("textWidth(toast.text, 5) + 12") > 252)
+    return "the ROOM+ arming toast is wider than the card: " + sim.G("textWidth(toast.text, 5) + 12") + "px";
+  if (!/A NIGHT/.test(sim.G("JSON.stringify(toast.text)"))) return "the ROOM+ toast hides the rent it adds";
+  sim.G("upArm = null;");
   const c0 = sim.G("Math.round(coins)"), r0 = sim.G("BIZ.hotel.rent"), n0 = sim.G("hotelRooms().length");
   const w0 = sim.G("Math.round(worldMoney() * 100) / 100");
   if (!sim.G("buildRoom('player')")) return "the owner could not build with the money in hand";

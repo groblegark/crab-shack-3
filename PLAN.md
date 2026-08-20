@@ -5058,3 +5058,167 @@ language is merely kept distinct so either reading still works.
 - Big features → fork subagents in git worktrees (they don't push; the parent
   reviews screenshots + suite output, merges, re-verifies, pushes).
 - Balance work happens in the sim, not by intuition — measure, then tune.
+
+## ACCOMMODATION UPGRADES (shipped 2026-08-20, worktree)
+
+Matt's directive, verbatim: *"Also now we have two multi accommodation places;
+need to be able to make each pretty big by buying upgrades."*
+
+The town has two buildings that sleep more than one crab and both were frozen
+at the size they shipped. They grow now, and **the whole design is in who signs
+for the growth, because that is who pays for it.**
+
+### THE TWO HALVES ARE DELIBERATELY DIFFERENT
+| | THE SHELTER | THE DRIFTWOOD |
+|---|---|---|
+| what it is | town property, RENTED off Mr. Pincherton | a commercial lease with an owner |
+| who decides | the MAYOR (the player's chip when they hold the office, a policy when they don't) | the OWNER (the player's chip when they hold the lease, a policy when BRASS/REEF/a fisher does) |
+| what it costs | **$3 a night, forever**, out of the town fund - plus the first night as key money on the day | **$80 once** out of the till, **plus $4 a night on the lease, forever** |
+| what gates it | THE PURSE THE TOWN VOTED FOR | the till, tonight, with a payroll floor left in it |
+| how big | 4 beds -> 12 | 7 rooms -> 13 |
+
+### THE SHELTER HAD NO WALL AT ALL, and that is the fault this pass found
+`homeSpot` cycled four cot positions with `index % 4`, so the fifth homeless
+crab slept inside the first and the twentieth slept inside the fourth. The one
+building the entire town hall exists to pay for had **infinite capacity**. It
+has four beds now - the four the sprite has drawn since the day it shipped -
+and the crab who finds them taken **sleeps rough on the step**, through
+`sleepRough()`, the state the bolted-door path already models and prices (no
+rest banked at all, which arms the next morning's sickness roll).
+
+**Who gets a bed is TENURE**, off `p.nCot`, the nights-at-the-shelter counter
+`logNightly` has always kept. Two reasons, both load-bearing:
+- roster order would hand every bed to the player's crew (crabs come before
+  npcs in `allCrabs`), so the player would never once feel the wall they are
+  being asked to pay to move. **The pinch has to land on the hire.**
+- everybody's counter ticks on the same nights, so the ORDER never churns:
+  "the crab who has slept here longest keeps their cot" is stable, testable and
+  arguable from the dossier.
+
+### THE PURSE IS THE GATE, and that is the politics
+The fund **cannot save up** - `fundNeed()` strikes the purse to one night's
+bill and nothing more, by design - so a capital cost for a bed would simply
+mean the shelter could never grow. What gates a bed instead is a forward test:
+**would the purse the town voted for still cover the shelter's bill with this
+bed on it?** (`dormTake()` - a whole day's `purseYield`, recorded once at
+settlement so the player's chip and the CPU mayor's policy read the identical
+number rather than a half-finished morning's levy).
+
+Measured on four 40-day growth towns: a town on **RENTS 20%** raises about the
+rent and no more, and cannot add a single bed; the refusal says so by name
+(*"THE RENTS WON'T CARRY $16 A NIGHT"*). A town on a **LEVY** can carry three
+or four. Three of the four towns got to five beds and stalled there, which is
+the honest answer: **the shelter is as big as the town's politics.** The player
+who wants a twelve-bed dormitory has to win the office AND set a purse that
+bills their own shack for it - the conflict of interest the mayor pass built,
+now with something to buy.
+
+**AND THE BEDS COMPETE WITH THE BOWLS.** `platBowls` only counts the soup a
+platform can pay for AFTER the roof, and `platValue`'s roof term is binary
+(`purseYield >= shelterRent()`), so every bed walks into the next election:
+suite-pinned, a twelve-bed shelter makes a platform that used to cover the roof
+stop covering it, and the ideal platform of a homeless voter moves with it.
+
+### THE DRIFTWOOD GROWS INTO ITS OWN FORECOURT
+The back wall is FULL (the linen press at 2206, the last door ending at 2428,
+the queue standing at 2432) and **there is no upstairs**: `FLOOR_MIN` is 126,
+so a crab cannot walk to a landing and a room a guest cannot reach is scenery.
+What the hotel does have is a forecourt - the front row at **y158**, the row
+the shack keeps its tables in, on the same solid band (149-164) that leaves
+both travel lanes their daylight by construction. So it puts up **CABANAS**,
+six of them at a 26px pitch from x2266, and you can count them from the
+promenade. They are `stalls` like the rooms are, so the housekeeping dispatch,
+`freeRoom`, the wedge guards, the asking price's per-fixture term and the
+save's room index all grew with them and none of them had to be told.
+
+**The CPU owner's signal is the mirror of the hotelier's.** BRASS answers an
+unmade bed (`today.roomsLost`) with a WAGE, because that is a bed her laundry
+cost her. A guest bedded down on the sand with **every room LET** is a bed the
+house does not HAVE, and that is answered with a cabana (`annexe.short`, a
+running tally of guests rather than a nightly reading - a guest beds down at
+21:00 and the books close at 20:00, so a nightly counter would be read a day
+late or not at all). Keyed on the LEASE, so REEF builds on it too.
+
+### BALANCE - measured before and after on this tree
+| matrix | before | after |
+|---|---|---|
+| baseline `--days 30 --seeds 16` | 0/16, median **12** (7,10,11,11,11,11,11,12,12,12,12,13,13,13,14,14) | **0/16, median 11** (7,9,10,11,11,11,11,11,11,12,12,13,13,13,18,18) |
+| growth `--buy chef,table` 40d x 8 | **3/8** (10,10,11,13,14,41,41,41) | **4/8** (9,10,12,14,41,41,41,41) |
+| growth, second block `--seedbase 8` | **1/8** (6,11,12,12,13,14,14,41) | **2/8** (6,8,9,11,14,15,41,41) |
+| growth, BOTH blocks (16 seeds) | **4/16** | **6/16** |
+| lifetime, baseline | $57,468 | $57,725 |
+| lifetime, growth (block 1 / block 2) | $85,551 / $48,232 | $98,480 / $59,390 |
+
+Lose-by-default is untouched (0/16, median inside CLAUDE.md's 11-13 band).
+Growth is up by **two towns in sixteen** - inside the band PLAN already
+documents for that curve (5/16 and 6/16 either side of the visitor pass), and
+the second block was run precisely because CLAUDE.md says eight growth seeds is
+a coin. The movement is not free money, it is the hotel's own book: **room-lets
+1,051 -> 1,471** on block one and **703 -> 949** on block two, with **visitors
+sleeping on the sand 635 -> 458** and **385 -> 363**. A thirteen-room Driftwood
+turns fewer people away, which is reputation, which is what fills the boat.
+If the escape rate ever needs to come back down, the honest lever is
+`ROOM_CFG.RENT` (the landlord's cut of the annexe), not the capacity.
+
+**Rough nights roughly double in a long growth town** (2-19 before, 10-44
+after) and that is the new pressure, landing exactly where it was aimed: on the
+crabs a growing shack keeps hiring, who all start homeless.
+
+### WHAT IT COSTS THE SAVE
+Two small keys: `dorm` (beds, the last build day, the streak, the recorded
+purse) and `annexe` (the count, the last build day, the tally). The ANNEXE is
+written as a **count** and the stalls are rebuilt from it on load - the rooms
+are geometry, and a saved array of x's would let a reload land a hut somewhere
+a fresh build never would. Loaded BEFORE the visitors, because a guest is
+re-hung on their room by index and a guest asleep in cabana 3 must not wake up
+outdoors. An old save is a four-bed shelter and a seven-room hotel, which IS
+the old world.
+
+### THE ONE SEAM WITH THE TOWN HALL
+`SHELTER_RENT` stays a const and gains **`shelterRent()`** beside it; six call
+sites read the function instead (`fundNeed`, `platTake`, `platBowls`,
+`platValue`'s roof term, `runTownHall`'s `owed`, and the HALL tab's RENT line).
+`runTownHall` is otherwise untouched.
+
+### SUITE +9, and every one of them mutation-tested
+`shelter: the beds are finite, and the crab with no cot sleeps on the step`
+(both arms in one town: four beds and six crabs puts two on the step, the same
+night with the beds bought puts nobody there); `shelter: a bed is RENT, not a
+purchase` (world money falls by exactly the key money at a NAMED counterparty,
+and the next night's remit is the bigger number); `shelter: the PURSE decides`;
+`shelter: the BED+ chip is the mayor's, and it sits on the notice without
+covering it`; `hotel: the annexe is real rooms` (a guest sleeps in a cabana and
+housekeeping turns it over; a FULL annexe leaves both travel lanes clear - the
+harshest version of the lane tripwire there is); `hotel: a room is CAPITAL`;
+`hotel: a PEER owner builds off turned-away guests, and never out of tomorrow's
+payroll` (three arms: signal without money, money without signal, both);
+`accommodation: beds, cabanas, the bills they carry and a guest asleep in one
+all roundtrip` (plus an old save and a corrupt one); `accommodation: the
+shelter's bill is what the town votes on`.
+
+**Mutation tests, all five caught by the intended scenario:** an infinite
+shelter (`hasCot` always true), a free bed (`shelterRent` ignoring them), a peer
+owner with no till floor, a landlord who takes no cut of the annexe, and a
+cabana parked on the boardwalk lane.
+
+### WHAT WAS NOT BUILT, AND WHY
+- **No building materials on the trade ledger.** The rule is that resources are
+  never conjured, and they are not: the money leaves a real balance and is
+  destroyed at Mr. Pincherton, exactly the way every rent in this game already
+  leaves the world. The town is not buying timber, it is renting more of a
+  building that already stands, and inventing a freighter for it would be a
+  fiction the ledger does not need. (`IMPORTS` was also mid-edit in another
+  worktree; a table row is the worst-shaped hunk to land twice.)
+- **No third row of cot ART.** `cotSpot` stands three rows of four inside the
+  footprint (155/145/135 - `FLOOR_MIN` 126 is the ceiling) and draws a bed at
+  every one of them, but the crabs are painted over the back rows by the
+  y-sorted pass, so a twelve-bed dormitory reads as a full room rather than as
+  twelve distinct beds. The LOFT STOREYS above the roofline are what actually
+  say "this building got bigger" - one band per row of beds bought, a lit
+  window for each bed up there, and the mayor's notice rides up with it.
+- **No way to give a bed BACK.** A mayor can commit the town to a bill the next
+  mayor inherits and cannot undo, which is a feature: it is the sharpest thing
+  an office with two dials can do to a town.
+- **No HOURS lever on the annexe**, no per-cabana price (one price on the
+  hotel's sign is a suite-pinned invariant), and the player still cannot own
+  the hotel and meet BRASS - that is the hotelier entry's own deferral.
