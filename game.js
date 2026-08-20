@@ -585,8 +585,8 @@ const SHELTER_RENT = 10;         // Mr. Pincherton owns the shelter too, and he 
 function shelterRent() { return SHELTER_RENT + dormExtra() * DORM_CFG.RENT; }
 const SHELTER_FLOAT = 1;         // ...and the purse is struck to carry this many nights of it IN HAND.
                                  // Same idiom the town already uses everywhere money has to survive a
-                                 // bad day (RIVAL_CFG.FLOAT_NIGHTS, BANK_KEEP's "two nights' rent and a
-                                 // wage in the till"). MEASURED, and this is what it is for: with no
+                                 // bad day (RIVAL_CFG.FLOAT_NIGHTS, and BANK_KEEP's "two nights' rent
+                                 // and a wage in the till" before the war chest was retired). MEASURED, and this is what it is for: with no
                                  // float, six solvent towns over 24 days bolted the shelter FIVE times -
                                  // and not one of those was a bad POLICY. Every one was a purse that
                                  // cleared the rent on polling day and came up a dollar short on a
@@ -2166,9 +2166,6 @@ const RIVAL_CFG = {
   // next door and $0-45 after, so a keep-back of two nights' rent and a wage
   // means she banks in the good months and banks nothing in the lean ones -
   // which is exactly the pressure this is supposed to model.
-  BANK_KEEP: 100,        // she leaves two nights' rent and a wage in the till...
-  BANK_FRAC: 0.5,        // ...then puts half of what is over it by...
-  BANK_MAX: 60,          // ...up to this a night
   CAP: 1.3,
   EYE: 0.28,             // she is SEEN at the bar once she can raise this share of it...
   DROP: 0.18,            // ...and stops being seen there below THIS. A hysteresis band,
@@ -2206,7 +2203,7 @@ const RIVAL_CFG = {
 };
 // stage: none -> eyeing -> offer -> compete (-> offer -> ...), or done (she has it)
 function newRival() {
-  return { intent: 0, fund: 0, stage: "none", offer: null, offerDay: 0, lastOffer: 0,
+  return { intent: 0, stage: "none", offer: null, offerDay: 0, lastOffer: 0,
     refused: 0, step: 0, stepDay: 0, noDay: 0, eyeDay: 0, val: 0, who: null };
 }
 let rival = newRival();
@@ -2215,7 +2212,6 @@ function loadRival(r) {
   rival = newRival();
   if (!r || typeof r !== "object") return;   // an old save has no rivalry, and "none" IS the old world
   rival.intent = Math.max(0, Math.min(RIVAL_CFG.CAP, +r.intent || 0));
-  rival.fund = Math.max(0, Math.round(+r.fund || 0));
   rival.val = Math.max(0, Math.round(+r.val || 0));
   rival.who = typeof r.who === "string" && OWNERS[r.who] ? r.who : null;
   rival.stage = RIVAL_STAGES.includes(r.stage) ? r.stage : "none";
@@ -2254,7 +2250,6 @@ function rivalOn() {
 function rivalOwnerCheck() {
   const oid = rivalOwnerId();
   if (rival.who === oid) return;
-  if (rival.fund > 0 && rival.who && OWNERS[rival.who]) OWNERS[rival.who].till += rival.fund;
   const was = rival.who;
   const keep = rival.stage === "done";   // a finished rivalry stays finished
   Object.assign(rival, newRival());
@@ -2277,60 +2272,53 @@ function rivalPurse() {
 // shop borrows to do it; this is the game's own machinery for that, and the
 // risk is real - she services the debt out of both tills afterwards or the
 // three-strike rule takes a lease off her.
-function rivalCredit() {
-  const o = OWNERS[rivalOwnerId()];
-  if (!o) return 0;
-  // A LINE OF CREDIT IS A BUSINESS LINE. A crab with no lease has no line, so
-  // losing her own shop ends the ambition outright rather than leaving a
-  // shopless fisher borrowing three hundred dollars for a juice bar. This is
-  // also what makes "starve her shop of trade" a real counter and not a mood.
-  if (!Object.keys(BIZ).some(b2 => bizOwner(b2) === rivalOwnerId())) return 0;
-  return Math.max(0, creditLimit() - Math.max(0, o.credit || 0));
-}
+// (rivalCredit() lived here: the headroom on her business line, counted as
+// buying power. It is retired with the war chest - she buys a shop with cash
+// like the player does. The rule it carried is worth keeping though, because
+// the wage lever still leans on it: A LINE OF CREDIT IS A BUSINESS LINE, so a
+// crab with no lease has none, and losing her own shop ends the ambition
+// rather than leaving a shopless fisher borrowing for a juice bar.)
 // EVERYTHING SHE COULD RAISE: the war chest, the till, her own pocket and what
 // the bank would lend her. This is the number the offer is built from and the
 // number the day report prints, so nothing about the offer is hidden.
-function rivalRaise() { return Math.max(0, rival.fund || 0) + rivalPurse() + rivalCredit(); }
-// SHE PUTS MONEY BY, out of her own till, on a night her shop settled clean and
-// is carrying more than a working float. Nothing is minted: the money leaves
-// the till it came from, which is why the war chest makes her shop leaner and
-// why she raids it back the moment a rent is at risk (rivalRaidFund).
-function bankRivalFund() {
-  const shop = RIVAL_CFG.SHOP, o = OWNERS[rivalOwnerId()];
-  if (!o || bizOwner(shop) !== rivalOwnerId() || forSale(shop)) return 0;
-  if ((bizStrike[shop] || 0) > 0) return 0;                    // a missed rent is not a good month
-  const spare = o.till - RIVAL_CFG.BANK_KEEP;
-  if (spare <= 0) return 0;
-  const put = Math.min(RIVAL_CFG.BANK_MAX, Math.floor(spare * RIVAL_CFG.BANK_FRAC));
-  if (put <= 0) return 0;
-  o.till -= put; rival.fund = (rival.fund || 0) + put;
-  return put;
-}
-// ...and she raids it before she misses a rent. A war chest that shuts your own
-// shop is not ambition, it is a bug - so this runs BEFORE her lease settles.
-function rivalRaidFund(b) {
-  if (b !== RIVAL_CFG.SHOP || !(rival.fund > 0)) return 0;
-  const o = OWNERS[rivalOwnerId()];
-  if (!o) return 0;
-  const need = Math.ceil(BIZ[b].rent * 1.5) - o.till;
-  if (need <= 0) return 0;
-  const take = Math.min(rival.fund, need);
-  rival.fund -= take; o.till += take;
-  return take;
-}
+// WHAT SHE CAN PUT ON THE TABLE, and it is CASH SHE HOLDS - nothing else.
+// (Matt, 2026-08-20: "sudsy was able to finance way more money than he had in
+// his wallet - we can't have multiple accounts per crab, that's nuts", and
+// then: "assets need to be fully disclosed in the interface; one account per
+// crab".)
+//
+// THIS USED TO BE A SUM OF FOUR POTS: a hidden WAR CHEST, her shop's till, her
+// own wallet, and the headroom on a credit line. Two things were wrong with it
+// and the second one was worse than the first.
+//
+//   1. THE WAR CHEST WAS A SECOND ACCOUNT FOR ONE CRAB, invisible on her card,
+//      that no other crab and no player had. It is gone. She saves in her TILL
+//      now, like every other shopkeeper in this town, where the money can be
+//      seen and where starving her trade actually reaches it.
+//   2. SHE COULD OFFER MONEY SHE COULD NOT PAY. The offer was sized against
+//      all four pots; acceptRivalOffer settled out of TWO of them. MEASURED
+//      before the fix: on seeds 909 and 1337, EVERY offer she made in 30 days
+//      was unpayable - $435 against a $63 purse - so a player who said YES got
+//      "CAN'T COVER" and nothing happened. The accept path had never worked.
+//
+// So the gate and the payer are now the same number by construction, and it is
+// the same rule the player buys under (tapSaleChip: `coins < price` - no
+// financing a shop on the credit line).
+function rivalRaise() { return rivalPurse(); }
 // what she holds back: enough to OPEN the shop she is buying in the morning
 function rivalFloat() {
   return RIVAL_CFG.FLOAT_NIGHTS * BIZ[RIVAL_CFG.PRIZE].rent;
 }
 // war chest, then till, then her pocket, then the BANK. Nothing is minted
 // anywhere: a drawn line is a debt she carries into every settlement after.
+// ...AND SHE PAYS OUT OF EXACTLY WHAT rivalRaise() COUNTED. The till first,
+// then her own pocket. No third pot to draw on and no drawing on the line -
+// see the note above rivalRaise for why those two doors are shut.
 function payFromRival(amt) {
   const o = OWNERS[rivalOwnerId()], c = rivalCrab();
   let left = Math.max(0, Math.round(amt));
-  { const d = Math.min(Math.max(0, rival.fund || 0), left); rival.fund -= d; left -= d; }
   if (o) { const d = Math.min(Math.max(0, o.till), left); o.till -= d; left -= d; }
   if (c) { const d = Math.min(Math.max(0, c.p.wallet), left); c.p.wallet -= d; left -= d; }
-  if (o && left > 0) { const d = Math.min(rivalCredit(), left); o.credit = (o.credit || 0) + d; left -= d; }
   return Math.round(amt) - left;
 }
 function bizTakeAvg(b) {
@@ -2408,10 +2396,20 @@ function rivalManageLines() {
   // so the hours use the shift-label clock (8-21, not 8:00-21:00)
   const nums = "HER " + BIZ[shop].short + ": " + Math.round(bizPriceMul(shop) * 100) + "%  "
     + fmtHr(BIZ[shop].hours.open) + "-" + fmtHr(BIZ[shop].hours.close)
-    + "  $" + bizWage(shop) + "/DAY  TILL $" + fmt(Math.round(ownerFunds(shop)));
+    + "  $" + bizWage(shop) + "/DAY  TILL $" + fmt(Math.round(ownerFunds(shop)))
+    + " +$" + fmt(Math.round(rivalCrab() ? rivalCrab().p.wallet : 0));
+  // ASSETS FULLY DISCLOSED (Matt, 2026-08-20). Every line here that names a
+  // number she might pay also names WHAT SHE HAS, because the whole complaint
+  // was watching a crab bid money that was nowhere on her card.
   if (rivalOfferLive())
     return [who + " OFFERS $" + fmt(rival.offer.price) + " (WORTH $"
-      + fmt(rival.offer.worth) + ") - TAP THE SIGN", nums];
+      + fmt(rival.offer.worth) + ") - SHE HOLDS $" + fmt(rivalPurse()), nums];
+  // ...and the honest version of "the button is not there": she has bid a
+  // number her till has since dropped under, so there is nothing to accept
+  // until it comes back. Saying that is the whole of "assets fully disclosed".
+  if (rivalOfferShort())
+    return [who + " BID $" + fmt(rival.offer.price) + " BUT IS DOWN TO $"
+      + fmt(rivalPurse()) + " TODAY", nums];
   if (rival.stage === "compete")
     return [who + " IS COMPETING FOR THE " + prize, nums];
   // EYEING SAYS WHAT IS ACTUALLY HOLDING HER UP. This used to read "CAN RAISE
@@ -2424,16 +2422,34 @@ function rivalManageLines() {
   // number that was already big enough and concluded the sale was blocked on
   // her wallet. Only say "she cannot afford it" when she cannot afford it.
   const short = rivalRaise() < rivalWorth() * RIVAL_CFG.LOWBALL;
-  return [who + " IS EYEING THE " + prize + (short
-    ? " - CANNOT RAISE A NUMBER YET ($" + fmt(rivalRaise()) + " OF $" + fmt(rivalWorth()) + ")"
-    : " - SHE CAN AFFORD IT ($" + fmt(rivalWorth()) + "); SHE HAS NOT ASKED YET"), nums];
+  return [who + " IS EYEING THE " + prize + " - SHE HOLDS $" + fmt(rivalPurse()) + (short
+    ? ", NOT ENOUGH TO ASK ($" + fmt(rivalWorth()) + ")"
+    : " AND HAS NOT ASKED YET"), nums];
 }
 function rivalChipRects(b) {
   const cx = Math.round((BIZ[b].x0 + BIZ[b].x1) / 2);
   return { take: { x: cx - 46, y: 133, w: 44, h: 11 },
            no:   { x: cx + 4,  y: 133, w: 34, h: 11 } };
 }
-function rivalOfferLive() { return rival.stage === "offer" && !!rival.offer && prizeIsPlayers(); }
+// A LIVE OFFER IS ONE SHE CAN PAY RIGHT NOW. Coverage is part of what "live"
+// MEANS, not a check somebody remembers to make at the till - which is exactly
+// how the original bug happened: the offer was sized in one place and settled
+// in another, and the two drifted. Everything reads this one predicate (the
+// shopfront chips, the management chips, the hit-tests and acceptRivalOffer),
+// so "she offered it" and "she can pay it" cannot come apart again.
+//
+// Her purse moves DURING a day - wages and rent come out of the same till - so
+// a standing offer can dip under its own number by lunchtime and be good again
+// by evening. While it is under, there is nothing to accept and the management
+// card says so in as many words rather than showing a button that would fail.
+function rivalOfferLive() {
+  return rival.stage === "offer" && !!rival.offer && prizeIsPlayers()
+    && rivalPurse() >= rival.offer.price;
+}
+function rivalOfferShort() {
+  return rival.stage === "offer" && !!rival.offer && prizeIsPlayers()
+    && rivalPurse() < rival.offer.price;
+}
 function makeRivalOffer() {
   const b = RIVAL_CFG.PRIZE, q = rivalOfferPrice();
   rival.offer = { price: q.price, worth: q.worth, day };
@@ -2588,7 +2604,7 @@ function runRivalCompete() {
       const staffN = Math.max(1, allCrabs().filter(k => k.p.job === shop && !k.p.owner).length);
       // ...and only the WAGE costs cash on the night: a price cut and a longer
       // day are paid for out of margin, which is what the retreat rule reads
-      if (want > bizWage(shop) && o.till + (rival.fund || 0) >= want * staffN) {
+      if (want > bizWage(shop) && o.till >= want * staffN) {   // one account: the till
         setBizWage(shop, want);
         for (const j of jobBoard) if (j.biz === shop) j.wage = bizWage(shop);
         line = "POSTS $" + bizWage(shop) + " AT THE " + BIZ[shop].short;
@@ -2629,18 +2645,29 @@ function runRivalAmbition() {
   // moved SUDSY's till by $39 on day 2 of a town with no juice bar in it, which
   // tripped the frozen day-2 fingerprint and two other pins for a perfectly
   // good reason. Gated here, a town that never opens a juice bar is untouched.
-  // (The war chest is not load-bearing either way: in the 8-seed organic probe
-  // the whole arc fires with the fund reading 0 throughout, because the LINE OF
-  // CREDIT is what a small operator actually buys a shop with. What the chest
-  // adds is a rival whose shop is doing WELL getting there faster - which is
-  // exactly the handle the player's own price stepper has on her.)
-  bankRivalFund();
+  // (The war chest and the credit line are both RETIRED - see rivalRaise. She
+  // buys with cash in her till, which is the same handle the player's own price
+  // stepper always had on her, only now it is the ONLY one.)
   const gc = goingConcern(prize, 0);
   rival.val = rival.val > 0 ? Math.round(rival.val * (1 - RIVAL_CFG.SMOOTH) + gc * RIVAL_CFG.SMOOTH) : gc;
   rival.intent = rivalIntent();
   const who = rivalName();
   // a live offer runs out of road
   if (rival.stage === "offer") {
+    // AN OFFER IS ONLY GOOD WHILE SHE CAN STILL PAY IT. Her purse is one
+    // account and it moves every night; sizing the offer to it at the moment
+    // she makes it is not enough, because a bad three days can take it back
+    // under the number before the player answers. MEASURED after the war chest
+    // came out: seed 909 stood an offer of $189 made on a $244 purse and was
+    // down to $141 by the third day of it. A player who accepts must never be
+    // told "CAN'T COVER" - so the offer withdraws itself, and says so.
+    if (rivalOfferShort()) {
+      today.rival.push(who + " WITHDREW - SHE IS DOWN TO $" + fmt(rivalPurse())
+        + " AND OFFERED $" + fmt(rival.offer.price));
+      toast = { text: who + " WITHDREW HER OFFER - SHE CAN'T COVER IT NOW", t: 6 };
+      refuseRivalOffer("broke");
+      return;
+    }
     if (day - rival.offerDay >= RIVAL_CFG.ANSWER_DAYS) refuseRivalOffer("lapsed");
     else today.rival.push(who + " IS WAITING ON YOUR ANSWER - $" + fmt(rival.offer.price));
     return;
@@ -14687,7 +14714,6 @@ function frame(now) {
       }
       // a rival's WAR CHEST comes out before a rent is missed: saving up to buy
       // the shop next door must never be the thing that shuts your own
-      rivalRaidFund(b);
       const nf = settleCreditLine(o.credit || 0, o.till, BIZ[b].rent);
       o.credit = nf.bal; o.till = Math.max(0, nf.funds);   // interest lands either way; a missed bill stays owed
       if (nf.ok && !nf.missedMin) bizStrike[b] = 0;        // a clean night wipes the slate

@@ -5558,13 +5558,21 @@ scenario("rivalry: the player can buy HER shop - the ownership layer stays symme
 scenario("rivalry: THE LEASE IS THE RIVAL - a new owner next door inherits the ambition", () => {
   // SUDS SHOWERS fails in most long runs and a fisher buys it off the market.
   // The rivalry keys on the BUSINESS, exactly the way HOURS_POLICY and
-  // WAGE_POLICY do, so the new holder picks the ambition up - and the money the
-  // last one had put by goes back to the last one, because it is real money.
+  // WAGE_POLICY do, so the new holder picks the ambition up - and starts it
+  // from THEIR OWN books.
+  //
+  // THIS USED TO CHECK THAT A WAR CHEST WENT BACK to whoever saved it. There is
+  // no war chest now (Matt: "one account per crab") - she saves in her till,
+  // and a till belongs to the LEASE, so it changes hands with the shop and
+  // there is nothing to hand back. What still has to hold, and is what this
+  // scenario was always really about, is that AMBITION DOES NOT COME WITH
+  // SAVINGS ATTACHED: the new holder inherits the interest and none of the
+  // money, and their buying power is their own till and pocket.
   const sim = rivalTown(1337);
   for (let i = 0; i < 10 && sim.G(`rival.stage`) === "none"; i++) rivalDay(sim);
   if (sim.G(`rival.stage`) === "none") return `the founding owner never took an interest`;
   const oid0 = sim.G(`rivalOwnerId()`);
-  sim.G(`rival.fund = 140; OWNERS["${oid0}"].till = 0;`);
+  sim.G(`OWNERS["${oid0}"].till = 140;`);
   // hand the lease to somebody else, the way succession does
   sim.G(`OWNERS.newby = { id: "newby", name: "NEWBY", till: 300, credit: 0, darkT: 0 };
          { const k = allCrabs().find(c => c.p.npc && c.p.owner !== "${oid0}");
@@ -5572,9 +5580,12 @@ scenario("rivalry: THE LEASE IS THE RIVAL - a new owner next door inherits the a
          BIZ.showers.owner = "newby";`);
   sim.G(`rivalOwnerCheck()`);
   if (sim.G(`rivalOwnerId()`) !== "newby") return `the rival did not follow the lease`;
-  if (sim.G(`rival.fund`) !== 0) return `the new owner inherited somebody else's savings`;
+  if (sim.G(`rival.fund !== undefined`)) return `a second account came back onto the rival`;
+  // the new holder's buying power is THEIR OWN money, not the last owner's
+  if (Math.round(sim.G(`rivalRaise()`)) !== Math.round(sim.G(`rivalPurse()`)))
+    return `the rival can raise more than she holds`;
   if (Math.round(sim.G(`OWNERS["${oid0}"].till`)) !== 140)
-    return `the war chest evaporated instead of going back to whoever saved it`;
+    return `the outgoing owner's own till was raided by the handover`;
   if (sim.G(`rival.stage`) !== "none") return `the new owner started mid-rivalry`;
   if (sim.G(`rivalName()`) !== "NEWBY") return `the town still names the old owner`;
   // ...and NEWBY builds their own ambition from their own books
@@ -5592,7 +5603,8 @@ scenario("rivalry: prices, ambition and a standing offer roundtrip save/load", (
   a.G(`coins = 4000; UPS.juicebar.lvl = 1;`);
   a.runDays(2);
   a.G(`setBizPrice("showers", 0.85); setBizPrice("juicebar", 1.15);
-       rival.stage = "offer"; rival.refused = 2; rival.step = 5; rival.fund = 88;
+       OWNERS[rivalOwnerId()].till = 900;   // an offer is only LIVE while she can cover it
+       rival.stage = "offer"; rival.refused = 2; rival.step = 5;
        rival.stepDay = 2; rival.noDay = 1; rival.lastOffer = 2; rival.offerDay = 2;
        rival.eyeDay = 1; rival.val = 520; rival.who = "sudsy";
        rival.offer = { price: 411, worth: 520, day: 2 };
@@ -5604,7 +5616,11 @@ scenario("rivalry: prices, ambition and a standing offer roundtrip save/load", (
   if (Math.abs(got.bar - 1.15) > 1e-9) return `the bar's price came back ${got.bar}`;
   if (got.r.stage !== "offer" || !got.r.offer) return `the standing offer did not survive (${JSON.stringify(got.r)})`;
   if (got.r.offer.price !== 411 || got.r.offer.worth !== 520) return `the offer's numbers moved`;
-  if (got.r.fund !== 88 || got.r.val !== 520 || got.r.who !== "sudsy") return `the war chest did not roundtrip`;
+  if (got.r.val !== 520 || got.r.who !== "sudsy") return `her valuation or her identity did not roundtrip`;
+  // ...and no second account comes back off disk either: a save written by an
+  // older build carries `fund`, and loading it must not resurrect the pot.
+  if (got.r.fund !== undefined && got.r.fund !== null)
+    return `a war chest came back off disk (${got.r.fund}) - there is one account per crab now`;
   if (got.r.refused !== 2 || got.r.step !== 5 || got.r.noDay !== 1 || got.r.eyeDay !== 1)
     return `the escalation ledger did not roundtrip`;
   if (!got.live) return `the reloaded offer is not answerable`;
@@ -5622,7 +5638,8 @@ scenario("rivalry: prices, ambition and a standing offer roundtrip save/load", (
   store2.set(ACTIVE, "1");
   const c = createSim({ seed: 3, storage: store2, fresh: false });
   if (c.G(`bizPriceMul("shack")`) !== 1) return `an old save did not open on the board price`;
-  if (c.G(`rival.stage`) !== "none" || c.G(`rival.fund`) !== 0) return `an old save opened mid-rivalry`;
+  if (c.G(`rival.stage`) !== "none") return `an old save opened mid-rivalry`;
+  if (c.G(`rival.fund !== undefined`)) return `an old save brought a war chest back with it`;
   const store3 = new Map();
   store3.set(SLOT1, JSON.stringify({ _ver: 1, coins: 200, day: 2, lv: { chef: 2 },
     price: { shack: 12, showers: -4 },
@@ -5633,8 +5650,12 @@ scenario("rivalry: prices, ambition and a standing offer roundtrip save/load", (
   const junk = JSON.parse(d.G(`JSON.stringify({ hi: bizPriceMul("shack"), lo: bizPriceMul("showers"),
     stage: rival.stage, fund: rival.fund, val: rival.val, who: rival.who, offer: rival.offer })`));
   if (junk.hi !== d.G(`PRICE_MAX`) || junk.lo !== d.G(`PRICE_MIN`)) return `hand-edited prices were not clamped`;
-  if (junk.stage !== "none" || junk.fund !== 0 || junk.val !== 0 || junk.who || junk.offer)
+  // (the hand-edited save carries a negative `fund` from an older build: it must
+  // be IGNORED, not clamped to 0 and kept, because the pot no longer exists)
+  if (junk.stage !== "none" || junk.val !== 0 || junk.who || junk.offer)
     return `a hand-edited rivalry was believed (${JSON.stringify(junk)})`;
+  if (junk.fund !== undefined && junk.fund !== null)
+    return `a hand-edited war chest survived the load (${junk.fund})`;
   return true;
 });
 
@@ -9046,6 +9067,10 @@ scenario("a standing offer can be answered from the card that announces it", () 
     // rivalry scenarios above; what is under test here is the affordance.
     const b = RIVAL_CFG.PRIZE;
     coins = 9000; tryBuy(b);   // prizeIsPlayers() wants it UNLOCKED, not just owned
+    // ...and she has to be able to COVER it: coverage is part of what a live
+    // offer means now, so a fixture that stands a number she cannot pay is
+    // staging the not-live case by accident.
+    OWNERS[rivalOwnerId()].till = 900;
     rival.stage = "offer"; rival.offerDay = day; rival.lastOffer = day;
     rival.offer = { price: 480, worth: 600, day };
     manage = b; manageTab = "HOURS";
@@ -9118,22 +9143,94 @@ scenario("EYEING only blames her wallet when her wallet is the problem", () => {
     coins = 9000; tryBuy(RIVAL_CFG.PRIZE);
     rival.stage = "eyeing"; rival.offer = null; rival.intent = RIVAL_CFG.EYE;
     const read = () => (rivalManageLines(RIVAL_CFG.PRIZE)[0] || "");
-    rival.fund = 100000;                       // she is flush
+    OWNERS[rivalOwnerId()].till = 100000;      // she is flush
     const flush = read();
     // ...and she is not. rivalRaise() is fund + PURSE + credit, so her own
     // pocket has to be emptied too or she is still good for the deposit.
-    rival.fund = 0;
     for (const k in OWNERS) { OWNERS[k].till = 0; OWNERS[k].credit = 0; }
     for (const c of allCrabs()) c.p.wallet = 0;
     const broke = read();
     return JSON.stringify({ flush, broke, worth: Math.round(rivalWorth()) });
   })()`));
-  if (/CANNOT RAISE/.test(got.flush))
+  if (/NOT ENOUGH TO ASK/.test(got.flush))
     return "a flush rival is reported as unable to raise the money: " + got.flush;
-  if (!/CAN AFFORD/.test(got.flush))
-    return "a flush rival's line does not say she can afford it: " + got.flush;
-  if (!/CANNOT RAISE/.test(got.broke))
+  if (!/HAS NOT ASKED YET/.test(got.flush))
+    return "a flush rival's line does not say the hold-up is her, not her purse: " + got.flush;
+  if (!/NOT ENOUGH TO ASK/.test(got.broke))
     return "a broke rival's line does not say she is short: " + got.broke;
+  // ...and BOTH lines disclose the number, which is the whole of "assets fully
+  // disclosed": a player must never have to guess what she is holding.
+  for (const [what, line] of [["flush", got.flush], ["broke", got.broke]])
+    if (!/SHE HOLDS \$/.test(line)) return `the ${what} line does not disclose her holdings: ${line}`;
+  return true;
+});
+
+// ===========================================================================
+// ONE ACCOUNT PER CRAB (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("a rival never bids money she does not hold, and accepting always works", () => {
+  // Matt: "sudsy was able to finance way more money than he had in his wallet -
+  // we can't have multiple accounts per crab, that's nuts", and then "assets
+  // need to be fully disclosed in the interface; one account per crab".
+  //
+  // She used to bid against FOUR pots - a hidden war chest, her till, her
+  // pocket, and the headroom on a credit line - and settle out of TWO. MEASURED
+  // before the fix, on seeds 909 and 1337: EVERY offer she made in thirty days
+  // was unpayable, $435 against a $63 purse, so a player who said YES was told
+  // "CAN'T COVER" and nothing happened. The accept path had never once worked.
+  //
+  // Four things are asserted, and the fourth is the one that catches a
+  // regression sneaking a pot back in through the side door.
+  const seen = { offers: 0, overbid: 0, withdrawn: 0 };
+  for (const seed of [909, 1337]) {
+    const sim = createSim({ seed });
+    sim.G(`coins = 9000; tryBuy("juicebar"); tryBuy("table"); while (crabs.length < 6) hireCrew();
+      crabs[2].p.job = "juicebar"; crabs[4].p.job = "juicebar";`);
+    let last = -1;
+    sim.runDays(30, { tickEvery: 60, onTick: (G) => {
+      if (G("coins") < 800) G("coins = 800");
+      const r = G(`JSON.stringify({ d: day, live: rivalOfferLive(),
+        price: rivalOfferLive() ? rival.offer.price : 0,
+        purse: Math.round(rivalPurse()), raise: Math.round(rivalRaise()),
+        secondPot: rival.fund !== undefined })`);
+      const g = JSON.parse(r);
+      // 1. THERE IS NO SECOND POT, on any tick of any day.
+      if (g.secondPot) seen.secondPot = true;
+      // 2. AND NO HIDDEN BUYING POWER: what she can raise IS what she holds.
+      if (g.raise !== g.purse) seen.mismatch = (seen.mismatch || 0) + 1;
+      if (!g.live || g.d === last) return;
+      last = g.d;
+      seen.offers++;
+      // 3. EVERY LIVE OFFER IS COVERED BY CASH SHE ACTUALLY HAS.
+      if (g.price > g.purse) seen.overbid++;
+    } });
+  }
+  if (seen.secondPot) return "a second account reappeared on the rival";
+  if (seen.mismatch) return `she could raise more than she holds on ${seen.mismatch} ticks`;
+  if (!seen.offers) return "she never made an offer in 60 days - the fixture proves nothing";
+  if (seen.overbid) return `${seen.overbid} of ${seen.offers} live offers were more than she holds`;
+
+  // 4. ...AND ACCEPTING A LIVE OFFER ALWAYS COMPLETES, with the money moving
+  // rather than appearing. This is the assertion that would have caught the
+  // original bug: the gate and the payer have to be the same number.
+  const sale = JSON.parse(createSim({ seed: 909 }).G(`(() => {
+    const b = RIVAL_CFG.PRIZE;
+    coins = 9000; tryBuy(b);
+    OWNERS[rivalOwnerId()].till = 900;
+    rival.stage = "offer"; rival.offerDay = day; rival.lastOffer = day;
+    rival.offer = { price: rivalPurse(), worth: 900, day };   // every penny she has
+    const w0 = worldMoney(), c0 = coins, price = rival.offer.price;
+    const ok = tapRivalChip("take");
+    return JSON.stringify({ ok, price, dCoins: Math.round(coins - c0),
+      dWorld: Math.round((worldMoney() - w0) * 100) / 100,
+      purseAfter: Math.round(rivalPurse()), owner: bizOwner(b) });
+  })()`));
+  if (!sale.ok) return "an offer she could exactly afford was refused";
+  if (sale.dCoins !== sale.price) return `the player was paid ${sale.dCoins} on a ${sale.price} sale`;
+  if (Math.abs(sale.dWorld) > 0.01) return `a business sale moved the world's money by ${sale.dWorld}`;
+  if (sale.purseAfter !== 0) return "she paid every penny she had and still has some";
+  if (sale.owner === "player") return "the business did not change hands";
   return true;
 });
 
