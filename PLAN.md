@@ -3169,6 +3169,48 @@ them, rep is 5 points lower, and the player's till is $64/$105 down at the end
 of day two. Two fixtures that used to CLEAR the opening crowd are now no-ops
 and are kept as belts, with their comments re-pointed to say so.
 
+## ONE ACCOUNT PER CRAB (Matt, 2026-08-20) — a ruling
+
+> "sudsy was able to finance way more money than he had in his wallet — we
+> can't have multiple accounts per crab, that's nuts"
+> "assets need to be fully disclosed in the interface; one account per crab"
+
+**THE RULE.** A crab's money is their pocket. A business's money is its till. A
+lease may carry a credit line. **That is all the accounts there are**, and no
+actor may bid, promise or spend against anything else. The player's structure
+IS the NPC structure — this is the same "simulation, not arcade" call that
+retired NPC_WAGE and made the ownership layer symmetric.
+
+**WHAT IT CAUGHT.** The rival was bidding against FOUR pots — a hidden war
+chest (`rival.fund`), her till, her pocket, and credit-line headroom — while
+`acceptRivalOffer` settled out of TWO. Measured on seeds 909/1337 over 30 days:
+**every offer she ever made was unpayable** ($435 against a $63 purse), so a
+player who accepted got "CAN'T COVER" and nothing happened. **The accept path
+had never worked, in any town, on any day** — and no test caught it because
+every rivalry scenario asserted the offer was MADE, never that it could be
+TAKEN.
+
+**THE FIX, and the shape worth copying.** `rivalRaise()` IS `rivalPurse()`, so
+no number exists that is larger than what she holds. Better: **coverage is part
+of what "a live offer" MEANS** — `rivalOfferLive()` asks whether she can pay,
+and the shopfront chips, the card chips, both hit-tests and the settlement all
+read that one predicate. The original bug was two numbers computed in two
+places drifting apart; a single predicate cannot drift from itself.
+
+**Her purse moves during a day** (wages and rent leave the same till), so a
+standing bid can dip under its own number by lunchtime. While it is under there
+is nothing to accept and the card says so — *"BID $189 BUT IS DOWN TO $141
+TODAY"* — rather than showing a button that would fail. At settlement she
+withdraws it by name.
+
+**DISCLOSURE IS PART OF THE RULE.** Every line that names a number an actor
+might pay also names what they are holding. If a surface shows a price, it
+shows the purse behind it.
+
+**Balance: unmoved.** 0/16 with identical eviction days seed for seed, growth
+unchanged. It had to be — the money was always conserved, and the path this
+fixed had never once completed.
+
 ## THE PROMENADE IS NOT ZERO SUM (measured 2026-08-20)
 
 Written down because the rivalry arm asserted the opposite for a week, and
