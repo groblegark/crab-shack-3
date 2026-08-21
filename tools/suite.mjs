@@ -11,7 +11,7 @@ const near = (v, lo, hi) => v >= lo && v <= hi;
 // the customer states that belong to a SHOP TRANSACTION. A visitor lives in
 // `customers` for its whole stay now, so "the queue is empty" has to be asked
 // as "nobody is mid-order" rather than "the list is empty".
-const COUNTER_STATES = '["arriving","waiting","toSeat","seatedWaiting","toTable","dining","toStall","showering","outStall","waitStall","leaving"]';
+const COUNTER_STATES = '["arriving","waiting","toSeat","seatedWaiting","toTable","dining","toStall","showering","outStall","waitStall","playing","toPrize","leaving"]';
 
 
 // Saves live in NUMBERED SLOTS. LEGACY is the old single key - still written by
@@ -7047,6 +7047,7 @@ const DEP_BASE = `{
   waitMin: 10, worstMin: 10, worstBiz: "CRAB SHACK",
   quits: 0, quitMin: 0, quitBiz: null,
   shut: 0, full: 0, broke: 0, blocked: null, mistMin: 0, missed: 0,
+  prizes: 0, bestPrize: null, tix: 0, want: "RUBBER CRAB", short: 20,
   hunger: 0.1, thirst: 0.1, dirt: 0.1, bored: 0.1, tired: 0.1 }`;
 
 scenario("departures: every quote is DERIVED - one changed fact, one changed line", () => {
@@ -7066,6 +7067,12 @@ scenario("departures: every quote is DERIVED - one changed fact, one changed lin
     ["grubby", `{ dirt: 1, washes: 0 }`],
     ["weary", `{ tired: 1, nightsBed: 0 }`],
     ["bored", `{ bored: 1, games: 0 }`],
+    // THE CLAWCADE, both ways round: a prize they took home, and a stub they
+    // could not spend. The second is the one that matters - "8 tickets off the
+    // gold plush" is a guest who is coming BACK, and it must not be swallowed
+    // by the generic "a few honest stops" line.
+    ["prize", `{ games: 1, prizes: 1, bestPrize: "CLAW PLUSH" }`],
+    ["stub", `{ games: 1, prizes: 0, tix: 60, want: "CLAW PLUSH", short: 10 }`],
     ["wait", `{ worstMin: 380, worstBiz: "CRAB SHACK", serves: 1 }`],
     ["dues", `{ dues: 4 }`],
     ["missed", `{ missed: 1 }`],
@@ -8725,7 +8732,13 @@ scenario("the shop tooltip promises what the button actually does", () => {
     table: 'bizTables("shack").length',
     juicebar: "ownedBizList().length",
     arcade: "ownedBizList().length",
-    cadegear: 'stationCap("arcade", "claw")',
+    // RE-POINTED (the arcade loop, 2026-08-21): CADE GEAR+ used to buy STATION
+    // SLOTS for the attendant and now buys CABINETS the customer stands at, so
+    // the thing to count moved from stationCap to the floor itself. The
+    // scenario is unchanged in shape - read the promise, buy the thing, check
+    // the town holds the number the promise named - and it caught the drift on
+    // the first full run, which is the whole point of counting the MECHANISM.
+    cadegear: "arcadeMachines().length",
   };
   // the arcade has to be standing before CADE GEAR+'s counter means anything,
   // which is why the order below is the shop grid's own order
@@ -10271,6 +10284,506 @@ scenario("back pay is paid before tonight's wages, and the bank has a limit", ()
     return `a solvent town still owes $${after} of the $${got.owed0} it missed - back pay never cleared`;
   const stats = JSON.parse(sim.G(`JSON.stringify(window._stats || {})`));
   if (!(stats.paydayMissed > 0)) return "the fixture proved nothing - no payday was ever missed";
+  return true;
+});
+
+// ===========================================================================
+// THE ARCADE LOOP: tokens -> tickets -> prizes (2026-08-21)
+//
+// The CLAWCADE used to be a taco stand with a plush on the plate: you queued,
+// an attendant "cooked" a prize at a machine you never touched, and your
+// boredom went to zero at the counter. The rebuild makes the three steps real,
+// and these scenarios exist because each step introduced a way to be wrong:
+//   * a ticket could quietly become money (it must not),
+//   * a prize could appear on a shelf nobody paid for (it must not),
+//   * a cabinet could be flagged DIRTY by the shower cycle and close itself
+//     for the rest of the game (it did, on the first build),
+//   * a dial could look like it does something on the card and do nothing.
+// ===========================================================================
+
+// one arcade town, staffed, with a crab standing by. `gear` fits CADE GEAR+.
+function arcadeTown(seed, gear, opts) {
+  const sim = createSim(Object.assign({ seed }, opts || {}));
+  sim.G(`coins = 8000; tryBuy("arcade"); tryBuy("chef"); tryBuy("chef");
+    ${gear ? 'tryBuy("cadegear");' : ""}
+    crabs[2].p.job = "arcade"; crabs[3].p.job = "arcade";`);
+  return sim;
+}
+
+scenario("arcade: the counter sells TOKENS, and the tokens go onto the floor", () => {
+  // The first step of the loop, and the only one that costs money. What broke
+  // before this existed: the counter handed over a PLUSH and the customer
+  // walked out - there was no floor, no play and no prize, so "tokens" was a
+  // word in a recipe id. This asserts the handover puts the bundle's own token
+  // count in the customer's pocket and puts THEM at a cabinet.
+  const sim = arcadeTown(1337);
+  const got = sim.runUntil(`customers.some(k => k.biz === "arcade" && (k.state === "playing" || k.state === "toStall"))`,
+    { maxSteps: 200000 });
+  if (!got) return "nobody ever reached a machine in the arcade";
+  const row = JSON.parse(sim.G(`(() => {
+    const k = customers.find(q => q.biz === "arcade" && (q.state === "playing" || q.state === "toStall"));
+    return JSON.stringify({ tokens: k.tokens, want: k.recipe.tokens, price: menuPrice("arcade", k.recipe),
+      onMachine: !!(k.stall && k.stall.machine), eyeing: k.eyeing && k.eyeing.id,
+      take: Math.round((today.biz.arcade || { take: 0 }).take) });
+  })()`));
+  if (row.tokens !== row.want)
+    return `bought a ${row.want}-token bundle and is holding ${row.tokens}`;
+  if (!row.onMachine) return "holding tokens but not standing at a machine";
+  if (!row.eyeing) return "walked onto the floor with no prize in mind - the chase has nothing to aim at";
+  if (!(row.take >= row.price))
+    return `the till took $${row.take} for a bundle priced $${row.price}`;
+  return true;
+});
+
+scenario("arcade: a go pays TICKETS and moves not one dollar", () => {
+  // THE CONSERVATION BOUNDARY. A ticket is a claim on a shelf, never money -
+  // worldMoney() must not budge when one is created, and the ONLY movement on
+  // the arcade floor is the till paying a wholesaler for a prize coming off
+  // it. Both halves are checked here on every single event of a five-day town,
+  // because "usually conserved" is the same bug as "never conserved".
+  const sim = arcadeTown(909);
+  sim.G(`window._arc = [];
+    const _play = arcPlay, _red = redeemPrize, _ref = arcRefundTokens;
+    arcPlay = function (k) { const b = worldMoney(); _play(k); window._arc.push(["play", Math.round((worldMoney() - b) * 1000) / 1000, 0]); };
+    redeemPrize = function (k, p) { const b = worldMoney(); const r = _red(k, p); window._arc.push(["redeem", Math.round((worldMoney() - b) * 1000) / 1000, p.cost]); return r; };
+    arcRefundTokens = function (k) { const b = worldMoney(); const r = _ref(k); window._arc.push(["refund", Math.round((worldMoney() - b) * 1000) / 1000, 0]); return r; };`);
+  sim.runDays(5);
+  const rows = JSON.parse(sim.G("JSON.stringify(window._arc)"));
+  const plays = rows.filter(r => r[0] === "play"), reds = rows.filter(r => r[0] === "redeem");
+  if (plays.length < 20) return `only ${plays.length} goes in five days - the fixture proved nothing`;
+  const badPlay = plays.find(r => Math.abs(r[1]) > 1e-6);
+  if (badPlay) return `a go on a machine moved $${badPlay[1]} of world money - a ticket became money`;
+  const badRef = rows.filter(r => r[0] === "refund").find(r => Math.abs(r[1]) > 1e-6);
+  if (badRef) return `a token refund moved $${badRef[1]} of world money instead of nothing`;
+  if (!reds.length) return "nobody redeemed a prize in five days - the wall proved nothing";
+  const badRed = reds.find(r => Math.abs(r[1] + r[2]) > 1e-6);
+  if (badRed) return `a $${badRed[2]} prize changed world money by $${badRed[1]} (want -$${badRed[2]})`;
+  const st = JSON.parse(sim.G("JSON.stringify(window._stats)"));
+  if (!(st.arcTix > 0)) return "goes were played and no ticket was ever won";
+  return true;
+});
+
+scenario("arcade: the claw and the skee lane pay the same, and feel nothing like it", () => {
+  // THE WHOLE DESIGN IN ONE ASSERTION. The claw is all-or-nothing and the skee
+  // lane is a steady handful, and they are built to the SAME expected tickets
+  // per token (skeeRoll derives its band from arcEV) - so a player choosing a
+  // machine is choosing VARIANCE, not value. Get this wrong in either
+  // direction and one cabinet is strictly better, which kills the choice.
+  const sim = createSim({ seed: 31 });
+  const N = 20000;
+  const got = JSON.parse(sim.G(`(() => {
+    let cs = 0, cz = 0, cmax = 0, ss = 0, szMin = 1e9, szMax = -1;
+    for (let i = 0; i < ${N}; i++) { const v = clawRoll(); cs += v; if (v === 0) cz++; if (v > cmax) cmax = v; }
+    for (let i = 0; i < ${N}; i++) { const v = skeeRoll(); ss += v; if (v < szMin) szMin = v; if (v > szMax) szMax = v; }
+    return JSON.stringify({ claw: cs / ${N}, skee: ss / ${N}, ev: arcEV(),
+      clawZero: cz / ${N}, clawMax: cmax, skeeMin: szMin, skeeMax: szMax });
+  })()`));
+  if (Math.abs(got.claw - got.ev) > got.ev * 0.06)
+    return `the claw averages ${got.claw.toFixed(2)} tickets a go against a stated EV of ${got.ev}`;
+  if (Math.abs(got.skee - got.ev) > got.ev * 0.06)
+    return `the skee lane averages ${got.skee.toFixed(2)} against the claw's stated EV of ${got.ev}`;
+  // ...and the SHAPE. Default grab is 20%, so four goes in five pay nothing at
+  // all on the claw and the skee lane pays every single time.
+  if (!near(got.clawZero, 0.74, 0.86))
+    return `the claw paid nothing on ${(got.clawZero * 100).toFixed(1)}% of goes (want ~80% at a 20% grab)`;
+  if (got.skeeMin < 1) return `the skee lane paid ${got.skeeMin} on a go - it is meant to pay every time`;
+  // ...and the band the MANAGEMENT CARD prints is the band the lane rolls, not
+  // a copy of the formula that agrees with it until somebody edits one of them
+  const band = JSON.parse(sim.G("JSON.stringify(skeeBand())"));
+  if (band[0] !== got.skeeMin || band[1] !== got.skeeMax)
+    return `the card says the lane pays ${band[0]}-${band[1]} and 20000 goes came out ${got.skeeMin}-${got.skeeMax}`;
+  if (!(got.clawMax > got.skeeMax))
+    return `the claw's best go (${got.clawMax}) is no better than the skee lane's (${got.skeeMax}) - there is no reason to take the risk`;
+  return true;
+});
+
+scenario("arcade: the four dials are real, and the card's promise is the floor's behaviour", () => {
+  // INTERFACE OPACITY IS A BUG (PLAN's standing ruling), so the management
+  // card states what the machines do in tickets and in dollars. This asserts
+  // the numbers on that card are the numbers the machines actually roll: move
+  // a dial, and both the stated expectation AND twenty thousand real goes move
+  // with it. A dial that only changed the caption would pass a drawing test
+  // and fail this one.
+  const sim = createSim({ seed: 77 });
+  const sample = (win, pay, mul, tok) => JSON.parse(sim.G(`(() => {
+    setArcWin(${win}); setArcPay(${pay}); setArcPrizeMul(${mul}); setArcToken(${tok});
+    let s = 0; for (let i = 0; i < 20000; i++) s += arcRoll(i % 2 ? "skee" : "claw");
+    return JSON.stringify({ ev: arcEV(), real: s / 20000,
+      top: prizeTix(ARC_PRIZES[ARC_PRIZES.length - 1]),
+      bundle: menuPrice("arcade", BIZ.arcade.recipes[0]), tokens: BIZ.arcade.recipes[0].tokens });
+  })()`));
+  const tight = sample(0.05, 40, 1, 3), loose = sample(0.60, 40, 1, 3);
+  if (!(loose.real > tight.real * 5))
+    return `a 60% grab pays ${loose.real.toFixed(2)} tickets a go against a 5% grab's ${tight.real.toFixed(2)} - the grab dial is inert`;
+  for (const s of [tight, loose])
+    if (Math.abs(s.real - s.ev) > Math.max(0.4, s.ev * 0.06))
+      return `the card promises ${s.ev} tickets a go and the machines pay ${s.real.toFixed(2)}`;
+  const dear = sample(0.20, 40, 2.0, 3), cheap = sample(0.20, 40, 0.5, 3);
+  if (dear.top !== Math.round(cheap.top * 4))
+    return `the PRIZES dial moved the top prize ${cheap.top} -> ${dear.top} tickets (want a 4x span across 0.5 - 2.0)`;
+  // ...and the TOKEN price is the arcade's board price, in one place only
+  const t5 = sample(0.20, 40, 1, 5);
+  if (t5.bundle !== t5.tokens * 5)
+    return `a $5 token prices the ${t5.tokens}-token bundle at $${t5.bundle}`;
+  if (!(sim.G("priceAppeal('arcade')") < 1))
+    return "a dearer token did not make the arcade's board less attractive - the promenade stopped being zero sum";
+  // ...AND THE CARD ITSELF, read the way the "no surface prints off the canvas"
+  // scenario reads one: text and smallText stubbed, drawManage() driven, and
+  // the SENTENCES it produced compared against what twenty thousand real goes
+  // actually did. Everything above proves the machines obey the dials; this is
+  // the only thing that proves the PLAYER IS TOLD THE TRUTH about them, which
+  // is the half the standing ruling on interface opacity is about.
+  const said = JSON.parse(sim.G(`(() => {
+    setArcWin(0.25); setArcPay(60); setArcPrizeMul(1.5); setArcToken(4);
+    coins = 9000; tryBuy("arcade");
+    const out = [];
+    const T = text, S = smallText;
+    const grab = (fn) => (c, str, x, y, col, sz) => { out.push(String(str)); return fn(c, str, x, y, col, sz); };
+    text = grab(T); smallText = grab(S);
+    manage = "arcade"; manageTab = "HOURS"; dossier = null; saveView = false; helpView = false;
+    try { drawManage(); } finally { text = T; smallText = S; }
+    return JSON.stringify(out);
+  })()`));
+  const page = said.join(" | ");
+  const facts = JSON.parse(sim.G(`(() => {
+    let lo = 1e9, hi = -1, cz = 0, cmax = 0;
+    for (let i = 0; i < 20000; i++) { const v = skeeRoll(); if (v < lo) lo = v; if (v > hi) hi = v; }
+    for (let i = 0; i < 20000; i++) { const v = clawRoll(); if (v === 0) cz++; if (v > cmax) cmax = v; }
+    return JSON.stringify({ lo, hi, cmax, oneIn: Math.round(20000 / (20000 - cz)),
+      top: prizeTix(ARC_PRIZES[2]), cheap: prizeTix(ARC_PRIZES[0]),
+      goes: Math.ceil(prizeTix(ARC_PRIZES[2]) / arcEV()), tok: arcToken() });
+  })()`));
+  const must = [
+    ["the claw's payout", "CLAW " + facts.cmax + " TIX"],
+    ["the claw's odds", "1 GO IN " + facts.oneIn],
+    ["the skee lane's band", "SKEE " + facts.lo + "-" + facts.hi + " EVERY GO"],
+    ["the cheapest prize", "RUBBER " + facts.cheap],
+    ["the top prize", "GOLD " + facts.top],
+    ["what the top prize costs in goes", "~" + facts.goes + " GOES"],
+    ["what the top prize costs in money", "$" + facts.goes * facts.tok + " OF TOKENS"],
+    ["the token price", "$" + facts.tok],
+  ];
+  for (const [what, s] of must)
+    if (page.indexOf(s) < 0)
+      return `the card never says ${what} ("${s}") - it printed: ${page.slice(0, 300)}`;
+  return true;
+});
+
+scenario("arcade: the dials on the HOURS tab answer a real tap", () => {
+  // Every previous management control was tested by CALLING its setter, which
+  // proves the setter and nothing about the button. This drives the game's own
+  // canvas click handler at the rect the DRAW uses, so a card whose picture and
+  // whose hit test disagree about where a stepper is fails here - the only
+  // test in the file that can catch that.
+  const sim = arcadeTown(11);
+  sim.G(`screen = "play"; manage = "arcade"; manageTab = "HOURS"; dossier = null; saveView = false; helpView = false;`);
+  const R = JSON.parse(sim.G("JSON.stringify(manageRects())"));
+  const read = () => JSON.parse(sim.G("JSON.stringify([ARC.token, ARC.win, ARC.pay, ARC.prizeMul, BIZ.arcade.recipes[0].pay])"));
+  const before = read();
+  sim.tapRect(R.pp); sim.tapRect(R.acp); sim.tapRect(R.app); sim.tapRect(R.azp);
+  const up = read();
+  const names = ["TOKEN", "CLAW GRAB", "PAYOUT", "PRIZES"];
+  for (let i = 0; i < 4; i++)
+    if (!(up[i] > before[i])) return `tapping the ${names[i]} stepper's + left it at ${up[i]}`;
+  if (up[4] !== BIZ_ARC_BUNDLE(sim))
+    return `the board price did not follow the token price: bundle $${up[4]} at $${up[0]} a token`;
+  sim.tapRect(R.pm); sim.tapRect(R.acm); sim.tapRect(R.apm); sim.tapRect(R.azm);
+  const back = read();
+  for (let i = 0; i < 4; i++)
+    if (Math.abs(back[i] - before[i]) > 1e-9)
+      return `the ${names[i]} stepper is not symmetric: ${before[i]} -> ${up[i]} -> ${back[i]}`;
+  // ...and a tap on bare card, away from every stepper, changes nothing
+  sim.tap(R.x + R.w - 4, R.y + 90);
+  const idle = read();
+  if (JSON.stringify(idle) !== JSON.stringify(back)) return "a tap on empty card moved a dial: " + idle;
+  // GEOMETRY, and this half exists because a mutation SURVIVED the taps above.
+  // The draw and the hit test read ONE table (manageRects), so moving a rect
+  // moves the button with it and a click still lands - which is the design,
+  // and it means a tap test can never catch a stepper that has wandered. What
+  // it CAN catch is a stepper that has wandered somewhere USELESS: off the
+  // card, or on top of another control. Both are drift a player would report
+  // as "that button does the wrong thing".
+  const keys = ["pm", "pp", "acm", "acp", "apm", "app", "azm", "azp", "done"];
+  for (const k of keys) {
+    const r = R[k];
+    if (r.x < R.x || r.x + r.w > R.x + R.w || r.y < R.y || r.y + r.h > R.y + R.h)
+      return `the ${k} control is outside the card: ${JSON.stringify(r)} against ${R.x},${R.y} ${R.w}x${R.h}`;
+  }
+  for (let i = 0; i < keys.length; i++) for (let j = i + 1; j < keys.length; j++) {
+    const a = R[keys[i]], b = R[keys[j]];
+    if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h)
+      return `the ${keys[i]} and ${keys[j]} controls overlap - one of them is unreachable`;
+  }
+  return true;
+});
+function BIZ_ARC_BUNDLE(sim) { return +sim.G("BIZ.arcade.recipes[0].tokens * arcToken()"); }
+
+scenario("arcade: a ticket stub is a reason to come back that has nothing to do with boredom", () => {
+  // THE DIRECTIVE'S OWN SENTENCE - "it could be a bit addictive if you're not
+  // winning the prizes you want" - as a mechanism rather than a mood. A crab
+  // who is NOT bored and is holding most of a plush's worth of tickets picks
+  // the arcade; the identical crab holding nothing does not. Nothing here is
+  // rolled: arcChase is tickets-held over tickets-needed.
+  const sim = arcadeTown(4242);
+  sim.runUntil('bizStaffed("arcade") && tmin > 10 * 60', { maxSteps: 200000 });
+  const probe = (tix) => sim.G(`(() => {
+    const c = crabs[0];
+    c.p.tickets = ${tix}; c.p.prizes = 0;
+    c.p.bored = 0.1; c.p.hunger = 0; c.p.thirst = 0; c.p.dirt = 0; c.p.tired = 0; c.p.sick = null;
+    c.p.wallet = 200; c.errandCd = 0; c.duty = false; c.dayState = "home";
+    const e = pickErrand(c);
+    return e && e.biz === "arcade" ? "arcade" : e ? (e.biz || e.need || "other") : "none";
+  })()`);
+  const empty = probe(0), stub = probe(Math.round(sim.G("prizeTix(ARC_PRIZES[1]) * 0.85")));
+  if (empty === "arcade")
+    return "a crab with no tickets and no boredom went to the arcade anyway - the chase is not what is being measured";
+  if (stub !== "arcade")
+    return `a crab 15% short of the plush and not bored picked "${stub}" instead of the arcade - the stub is inert`;
+  // ...and the pull DIES the moment the wall is within reach, or nobody would
+  // ever stop: a crab holding enough for the top prize walks to the counter,
+  // not back to the booth.
+  const rich = +sim.G(`arcChase(prizeTix(ARC_PRIZES[ARC_PRIZES.length - 1]))`);
+  if (rich !== 0) return `a crab who can afford the top prize still has a chase urge of ${rich}`;
+  return true;
+});
+
+scenario("arcade: a cabinet is never scrubbed, and nobody is ever stranded at one", () => {
+  // THE BUG THIS CAUGHT, and it closed the whole shop. The machines reuse the
+  // shower stalls' occupancy machinery, and every abort path in the game marks
+  // a released stall DIRTY so a crab comes and cleans it. A DIRTY machine is
+  // filtered out of `find(t => !t.occupant && !t.dirty)` for ever, and nobody
+  // cleans a claw machine - so the floor quietly shut itself one cabinet at a
+  // time. releaseFixture is the one function that knows the difference.
+  const sim = arcadeTown(5348, true);
+  let worstIdle = 0, ghost = 0;
+  sim.runDays(6, { tickEvery: 4, onTick: (G) => {
+    const bad = JSON.parse(G(`JSON.stringify(arcadeMachines().map(m => [
+      !!m.dirty, !!m.cleaning, m.occupant ? m.occupant.state : null]))`));
+    for (const [dirty, cleaning, st] of bad) {
+      if (dirty || cleaning) { worstIdle = -1; return; }
+      if (st && st !== "playing" && st !== "toStall" && st !== "waitStall") worstIdle = Math.max(worstIdle, 1);
+    }
+    // ...AND THE OTHER HALF OF THE SAME WEDGE. arcPlay refuses to roll without
+    // a cabinet, so a customer left in `playing` with no machine never spends a
+    // token, never finishes, and holds a queue slot for the rest of the town's
+    // life. It cannot be seen by looking at the machines - only at the people.
+    ghost = Math.max(ghost, +G(`customers.filter(k => k.state === "playing" && !k.stall).length`));
+  } });
+  if (worstIdle < 0) return "a claw machine was flagged DIRTY - it can never be used again, and nobody cleans one";
+  if (ghost) return `${ghost} customer(s) were left in "playing" with no cabinet - they can never finish`;
+  const end = JSON.parse(sim.G(`JSON.stringify({
+    n: arcadeMachines().length,
+    held: arcadeMachines().filter(m => m.occupant && !customers.includes(m.occupant)).length,
+    free: arcadeMachines().filter(m => !m.occupant).length })`));
+  if (end.n !== 6) return `CADE GEAR+ stood ${end.n} cabinets, not 6`;
+  if (end.held) return `${end.held} cabinets are held by somebody who has left the game`;
+  if (worstIdle > 0) return "a cabinet was occupied by somebody who was neither playing nor walking to it";
+  return true;
+});
+
+scenario("arcade: tokens nobody got to play are refunded, never deleted", () => {
+  // A full floor is the SHOP's problem. Deleting brass a customer has already
+  // paid for would take money out of the world at a counter, which is the one
+  // thing no shop in this game may do - it is the same class of fault as the
+  // town fund minting bowls. The refund is the sale run backwards, so the
+  // world's total does not move and the till carries the cost of a floor that
+  // is too small.
+  const sim = arcadeTown(2674);
+  const got = JSON.parse(sim.G(`(() => {
+    // a REAL guest in the customers list: worldMoney only counts a purse that
+    // is actually in town, so a fixture holding one on the side would "prove"
+    // conservation by hiding half the movement
+    const k = { biz: "arcade", isCrab: false, visitor: true, gone: false, x: BIZ.arcade.door,
+      wallet: 10, purse: 50, spent: 40, tokens: 6, tickets: 0, state: "roam", stay: newStay() };
+    customers.push(k);
+    const w0 = worldMoney(), c0 = coins;
+    const back = arcRefundTokens(k);
+    return JSON.stringify({ back, want: 6 * arcToken(), wallet: k.wallet, spent: k.spent,
+      tokens: k.tokens, dWorld: Math.round((worldMoney() - w0) * 1000) / 1000,
+      dCoins: Math.round((coins - c0) * 1000) / 1000 });
+  })()`));
+  if (got.back !== got.want) return `refunded $${got.back} for 6 tokens at $${got.want / 6} each`;
+  if (got.tokens !== 0) return "the tokens were refunded AND kept";
+  if (got.wallet !== 10 + got.want) return `wallet went to $${got.wallet}, not $${10 + got.want}`;
+  if (got.dCoins !== -got.want) return `the arcade's till moved $${got.dCoins} for a $${got.want} refund`;
+  if (Math.abs(got.dWorld) > 1e-6)
+    return `a refund changed the world's money by $${got.dWorld} - money was created or destroyed at a counter`;
+  // AND THE SHUTTERED CASE, which is the same fault with the sign flipped. A
+  // closed lease has no till at all (creditBiz/debitBiz both refuse one), so a
+  // refund paid out of it would be MINTED, and a prize handed off its shelf
+  // would be stock nobody bought. Both must simply not happen.
+  const shut = JSON.parse(sim.G(`(() => {
+    BIZ.arcade.owner = null;
+    const k = { biz: "arcade", isCrab: false, visitor: true, gone: false, x: BIZ.arcade.door,
+      wallet: 10, purse: 50, spent: 0, tokens: 6, tickets: 9999, state: "roam", stay: newStay() };
+    customers.push(k);
+    const w0 = worldMoney();
+    const back = arcRefundTokens(k);
+    const gave = redeemPrize(k, ARC_PRIZES[2]);
+    const out = { back, gave: !!gave, wallet: k.wallet, tix: k.tickets,
+      dWorld: Math.round((worldMoney() - w0) * 1000) / 1000 };
+    BIZ.arcade.owner = "player";
+    customers = customers.filter(q => q !== k);
+    return JSON.stringify(out);
+  })()`));
+  if (shut.back !== 0 || shut.wallet !== 10)
+    return `a shuttered arcade refunded $${shut.back} out of a till it has not got`;
+  if (shut.gave) return "a shuttered arcade handed a gold plush off a shelf nobody paid for";
+  if (Math.abs(shut.dWorld) > 1e-6)
+    return `a shuttered arcade moved $${shut.dWorld} of world money`;
+  return true;
+});
+
+scenario("arcade: the stub, the prizes and all four dials roundtrip save/load", () => {
+  // Tickets are a RESOURCE - a crab really can save across three visits, and a
+  // guest carries theirs for the whole stay - so losing them on a reload is
+  // the same bug as a reload handing the town a second vote. The dials are the
+  // player's settings and must come back exactly, clamped on the way in.
+  const store = new Map();
+  const sim = arcadeTown(1337, false, { storage: store, fresh: false });
+  sim.runUntil("day >= 2", { maxSteps: 200000 });
+  const want = JSON.parse(sim.G(`(() => {
+    setArcToken(5); setArcWin(0.45); setArcPay(90); setArcPrizeMul(1.6);
+    crabs[0].p.tickets = 143; crabs[0].p.prizes = 2;
+    const v = customers.find(k => k.visitor && !k.gone);
+    if (v) { v.tickets = 61; v.prizes = 1; v.state = "roam"; v.biz = null; }
+    save();
+    return JSON.stringify({ arc: [ARC.token, ARC.win, ARC.pay, ARC.prizeMul],
+      crab: [crabs[0].p.name, 143, 2], vis: v ? [v.name, 61, 1] : null,
+      bundle: BIZ.arcade.recipes[0].pay });
+  })()`));
+  if (!want.vis) return "the fixture had no visitor in town to give a stub to";
+  const re = createSim({ seed: 99, storage: store, fresh: false });
+  const got = JSON.parse(re.G(`(() => {
+    const c = crabs.find(q => q.p.name === ${JSON.stringify(want.crab[0])});
+    const v = customers.find(q => q.visitor && q.name === ${JSON.stringify(want.vis[0])});
+    return JSON.stringify({ arc: [ARC.token, ARC.win, ARC.pay, ARC.prizeMul],
+      crab: c ? [c.p.tickets || 0, c.p.prizes || 0] : null,
+      vis: v ? [v.tickets || 0, v.prizes || 0] : null,
+      bundle: BIZ.arcade.recipes[0].pay, machines: arcadeMachines().length });
+  })()`));
+  if (JSON.stringify(got.arc) !== JSON.stringify(want.arc))
+    return `the dials came back ${JSON.stringify(got.arc)} against ${JSON.stringify(want.arc)}`;
+  if (got.bundle !== want.bundle)
+    return `the bundle's board price came back $${got.bundle} against $${want.bundle} - it was not rebuilt from the token price`;
+  if (!got.crab || got.crab[0] !== 143 || got.crab[1] !== 2)
+    return `the crab's stub came back ${JSON.stringify(got.crab)} against [143, 2]`;
+  if (!got.vis || got.vis[0] !== 61 || got.vis[1] !== 1)
+    return `the guest's stub came back ${JSON.stringify(got.vis)} against [61, 1]`;
+  if (got.machines !== 4) return `${got.machines} cabinets stood after a reload, not 4`;
+  // a corrupt save is clamped into the band the steppers can reach, not trusted
+  const bad = createSim({ seed: 5, storage: (() => {
+    const m = new Map(store);
+    const env = JSON.parse(m.get(SLOT1));
+    env.arc = { t: 9999, w: -3, p: 1e9, z: 40 };
+    m.set(SLOT1, JSON.stringify(env));
+    return m;
+  })(), fresh: false });
+  const cl = JSON.parse(bad.G("JSON.stringify([ARC.token, ARC.win, ARC.pay, ARC.prizeMul])"));
+  if (cl[0] > 6 || cl[1] > 0.6 || cl[2] > 120 || cl[3] > 2)
+    return "a corrupt arcade save was loaded unclamped: " + JSON.stringify(cl);
+  return true;
+});
+
+scenario("arcade: buying tokens does not cure boredom - playing does, and a prize finishes it", () => {
+  // The ordering IS the feature. Boredom used to go to zero at the counter,
+  // which is what made the arcade a taco stand: the money bought the cure
+  // outright and the machines were scenery. Now a go buys a little back and a
+  // PRIZE zeroes it, so a shop that takes your money and sends you home
+  // empty-handed has not finished selling you a good time.
+  const sim = arcadeTown(909);
+  const got = JSON.parse(sim.G(`(() => {
+    const m = arcadeMachines()[0];
+    const c = crabs[0]; c.p.bored = 1; c.p.tickets = 0; c.p.prizes = 0;
+    const k = { biz: "arcade", isCrab: true, crab: c, recipe: BIZ.arcade.recipes[1],
+      need: "fun", x: m.x, state: "playing", tokens: 3, stall: m, played: 0, wonTix: 0 };
+    m.occupant = k;
+    const atCounter = c.p.bored;                 // after the sale, before a single go
+    arcPlay(k); const afterOne = c.p.bored;
+    arcPlay(k); arcPlay(k);
+    const afterAll = c.p.bored;
+    c.p.tickets = prizeTix(ARC_PRIZES[0]);
+    redeemPrize(k, ARC_PRIZES[0]);
+    m.occupant = null;
+    return JSON.stringify({ atCounter, afterOne, afterAll, afterPrize: c.p.bored,
+      prizes: c.p.prizes, step: ARC_FUN_PLAY });
+  })()`));
+  if (got.atCounter !== 1)
+    return `boredom was already ${got.atCounter} before a single go - the counter is curing it again`;
+  if (Math.abs((got.atCounter - got.afterOne) - got.step) > 1e-9)
+    return `one go moved boredom by ${(got.atCounter - got.afterOne).toFixed(3)}, not ${got.step}`;
+  if (!(got.afterAll > 0))
+    return "three goes cured boredom outright - there is nothing left for the prize to be worth";
+  if (got.afterPrize !== 0) return `a redeemed prize left boredom at ${got.afterPrize}`;
+  if (got.prizes !== 1) return "the prize was not recorded on the crab";
+  // AND THE COUNTER ITSELF, driven directly. The block above starts a customer
+  // already standing at a machine, so it never touches payAndBenefit - and a
+  // mutation that put `bored = 0` back at the till SURVIVED it. This runs the
+  // handover for real, for a local and for a guest, and asserts the sale moves
+  // the money and leaves the boredom exactly where it was.
+  const till = JSON.parse(sim.G(`(() => {
+    const c = crabs[1]; c.p.bored = 1; c.p.wallet = 300; c.p.tickets = 0;
+    const r = BIZ.arcade.recipes[0];
+    const k = { biz: "arcade", isCrab: true, crab: c, recipe: r, need: "fun",
+      x: BIZ.arcade.door, state: "waiting", patience: 90, maxPatience: 90, served: false };
+    const w0 = c.p.wallet, c0 = coins;
+    payAndBenefit(crabs[2], k);
+    const local = { bored: c.p.bored, paid: w0 - c.p.wallet, till: Math.round(coins - c0) };
+    // ...and a visitor, through visBenefit, which is the other half of the door
+    const v = { visitor: true, gone: false, biz: "arcade", recipe: r, need: "fun",
+      wallet: 300, purse: 300, spent: 0, tickets: 0, bored: 1, hunger: 0, thirst: 0,
+      dirt: 0, tired: 0, x: BIZ.arcade.door, name: "PROBE", stay: newStay(), log: [] };
+    visBenefit(v);
+    return JSON.stringify({ local, guest: v.bored });
+  })()`));
+  if (till.local.bored !== 1)
+    return `paying for tokens took a local's boredom to ${till.local.bored} - the counter is curing it again`;
+  if (till.guest !== 1)
+    return `paying for tokens took a guest's boredom to ${till.guest} - the counter is curing it again`;
+  if (!(till.local.paid > 0)) return "the local paid nothing for their tokens";
+  if (till.local.till !== till.local.paid)
+    return `the local paid $${till.local.paid} and the till took $${till.local.till}`;
+  return true;
+});
+
+scenario("arcade: they hold out for the prize they came for, and settle when they cannot come back", () => {
+  // THE PRIZE WALL IS THE HOOK, and this is the decision that makes it one. A
+  // customer standing at the counter with enough tickets for the little rubber
+  // crab and their eye on the plush does NOT take the rubber crab - not while
+  // they can still afford another handful of tokens. Take that away and the
+  // wall is a vending machine: everybody cashes out at the bottom shelf on
+  // their first visit and nobody ever chases anything.
+  //
+  // Nothing here is a die roll or a counter. The three answers come from two
+  // facts about the person - what is in the stub, and what is in the purse.
+  const sim = arcadeTown(1337);
+  if (!sim.runUntil('bizStaffed("arcade") && bizOpenNow("arcade")', { maxSteps: 200000 }))
+    return "the fixture never opened the arcade";
+  const ask = (tix, wallet, eye) => sim.G(`(() => {
+    const c = crabs[0]; c.p.wallet = ${wallet}; c.p.tickets = ${tix};
+    const k = { biz: "arcade", isCrab: true, crab: c, tokens: 0, eyeing: ARC_PRIZES[${eye}] };
+    const p = arcCashOut(k);
+    return p ? p.id : "hold";
+  })()`);
+  const rubber = +sim.G("prizeTix(ARC_PRIZES[0])"), plush = +sim.G("prizeTix(ARC_PRIZES[1])");
+  const flush = +sim.G("localPrice('arcade', BIZ.arcade.recipes[0]) + ARC_SPARE + 5");
+  const held = ask(rubber, flush, 1);
+  if (held !== "hold")
+    return `a crab with ${rubber} tickets and their eye on the plush cashed out for the ${held} with $${flush} still in their pocket`;
+  const settled = ask(rubber, 1, 1);
+  if (settled !== "rubber")
+    return `a crab with ${rubber} tickets, their eye on the plush and $1 left answered "${settled}" - they cannot come back, so they should take what the stub buys`;
+  const got = ask(plush, flush, 1);
+  if (got !== "plush")
+    return `a crab who reached the plush answered "${got}" instead of taking it`;
+  // ...and somebody with nothing on the stub has nothing to decide
+  if (ask(0, flush, 0) !== "hold")
+    return "a crab with no tickets was handed a prize off the wall";
+  // the target itself is DERIVED: an optimist walking in with 10 tokens aims
+  // higher than the same crab walking in with 3, and neither aims at nothing
+  const small = sim.G("eyePrize(0, 3).id"), big = sim.G("eyePrize(0, 12).id");
+  if (small === big)
+    return `a 3-token visit and a 12-token visit both aim at the ${small} - the eye does not follow the pocket`;
   return true;
 });
 

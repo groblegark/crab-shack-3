@@ -26,8 +26,20 @@ export function createSim({ seed = 1337, storage = null, fresh = true, screenH =
     },
     set: () => true,
   });
-  const mkCanvas = () => ({ width: 0, height: 0, getContext: () => ctxStub,
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 256, height: 240 }), addEventListener: noop });
+  // THE CANVAS REMEMBERS ITS LISTENERS, which is the whole of `tap` below. The
+  // game's click handler is an anonymous arrow inside addEventListener, so
+  // with a noop stub there was NO WAY to reach it from a scenario: a draw and
+  // its hit test could disagree about where a control was and 200 scenarios
+  // would all pass. Recording the handlers costs nothing and is not a new
+  // browser API - it is the same addEventListener that was always there.
+  const canvasListeners = {};
+  // width/height are the REAL canvas's, not zero: evPos scales a click by
+  // cv.width / boundingRect.width, and at width 0 every tap in the game landed
+  // on pixel (0,0). Read only by evPos, so nothing about the sim's behaviour
+  // moves - it is the difference between `tap` working and `tap` lying.
+  const mkCanvas = () => ({ width: 256, height: screenH || 240, getContext: () => ctxStub,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 256, height: 240 }),
+    addEventListener: (type, fn) => { (canvasListeners[type] = canvasListeners[type] || []).push(fn); } });
   const store = storage || new Map();
   const seededMath = Object.create(Math);
   seededMath.random = mulberry32(seed);
@@ -61,6 +73,19 @@ export function createSim({ seed = 1337, storage = null, fresh = true, screenH =
   const stepScript = (stepMs) => new vm.Script(`simNow += ${stepMs}; rafCb(simNow);`);
   return {
     C, G, sandbox, store,
+    // DRIVE THE REAL CLICK HANDLER. `tap(x, y)` is a canvas-space click - the
+    // getBoundingClientRect stub above is 1:1 with the 256px canvas, so a
+    // world/card coordinate goes straight in. `tapRect(r)` aims at a rect's
+    // centre, which is how a scenario proves that a control a DRAW put at
+    // manageRects().foo is the control the HIT TEST acts on: the two read the
+    // same table, and this is the only thing that can catch them drifting.
+    tap(x, y) {
+      const ls = canvasListeners.click || [];
+      if (!ls.length) throw new Error("no click listener registered on the canvas");
+      for (const fn of ls) fn({ clientX: x, clientY: y, preventDefault: noop });
+      return ls.length;
+    },
+    tapRect(r) { return this.tap(r.x + r.w / 2, r.y + r.h / 2); },
     // run until a predicate (a G-expression) is true, or maxSteps elapse
     runUntil(expr, { step = 50, maxSteps = 400000, onTick = null, tickEvery = 20 } = {}) {
       const s = stepScript(step);

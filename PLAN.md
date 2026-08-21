@@ -7048,3 +7048,292 @@ road left. `wageLoanWhy()` says which of the two it is.
 first three attempts at this fixture "proved" that missing payday did nothing,
 and all three were measuring a loop that never ran. Now in CLAUDE.md, and
 called out at the top of the payday scenarios.
+
+## THE ARCADE LOOP (Matt, 2026-08-21, shipped worktree) — tokens, tickets, prizes
+
+Verbatim: *"the arcade mechanics aren't very 'arcade like' -- at an arcade you
+get tokens, then you play games get tickets, then you trade the tickets for
+prizes.. it could be a bit addictive if you're not winning the prizes you want.
+should have like a claw game to make this obvious, and settings for the
+mechanics of the claw game and stuff"*.
+
+### WHAT THE CLAWCADE WAS: A TACO STAND WITH A PLUSH ON THE PLATE
+
+The old shop was the shack's pipeline wearing different sprites. You queued, an
+ATTENDANT "cooked" a `clawgame` at a claw machine you never touched, handed you
+a plush over the counter, and **your boredom went to zero at the till**. There
+was no floor, no ticket, no prize wall and no decision — `token` was a word in
+a recipe id. Nothing about it was arcade-shaped except the art.
+
+### THE THREE STEPS, AND ONLY THE FIRST ONE IS MONEY
+
+1. **TOKENS.** The booth sells one product in three sizes — 3 / 6 / 10 tokens.
+   This is the ONLY transaction in the building, and it goes through the same
+   counter pipeline a taco goes through, so tips, patience, rage-quits, the
+   queue cap, the day book, the till board and the departure card all work on
+   it unchanged.
+2. **TICKETS.** The customer walks onto the floor, takes a CABINET, and spends
+   the tokens one at a time. The CLAW pays `ARC.pay` tickets `ARC.win` of the
+   time and **nothing** the rest; the SKEE LANE pays a middling handful every
+   single go. **Both have the same expected tickets per token by construction**
+   (`skeeRoll` derives its band from `arcEV()`), so choosing a machine is
+   choosing VARIANCE and nothing else — and `arcPickMachine` has the customer
+   take the claw when they are a long way short and the lane when they are
+   nearly there, which is a real decision falling out of two numbers they are
+   already carrying.
+3. **PRIZES.** The wall at the back trades tickets for a prize: RUBBER CRAB 20,
+   CLAW PLUSH 70, GOLD PLUSH 220. Tickets live on the PERSON and survive the
+   visit — a crab's in their persona (so they save across days and across a
+   reload), a guest's for the length of the stay.
+
+**THE HOOK IS A RATIO, NOT A SCRIPT.** `arcChase(tix)` is tickets held over
+tickets needed for the next thing on the wall, and it is added to the arcade's
+errand APPEAL on both scorers (the crabs' `errandScore` already had `appeal`;
+the visitor scorer gained the same term, defaulting to 1, so every other stop
+scores what it always scored). It goes to ZERO the moment they can afford the
+top prize, so nobody chases for ever. `arcCashOut` is the other half: a
+customer with enough tickets for the rubber crab and their eye on the plush
+**holds out** while they can still afford another handful, and settles for what
+the stub buys only when they cannot come back. That is "a bit addictive if
+you're not winning the prizes you want", made of two facts about the person.
+
+**BOREDOM MOVED OFF THE COUNTER.** A go buys back `ARC_FUN_PLAY` (0.10); a
+REDEEMED PRIZE zeroes it. The ordering is the mechanic: a shop that takes your
+money and sends you home empty-handed has not finished selling you a good time.
+
+### NOTHING IS CONJURED, AND IT IS THE TOWN FUND'S OWN ARGUMENT
+
+- **A ticket is not money.** `worldMoney()` never counts one; it cannot enter a
+  wallet or a till and cannot be sold. It is a claim on a shelf.
+- **A prize is stock.** Handing one over DEBITS the arcade's till for the
+  prize's wholesale `cost` and books it as an import (`trade.prize`), exactly
+  the way a fish leaves the world when the kitchen buys one.
+- **Unplayed tokens are REFUNDED, never deleted.** A full floor is the shop's
+  problem; deleting brass somebody has already paid for would take money out of
+  the world at a counter. The refund is the sale run backwards — till down,
+  wallet up, world unchanged — and it is a real cost of a floor that is too
+  small, which is what CADE GEAR+ is now for.
+- **A shuttered lease does neither.** With no till, `debitBiz` is a no-op, so a
+  refund would be MINTED and a prize would come off a shelf nobody paid for.
+  Both are refused (`bizOwner("arcade")` guards) and both were mutation-tested.
+
+Measured over five sim-days with an audit wrapped around every event: 38 goes
+moved **$0.000** of world money, 7 redemptions each moved **exactly minus the
+prize's cost**, and every refund moved **$0.000**.
+
+### THE SETTINGS THE DIRECTIVE ASKED FOR (management card, HOURS tab)
+
+Four dials, all player-facing, all saved, all clamped on load:
+
+| dial | where | band | default |
+|---|---|---|---|
+| **TOKEN $** | the shop's own PRICE row | $1–$6 | $3 |
+| **CLAW GRAB** | HOURS tab, arcade only | 5%–60% in 5s | 20% |
+| **PAYOUT** | HOURS tab, arcade only | 10–120 tix in 10s | 40 |
+| **PRIZES** | HOURS tab, arcade only | 50%–200% in 10s | 100% |
+
+**THE TOKEN PRICE IS THE SHOP'S PRICE ROW**, in the place every other shop
+prices itself, denominated in dollars per token instead of a percentage.
+`bizPriceMul("arcade")` is pinned at 1 and `priceAppeal("arcade")` reads the
+token price off the same elasticity curve — so a dearer token really does cost
+the arcade footfall, the promenade stays zero sum, and there is exactly ONE
+place the board price lives. (A second one would let the refund at the booth
+hand back a different number from the one the till took.)
+
+**AND THE CARD SAYS WHAT THEY DO**, because interface opacity is a bug. Three
+derived lines under the steppers, every number read out of `arcEV` / `prizeTix`
+rather than typed:
+
+```
+CLAW 40 TIX 1 GO IN 5    SKEE 4-12 EVERY GO
+RUBBER 20   CLAW 70   GOLD 220
+GOLD PLUSH: ~28 GOES, $84 OF TOKENS
+```
+
+That last line is the whole feature in one sentence — what the thing at the top
+of the wall costs in goes, and therefore in money. What the card does NOT say
+is whether a tighter claw makes you richer. That genuinely depends on the town,
+and it is the game.
+
+### THE PICTURE, BECAUSE "MAKE THIS OBVIOUS" WAS THE POINT
+
+The machines are no longer STATIONS — they are FIXTURES THE CUSTOMER OCCUPIES,
+built on the shower stalls' occupancy machinery (so every wedge guard, abort
+path and leak check already knew what to do with them) and standing on the
+stalls' y, so both travel lanes keep their daylight by construction. Four
+cabinets alternating claw/skee, six with CADE GEAR+ — which now buys CABINETS,
+rebuilt by `syncArcadeFloor()` off `ARC_FLOOR` the way the annexe rebuilds
+hotel rooms, never a saved array of x's. From the boardwalk you can watch the
+claw actually DROP through a go, tickets spill out of the slot on a grab, a
+ball run up the skee lane, and the three prizes standing on the wall at the
+back.
+
+**THE BUG THAT COST THE MOST, and it closed the whole shop.** Every abort path
+in the game marks a released stall DIRTY so a crab comes and cleans it. A DIRTY
+machine is filtered out of `find(t => !t.occupant && !t.dirty)` for ever, and
+nobody cleans a claw machine — so the floor quietly shut itself, one cabinet at
+a time, over a couple of days. `releaseFixture(k)` is now the one function that
+knows the difference between a stall and a cabinet, and a scenario watches
+every machine on every tick of a six-day town for a dirty flag.
+
+### BALANCE: THE DOCUMENTED MATRICES DID NOT MOVE, AND IT IS PROVED RATHER THAN ASSERTED
+
+`tools/headless.mjs` never buys the arcade — $650 is out of reach of a town
+that dies on day 12, so `--buy chef,table,arcade` is bit-identical to
+`--buy chef,table` — which means a change confined to a shop nobody opens
+cannot move the documented curves. That is an argument, not a measurement, so
+it was measured — and the measuring shipped as a tool, because CLAUDE.md's
+"measure against the tree you are landing on" deserves something cheaper than
+fifteen minutes of seeds and medians:
+
+**`node tools/abtree.mjs --ref <sha> [--days N] [--buy ...] [--seeds ...]
+[--js '...']`** materialises the control tree with `git archive` into a temp
+dir, runs the same seeded town on both, and diffs a FINGERPRINT — day, till,
+reputation, crew size and customers in town at every midnight, plus how and
+when it ended. Identical means identical; different prints the first midnight
+they parted company, which is usually enough to name the cause. Exit code 0
+only when every seed matches, so it drops straight into a shell `if`.
+
+- **buy nothing, 20 days, seeds 1337/909/4242/5348: 4/4 BYTE-IDENTICAL.**
+- **`--buy chef,table`, 25 days, same seeds: 4/4 BYTE-IDENTICAL.**
+- And the NEGATIVE CONTROL, because a tool that only ever says "identical" is
+  not a tool: a town that actually RUNS the arcade
+  (`--buy arcade,chef,chef --js 'coins = 500; crabs[2].p.job = "arcade"; crabs[3].p.job = "arcade";'`)
+  **DIFFERS on both seeds, from day 2.**
+
+One trap in that tool is called out in its own output rather than in a comment
+nobody reads: `--buy` funds itself out of a float it puts back afterwards, so a
+long buy list can open the shop in debt, kill it at the first 20:00, and read
+IDENTICAL on both trees because neither town ever traded. It now WARNS when the
+town lasted fewer than two midnights. That false pass cost twenty minutes here.
+
+And the matrices themselves, re-run on this tree:
+
+- Baseline `--days 30 --seeds 16`: **0/16, median eviction 12**
+  (8,10,10,11,11,11,12,12,12,12,12,13,13,13,13,17; lifetime $54,276) — the
+  documented 0/16 median 12.
+- Growth `--buy chef,table --days 40 --seeds 8`: **1/8**
+  (10,11,12,12,12,12,13,41) and **1/8 on `--seedbase 8`**
+  (8,9,10,12,13,14,15,41) — **2/16, the documented number.**
+
+**WHERE IT DOES MOVE IS IN A TOWN THAT ACTUALLY RUNS ONE**, which is the point
+of the feature and is the one thing the matrix cannot see. A throwaway rig
+(kept in the worktree's untracked `.measure/arcecon.mjs`) stands an arcade town
+up on day one — the shop, four crew, two of them on the floor — and reads the
+shop's own books on both trees. 20 days x 4 seeds:
+
+| | pre-pass | arcade loop |
+|---|---|---|
+| towns alive at day 20 | 0/4 | 1/4 |
+| town-days lived | 40 | 56 |
+| lifetime takings | $13,958 | $23,345 |
+| **arcade took** | **$3,089 ($77/town-day)** | **$8,487 ($152/town-day)** |
+| arcade's costs | $224 | $1,150 (of which $725 is prize stock) |
+| shack took | $10,868 ($272/town-day) | $14,857 ($265/town-day) |
+| goes played | — | 2,588 |
+| tickets won | — | 20,663 |
+| prizes redeemed | — | 327 |
+| sessions ending EMPTY-HANDED | — | 95 |
+| claw grabs | — | **185 / 919 = 20.1%** against a 20% dial |
+| token refunds | — | $0 |
+| walkouts per town-day | 0.35 | 0.32 |
+
+**The honest reading: the arcade is now about twice the business it was, per
+day it is open.** The shack's own per-day take is FLAT ($272 -> $265), so this
+is not the shack's trade moving next door — it is visitors and locals spending
+money on a second and third handful of tokens that the old one-plush-per-visit
+shop never asked them for. That is a real buff to a town that has bought the
+arcade, it narrows the documented "side businesses make a town poorer" finding,
+and **it is left as measured rather than tuned away** — the dials are right
+there if it wants pulling back, and the do-nothing and growth pillars are
+untouched.
+
+### SUITE +11, ONE RE-POINTING, EVERY ONE MUTATION-TESTED
+
+**The one re-pointing is worth naming because it is the good kind.** "The shop
+tooltip promises what the button actually does" counts the MECHANISM rather
+than the string — read the promise, buy the thing, check the town holds the
+number the promise named — and CADE GEAR+'s counter was
+`stationCap("arcade", "claw")`. Cabinets are not stations any more, so that
+counter reads 1 for ever and the scenario failed on the first full run with
+`cadegear: the tooltip opened on "MACHINES 4 -> 6" while the town held 1`. The
+counter is now `arcadeMachines().length`; the scenario's shape did not change.
+That is exactly what a mechanism test is supposed to do when a mechanism moves.
+
+
+Eleven scenarios under `arcade:`, plus two new cases in the departure card's
+"every quote is DERIVED" coverage (that scenario fails on any rule no
+constructed stay can reach, which is exactly what caught the two new CLAWCADE
+rules the moment they were added — a dead sentence is the same defect as a
+random one).
+
+**AND THE CARD IS READ, NOT TRUSTED.** The dials scenario stubs `text` and
+`smallText`, drives `drawManage()`, and compares the SENTENCES the card
+produced against what twenty thousand real goes actually did — the claw's
+payout, its odds, the lane's band, both ends of the prize wall, and what the
+gold plush costs in goes and in dollars. Everything else in the file proves the
+machines obey the dials; this is the only thing that proves the PLAYER IS TOLD
+THE TRUTH about them, which is the half of the opacity ruling a behaviour test
+cannot reach. (`skeeBand()` exists for the same reason: a band typed into the
+card and a band typed into the roll are two numbers that agree right up until
+somebody edits one of them.)
+
+**Thirty mutations were run. Twenty-eight were caught outright; two survived,
+and both were answered with an assertion aimed straight at them and then
+caught.** The two survivors are the useful part of the record:
+
+**MOVING A STEPPER'S RECT DID NOT BREAK THE TAP TEST**, and it never can — the
+draw and the hit test read ONE geometry table (`manageRects`), so a rect that
+moves takes its button with it. What a tap test CAN catch is the two
+DISAGREEING, and that mutation (a hit test looking 40px from where the stepper
+is drawn) fails immediately. The surviving mutant was answered with an
+assertion aimed straight at it: every arcade control must lie inside the card
+and no two may overlap, which is the drift a player would report as "that
+button does the wrong thing". A rect nudged onto its neighbour now fails.
+
+**AND: PUTTING `bored = 0` BACK AT THE COUNTER SURVIVED THE BOREDOM SCENARIO**,
+because that fixture starts a customer already standing at a machine and never
+touches `payAndBenefit`. It now drives the handover for real, for a local
+through `payAndBenefit` and for a guest through `visBenefit`, and asserts the
+sale moves the money and leaves the boredom exactly where it was. A fixture
+that skips the door cannot test the door.
+
+**One wedge was found by reading rather than by measuring, and is now guarded
+and mutation-tested.** `arcPlay` refuses to roll without a cabinet, so a
+customer left in `playing` with no machine would never spend a token, never
+finish, and hold a queue slot for the rest of the town's life — invisible to
+anything that looks at the MACHINES, because there is no machine to look at.
+The state now ends the session, and the scenario counts people as well as
+cabinets. (Mutation: yank a cabinet at 0.4% a frame with the guard reverted —
+**9 ghost players in a six-day town**.)
+
+`sim.tap(x, y)` / `sim.tapRect(r)` in `tools/simlib.mjs` drive the game's REAL
+canvas click handler. Two things were needed for that: the canvas stub now
+records its listeners, and it reports `width` 256 rather than 0 — `evPos`
+scales a click by `cv.width / rect.width`, so at width 0 **every tap in the
+game landed on pixel (0,0)**. `cv.width` is read by `evPos` and nothing else,
+so no sim behaviour moves; it is the difference between `tap` working and `tap`
+lying.
+
+### WHAT IT COSTS THE SAVE
+
+Four numbers (`arc: {t,w,p,z}`), a ticket stub and a prize count per crab
+(inside the persona, so free) and the same two per guest (`tk`, `pz`). The
+FLOOR is not saved — it is rebuilt from `ARC_FLOOR` and the CADE GEAR+ level,
+for the reason the hotel's annexe is a count rather than an array of x's.
+
+An old save carries none of it and gets the shipping defaults, which is exactly
+the arcade it was saved with. Checked end to end rather than assumed: a town
+saved on the pre-pass tree at day 3 with CADE GEAR+ fitted opens here with the
+same day, till, crew and guest list, **six cabinets standing**, the dials at
+their defaults, the board rebuilt at 9/18/30, both travel lanes clear — and
+trades for three more days (168 goes, 26 prizes, zero cabinets stuck dirty).
+
+### KNOWN, PRE-EXISTING, AND DELIBERATELY NOT FIXED HERE
+
+The management card is `h2 = 196` at `y = 6`, i.e. it ends at y202 on a canvas
+whose panel starts at **176** — so the rivalry line (y176) and the DONE chip
+(y187) sit behind the panel in the 240 mode. Nothing in this pass changed the
+card's height, and the arcade block is laid out to finish at **y173**, inside
+the visible band. Flagged because the HALL/ELECTION split is moving that height
+anyway.
