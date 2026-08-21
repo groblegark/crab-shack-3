@@ -7048,3 +7048,86 @@ road left. `wageLoanWhy()` says which of the two it is.
 first three attempts at this fixture "proved" that missing payday did nothing,
 and all three were measuring a loop that never ran. Now in CLAUDE.md, and
 called out at the top of the payday scenarios.
+
+## THE NEW QUARTER (Matt, 2026-08-21) — a coffee stand, a glow stall and an import counter
+
+Matt: *"midgame everybody gets rich w/o much to spend it on, I noticed that;
+richer crabs need more durable assets they can buy, maybe nice stuff for their
+house and we need a small imported durable goods shop? we could expand the
+juice menu to add more healthful options that increase your zzz for a while;
+oh we need a coffee shop and a glow stick shop"*.
+
+### The durable is the whole idea
+
+**Every other purchase in this town is a consumable.** A plate zeroes hunger
+and it comes back; a shower zeroes dirt and it comes back. So a crab who
+out-earns their appetite has nowhere for the surplus to go and the money just
+piles up — exactly what he saw. A **HOUSE GOOD** is the missing shape: bought
+once, expensive, and it keeps paying by making that crab's own nights better.
+The effects are all HOME effects, so a good works in the house it stands in and
+does nothing behind a counter.
+
+Measured against **real wallets**, not against what felt expensive: a crab's
+pocket runs $0–90 and the richest in a 40-day town touched $147, so the first
+cut ($60 plus $90 held back) was a purchase nobody in the game could ever make
+and the counter sold *nothing* in thirty days.
+
+### Four things it took to make three shops live
+
+1. **THE PROMENADE WAS FULL.** Every apparent gap was already spoken for by a
+   neighbour's QUEUE — the showers' line runs 1126–1178, the arcade's
+   1804–1856. The world grew 2512 → 3100 and the quarter opens east of the
+   DRIFTWOOD.
+2. **A QUARTER WITH NO WATER KILLS ITS OWN SHOPKEEPERS.** Three owner-operators
+   2500px from the nearest tap, with `DETOUR_MAX` refusing a stop that far off
+   your route: all three dead or bankrupt inside a fortnight, taking the NPC
+   economy with them. New streets need infrastructure — a third tap and a
+   fourth bus stop.
+3. **THEY ARE MIDGAME SHOPS.** Opening all three on day one bled rent from an
+   opening float with nobody yet tired, bored or rich enough to walk out there:
+   bankrupt on **day seven**, dead before the midgame they exist for. They now
+   open off `lifetime`, and their proprietors ride in **with** the lease.
+4. **RENT IS THE ONLY COST THAT LEAVES THE WORLD.** Wages and plates move money
+   between crabs; the landlord's cut removes it. Three leases at the old shops'
+   rates put $130/night of permanent drain into a town that was just balancing.
+   They are small counters and are priced like small counters.
+
+### The blast radius, and how it was contained
+
+The first working cut turned **24 scenarios red** — fishers hired off the rail,
+the showers unable to staff, shops failing that never failed before. Three new
+bidders in a labour market of eight crabs is a different town.
+
+> **A feature meant to give rich crabs something to buy has no business
+> rewriting who works where.**
+
+So the quarter competes for **customers and not for labour**: its stalls never
+post a vacancy (`runJobBoard` skips them), they are not in `townWage` (a
+counter that never hires is not part of the going rate), and their proprietors
+are not in the buyer pool for other people's failed leases (they moved here
+with a stake to work one counter, not to speculate). That took 24 red down to
+the handful below.
+
+### Three real bugs it surfaced, all pre-existing
+
+- **`release()` used the crab's CURRENT shop** with a slot taken at a different
+  one, so a crab who changed jobs mid-slot released `busy.hotel.board` — which
+  does not exist — and threw the whole frame. It needed a town with enough
+  shops for job churn to be routine before it could ever fire.
+- **Owner-operators could never leave the counter.** The self-employed break
+  was written as `job === "fishing"`, so the *other* self-employed crabs worked
+  ten-hour days with no gap. SUDSY has been the standing casualty: the taps
+  scenario has tracked her at 18.7%, 25% and 31% of her life on the dehydration
+  sickness line across three passes, and every time the fix was tuning
+  something else. She now steps out for water or food past 0.7.
+- **All three vote-loss lines** on the ballot page needed the bound that only
+  the last one had; the LATE line was the one that printed through the STAND
+  chip.
+
+### Balance and state
+
+`250/251`. The one red is `rivalry: THE LEASE IS THE RIVAL` — the inherited
+ambition reaches `eyeing` on day 5 with intent 0.46 and then DECAYS below the
+0.28 gate before the fixture looks. The mechanism is intact (verified directly);
+the fixture is racing a decay it did not used to race. **Left red rather than
+papered over.**

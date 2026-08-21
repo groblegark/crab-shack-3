@@ -130,6 +130,73 @@ function touristArt(style) { return parseArt(_TOURIST, swap(PAL, style)); }
 // ---------------------------------------------------------------- items 9x7
 const ITEMS = {};
 function defItem(name, rows) { ITEMS[name] = parseArt(rows, PAL); }
+// ---- THE THREE NEW COUNTERS (2026-08-21). Matt: "midgame everybody gets rich
+// w/o much to spend it on ... we need a small imported durable goods shop ...
+// oh we need a coffee shop and a glow stick shop". Nine by seven, same as
+// every other item, so they ride the existing carry/serve pipeline untouched.
+defItem("tonic", [
+  "...KKK...",
+  "..KGGGK..",
+  ".KGJJJGK.",
+  ".KGJJJGK.",
+  ".KGJJJGK.",
+  "..KGGGK..",
+  "...KKK...",
+]);
+defItem("beans", [
+  ".........",
+  "..KKKKK..",
+  ".KDDDDDK.",
+  ".KDEDEDK.",
+  ".KDDDDDK.",
+  "..KKKKK..",
+  ".........",
+]);
+defItem("coffee", [
+  ".........",
+  ".KKKKKK..",
+  ".KDDDDKM.",
+  ".KDDDDKKM",
+  ".KDDDDKM.",
+  ".KKKKKK..",
+  "..MMMM...",
+]);
+defItem("glowstick", [
+  ".........",
+  ".......KK",
+  "....KKGGK",
+  "..KKGGGK.",
+  "KKGGGKK..",
+  "KGGKK....",
+  "KK.......",
+]);
+defItem("glowpack", [
+  ".........",
+  ".KKKKKKK.",
+  ".KGJGJGK.",
+  ".KJGJGJK.",
+  ".KGJGJGK.",
+  ".KKKKKKK.",
+  ".........",
+]);
+defItem("crate_goods", [
+  ".........",
+  ".KKKKKKK.",
+  ".KEDEDEK.",
+  ".KDEAEDK.",
+  ".KEDEDEK.",
+  ".KKKKKKK.",
+  ".........",
+]);
+defItem("fitting", [
+  "...KKK...",
+  "..KAAAK..",
+  ".KAYYYAK.",
+  ".KAYYYAK.",
+  "..KAAAK..",
+  "...KEK...",
+  "...KEK...",
+]);
 defItem("fish_raw", [
   ".........",
   ".KKK.....",

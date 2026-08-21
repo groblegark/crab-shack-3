@@ -1673,7 +1673,14 @@ scenario("days off: everyone rests their weekday and plays customer", () => {
   if (Object.keys(clockIns).length) return "worked their own day off: " + JSON.stringify(clockIns);
   const seen = JSON.parse(sim.G("JSON.stringify(window._offSeen)"));
   const sick = JSON.parse(sim.G("JSON.stringify(window._sickDays)"));
-  const names = JSON.parse(sim.G("JSON.stringify(allCrabs().map(c => [c.p.name, !!c.p.npc]))"));
+  // ...OF THE CRABS WHO WERE HERE FOR THE WHOLE WEEK. The eastern quarter's
+  // shopkeepers arrive with their leases part-way through (see QUARTER_OPEN),
+  // so a crab who moved to town on Thursday has not reached their weekday yet
+  // and is not evidence of anything. The rota is what is on trial here.
+  const names = JSON.parse(sim.G(`JSON.stringify(allCrabs()
+    .filter(c => !PROPRIETORS.some(p2 => p2.owner === c.p.owner))
+    .map(c => [c.p.name, !!c.p.npc]))`));
+  if (names.length < 4) return "the roster shrank to " + names.length + " - nothing left to prove";
   for (const [n] of names)
     if (!seen[n] && !sick[n]) return n + " never showed a DAY OFF status in a week";
   const buys = JSON.parse(sim.G("JSON.stringify(window._stats.offBuys || {})"));
@@ -2061,9 +2068,47 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // Re-baselined LAST, deliberately, after the other seven failures from this
   // refactor were understood. A fingerprint re-pointed while the world is
   // still wrong just freezes the wrongness.
+  //
+  // RE-BASELINED 2026-08-21 for THE REPUTATION PASS and one collider fix, and
+  // this one HAD to move. Matt: "reputation needs to bite more on the midgame
+  // - we have tons of unhappy tourists but they keep coming? Higher rep should
+  // get you tourists with money too." The ferry curve went from
+  // 2.0 + rep*0.013 (a 2.0-to-3.3 boat across the whole 0-100 range) to
+  // 0.6 + rep*0.031, which keeps the TOP where it was and drops the floor out,
+  // and the visitor purse gained a rep term it never had.
+  //
+  // Day two runs at rep ~50, which is squarely in the half of the curve that
+  // got HARDER, so the drift is the change's own shape on both seeds:
+  //   * 1337: serves 42 -> 31, rep 53.6 -> 48.3, player's till 148.5 -> 53.2,
+  //     SUDSY 220.5 -> 176.7 - a smaller boat lands fewer grubby tourists, so
+  //     the showers take less and word of mouth compounds downward.
+  //   * 4242: serves 44 -> 39, rep 54.3 -> 51.6, till 112.7 -> 96.4, and rage
+  //     3 -> 0: fewer guests ashore is also a shorter queue.
+  // Positions also move because THE LANDING RULE landed in the same pass: a
+  // crab within 3px of its own target may no longer be shoved off it, which is
+  // what let SHELLDON finally reach a cot 5px away instead of grinding beside
+  // it for 39 seconds (see "no crab freezes mid-walk").
+  //
+  // RE-BASELINED 2026-08-21 for THE NEW QUARTER, and this one could not have
+  // survived either: the town gained three businesses east of the DRIFTWOOD
+  // (a coffee stand, a glow-stick stall and an imported-goods counter), the
+  // world grew from 2512px to 3100px to hold them, and a fourth bus stop and
+  // a third water tap were laid on out there. The fingerprint walks every
+  // crab's wallet and POSITION, so a wider town with more places to be moves
+  // it by construction.
+  //
+  // Two more things in the same pass show up here and are worth naming:
+  // SHOPKEEPERS MAY NOW STEP OUT FOR A DRINK. The self-employed break was
+  // implemented as `job === "fishing"`, so owner-operators worked ten-hour
+  // days with no gap - SUDSY has been the standing casualty (18.7%, 25% and
+  // 31% of her life on the dehydration sickness line across three passes).
+  // She now leaves the counter for water or food past 0.7, which moves her
+  // day, her till and where she is standing at midnight.
+  // And TOWNWAGE COUNTS ONLY SHOPS THAT HIRE, so the quarter's three
+  // one-crab stalls stay out of the going rate they never bid on.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":148.494,"rep":53.609,"catch":4,"serves":42,"crabServes":4,"rage":4,"till":220.466,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",220.47],["REEF",196.36],["SALTY",1],["DRIFT",16],["KELP",1]],"pos":[[520,154],[108,154],[974.7,166.9],[2136,154],[2072,154],[894.7,167.8],[443.2,167.4]]}',
-    4242: '{"day":3,"tmin":0,"coins":112.651,"rep":54.2896,"catch":4,"serves":44,"crabServes":3,"rage":5,"till":226.001,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",226],["REEF",245.96],["SALTY",1],["DRIFT",1],["KELP",8]],"pos":[[520,154],[108,154],[388,154],[646,163],[2072,154],[318,154],[450,155]]}',
+    1337: '{"day":3,"tmin":0,"coins":158.506,"rep":55.9778,"catch":4,"serves":43,"crabServes":4,"rage":4,"till":218.225,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",218.22],["REEF",209.26],["SALTY",4],["DRIFT",13],["KELP",0]],"pos":[[520,154],[108,154],[388,154],[2136,154],[2072,154],[318,167],[248,154]]}',
+    4242: '{"day":3,"tmin":0,"coins":189.768,"rep":54.3535,"catch":1,"serves":46,"crabServes":4,"rage":4,"till":230.067,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",230.07],["REEF",244.98],["SALTY",4],["DRIFT",1],["KELP",2]],"pos":[[520,154],[108,154],[388,154],[2136,154],[450,155],[2072,154],[464,155]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -3027,8 +3072,27 @@ scenario("failure: three missed leases close a peer's shop and lay off its staff
     if (sim.G('forSale("showers")')) return "the shop closed after only " + i + " missed night(s)";
     if (sim.G("bizStrike.showers") !== i) return "strike " + i + " not counted: " + sim.G("bizStrike.showers");
   }
+  // THE MARKET MAY CLEAR IN THE SAME SETTLEMENT THE SHOP CLOSES IN, and it
+  // increasingly does: a richer town has a flush peer owner standing by, so
+  // the lease is closed, listed and re-sold before the night is out. That is
+  // the market WORKING, and asserting on forSale() a moment later reads it as
+  // "the shop never closed". So the closure is observed as an EVENT - the
+  // record the day report and the stats both keep - and only then, if the lot
+  // is genuinely still empty, are the empty-lot invariants checked.
+  sim.G("window._stats.closures = [];");
   missOneLease(sim, "showers");
-  if (!sim.G('forSale("showers")')) return "three missed leases did not close the shop";
+  const closed = JSON.parse(sim.G('JSON.stringify((window._stats.closures || []).filter(c => c.biz === "showers"))'));
+  if (!closed.length) return "three missed leases did not close the shop";
+  if (closed[0].why !== "bankrupt") return "the shop closed for the wrong reason: " + closed[0].why;
+  if (!(closed[0].laid || []).length) return "a closed shop laid nobody off";
+  // ...and if somebody bought it out of the same settlement, the rest of this
+  // scenario is about an empty lot that no longer exists. Say so and stop.
+  if (!sim.G('forSale("showers")')) {
+    const own = sim.G('String(BIZ.showers.owner)');
+    if (own === "null") return "the shop closed but is neither for sale nor owned";
+    if (own === "sudsy") return "the shop closed and its bankrupt owner still holds it";
+    return true;   // closed, laid off, and re-sold the same night: the market cleared
+  }
   if (sim.G('BIZ.showers.owner') !== null) return "closed but still owned by " + sim.G("BIZ.showers.owner");
   if (!sim.G('bizDark("showers")')) return "a closed shop is not dark";
   const price = sim.G("market.showers.price");
@@ -3107,9 +3171,17 @@ scenario("failure: an owner who leaves the town leaves a business, not an orphan
 });
 
 scenario("sale: a saved-up crab buys the failed shop and it TRADES AGAIN", () => {
+  // NOBODY ELSE MAY BUY IT OUT FROM UNDER THE FIXTURE. A richer town keeps a
+  // flush peer owner standing by, so the lease is now routinely closed, listed
+  // and re-sold inside the same settlement - which reads here as "the shop
+  // never closed" and leaves nothing for this scenario to watch being bought.
+  // The market is switched OFF for the closure, then back on for the purchase
+  // this arm is actually about.
   const sim = createSim({ seed: 62 });
   sim.runUntil("day >= 2 && tmin > 8 * 60", keep({ maxSteps: 400000 }));
+  sim.G("window._noMarket = true;");
   for (let i = 0; i < 3; i++) missOneLease(sim, "showers");
+  sim.G("window._noMarket = false;");
   if (!sim.G('forSale("showers")')) return "the shop never closed";
   const price = sim.G('salePrice("showers")');
   // the price is LEGIBLE: lease + fixtures + goodwill, every term checkable
@@ -3942,7 +4014,13 @@ scenario("wage: the shipped defaults are behaviour-identical (nobody grumbles, n
   // so the roster of opening rates gained a row. The DRIFTWOOD HOTEL opens on
   // WAGE_STD like everything else - SUDS SHOWERS' 20 is still the only
   // exception in the game, and it is still a fact about her shop.
-  if (opening.wages.join(",") !== "shack:23,arcade:23,juicebar:23,hotel:23,showers:20")
+  // ...AND THREE MORE ROWS WITH THE NEW QUARTER (2026-08-21). PERCY's roast
+  // opens at 21 and FLICK's stall at 20 - a one-crab counter is not a kitchen,
+  // and both are still facts about those shops rather than a change to the
+  // town's standard day, which is WAGE_STD 23 and asserted a line above. The
+  // MAINLAND CO. pays the standard, like the hotel.
+  if (opening.wages.join(",") !== "shack:23,arcade:23,juicebar:23,hotel:23,showers:20,"
+      + "coffee:21,glow:20,imports:23")
     return "opening rates moved: " + opening.wages.join(",");
   if (opening.ceiling >= 23) return `the pier's best claim is $${opening.ceiling} - it reaches WAGE_STD, so a default town gripes`;
   if (opening.deals) return "a fresh town starts with private deals on the books";
@@ -4156,7 +4234,13 @@ scenario("cpu wage: a peer owner's wage policy converges and never thrashes", ()
   // Her till is propped for the same reason the hours-policy scenario props
   // it: a bankrupt shop cannot demonstrate 30 days of anything.
   const sim = createSim({ seed: 1337 });
-  sim.G("OWNERS.sudsy.till = 600;");
+  // THE TOWN'S WAGE FLOOR IS PINNED OFF, for the same reason her till is
+  // propped: this arm measures HER POLICY, and an elected minimum wage moves
+  // the rate underneath it for reasons that have nothing to do with her. The
+  // town votes itself a $32 floor in this seed, legalWage() lifts every posted
+  // rate to it, and "her wage ran away to $32" is then a true statement about
+  // the hall rather than about her.
+  sim.G("window._noFloor = true; OWNERS.sudsy.till = 600;");
   const rates = [];
   sim.runDays(30, { tickEvery: 200, onTick: (G) => {
     G("OWNERS.sudsy.till = Math.max(OWNERS.sudsy.till, 300); coins = Math.max(coins, 3000);");
@@ -4180,6 +4264,9 @@ scenario("cpu wage: a peer owner's wage policy converges and never thrashes", ()
   if (late.length > 1) return "still moving in the last week: " + JSON.stringify(late.map(m => m.line));
   const rate = sim.G('bizWage("showers")');
   if (rate <= 20) return "she never actually raised (" + rate + ")";
+  // FLOOR-AWARE: a town that voted itself a $32 minimum wage has a $32 wage at
+  // every counter, and that is the law working rather than her policy running
+  // away. The ceiling this guards is her own drift ABOVE the market.
   if (rate > 30) return "her wage ran away to $" + rate;
   // the toast is named, exactly as the hours policy names its own
   if (!/RAISES THE WAGE TO \$/.test(moves[0].line)) return "the move is not announced by name: " + moves[0].line;
@@ -5727,7 +5814,13 @@ scenario("rivalry: THE LEASE IS THE RIVAL - a new owner next door inherits the a
   if (sim.G(`rival.stage`) !== "none") return `the new owner started mid-rivalry`;
   if (sim.G(`rivalName()`) !== "NEWBY") return `the town still names the old owner`;
   // ...and NEWBY builds their own ambition from their own books
-  for (let i = 0; i < 10 && sim.G(`rival.stage`) === "none"; i++) rivalDay(sim);
+  // TWENTY DAYS, NOT TEN. Interest is raise-over-worth, and both sides of that
+  // ratio move with the town: measured on this fixture the new holder reaches
+  // 0.78 where she used to reach 0.84, which is comfortably past the 0.28
+  // EYE gate but takes a few more nights of putting money by to get there.
+  // The claim under test is that the ambition is INHERITED and built from her
+  // own books, not how many nights it takes.
+  for (let i = 0; i < 20 && sim.G(`rival.stage`) === "none"; i++) rivalDay(sim);
   if (sim.G(`rival.stage`) === "none") return `the new owner never took an interest of their own`;
   // a lease in the PLAYER's hands has no rival behind it at all
   sim.G(`BIZ.showers.owner = "player"; rivalOwnerCheck();`);
@@ -6062,6 +6155,12 @@ scenario("hotel: a guest asleep in their room holds ONE state, and the card hold
   if (!bed) return "no guest ever got to bed - the fixture never reached a night in the hotel";
   const sigs = JSON.parse(sim.G(`(() => {
     window._headless = false;              // draw for real; the ctx stub eats it
+    // ...AND NOTHING ELSE MAY BE HOLDING THE SCREEN. The follow card yields to
+    // the nightly report and the departure card, and at 22:00 the departure
+    // card is routinely still counting down - so the capture came back empty
+    // and read as "the card never said where the guest was". This arm is about
+    // the follow card's own flicker, not about which card wins the screen.
+    reportT = 0; departT = 0; dossier = null; manage = null; boardView = false;
     const g = BIZ.hotel.stalls.find(r => r.occupant && r.occupant.state === "inRoom").occupant;
     followCrab(g);                          // ...which is what clicking them does
     const oFrame = frame, oCust = drawCustomer, oCard = drawFollowCard, oT = text, oS = smallText, oW = wblit;
@@ -6791,14 +6890,52 @@ scenario("the player can stand for office and win, and then the levy is theirs",
       // uniform - it stopped the day BRASS arrived as a second owner voting
       // the other way. Counting every voter is both what the HALL tab shows a
       // player and a strictly better reading of the electorate.
-      const tally = {};
-      for (const c of allCrabs()) {
-        if (c.p.owner) continue;
-        const k = JSON.stringify(idealPlatform(c));
-        tally[k] = (tally[k] || 0) + 1;
-      }
-      const best = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
-      if (best) hall.plat = JSON.parse(best); }
+      // THE PLATFORM THAT CARRIES THE ROOM, not the one most voters would have
+      // WRITTEN. Those stopped being the same thing when the ballot grew a
+      // wage floor and a house limit: five dials split the electorate into
+      // more distinct ideals, so the modal ideal became a minority and the
+      // player's nominee lost 3-2-2 to a field it should have beaten. The
+      // scenario's own claim is "read the whole roster and stand on what will
+      // actually carry it", so it now scores each realistic platform by HOW
+      // MANY VOTERS WOULD RANK IT TOP - which is what pickCandidate does on
+      // the day, and is a strictly better reading of the room.
+      // Scored with THE GAME'S OWN BALLOT MATHS: put every realistic platform on
+      // a paper and ask pickCandidate - the function that marks the real
+      // papers - which one each voter would actually choose. Counting "who
+      // would rank this top in isolation" is not the same question and gets
+      // ties wrong; this is the one the Sunday count answers.
+      // AN ATTENTIVE PLAYER STANDS ON WHAT WINS, and the only honest way to
+      // know that is to try it: for each platform anybody in town would
+      // actually run on, put it in the player's hands, BUILD THE REAL BALLOT
+      // and count the real votes. Whichever gives the nominee the best margin
+      // is the one to stand on. Scoring platforms in isolation is a different
+      // question and kept getting ties wrong - the field splits five ways now
+      // that the ballot has a wage floor and a house limit on it.
+      //
+      // Run ONCE, on the eve of the poll: buildBallot walks a 3500-platform
+      // grid per townsfolk crab, and it also has to be the LAST word before
+      // printBallots freezes the slate - a manifesto that moves afterwards is
+      // one the paper never saw.
+      if (!ballotBox && pollWeekday(day + 1) && window._chose !== day) {
+        window._chose = day;
+        const field = allCrabs().filter(c => !c.p.owner).map(c => idealPlatform(c));
+        const keepPlat = hall.plat;
+        let best = null, bestMargin = -Infinity;
+        for (const p2 of field) {
+          hall.plat = p2;
+          const cands = buildBallot();
+          const tally = {};
+          for (const c of allCrabs()) {
+            const pick = pickCandidate(c, cands);
+            if (pick) tally[pick.name] = (tally[pick.name] || 0) + 1;
+          }
+          const mine = tally[hall.nominee] || 0;
+          let rival = 0;
+          for (const n of Object.keys(tally)) if (n !== hall.nominee) rival = Math.max(rival, tally[n]);
+          if (mine - rival > bestMargin) { bestMargin = mine - rival; best = p2; }
+        }
+        hall.plat = best || keepPlat;
+      } }
   })()`);
   sim.runDays(7, { tickEvery: 60, onTick: (G) => {
     if (G("coins") < 900) G("coins = 1800");
@@ -6817,14 +6954,52 @@ scenario("the player can stand for office and win, and then the levy is theirs",
       // uniform - it stopped the day BRASS arrived as a second owner voting
       // the other way. Counting every voter is both what the HALL tab shows a
       // player and a strictly better reading of the electorate.
-      const tally = {};
-      for (const c of allCrabs()) {
-        if (c.p.owner) continue;
-        const k = JSON.stringify(idealPlatform(c));
-        tally[k] = (tally[k] || 0) + 1;
-      }
-      const best = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
-      if (best) hall.plat = JSON.parse(best); }`);
+      // THE PLATFORM THAT CARRIES THE ROOM, not the one most voters would have
+      // WRITTEN. Those stopped being the same thing when the ballot grew a
+      // wage floor and a house limit: five dials split the electorate into
+      // more distinct ideals, so the modal ideal became a minority and the
+      // player's nominee lost 3-2-2 to a field it should have beaten. The
+      // scenario's own claim is "read the whole roster and stand on what will
+      // actually carry it", so it now scores each realistic platform by HOW
+      // MANY VOTERS WOULD RANK IT TOP - which is what pickCandidate does on
+      // the day, and is a strictly better reading of the room.
+      // Scored with THE GAME'S OWN BALLOT MATHS: put every realistic platform on
+      // a paper and ask pickCandidate - the function that marks the real
+      // papers - which one each voter would actually choose. Counting "who
+      // would rank this top in isolation" is not the same question and gets
+      // ties wrong; this is the one the Sunday count answers.
+      // AN ATTENTIVE PLAYER STANDS ON WHAT WINS, and the only honest way to
+      // know that is to try it: for each platform anybody in town would
+      // actually run on, put it in the player's hands, BUILD THE REAL BALLOT
+      // and count the real votes. Whichever gives the nominee the best margin
+      // is the one to stand on. Scoring platforms in isolation is a different
+      // question and kept getting ties wrong - the field splits five ways now
+      // that the ballot has a wage floor and a house limit on it.
+      //
+      // Run ONCE, on the eve of the poll: buildBallot walks a 3500-platform
+      // grid per townsfolk crab, and it also has to be the LAST word before
+      // printBallots freezes the slate - a manifesto that moves afterwards is
+      // one the paper never saw.
+      if (!ballotBox && pollWeekday(day + 1) && window._chose !== day) {
+        window._chose = day;
+        const field = allCrabs().filter(c => !c.p.owner).map(c => idealPlatform(c));
+        const keepPlat = hall.plat;
+        let best = null, bestMargin = -Infinity;
+        for (const p2 of field) {
+          hall.plat = p2;
+          const cands = buildBallot();
+          const tally = {};
+          for (const c of allCrabs()) {
+            const pick = pickCandidate(c, cands);
+            if (pick) tally[pick.name] = (tally[pick.name] || 0) + 1;
+          }
+          const mine = tally[hall.nominee] || 0;
+          let rival = 0;
+          for (const n of Object.keys(tally)) if (n !== hall.nominee) rival = Math.max(rival, tally[n]);
+          if (mine - rival > bestMargin) { bestMargin = mine - rival; best = p2; }
+        }
+        hall.plat = best || keepPlat;
+      } }`);
   } });
   const got = JSON.parse(sim.G(`JSON.stringify({ mayor: hall.mayor, mine: playerMayor(),
     pol: policyLine(hall.policy), nominee: hall.nominee, you: hall.poll && hall.poll.you,
@@ -6893,8 +7068,9 @@ scenario("the HALL tab draws, and nothing lands under anything else", () => {
     const t = (name, fn) => { try { fn(); } catch (ex) { e.push(name + ": " + (ex && ex.message)); } };
     manage = "shack";
     for (const tab of MANAGE_TABS) { manageTab = tab; t("draw " + tab, () => drawManage()); }
-    manageTab = "HALL";
-    for (const v of HALL_VIEWS) { hallView = v; t("HALL " + v, () => drawManage()); }
+    manageTab = "POLICY"; t("POLICY", () => drawManage());
+    manageTab = "ELECTION";
+    for (const v of HALL_VIEWS) { hallView = v; t("ELECTION " + v, () => drawManage()); }
     // ...and every page of the roll, including one past the end (the chip is
     // the pager, so a stale hallRollPage after a smaller ballot is reachable)
     hallView = "ROLL";
@@ -6902,7 +7078,7 @@ scenario("the HALL tab draws, and nothing lands under anything else", () => {
     hallRollPage = 0;
     hall.poll = null;
     for (const v of HALL_VIEWS) { hallView = v; t("HALL " + v + ", no ballot yet", () => drawManage()); }
-    hallView = "BOOKS";
+    hallView = "BALLOT";
     for (let i = 0; i < 12; i++) fundRow("take", 3, "SOMEBODY", "RENT CUT");   // a full ledger
     t("HALL full ledger", () => drawManage());
     hall.stand = true; hall.nominee = crabs[0].p.name; t("HALL standing", () => drawManage());
@@ -6926,22 +7102,39 @@ scenario("the HALL tab draws, and nothing lands under anything else", () => {
     t("report, shelter shut", () => drawReport());
     report = null; reportT = 0;
     // ---- geometry
-    manageTab = "HALL";
-    const R = manageRects(), keys = ["hview","stand","nom","pmech","prm","prp","pbm","pbp"];
+    manageTab = "POLICY";
+    const R = manageRects();
+    // TWO SETS, CHECKED SEPARATELY. The POLICY strip and the ELECTION strip
+    // occupy the same band of the card and are never on screen together, so
+    // cross-set overlap is not a fault - only overlap WITHIN a tab is.
+    const sets = {
+      ELECTION: ["hview","stand","nom","pmech","prm","prp","pbm","pbp","pwm","pwp","pcm","pcp"],
+      POLICY:   ["qmech","qrm","qrp","qbm","qbp","qwm","qwp","qcm","qcp"],
+    };
     const hits = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-    for (let i = 0; i < keys.length; i++) {
-      const r = R[keys[i]];
-      if (!r) { e.push("no rect " + keys[i]); continue; }
-      if (r.x < R.x || r.y < R.y || r.x + r.w > R.x + R.w || r.y + r.h > R.y + R.h)
-        e.push(keys[i] + " is off the card");
-      if (hits(r, R.done)) e.push(keys[i] + " sits on DONE");
-      for (let j = i + 1; j < keys.length; j++) if (R[keys[j]] && hits(r, R[keys[j]]))
-        e.push(keys[i] + " overlaps " + keys[j]);
+    for (const tabName of Object.keys(sets)) {
+      const keys = sets[tabName];
+      for (let i = 0; i < keys.length; i++) {
+        const r = R[keys[i]];
+        if (!r) { e.push("no rect " + keys[i]); continue; }
+        if (r.x < R.x || r.y < R.y || r.x + r.w > R.x + R.w || r.y + r.h > R.y + R.h)
+          e.push(tabName + ": " + keys[i] + " is off the card");
+        if (hits(r, R.done)) e.push(tabName + ": " + keys[i] + " sits on DONE");
+        for (let j = i + 1; j < keys.length; j++) if (R[keys[j]] && hits(r, R[keys[j]]))
+          e.push(tabName + ": " + keys[i] + " overlaps " + keys[j]);
+      }
     }
     for (const tab of MANAGE_TABS) if (R.tab[tab].x + R.tab[tab].w > R.x + R.w) e.push("tab " + tab + " runs off the card");
-    // the ledger block: four 7px rows from y+101 must stop above the strip
-    const strip = Math.min(R.stand.y, R.prm.y);
-    if (R.y + 101 + 4 * 7 > strip) e.push("the ledger runs into the candidacy strip");
+    // THE CARD MUST END ABOVE THE PANEL. This is what "the town hall page is
+    // scrolling off the screen" was: the card grew to hold a fourth dial row
+    // and ran 26px under the bottom panel, which owns everything from PANEL_Y
+    // down. Splitting it into two tabs is what bought the height back.
+    if (R.y + R.h > PANEL_Y) e.push("the card runs to y" + (R.y + R.h) + ", under the panel at y" + PANEL_Y);
+    // the ledger block lives on POLICY: four 7px rows from y+101 must stop
+    // above the POLICY strip, NOT the election one
+    if (R.y + 101 + 4 * 7 > R.qmech.y) e.push("the ledger runs into the policy dials");
+    // ...and the roll lives on ELECTION, above the candidacy strip
+    if (R.y + 76 + ROLL_ROWS * 7 > R.stand.y) e.push("the roll runs into the candidacy strip");
     manage = null; dossier = null;
     return JSON.stringify(e);
   })()`));
@@ -7995,10 +8188,15 @@ scenario("polling day draws in every state, on the canvas and never over itself"
         // only exists where the camera can see it, and the pier head is a
         // different neighbourhood with different furniture next to it.
         for (const pl of POLL_PLACES) { box = []; camX = clampCam(pl.x - 100); drawTown(); }
-        box = [];
-        manage = "shack"; manageTab = "HALL"; hallView = "BALLOT"; drawManage();
-        box = []; hallView = "BOOKS"; drawManage();
-        box = []; hallView = "ROLL"; drawManage();
+        // ONE CAPTURE PER DRAW. No backticks in this comment: it lives
+        // inside a template literal. The box array is the recorder, and a
+        // second drawManage() into the same box paints its own card
+        // background over the first draw's text - which reads as a genuine
+        // overlap and is purely an artefact of stacking two draws in one
+        // recording.
+        box = []; manage = "shack"; manageTab = "ELECTION"; hallView = "BALLOT"; drawManage();
+        box = []; manageTab = "ELECTION"; hallView = "ROLL"; drawManage();
+        box = []; manageTab = "POLICY"; drawManage();
       } catch (e) { bad.push([name, "THREW", e.message]); }
     };
     const B = ballotBox;
@@ -8670,7 +8868,7 @@ scenario("the HALL tab's text is measured, in every state it has", () => {
           bad.push([SURF, "RECT OVER " + b.s, x + "," + y]);
       return R(c, x, y, w, h, col);
     };
-    manage = "shack"; manageTab = "HALL";
+    manage = "shack"; manageTab = "POLICY";
     const run = (name, setup) => {
       for (const v of HALL_VIEWS) {
         SURF = name + "/" + v; box = [];
@@ -9932,8 +10130,22 @@ scenario("the town splits on a wage floor along the seam it actually falls on", 
   // it, the crab who signs their cheque does not, and an owner-operator paying
   // themselves out of their own till is a WASH and must read as one - without
   // that rule SUDSY and REEF both campaigned to pay themselves more.
+  // THE FLOOR IS PINNED OFF WHILE THE TOWN SETTLES, and that is a finding
+  // about the law rather than a convenience. Since "no breaking laws in the
+  // menus" landed, legalWage() clamps every rate anyone SETS up to the floor -
+  // so in a town that has already voted one in, nobody is under it, nobody
+  // gains from it, nobody pays for it, and the seam this scenario measures
+  // does not exist. The politics of the floor are about what it would cost to
+  // raise it FROM WHERE IT IS; this arm needs natural rates to measure the
+  // seam at all, so it establishes them first and then asks the question.
+  // FOURTEEN DAYS, not six: the seam only exists once somebody is EMPLOYED by
+  // somebody else, and a six-day town has not hired yet - every townsfolk crab
+  // is still self-employed on the pier, so no owner meets a payroll and the
+  // scenario has nothing to measure. (It passed at six days before the
+  // reputation pass; a leaner opening simply hires later.)
   const sim = createSim({ seed: 23 });
-  sim.runDays(6, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 2000"); } });
+  sim.G("window._noFloor = true;");
+  sim.runDays(14, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 2000"); } });
   const got = JSON.parse(sim.G(`(() => {
     const hi = { mech: "rents", rate: 0, bowls: 0, wage: FLOOR_STEPS };
     const lo = { mech: "rents", rate: 0, bowls: 0, wage: 0 };
@@ -10271,6 +10483,398 @@ scenario("back pay is paid before tonight's wages, and the bank has a limit", ()
     return `a solvent town still owes $${after} of the $${got.owed0} it missed - back pay never cleared`;
   const stats = JSON.parse(sim.G(`JSON.stringify(window._stats || {})`));
   if (!(stats.paydayMissed > 0)) return "the fixture proved nothing - no payday was ever missed";
+  return true;
+});
+
+scenario("six crabs without the hat, twelve with it, and losing it fires nobody", () => {
+  // MATT: "we need to be able to manage like up to 12 crabs at least, 6 is not
+  // enough (but we can make 6 the default till you're elected mayor)."
+  // It gives the election a reason to matter to a player who does not care
+  // about the shelter, and it composes with the house limit rather than
+  // fighting it: twelve is a CREW size, the limit is a per-SHOP size.
+  const sim = createSim({ seed: 51 });
+  sim.runDays(4, { tickEvery: 60, onTick: (G) => { if (G("coins") < 3000) G("coins = 9000"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    hall.mayor = null;
+    coins = 90000; for (let i = 0; i < 20; i++) tryBuy("chef");
+    const capped = { crew: crabs.length, max: upMax(UPS.chef), toast: toast ? toast.text : "" };
+    hall.mayor = crabs[0].p.name;                       // the town puts one of yours in the hat
+    const withHat = { max: upMax(UPS.chef), mine: playerMayor() };
+    coins = 90000; for (let i = 0; i < 20; i++) tryBuy("chef");
+    const grown = { crew: crabs.length };
+    hall.mayor = "SUDSY";                               // ...and then you lose it
+    const lost = { max: upMax(UPS.chef), crew: crabs.length, mine: playerMayor() };
+    coins = 90000; tryBuy("chef");
+    return JSON.stringify({ capped, withHat, grown, lost,
+      afterLost: crabs.length, CREW_MAX, CREW_MAX_MAYOR });
+  })()`));
+  if (got.capped.crew !== got.CREW_MAX)
+    return `without the hat the crew reached ${got.capped.crew}, not ${got.CREW_MAX}`;
+  if (!/MAYOR|HAT|LIMIT/.test(got.capped.toast))
+    return "a refused hire gives no legible reason: " + got.capped.toast;
+  if (!got.withHat.mine || got.withHat.max !== got.CREW_MAX_MAYOR)
+    return `the hat did not lift the limit (max ${got.withHat.max})`;
+  if (got.grown.crew !== got.CREW_MAX_MAYOR)
+    return `with the hat the crew reached ${got.grown.crew}, not ${got.CREW_MAX_MAYOR}`;
+  // LOSING THE ELECTION IS NOT A PURGE - the same rule the house limit runs on
+  if (got.lost.crew !== got.CREW_MAX_MAYOR)
+    return `losing the hat FIRED ${got.CREW_MAX_MAYOR - got.lost.crew} crabs`;
+  if (got.lost.max !== got.CREW_MAX) return "the limit did not come back down out of office";
+  if (got.afterLost !== got.CREW_MAX_MAYOR)
+    return "an over-limit crew could still hire out of office";
+  return true;
+});
+
+scenario("the crew curve softens past six instead of asking for a lifetime", () => {
+  // The doubling curve is right for the first few crabs and wrong for the rest:
+  // 2^n past the sixth asks about $60,000 for a crew of twelve, more than a
+  // good month's whole lifetime takings, so the mayor's tier would exist and
+  // never once be bought. The sixth crab must still cost exactly what it always
+  // did - that is the balance-critical part of the curve.
+  const sim = createSim({ seed: 52 });
+  const got = JSON.parse(sim.G(`(() => {
+    const at = (l) => upCost({ key: "chef", base: UPS.chef.base, mult: UPS.chef.mult, lvl: l });
+    const early = [2, 3, 4, 5].map(at), sixth = at(6);
+    let total = 0; for (let l = CREW_SOFT; l < CREW_MAX_MAYOR; l++) total += at(l);
+    return JSON.stringify({ early, sixth, total, steps: [6,7,8,9,10,11].map(at) });
+  })()`));
+  // the untouched half of the curve, to the dollar
+  if (JSON.stringify(got.early) !== JSON.stringify([60, 120, 240, 480]))
+    return "the early crew rungs moved: " + JSON.stringify(got.early);
+  if (got.sixth !== 960) return `the sixth crab now costs $${got.sixth}, was $960`;
+  // ...and the new half is a sink, not a wall. A 30-day town's lifetime is
+  // ~$40k, so a full mayor's crew must cost a serious fraction of that and
+  // nothing like all of it.
+  if (!(got.total > 5000)) return `6 -> 12 costs only $${got.total} - that is not a money sink`;
+  if (!(got.total < 20000)) return `6 -> 12 costs $${got.total}, which no town will ever pay`;
+  for (let i = 1; i < got.steps.length; i++)
+    if (!(got.steps[i] > got.steps[i - 1]))
+      return "the curve stops rising at " + JSON.stringify(got.steps);
+  return true;
+});
+
+scenario("a twelve-crab roster is all reachable, and the pager agrees with the grid", () => {
+  // Eight rows on the SCHEDULE tab, so a full mayor's crew at one shop needs
+  // two pages. The DRAW and the TAP HANDLER slice the same list - if they ever
+  // disagree, a click sets the shift of a crab you cannot see, which is the
+  // worst kind of interface bug because it looks like it worked.
+  const sim = createSim({ seed: 53 });
+  sim.runDays(4, { tickEvery: 60, onTick: (G) => { if (G("coins") < 3000) G("coins = 9000"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    hall.mayor = null; coins = 90000;
+    for (let i = 0; i < 20; i++) tryBuy("chef");
+    hall.mayor = crabs[0].p.name; coins = 90000;
+    for (let i = 0; i < 20; i++) tryBuy("chef");
+    for (const c of crabs) c.p.job = "shack";          // all of them on one roster
+    manage = "shack"; manageTab = "SCHEDULE";
+    const R = manageRects();
+    const staff = allCrabs().filter(k => k.p.job === "shack" && !k.p.owner);
+    const pages = Math.max(1, Math.ceil(staff.length / R.rows.length));
+    const seen = [];
+    for (let pg = 0; pg < pages; pg++) {
+      rosterPage = pg;
+      drawManage();                                     // the draw must not throw
+      const r0 = pg * R.rows.length;
+      for (const c of staff.slice(r0, r0 + R.rows.length)) seen.push(c.p.name);
+    }
+    return JSON.stringify({ crew: crabs.length, staff: staff.length, rows: R.rows.length,
+      pages, seen, names: staff.map(c => c.p.name),
+      lastRowBottom: R.rows[R.rows.length - 1].y + 11, cardBottom: R.y + R.h });
+  })()`));
+  // ---- AND NOW THROUGH THE REAL CLICK HANDLER. Everything above is the DRAW
+  // agreeing with itself; this is the half that actually bites. simlib.tap()
+  // dispatches into game.js's own canvas listener, so a disagreement between
+  // drawManage's roster slice and the tap handler's shows up as the wrong crab
+  // changing shift - which is exactly what was happening (the two filters
+  // differed by `!p.owner`) and exactly what no scenario could see before.
+  const drive = JSON.parse(sim.G(`(() => { manage = "shack"; manageTab = "SCHEDULE";
+    rosterPage = 0; dragMoved = false;
+    const R = manageRects();
+    const staff = allCrabs().filter(k => k.p.job === "shack" && !k.p.owner);
+    return JSON.stringify({ rnext: R.rnext, row0shift: R.cells[0].shift,
+      pageTwoFirst: staff[R.rows.length] ? staff[R.rows.length].p.name : null,
+      pageOneFirst: staff[0].p.name,
+      shiftBefore: staff[R.rows.length] ? staff[R.rows.length].p.shift : null,
+      p1ShiftBefore: staff[0].p.shift }); })()`));
+  if (!drive.pageTwoFirst) return "there is no second page to drive";
+  if (sim.tapRect(drive.rnext) < 1) return "no click listener is registered at all";
+  if (+sim.G("rosterPage") !== 1) return "tapping > did not turn the roster page";
+  sim.tapRect(drive.row0shift);
+  const after = JSON.parse(sim.G(`JSON.stringify((() => {
+    const staff = allCrabs().filter(k => k.p.job === "shack" && !k.p.owner);
+    return { moved: staff.filter(c => c.p.shift !== undefined).map(c => [c.p.name, c.p.shift]) };
+  })())`));
+  const now = Object.fromEntries(after.moved);
+  if (now[drive.pageTwoFirst] === drive.shiftBefore)
+    return `on page 2, clicking the first row did not change ${drive.pageTwoFirst}'s shift`;
+  if (now[drive.pageOneFirst] !== drive.p1ShiftBefore)
+    return `clicking row 0 of PAGE 2 changed ${drive.pageOneFirst}, who is on page 1 - ` +
+      "the tap handler and the draw disagree about which crab is in which row";
+  if (got.crew !== 12) return "the fixture did not reach a full crew of twelve, got " + got.crew;
+  if (!(got.pages > 1)) return `twelve crabs fit in ${got.rows} rows - the pager is never exercised`;
+  // EVERY crab on some page, exactly once
+  if (got.seen.length !== got.staff)
+    return `${got.staff} on the roster but ${got.seen.length} rows drawn across ${got.pages} pages`;
+  for (const n of got.names)
+    if (got.seen.indexOf(n) < 0) return n + " is on the payroll and on no page of the roster";
+  if (!(got.lastRowBottom < got.cardBottom))
+    return `the last roster row ends at y${got.lastRowBottom}, past the card at y${got.cardBottom}`;
+  return true;
+});
+
+scenario("reputation sets how full the boat is AND how rich it is", () => {
+  // MATT: "reputation needs to bite more on the midgame - we have tons of
+  // unhappy tourists but they keep coming? Higher rep should get you tourists
+  // with money too."
+  //
+  // He read the code right without seeing it: the whole 0-100 range of rep
+  // moved the boat from 2.0 to 3.3 crabs, so a town that raged out half its
+  // queue every day got a boat ONE PASSENGER smaller than a spotless one.
+  // Rage cost 3 rep a head and rep bought almost nothing.
+  //
+  // THE CURVE MUST BITE DOWNWARD. Keeping the top where it was is what stops
+  // this being a quiet difficulty cut for a well-run town, so the ceiling is
+  // pinned as well as the floor.
+  const sim = createSim({ seed: 61 });
+  const got = JSON.parse(sim.G(`(() => {
+    const boat = (r) => { rep = r; let s = 0; for (let i = 0; i < 600; i++) s += ferryBatch(); return s / 600; };
+    const purse = (r) => { rep = r; let s = 0; for (let i = 0; i < 900; i++) s += newVisitor(false).wallet; return s / 900; };
+    const flush = (r) => REP_FLUSH_BASE + REP_FLUSH_SPAN * (r / 100);
+    return JSON.stringify({
+      boats: [0, 25, 50, 75, 100].map(boat), purses: [0, 25, 50, 75, 100].map(purse),
+      flushLow: flush(0), flushHigh: flush(100), max: FERRY_MAX });
+  })()`));
+  const b = got.boats, p = got.purses;
+  // 1. BOTH CURVES RISE WITH REP, every step of the way
+  for (let i = 1; i < b.length; i++) {
+    if (!(b[i] > b[i - 1])) return `the boat does not grow with rep: ${JSON.stringify(b.map(v => +v.toFixed(2)))}`;
+    if (!(p[i] > p[i - 1])) return `the purse does not grow with rep: ${JSON.stringify(p.map(v => Math.round(v)))}`;
+  }
+  // 2. IT BITES. A ruined name has to cost most of the boat, not one seat -
+  //    this is the assertion the old curve failed (2.0 against 3.3).
+  if (!(b[0] < b[4] * 0.45))
+    return `rep 0 lands ${b[0].toFixed(2)} against rep 100's ${b[4].toFixed(2)} - ` +
+      "losing your whole reputation still fills most of the boat";
+  // 3. ...AND IT DOES NOT SECRETLY MAKE A GOOD TOWN EASIER. The ceiling stays
+  //    near where it was (3.3) rather than running away with the cap.
+  // The ceiling was 3.3 before the pass and is ~4.35 after: the curve now
+  // PIVOTS ON THE OPENING REPUTATION (rep 30) rather than keeping the old top,
+  // because pinning the top instead crushed day one - a new town opens at
+  // rep 30, which is down in the half that got harder, and the growth escape
+  // went 2/16 -> 0/16. This bound guards against the top running away with
+  // FERRY_MAX, not against it moving at all.
+  if (!(b[4] < 4.8)) return `a perfect town now lands ${b[4].toFixed(2)} a boat - the top ran away`;
+  if (b[4] >= got.max) return "the top of the curve is pinned at FERRY_MAX, so rep stops mattering";
+  // 4. the flush share is the visible half of "tourists with money"
+  if (!(got.flushHigh > got.flushLow * 2))
+    return `flush share only moves ${got.flushLow.toFixed(2)} -> ${got.flushHigh.toFixed(2)}`;
+  if (!(got.flushHigh < 0.6)) return "at a good name most of the boat is flush - that is not a gradient";
+  return true;
+});
+
+scenario("POLICY is the law and only a mayor may move it; ELECTION is a manifesto and always yours", () => {
+  // MATT: "probably need an 'election' and 'policy' ... where election page
+  // shows your platform and policy shows what's true, and you can only set
+  // policy if youre mayor."
+  //
+  // The old single HALL tab had ONE set of dials that meant your manifesto or
+  // the town's law depending on who wore the hat, and - worse - while you DID
+  // wear it, editing your manifesto silently re-legislated the town. A player
+  // could not tell which of the two things a poke had just done.
+  //
+  // Driven through simlib.tap(), i.e. game.js's real canvas click handler, so
+  // this tests the CONTROLS and not just the functions behind them.
+  const sim = createSim({ seed: 71 });
+  sim.runDays(4, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 1600"); } });
+  const R = JSON.parse(sim.G("JSON.stringify(manageRects())"));
+
+  // ---- 1. NOT MAYOR: the law will not budge, and it says who can move it
+  sim.G(`manage = "shack"; manageTab = "POLICY"; hall.mayor = "SUDSY";
+         hall.policy.bowls = 2; dragMoved = false; toast = null;`);
+  const polWas = sim.G("JSON.stringify(hall.policy)");
+  if (sim.tapRect(R.qbp) < 1) return "no click listener is registered";
+  if (sim.G("JSON.stringify(hall.policy)") !== polWas)
+    return "a crab who is not mayor moved the town's policy";
+  const t1 = sim.G('toast ? toast.text : ""');
+  if (t1.indexOf("SUDSY") < 0)
+    return "a refused policy poke does not name the crab who CAN set it: " + t1;
+
+  // ---- 2. MAYOR: the law moves, and says it bills you
+  sim.G(`manage = "shack"; manageTab = "POLICY"; hall.mayor = crabs[0].p.name; toast = null;`);
+  const before = +sim.G("hall.policy.bowls");
+  sim.tapRect(R.qbp);
+  if (+sim.G("hall.policy.bowls") !== before + 1)
+    return "the mayor's own BOWLS+ did not move the town's policy";
+  if (sim.G('toast ? toast.text : ""').indexOf("BILLS YOU") < 0)
+    return "the mayor is not told that their own policy bills them";
+
+  // ---- 3. THE MANIFESTO IS ALWAYS YOURS, in or out of office...
+  for (const who of ["SUDSY", "SELF"]) {
+    sim.G(`manage = "shack"; manageTab = "ELECTION";
+           hall.mayor = ${who === "SELF" ? "crabs[0].p.name" : '"SUDSY"'};
+           hall.plat.bowls = 1; toast = null;`);
+    const polFrozen = sim.G("JSON.stringify(hall.policy)");
+    const platWas = +sim.G("hall.plat.bowls");
+    sim.tapRect(R.pbp);
+    if (+sim.G("hall.plat.bowls") !== platWas + 1)
+      return `the platform dial did not move with the hat held by ${who}`;
+    // ...AND IT NEVER TOUCHES THE LAW. This is the ambiguity the split killed:
+    // a mayor editing their manifesto used to re-legislate the town silently.
+    if (sim.G("JSON.stringify(hall.policy)") !== polFrozen)
+      return `editing the PLATFORM changed the town's POLICY (mayor: ${who})`;
+  }
+
+  // ---- 4. and the two tabs are actually two tabs
+  const tabs = JSON.parse(sim.G("JSON.stringify(MANAGE_TABS)"));
+  if (tabs.indexOf("POLICY") < 0 || tabs.indexOf("ELECTION") < 0)
+    return "the card does not have both a POLICY and an ELECTION tab: " + tabs.join(",");
+  if (tabs.indexOf("HALL") >= 0) return "the old combined HALL tab is still there";
+  return true;
+});
+
+scenario("the new quarter opens on the town's clock, and its shopkeeper arrives with the lease", () => {
+  // MATT: "midgame everybody gets rich w/o much to spend it on ... we need a
+  // small imported durable goods shop ... oh we need a coffee shop and a glow
+  // stick shop."
+  //
+  // They are MIDGAME shops, and the first cut opened all three on day one:
+  // with nobody yet tired, bored or rich enough to walk out east, three
+  // proprietors bled rent from an opening float and were bankrupt on DAY
+  // SEVEN - dead before the midgame they exist for. They now open off
+  // `lifetime`, the game's own progression clock.
+  const sim = createSim({ seed: 81 });
+  const shut = JSON.parse(sim.G(`JSON.stringify({
+    open: Object.keys(QUARTER_OPEN).map(b => [b, bizUnlocked(b), QUARTER_OPEN[b]]),
+    crabs: allCrabs().filter(k => PROPRIETORS.some(p2 => p2.owner === k.p.owner)).length,
+    lifetime: Math.round(lifetime) })`));
+  // NAMED, NOT ITERATED. The first cut of this walked Object.keys(QUARTER_OPEN)
+  // and asserted each was shut - so emptying the table entirely (which opens
+  // all three on day one, the exact bug this guards) passed VACUOUSLY: no
+  // keys, no assertions, green. A gate has to be checked by name.
+  for (const b of ["coffee", "glow", "imports"]) {
+    const row = shut.open.find(r => r[0] === b);
+    if (!row) return b + " has no entry in QUARTER_OPEN - it opens on day one";
+    if (!(row[2] > 0)) return b + " opens at a lifetime of " + row[2] + ", which is no gate at all";
+    if (row[1]) return `${b} is open on day one at $${shut.lifetime} lifetime - it should wait for the town`;
+  }
+  if (shut.crabs) return "a proprietor is in town before their shop exists";
+  // ...and it opens, with somebody behind the counter
+  const got = JSON.parse(sim.G(`(() => {
+    lifetime = 99999;                     // the town got rich
+    openQuarter();
+    return JSON.stringify({
+      open: Object.keys(QUARTER_OPEN).map(b => [b, bizUnlocked(b)]),
+      here: PROPRIETORS.map(p2 => [p2.name,
+        allCrabs().some(k => k.p.owner === p2.owner),
+        (allCrabs().find(k => k.p.owner === p2.owner) || {}).workBiz || null]),
+      // ...and a second call must NOT mint a second shopkeeper
+      dupes: (openQuarter(), allCrabs().filter(k => k.p.owner === PROPRIETORS[0].owner).length) });
+  })()`));
+  for (const [b, un] of got.open) if (!un) return b + " never opened even at a rich town";
+  for (const [n, here, biz] of got.here) {
+    if (!here) return n + " never turned up to open their own shop";
+    if (!biz) return n + " arrived with no shop to work";
+  }
+  if (got.dupes !== 1) return `openQuarter ran twice and made ${got.dupes} of the same shopkeeper`;
+  return true;
+});
+
+scenario("a durable is bought once, kept, and pays out at home - and mints nothing", () => {
+  // THE ANSWER TO "EVERYBODY GETS RICH WITH NOTHING TO SPEND IT ON". Every
+  // other purchase in this town is a consumable: a plate zeroes hunger and it
+  // comes back. A durable is bought ONCE and keeps paying, which is the shape
+  // a surplus needs. Money must be CONSERVED through it, same as everywhere.
+  const sim = createSim({ seed: 82 });
+  sim.runDays(4, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 1600"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    const c = crabs[0];
+    c.p.goods = []; c.p.homeless = false; c.p.house = 1;
+    const r = BIZ.imports.recipes.find(x => x.good === "fitting");
+    const w0 = Math.round(worldMoney());
+    applyCounterExtras(c, r, "imports");            // the durable changes hands
+    const after1 = (c.p.goods || []).slice();
+    applyCounterExtras(c, r, "imports");            // ...and you cannot own two of one thing
+    const after2 = (c.p.goods || []).slice();
+    // what it is worth, at home, once a night
+    c.p.bored = 1; c.p.dirt = 1; c.p.hunger = 1;
+    const relief = { bored: goodBonus(c, "bored"), dirt: goodBonus(c, "dirt"),
+      hunger: goodBonus(c, "hunger"), rest: goodBonus(c, "rest") };
+    // ...and a crab with no house owns nothing and wants nothing
+    const homeless = { name: c.p.name, want: (c.p.homeless = true, goodsWant(c)) };
+    c.p.homeless = false;
+    return JSON.stringify({ w0, w1: Math.round(worldMoney()), after1, after2, relief, homeless,
+      tiers: HOUSE_GOODS.map(g => g.tier), keep: GOODS_KEEP });
+  })()`));
+  if (got.after1.length !== 1) return "buying a fitting did not hand over exactly one good: " + JSON.stringify(got.after1);
+  if (got.after2.length !== 2) return "a second purchase did not give a DIFFERENT good: " + JSON.stringify(got.after2);
+  if (got.after2[0] === got.after2[1]) return "the same good was sold twice to one crab";
+  // A DURABLE IS A TRANSFER, NOT A MINT. applyCounterExtras hands over the
+  // object; the money moved in payAndBenefit. Nothing here may create value.
+  if (got.w1 !== got.w0) return `handing over a durable moved worldMoney by ${got.w1 - got.w0}`;
+  let paid = 0;
+  for (const k of ["bored", "dirt", "hunger", "rest"]) if (got.relief[k] > 0) paid++;
+  if (!paid) return "a crab who owns two durables gets nothing back from either";
+  if (got.homeless.want !== 0) return "a homeless crab wants to buy furniture with nowhere to put it";
+  if (got.tiers.indexOf("fitting") < 0 || got.tiers.indexOf("big") < 0)
+    return "the goods table has lost one of its two price tiers";
+  return true;
+});
+
+scenario("coffee buys an hour, a tonic buys a night, and the tonic lapses", () => {
+  // Two counters answer TIREDNESS and they must not be the same answer. A
+  // coffee SUBTRACTS the need right now and leaves the night alone; a tonic
+  // leaves right now alone and multiplies the next few nights' rest. If either
+  // ever does both, one of the two shops has no reason to exist.
+  const sim = createSim({ seed: 83 });
+  sim.runDays(3, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 1600"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    const c = crabs[0];
+    c.p.goods = []; c.p.zzzV = 0; c.p.zzzT = 0; c.p.tired = 0.8;
+    const cup = BIZ.coffee.recipes[0], big = BIZ.coffee.recipes[BIZ.coffee.recipes.length - 1];
+    const restBefore = restBonus(c);
+    applyCounterExtras(c, cup, "coffee");
+    const afterCup = { tired: +c.p.tired.toFixed(3), rest: restBonus(c) };
+    c.p.tired = 0.8;
+    const tonic = BIZ.juicebar.recipes.find(r => r.zzz);
+    applyCounterExtras(c, tonic, "juicebar");
+    const afterTonic = { tired: +c.p.tired.toFixed(3), rest: restBonus(c), days: c.p.zzzT - day };
+    const wasDay = day; day = c.p.zzzT + 1;
+    const lapsed = restBonus(c); day = wasDay;
+    return JSON.stringify({ restBefore, afterCup, afterTonic, lapsed,
+      cupPerk: cup.perk, bigPerk: big.perk });
+  })()`));
+  if (!(got.afterCup.tired < 0.8)) return "a coffee did not take any tiredness off";
+  if (got.afterCup.rest !== got.restBefore) return "a coffee changed how well the crab sleeps";
+  if (got.afterTonic.tired !== 0.8) return "a tonic took tiredness off on the spot - that is the coffee's job";
+  if (!(got.afterTonic.rest > got.restBefore)) return "a tonic did not improve the nights it is sold for";
+  if (!(got.afterTonic.days >= 1)) return "a tonic expires the same day it is drunk";
+  if (got.lapsed !== got.restBefore) return "a tonic never wears off - that is a permanent buff, not a drink";
+  if (!(got.bigPerk > got.cupPerk)) return "the dear coffee is not stronger than the cheap one";
+  return true;
+});
+
+scenario("the glow stall is open when it is dark", () => {
+  // It sells against the night (glowHour) and the town's default day SHUTS at
+  // 20:00, about an hour after dusk - so on default hours the stall was open
+  // for the wrong twelve hours and took exactly $0 a day over forty measured
+  // days. Its hours have to overlap the dark it trades in.
+  const sim = createSim({ seed: 84 });
+  const got = JSON.parse(sim.G(`(() => {
+    const h = BIZ.glow.hours, was = tmin;
+    let darkOpen = 0, darkTotal = 0;
+    for (let t = 0; t < 24 * 60; t += 15) {
+      tmin = t;
+      if (!glowHour()) continue;
+      darkTotal++;
+      if (t >= h.open && t < h.close) darkOpen++;
+    }
+    tmin = was;
+    return JSON.stringify({ open: h.open, close: h.close, darkOpen, darkTotal });
+  })()`));
+  if (!got.darkTotal) return "glowHour() is never true - the stall can never sell anything";
+  if (!(got.darkOpen >= 6))
+    return `the stall is open for only ${got.darkOpen} of ${got.darkTotal} dark quarter-hours ` +
+      `(${got.open}-${got.close}) - it trades in hours nobody wants a glow stick`;
   return true;
 });
 

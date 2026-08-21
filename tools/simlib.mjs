@@ -26,13 +26,30 @@ export function createSim({ seed = 1337, storage = null, fresh = true, screenH =
     },
     set: () => true,
   });
-  const mkCanvas = () => ({ width: 0, height: 0, getContext: () => ctxStub,
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 256, height: 240 }), addEventListener: noop });
+  // EVERY LISTENER THE GAME REGISTERS IS KEPT, so a scenario can drive the real
+  // tap handlers instead of only the functions behind them. Before this the
+  // stub was `addEventListener: noop` and NO tap path in game.js was testable
+  // at all - a whole class of bug (a draw and its click handler disagreeing
+  // about which row is which crab) was invisible to 245 scenarios.
+  const taps = { click: [], pointerdown: [], pointerup: [], pointermove: [], keydown: [] };
+  const listen = (t, fn) => { if (taps[t]) taps[t].push(fn); };
+  // THE RECT IS DERIVED FROM THE CANVAS, not hardcoded, so evPos() scales 1:1.
+  // It used to report 256x240 for a canvas whose `width` was 0, and game.js
+  // computes a tap as (clientX - left) * (cv.width / rect.width) - so EVERY
+  // simulated tap landed on (0, 0), which is off every card in the game. That
+  // is why sim.tap() appeared to do nothing but close whatever was open.
+  const mkCanvas = () => {
+    const c = { width: 256, height: 240, getContext: () => ctxStub,
+      addEventListener: listen };
+    c.getBoundingClientRect = () => ({ left: 0, top: 0,
+      width: c.width || 256, height: c.height || 240 });
+    return c;
+  };
   const store = storage || new Map();
   const seededMath = Object.create(Math);
   seededMath.random = mulberry32(seed);
   const sandbox = {
-    document: { createElement: () => mkCanvas(), getElementById: () => mkCanvas(), addEventListener: noop, hidden: false },
+    document: { createElement: () => mkCanvas(), getElementById: () => mkCanvas(), addEventListener: listen, hidden: false },
     location: { search: fresh ? "?fresh" : "" },
     localStorage: {
       getItem: (k) => (store.has(k) ? store.get(k) : null),
@@ -40,7 +57,7 @@ export function createSim({ seed = 1337, storage = null, fresh = true, screenH =
       removeItem: (k) => store.delete(k),
     },
     Audio: class { constructor() { this.loop = false; this.volume = 0; } play() { return { catch: noop }; } pause() {} addEventListener() {} },
-    AudioContext: undefined, addEventListener: noop, console,
+    AudioContext: undefined, addEventListener: listen, console,
     Math: seededMath, JSON, rafCb: null, simNow: 0,
   };
   sandbox.window = sandbox;
@@ -80,5 +97,17 @@ export function createSim({ seed = 1337, storage = null, fresh = true, screenH =
         if (onTick && ++i % tickEvery === 0) onTick(G);
       }
     },
+    // A REAL TAP, through the game's own click handler, in CANVAS coordinates.
+    // The stub's getBoundingClientRect is 256x240 at the origin, so clientX/Y
+    // and canvas x/y are the same number and a scenario can hand this a rect
+    // straight out of manageRects(). Returns how many listeners saw it, so a
+    // scenario can tell "the handler ignored my tap" from "there is no handler".
+    tap(x, y) {
+      const ev = { clientX: x, clientY: y, preventDefault() {}, stopPropagation() {} };
+      for (const fn of taps.click) fn(ev);
+      return taps.click.length;
+    },
+    // ...and the middle of a rect, which is what every scenario actually wants
+    tapRect(r) { return this.tap(r.x + r.w / 2, r.y + r.h / 2); },
   };
 }
