@@ -5578,20 +5578,78 @@ function crabBerth(c) {
 }
 
 // ---------------------------------------------------------------- sound (from CS1)
+// THE PLAYLIST HAS AN ENERGY COLUMN, and two tracks that are not in the
+// rotation at all (Matt, 2026-08-21: "energy match the songs though and think
+// about if some are event-appropriate").
+//
+// Twelve tracks used to play in a fixed loop, which meant a lullaby could land
+// on the busiest afternoon of the week and a dance number on a dead Sunday
+// night. `e` is what a track is FOR - 0 calm, 1 steady, 2 lively - and the
+// picker reads the town rather than a counter (see targetEnergy).
+//
+// `role` takes a track OUT of the rotation because it belongs to a moment:
+//   title - the start screen, which is what the track is literally called
+//   end   - the ferry ending and the bankruptcy card, both of which are
+//           thirty-one seconds of somebody telling you how it went
+// A roled track is never picked by the rotation, so it keeps its meaning: a
+// win sting that turns up on a Tuesday afternoon is not a win sting.
 const PLAYLIST = [
-  { src: "music/pixel-wave-waltz.mp3", name: "PIXEL WAVE WALTZ" },
-  { src: "music/regalia-of-the-surf.mp3", name: "REGALIA OF THE SURF" },
-  { src: "music/regalia-waltz.mp3", name: "REGALIA WALTZ" },
-  { src: "music/butter-pow.mp3", name: "BUTTER POW" },
-  { src: "music/carnival-of-the-glitch.mp3", name: "CARNIVAL OF THE GLITCH" },
-  { src: "music/pixomatic-moon.mp3", name: "PIXOMATIC MOON" },
-  { src: "music/dense-portal.mp3", name: "DENSE PORTAL" },
-  { src: "music/dance-up.mp3", name: "DANCE UP" },
-  { src: "music/lantern-circuit.mp3", name: "LANTERN CIRCUIT" },
-  { src: "music/marble-rain.mp3", name: "MARBLE RAIN" },
-  { src: "music/rain-circuit-lullaby.mp3", name: "RAIN CIRCUIT LULLABY" },
-  { src: "music/goat-circuit.mp3", name: "GOAT CIRCUIT" },
+  { src: "music/pixel-wave-waltz.mp3", name: "PIXEL WAVE WALTZ", e: 1 },
+  { src: "music/regalia-of-the-surf.mp3", name: "REGALIA OF THE SURF", e: 1 },
+  { src: "music/regalia-waltz.mp3", name: "REGALIA WALTZ", e: 1 },
+  { src: "music/butter-pow.mp3", name: "BUTTER POW", e: 0 },
+  { src: "music/carnival-of-the-glitch.mp3", name: "CARNIVAL OF THE GLITCH", e: 2 },
+  { src: "music/pixomatic-moon.mp3", name: "PIXOMATIC MOON", e: 0 },
+  { src: "music/dense-portal.mp3", name: "DENSE PORTAL", e: 2 },
+  { src: "music/dance-up.mp3", name: "DANCE UP", e: 2 },
+  { src: "music/lantern-circuit.mp3", name: "LANTERN CIRCUIT", e: 1 },
+  { src: "music/marble-rain.mp3", name: "MARBLE RAIN", e: 0 },
+  { src: "music/rain-circuit-lullaby.mp3", name: "RAIN CIRCUIT LULLABY", e: 0 },
+  { src: "music/goat-circuit.mp3", name: "GOAT CIRCUIT", e: 1 },
+  // ---- DENSE DANCE + CLONKBOY (2026-08-21). Energy read off what each track
+  // actually is: the lullabies and the porch-sitting ones carry the night, the
+  // thumping ones carry a full house.
+  { src: "music/grease-man.mp3", name: "GREASE MAN", e: 0 },
+  { src: "music/frog-ledger.mp3", name: "FROG LEDGER", e: 0 },
+  { src: "music/front-porch.mp3", name: "FRONT PORCH", e: 0 },
+  { src: "music/island-sand.mp3", name: "ISLAND SAND", e: 1 },
+  { src: "music/raster-beach.mp3", name: "RASTER BEACH", e: 1 },
+  { src: "music/train-whistle.mp3", name: "TRAIN WHISTLE", e: 1 },
+  { src: "music/peenball.mp3", name: "PEENBALL", e: 2 },
+  { src: "music/power-limbo.mp3", name: "POWER LIMBO", e: 2 },
+  { src: "music/beach-volleyball-start-screen.mp3", name: "BEACH VOLLEYBALL", e: 1, role: "title" },
+  { src: "music/you-win-game-over.mp3", name: "YOU WIN/GAME OVER", e: 1, role: "end" },
 ];
+// WHAT THE TOWN IS DOING, as one number the picker can match a track to.
+// Deliberately read off things a player can SEE - the clock, the light, and how
+// many people are on the promenade - so the music agreeing with the town is
+// something you notice rather than something you are told.
+function targetEnergy() {
+  if (typeof darkness === "function" && darkness() > 0.6) return 0;   // after dark: the town is asleep
+  if (typeof townOpen === "function" && !townOpen()) return 0;        // before the shutters go up
+  const crowd = (typeof customers !== "undefined" ? customers : []).filter(k => k && !k.gone).length;
+  return crowd >= 6 ? 2 : crowd >= 2 ? 1 : 0;
+}
+// ...and the track for it. Never a roled track, never the one just played, and
+// it falls back through the neighbouring energies rather than going silent -
+// a town with no lively track left still gets music, just calmer music.
+function pickTrack() {
+  const want = targetEnergy();
+  for (const d of [0, 1, 2, 3]) {
+    const pool = [];
+    for (let i = 0; i < PLAYLIST.length; i++) {
+      const t = PLAYLIST[i];
+      if (t.role || i === trackIdx) continue;
+      if (Math.abs((t.e == null ? 1 : t.e) - want) === d) pool.push(i);
+    }
+    if (pool.length) return pool[(Math.random() * pool.length) | 0];
+  }
+  return trackIdx;
+}
+function roleTrack(role) {
+  for (let i = 0; i < PLAYLIST.length; i++) if (PLAYLIST[i].role === role) return i;
+  return -1;
+}
 let musicOn = false, music = null, muted = false;   // opt-IN for new players (SFX stays on)
 let musNudges = 0, musNudged = false;               // invite, don't nag: gives up after 3 sessions
 function toggleMute() {
@@ -5606,11 +5664,22 @@ function playTrack(i) {
   const t = PLAYLIST[trackIdx];
   music = new Audio(t.src);
   music.volume = 0.55;
-  music.addEventListener("ended", () => { music = null; if (musicOn) playTrack(trackIdx + 1); });
+  // WHAT FOLLOWS A TRACK IS CHOSEN, NOT COUNTED. The next one is picked to
+  // match what the town is doing when this one runs out - see pickTrack.
+  music.addEventListener("ended", () => { music = null; if (musicOn) playTrack(pickTrack()); });
   music.play().then(() => { if (!toast) toast = { text: "NOW PLAYING: " + t.name, t: 4 }; })   // don't stomp a live toast (e.g. the migration refund)
     .catch(() => { music = null; });
 }
-function startMusic() { if (!music && musicOn && !muted) playTrack(trackIdx); }
+function startMusic() { if (!music && musicOn && !muted) playTrack(pickTrack()); }
+// THE TWO MOMENTS THAT OWN THEIR OWN MUSIC. Called from the screens that mean
+// them; each one only interrupts if it is not already the thing playing, so a
+// 31-second sting is not restarted every frame of the ending it belongs to.
+function playRole(role) {
+  const i = roleTrack(role);
+  if (i < 0 || !musicOn || muted) return;
+  if (music && trackIdx === i) return;
+  playTrack(i);
+}
 function toggleMusic() {
   musicOn = !musicOn;
   if (!musicOn && music) { music.pause(); music = null; } else if (musicOn) startMusic();
@@ -10472,7 +10541,7 @@ cv.addEventListener("contextmenu", (ev) => {
 addEventListener("keydown", (e) => {
   if (e.key === "m") { toggleMute(); if (!muted) sfx.ding(); }
   if (e.key === "n") toggleMusic();
-  if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
+  if (e.key === "b" && musicOn) playTrack(pickTrack());    // skip: another one that fits
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
   // [ and ] step the selection through the town, exactly what the little crab
   // cycler's chevrons do - the camera comes along, unlike an arrow-key pan
@@ -15107,6 +15176,8 @@ function frame(now) {
     return;
   }
   if (screen === "title") {
+    // THE START SCREEN HAS ITS OWN TRACK, and it is the one named after it.
+    playRole("title");
     if (newConfirmT > 0) newConfirmT -= dt;
     // attract mode: slow ping-pong pan across the town
     const span = WORLD_W - W, s = (time * 9) % (2 * span);
@@ -15382,6 +15453,12 @@ function frame(now) {
   drawShopTip();       // hangs off the bottom of the world, pointing at the grid it explains
   drawHireCard();
   if (!boardView && !manage && !saveView && !dossier && !helpView && departT <= 0) drawToast();   // reading surfaces own the screen
+  // ...AND SO DOES THE END, either kind of it: the ferry ending and the
+  // bankruptcy card are the same thirty-one seconds of somebody telling you how
+  // it went. (Placed with the draw rather than at the moment of death because a
+  // town can also be LOADED into its own ending - see winRec - and a reloaded
+  // win should sound like the one you played.)
+  if (gameOver || won) playRole("end");
   if (gameOver) drawGameOver();
   drawSaveScreen();
   drawHelp();          // the last word: HOW TO PLAY sits over everything, including game over

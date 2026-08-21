@@ -3,6 +3,7 @@
 //   node tools/suite.mjs            run everything
 //   node tools/suite.mjs stuck ff   run scenarios matching any arg substring
 import { createSim } from "./simlib.mjs";
+import { existsSync } from "fs";
 
 const results = [];
 function scenario(name, fn) { results.push({ name, fn }); }
@@ -9703,6 +9704,76 @@ scenario("a big crew never runs under the MANAGE and TOWN chips", () => {
     return JSON.stringify(out.slice(0, 6));
   })()`));
   if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
+  return true;
+});
+
+// ===========================================================================
+// THE MUSIC MATCHES THE TOWN (Matt, 2026-08-21)
+// ===========================================================================
+
+scenario("the playlist is energy-matched, and the event tracks stay out of the rotation", () => {
+  // Matt: "energy match the songs though and think about if some are event-
+  // appropriate." Two claims, and the second one is the one that rots quietly:
+  // a win sting that turns up on a Tuesday afternoon is not a win sting.
+  const sim = createSim({ seed: 1337 });
+  const got = JSON.parse(sim.G(`(() => {
+    // 1. EVERY track declares an energy, and the three bands all exist - a
+    //    picker with nothing calm to reach for silently plays the wrong thing.
+    const bands = {};
+    for (const t of PLAYLIST) bands[t.e] = (bands[t.e] || 0) + 1;
+    // 2. The roled tracks exist, are unique, and are NEVER returned by the
+    //    rotation. Sampled hard rather than argued: every energy target, many
+    //    draws each, because pickTrack is random within its band.
+    const roles = PLAYLIST.map((t, i) => [t.role, i]).filter(r => r[0]);
+    const rolled = new Set(roles.map(r => r[1]));
+    let leaked = 0, repeats = 0;
+    for (let want = 0; want <= 2; want++) {
+      for (let n = 0; n < 200; n++) {
+        trackIdx = n % PLAYLIST.length;
+        // force the target by stubbing the reader the picker uses
+        const T = targetEnergy; targetEnergy = () => want;
+        const got2 = pickTrack();
+        targetEnergy = T;
+        if (rolled.has(got2)) leaked++;
+        if (got2 === trackIdx) repeats++;
+      }
+    }
+    // 3. ...and the target actually MOVES with the town: a dark, empty night
+    //    and a busy afternoon must not ask for the same thing.
+    const night = (() => { tmin = 2 * 60; customers.length = 0; return targetEnergy(); })();
+    tmin = 13 * 60;
+    const quiet = targetEnergy();
+    for (let i = 0; i < 8; i++) customers.push({ x: 0, gone: false });
+    const busy = targetEnergy();
+    return JSON.stringify({ bands, roles: roles.map(r => r[0]), leaked, repeats, night, quiet, busy,
+      total: PLAYLIST.length });
+  })()`));
+  for (const e of [0, 1, 2])
+    if (!got.bands[e]) return `no track is tagged energy ${e} - the picker has nothing to reach for`;
+  if (got.bands.undefined) return `${got.bands.undefined} tracks have no energy at all`;
+  if (got.roles.length !== 2 || got.roles.indexOf("title") < 0 || got.roles.indexOf("end") < 0)
+    return "expected exactly a title and an end track, got " + JSON.stringify(got.roles);
+  if (got.leaked) return `a roled track was picked by the rotation ${got.leaked} times`;
+  if (got.repeats) return `the picker returned the track already playing ${got.repeats} times`;
+  if (!(got.night === 0)) return `a dark empty night asked for energy ${got.night}`;
+  if (!(got.busy > got.quiet)) return `a busy promenade (${got.busy}) did not ask for more than a quiet one (${got.quiet})`;
+  return true;
+});
+
+scenario("every track in the playlist is a file that exists", () => {
+  // Ten tracks arrived from two Suno albums in one go. A playlist entry whose
+  // mp3 is missing fails SILENTLY in a browser - the audio element errors, the
+  // 'ended' handler never fires, and the music simply stops for the rest of the
+  // session. Cheap to check, impossible to notice by playing.
+  const sim = createSim({ seed: 1 });
+  const srcs = JSON.parse(sim.G("JSON.stringify(PLAYLIST.map(t => t.src))"));
+  const seen = new Set();
+  for (const src of srcs) {
+    if (seen.has(src)) return "the same file is in the playlist twice: " + src;
+    seen.add(src);
+    if (!/^music\/[a-z0-9-]+\.mp3$/.test(src)) return "odd playlist path: " + src;
+    if (!existsSync(new URL("../" + src, import.meta.url))) return "playlist names a file that is not there: " + src;
+  }
   return true;
 });
 
