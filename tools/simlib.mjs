@@ -78,6 +78,21 @@ export function createSim({ seed = 1337, storage = null, fresh = true, screenH =
   const stepScript = (stepMs) => new vm.Script(`simNow += ${stepMs}; rafCb(simNow);`);
   return {
     C, G, sandbox, store,
+    // DRIVE THE REAL CLICK HANDLER. `tap(x, y)` is a canvas-space click - the
+    // getBoundingClientRect stub above DERIVES from the canvas, so it is 1:1
+    // at any screen height (a hardcoded 240-tall rect against a 288 canvas
+    // puts a 1.2x vertical scale on every tap in TALL mode), and a
+    // world/card coordinate goes straight in. `tapRect(r)` aims at a rect's
+    // centre, which is how a scenario proves that a control a DRAW put at
+    // manageRects().foo is the control the HIT TEST acts on: the two read the
+    // same table, and this is the only thing that can catch them drifting.
+    tap(x, y) {
+      const ls = taps.click || [];
+      if (!ls.length) throw new Error("no click listener registered on the canvas");
+      for (const fn of ls) fn({ clientX: x, clientY: y, preventDefault: noop });
+      return ls.length;
+    },
+    tapRect(r) { return this.tap(r.x + r.w / 2, r.y + r.h / 2); },
     // run until a predicate (a G-expression) is true, or maxSteps elapse
     runUntil(expr, { step = 50, maxSteps = 400000, onTick = null, tickEvery = 20 } = {}) {
       const s = stepScript(step);
@@ -97,17 +112,5 @@ export function createSim({ seed = 1337, storage = null, fresh = true, screenH =
         if (onTick && ++i % tickEvery === 0) onTick(G);
       }
     },
-    // A REAL TAP, through the game's own click handler, in CANVAS coordinates.
-    // The stub's getBoundingClientRect is 256x240 at the origin, so clientX/Y
-    // and canvas x/y are the same number and a scenario can hand this a rect
-    // straight out of manageRects(). Returns how many listeners saw it, so a
-    // scenario can tell "the handler ignored my tap" from "there is no handler".
-    tap(x, y) {
-      const ev = { clientX: x, clientY: y, preventDefault() {}, stopPropagation() {} };
-      for (const fn of taps.click) fn(ev);
-      return taps.click.length;
-    },
-    // ...and the middle of a rect, which is what every scenario actually wants
-    tapRect(r) { return this.tap(r.x + r.w / 2, r.y + r.h / 2); },
   };
 }

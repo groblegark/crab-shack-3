@@ -198,24 +198,47 @@ const BIZ = {
         steps: [["grill", 5.0, "plate_fish"]] },
     ],
   },
+  // ---------------------------------------------------------- the arcade
+  // THE CLAWCADE IS NOT A RESTAURANT THAT SELLS FUN. It used to be one: you
+  // queued, an attendant "cooked" a plush at a claw machine you never touched,
+  // and boredom went to zero at the counter. That is a taco with a different
+  // sprite, and the owner said so - "at an arcade you get tokens, then you
+  // play games get tickets, then you trade the tickets for prizes".
+  //
+  // So the shop's counter now sells exactly ONE thing, and it is the only
+  // thing in here that costs money: A HANDFUL OF TOKENS. Everything
+  // downstream - the machines, the tickets, the prize wall - is the customer
+  // spending what they already bought. See THE ARCADE LOOP block below for the
+  // whole model and for the conservation argument (a ticket is not money; a
+  // prize is stock the till pays for, exactly like a fish).
   arcade: {
     name: "CLAWCADE", short: "CADE", sign: "THE CLAWCADE", kind: "shopfront", rent: 80, owner: "player",
     x0: 1620, x1: 1800, door: 1636,
+    // TWO COUNTERS AND A FLOOR. The token booth stands at the door end beside
+    // the line (every `out` station in this game does - what the crab carries
+    // has to reach the queue); the prize wall is at the BACK, so redeeming is
+    // a walk past every machine you have not beaten yet. The machines
+    // themselves are not stations at all any more - they are FIXTURES THE
+    // CUSTOMER OCCUPIES, on the shower stalls' y so both travel lanes keep
+    // their daylight by construction.
     stations: {
-      booth: [{ x: 1630, y: 136 }],
-      claw:  [{ x: 1666, y: 136 }, { x: 1688, y: 136 }],
-      skee:  [{ x: 1718, y: 160 }, { x: 1740, y: 160 }],
-      prize: [{ x: 1772, y: 160 }],
+      prize: [{ x: 1622, y: 160 }],
+      booth: [{ x: 1766, y: 160 }],
     },
-    source: "booth", out: "prize", queueX: 1804,
+    // THE FLOOR. Rebuilt by syncArcadeFloor() off ARC_FLOOR - CADE GEAR+ adds
+    // two more cabinets, exactly the way the hotel's annexe adds rooms, so the
+    // geometry is never a saved array of x's.
+    stalls: [],
+    arcadeFloor: true,
+    source: "booth", out: "booth", queueX: 1804,
     park: 1590, rack: 1604,
+    // ONE PRODUCT, THREE SIZES. `tokens` is the real field; `pay` is DERIVED
+    // from the token price every time the dial moves (see setArcToken), so
+    // there is no second place a price can drift to.
     recipes: [
-      { id: "clawgame", icon: "plush", pay: 13, raw: "token",
-        steps: [["claw", 3.5, "plush"]] },
-      { id: "skeerun", icon: "tickets", pay: 9, raw: "token",
-        steps: [["skee", 2.8, "tickets"]] },
-      { id: "gamenight", icon: "gold_plush", pay: 18, raw: "token",
-        steps: [["skee", 2.5, "tickets"], ["claw", 3.0, "gold_plush"]] },
+      { id: "tok3",  icon: "token", tokens: 3,  pay: 9,  raw: "token", steps: [["booth", 1.2, "token"]] },
+      { id: "tok6",  icon: "token", tokens: 6,  pay: 18, raw: "token", steps: [["booth", 1.6, "token"]] },
+      { id: "tok10", icon: "token", tokens: 10, pay: 30, raw: "token", steps: [["booth", 2.0, "token"]] },
     ],
   },
   juicebar: {
@@ -550,7 +573,19 @@ function fmtClock(m) { const h = (m / 60) | 0, mm = m % 60 | 0; return h + ":" +
 const PRICE_MIN = 0.7, PRICE_MAX = 1.3, PRICE_STEP = 0.05;
 const clampPrice = (v) => Math.max(PRICE_MIN, Math.min(PRICE_MAX,
   Math.round((+v || 0) / PRICE_STEP) * PRICE_STEP));
-function bizPriceMul(b) { const m = BIZ[b] && BIZ[b].priceMul; return m == null ? 1 : m; }
+function bizPriceMul(b) {
+  // THE ARCADE HAS ONE PRICE AND IT IS THE TOKEN PRICE. A percentage
+  // multiplier on top of "tokens x $3" would be a SECOND place the board price
+  // could live, and the two would drift the moment anybody touched either -
+  // the refund at the booth would hand back a different number from the one
+  // the till took. So the multiplier is pinned at 1 here and the shop's price
+  // stepper on the management card steps ARC.token instead (same row, same
+  // geometry, denominated in dollars-per-token). A peer owner who inherits
+  // this lease runs a price policy that calls setBizPrice; it lands here and
+  // is inert, which is honest - they do not know how to price an arcade.
+  if (b === "arcade") return 1;
+  const m = BIZ[b] && BIZ[b].priceMul; return m == null ? 1 : m;
+}
 function setBizPrice(b, v) { if (BIZ[b]) BIZ[b].priceMul = clampPrice(v); }
 function menuPrice(b, r) { return Math.max(1, Math.round(r.pay * bizPriceMul(b))); }   // what it says on the board
 // TRIM TO FIT, MEASURED. A character count is a guess about a proportional
@@ -589,9 +624,188 @@ const TOURIST_PULL = { shack: 0.5, arcade: 0.22, juicebar: 0.3 };
 function bizPullBase(b) { return TOURIST_PULL[b] == null ? 0.1 : TOURIST_PULL[b]; }
 function bizPull(b) { return bizPullBase(b) * priceAppeal(b); }
 function priceAppeal(b) {
+  // THE ARCADE'S BOARD IS DENOMINATED IN TOKENS, so its appeal is read off the
+  // TOKEN PRICE rather than off a percentage nobody set. Same curve, same
+  // clamp, same "exactly 1 at the default" property (ARC_TOKEN_BASE is the
+  // default), so a town whose dials nobody has touched behaves identically.
+  if (b === "arcade") return Math.max(0.6, Math.min(1.6, Math.pow(ARC_TOKEN_BASE / arcToken(), PRICE_ELAST)));
   const m = bizPriceMul(b);
   return Math.max(0.6, Math.min(1.6, Math.pow(1 / m, PRICE_ELAST)));
 }
+
+// ===========================================================================
+// THE ARCADE LOOP  (owner directive, 2026-08-21)
+//
+// Verbatim: "the arcade mechanics aren't very 'arcade like' -- at an arcade
+// you get tokens, then you play games get tickets, then you trade the tickets
+// for prizes.. it could be a bit addictive if you're not winning the prizes
+// you want. should have like a claw game to make this obvious, and settings
+// for the mechanics of the claw game and stuff".
+//
+// THREE STEPS, AND ONLY THE FIRST ONE IS MONEY:
+//   1. TOKENS. You buy a handful at the booth. This is the ONLY transaction
+//      in the building: wallet -> till, through the same counter pipeline a
+//      taco goes through, so tips, patience, rage-quits, the queue cap, the
+//      day book and the departure card all work on it unchanged.
+//   2. TICKETS. You walk onto the floor, take a cabinet, and spend the tokens
+//      one at a time. The CLAW pays ARC.pay tickets ARC.win of the time and
+//      NOTHING the rest; SKEE BALL pays a middling handful every single go.
+//      Both machines have the SAME EXPECTED TICKETS PER TOKEN by construction
+//      (see arcEV / skeeRoll) - the difference is variance, and the variance
+//      is the whole point. Tickets live on the PERSON and survive the visit.
+//   3. PRIZES. The wall at the back trades tickets for a prize. Prizes cost
+//      different numbers of tickets, so somebody saving for the big one walks
+//      back to the booth and buys more tokens instead of going home - which is
+//      exactly the "a bit addictive if you're not winning the prizes you want"
+//      the directive asked for. Nothing scripts that: `arcChase` is the urge,
+//      and it is a ratio of tickets held to tickets needed.
+//
+// NOTHING IS CONJURED, and it is the same argument the town fund makes:
+//   * A TICKET IS NOT MONEY. It is never counted by worldMoney(), never enters
+//     a wallet or a till, and cannot be sold. It is a claim on a shelf.
+//   * A PRIZE IS STOCK. Handing one over DEBITS the arcade's till for what the
+//     prize cost the shop (ARC_PRIZES[].cost) and books it as an import,
+//     exactly the way a fish leaves the world when the kitchen buys one. The
+//     till is poorer, the world is poorer by the same amount, and the customer
+//     is carrying a plush.
+//   * The only credit is at the booth, out of a wallet that was checked before
+//     they ever joined the line.
+//
+// WHAT CURES BOREDOM. Playing relieves a little (ARC_FUN_PLAY per token); a
+// REDEEMED PRIZE zeroes it. That ordering is the mechanic: the shop that sends
+// you home with nothing has not finished selling to you.
+// ===========================================================================
+const ARC_TOKEN_BASE = 3;          // the default token price, and the 1.0 of priceAppeal above
+const ARC_TOKEN_MIN = 1, ARC_TOKEN_MAX = 6;
+const ARC_WIN_MIN = 0.05, ARC_WIN_MAX = 0.60, ARC_WIN_STEP = 0.05;
+const ARC_PAY_MIN = 10, ARC_PAY_MAX = 120, ARC_PAY_STEP = 10;
+const ARC_PRIZE_MIN = 0.5, ARC_PRIZE_MAX = 2.0, ARC_PRIZE_STEP = 0.1;
+// THE FOUR DIALS, and they are the player's (management card, HOURS tab).
+// Defaults are the shipping calibration; every number the game shows about
+// this shop is derived from these four and nothing is written down twice.
+const ARC = { token: ARC_TOKEN_BASE, win: 0.20, pay: 40, prizeMul: 1 };
+const ARC_FUN_PLAY = 0.10;         // boredom a single go buys back; a PRIZE zeroes it
+const ARC_OPTIMISM = 1.6;          // a gambler eyes the prize their AVERAGE luck would not quite reach
+// THE PRIZE WALL. Ticket costs scale with the PRIZES dial; `cost` is what the
+// shop paid the wholesaler for the thing, and it is the arcade's only cost of
+// goods. Ordered cheapest first - every reader below relies on that.
+const ARC_PRIZES = [
+  { id: "rubber", name: "RUBBER CRAB", icon: "rubber_crab", tix: 20,  cost: 1 },
+  { id: "plush",  name: "CLAW PLUSH",  icon: "plush",       tix: 70,  cost: 3 },
+  { id: "gold",   name: "GOLD PLUSH",  icon: "gold_plush",  tix: 220, cost: 9 },
+];
+const clampTok = (v) => Math.max(ARC_TOKEN_MIN, Math.min(ARC_TOKEN_MAX, Math.round(+v || 0)));
+const clampWin = (v) => Math.max(ARC_WIN_MIN, Math.min(ARC_WIN_MAX,
+  Math.round((+v || 0) / ARC_WIN_STEP) * ARC_WIN_STEP));
+const clampPay = (v) => Math.max(ARC_PAY_MIN, Math.min(ARC_PAY_MAX,
+  Math.round((+v || 0) / ARC_PAY_STEP) * ARC_PAY_STEP));
+const clampPrizeMul = (v) => Math.max(ARC_PRIZE_MIN, Math.min(ARC_PRIZE_MAX,
+  Math.round((+v || 0) * 10) / 10));
+function arcToken() { return clampTok(ARC.token); }
+// ONE WRITE PATH FOR THE PRICE. The bundles' `pay` is the token price times
+// the tokens in the bundle, and it is recomputed here rather than stored
+// twice - so menuPrice, localPrice, the tip, the day book, the shopfront menu
+// and the visitor's affordability check all move together the instant the
+// stepper moves. Called on every load and on every tap.
+function setArcToken(v) {
+  ARC.token = clampTok(v);
+  for (const r of BIZ.arcade.recipes) r.pay = r.tokens * ARC.token;
+  return ARC.token;
+}
+function setArcWin(v) { return (ARC.win = clampWin(v)); }
+function setArcPay(v) { return (ARC.pay = clampPay(v)); }
+function setArcPrizeMul(v) { return (ARC.prizeMul = clampPrizeMul(v)); }
+// EXPECTED TICKETS PER TOKEN. The claw's own arithmetic - a grab pays `pay`
+// with probability `win` - and the skee lane is built to match it, so the two
+// cabinets differ in VARIANCE and in nothing else. Every legibility line on
+// the management card is this number wearing a different hat.
+function arcEV() { return ARC.win * ARC.pay; }
+function prizeTix(p) { return Math.max(1, Math.round(p.tix * ARC.prizeMul)); }
+// what one go pays, by cabinet. The claw is all-or-nothing on purpose: it is
+// the machine the directive named, and "you are not winning the prize you
+// want" is a sentence about variance.
+function clawRoll() { return Math.random() < ARC.win ? Math.round(ARC.pay) : 0; }
+// THE SKEE LANE'S BAND, and it is a FUNCTION because the management card
+// prints it. A band typed into the card and a band typed into the roll are two
+// numbers that agree until somebody edits one of them - which is the exact
+// drift the shop tooltips have a paragraph about. One source, two readers.
+function skeeBand() {
+  const ev = arcEV();
+  const lo = Math.max(0, Math.round(ev * 0.45));
+  return [lo, Math.max(lo, Math.round(2 * ev) - lo)];
+}
+function skeeRoll() {
+  const [lo, hi] = skeeBand();
+  return lo + ((Math.random() * (hi - lo + 1)) | 0);
+}
+function arcRoll(kind) { return kind === "claw" ? clawRoll() : skeeRoll(); }
+// THE FLOOR, rebuilt rather than saved (see BIZ.arcade.stalls). Four cabinets
+// to start, six once CADE GEAR+ is fitted, alternating claw/skee so the gear
+// upgrade buys one of each rather than two of the same.
+const ARC_FLOOR = { X0: 1626, DX: 26, Y: 136, BASE: 4, EXTRA: 2 };
+function arcadeMachines() { return (BIZ.arcade && BIZ.arcade.stalls) || []; }
+function arcadeFloorWant() { return ARC_FLOOR.BASE + (UPS.cadegear.lvl > 0 ? ARC_FLOOR.EXTRA : 0); }
+function syncArcadeFloor() {
+  const b = BIZ.arcade, want = arcadeFloorWant();
+  while (b.stalls.length > want) {
+    const m = b.stalls.pop();
+    if (m && m.occupant) { m.occupant.stall = null; m.occupant = null; }   // never strand a player at a cabinet that no longer exists
+  }
+  while (b.stalls.length < want) {
+    const i = b.stalls.length;
+    b.stalls.push({ x: ARC_FLOOR.X0 + i * ARC_FLOOR.DX, y: ARC_FLOOR.Y,
+      game: i % 2 === 0 ? "claw" : "skee", machine: true,
+      occupant: null, dirty: false, cleaning: false, anim: 0, flash: 0 });
+  }
+  _bandsKey = null;   // the floor is solid: the routing cache has to hear about it
+}
+// TICKETS LIVE ON THE PERSON. A crab keeps them in their persona (so they
+// save, and so a crab really can save up across three visits); a visitor keeps
+// them for the length of the stay and takes any unspent stub home, where it is
+// destroyed with the purse. Neither is money and neither is ever counted as
+// money - that is the whole conservation argument in two functions.
+function tixOf(k) { return Math.max(0, Math.round(k.isCrab ? (k.crab.p.tickets || 0) : (k.tickets || 0))); }
+function addTix(k, n) {
+  if (k.isCrab) k.crab.p.tickets = Math.max(0, (k.crab.p.tickets || 0) + n);
+  else k.tickets = Math.max(0, (k.tickets || 0) + n);
+}
+// THE PRIZE THEY ARE SAVING FOR. Derived, never rolled: the dearest thing on
+// the wall that an OPTIMIST holding `tix` tickets and `tokens` tokens could
+// still walk out with. Optimism is what makes it a chase - at ARC_OPTIMISM 1
+// nobody would ever aim past their average luck, and nobody would ever come
+// back for a second handful.
+function eyePrize(tix, tokens) {
+  const reach = tix + tokens * arcEV() * ARC_OPTIMISM;
+  let best = ARC_PRIZES[0];
+  for (const p of ARC_PRIZES) if (prizeTix(p) <= reach) best = p;
+  return best;
+}
+// the dearest prize this many tickets actually buys, or null
+function affordPrize(tix) {
+  let best = null;
+  for (const p of ARC_PRIZES) if (tix >= prizeTix(p)) best = p;
+  return best;
+}
+// THE HOOK, AND IT IS A RATIO. Somebody who is 90% of the way to the gold
+// plush wants to go back far more than somebody who has 3 tickets in their
+// pocket - so the pull is the fraction of the target they are already holding,
+// and it goes to zero the moment they can afford it (because then they just
+// walk to the wall). This is added to the arcade's errand APPEAL on both the
+// crab and the visitor scorers; it is the only new term either one gained.
+const ARC_CHASE = 1.6;   // what a nearly-complete ticket run is worth against a fresh want
+const ARC_CHASE_AT = 0.5;   // ...and how much of it is enough to make the walk on its own
+const ARC_SPARE = 18;    // rent + a bowl: what a chaser holds back that a bored crab does not
+function arcChase(tix) {
+  if (!(tix > 0)) return 0;
+  const target = ARC_PRIZES.find(p => prizeTix(p) > tix);
+  if (!target) return 0;                       // they can already afford the top of the wall
+  return ARC_CHASE * (tix / prizeTix(target));
+}
+// ...and what the shop is worth walking into at all. A crab with tickets in
+// their pocket has a reason to visit that has nothing to do with being bored,
+// which is exactly what "addictive" means and is the one behaviour a scenario
+// can point at.
+function arcadePull(tix) { return 1 + arcChase(tix); }
 function staffMealCharge(b, r) {   // what a selfCooking staffer rings up
   const pol = BIZ[b].mealPol || "retail";
   return pol === "free" ? 0 : pol === "atcost" ? ingredientCost(r.raw) : menuPrice(b, r);
@@ -763,7 +977,14 @@ function debitBiz(b, amt, x, y, label) {
 // `lifetime` is the game's existing progression clock (the player's takings to
 // date, saved and restored), so a quarter that opens off it opens when the
 // town can actually feed it.
-const QUARTER_OPEN = { coffee: 1400, glow: 2400, imports: 3600 };
+// MEASURED, AND MOVED OUT. At 1400/2400/3600 the quarter opened on days 4-14
+// of a growth town, which is not the midgame at all - it is the middle of the
+// climb, and three more counters drawing on the same crab wallets (plus their
+// rent, the one cost that leaves the world) took the growth pillar from 2/16
+// to 1/16. "Midgame" means AFTER a town is established: these now want a
+// lifetime that a struggling town never reaches, so they are a reward for
+// getting there rather than a tax on getting there.
+const QUARTER_OPEN = { coffee: 4200, glow: 6800, imports: 9500 };
 function quarterOpen(b) { return QUARTER_OPEN[b] == null || lifetime >= QUARTER_OPEN[b]; }
 // WHO OPENS EACH ONE. A shop with no crab behind the counter is a shop that
 // can never sell anything (the errand pipeline needs somebody on the
@@ -4945,16 +5166,21 @@ const IMPORTS = {
   // shop - the office orders it the night before a poll and the ferry lands
   // it, which is the whole reason an election has a price at all.
   paper: { name: "PAPER", unit: "SHT", price: BALLOT_PRICE },
+  // PRIZES. The arcade's only cost of goods: a plush comes off the boat like
+  // everything else and the till pays for it the moment it leaves the shelf.
+  // The unit price here is the middle of the wall (ARC_PRIZES); what is
+  // actually charged is the prize's own `cost`, passed in per redemption.
+  prize: { name: "PRIZES", unit: "EA", price: 3 },
 };
-let trade = { total: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 },
-  day: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 }, spent: 0,
+let trade = { total: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0, prize: 0 },
+  day: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0, prize: 0 }, spent: 0,
   // ...AND WHAT WE SPENT IT ON. `spent` was a single number back when FISH was
   // the only import that actually charged money, and "spent / fish landed = the
   // world price" was a fair thing for a test to assert. BALLOT PAPER is the
   // second priced import and it broke that assumption immediately - 46 fish and
   // ten sheets read as $7.05 a fish. The ledger should be able to answer "what
   // did the town spend on WHAT", so it does.
-  spentBy: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0 },
+  spentBy: { fish: 0, corn: 0, water: 0, power: 0, fruit: 0, paper: 0, prize: 0 },
   landedDay: 0, landed: 0,   // pier production - NOT an import
   // the fish market: today's price, fish eaten today (demand), 3-day
   // supply/demand windows, days pinned at the ceiling, and the price series
@@ -5001,13 +5227,24 @@ function consumeIngredient(raw, recipe) {
 const ITEM_NAMES = {
   fish_raw: "FISH", fish_cut: "CUT FISH", fruit: "FRUIT",
   taco: "FISH TACO", juice: "JUICE", cooler: "COOLER", plate_fish: "GRILL FISH",
-  token: "TOKENS", plush: "CLAW PLUSH", tickets: "TICKET RUN", gold_plush: "GOLD PLUSH",
+  token: "TOKENS", plush: "CLAW PLUSH", tickets: "TICKETS", gold_plush: "GOLD PLUSH",
+  rubber_crab: "RUBBER CRAB",
   soap: "SOAP", suds: "DELUXE SOAK", shine: "QUICK RINSE", dirty_dishes: "DIRTY DISHES",
   linen: "FRESH LINEN", roomkey: "A ROOM FOR THE NIGHT",
   tonic: "A KELP TONIC", beans: "BEANS", coffee: "COFFEE", glowstick: "A GLOW STICK",
   glowpack: "A BUNDLE OF GLOW STICKS", crate_goods: "IMPORTED GOODS",
   fitting: "A FITTING FOR THE HOUSE",
 };
+// WHAT A RECIPE IS CALLED, and the arcade is why this is a function. Its three
+// bundles are the same icon at three sizes, so the name has to be DERIVED from
+// the size or the board reads "TOKENS  TOKENS  TOKENS" and the day report
+// cannot tell you which one somebody bought. Everything else answers exactly
+// as ITEM_NAMES always did.
+function itemName(r) {
+  if (!r) return "?";
+  if (r.tokens) return r.tokens + " TOKENS";
+  return ITEM_NAMES[r.icon] || "?";
+}
 
 const DRINKS = { juice: 1, cooler: 1 };   // recipes that quench THIRST wherever they're bought
 
@@ -5169,7 +5406,10 @@ function upEffect(key) {
       const t = (bizTables("shack") || []).length;
       return "TABLES " + t + " -> " + (t + 1);
     }
-    case "cadegear": return "MACHINES " + cap("claw") + " -> " + (cap("claw") + 1);
+    // CADE GEAR+ buys CABINETS now, not station slots: the machines are
+    // fixtures the customer stands at, so the promise is read straight off the
+    // floor the same way TABLE+ reads bizTables.
+    case "cadegear": return "MACHINES " + arcadeMachines().length + " -> " + (ARC_FLOOR.BASE + ARC_FLOOR.EXTRA);
     case "juicebar": case "arcade":
       return "BUSINESSES " + ownedBizList().length + " -> " + (ownedBizList().length + 1);
   }
@@ -5188,7 +5428,6 @@ function upOngoing(key) {
 function stationCap(bizKey, kind) {
   if (bizKey === "shack" && kind === "grill") return 1 + UPS.grill.lvl;
   if (bizKey === "shack" && kind === "board") return 1 + UPS.board.lvl;
-  if (bizKey === "arcade" && (kind === "claw" || kind === "skee")) return 1 + UPS.cadegear.lvl;
   if (bizKey === "juicebar" && kind === "juicer") return 2;
   return 1;
 }
@@ -5379,7 +5618,9 @@ function nightlyDue() { return totalRent() + wagesOwedTonight(); }
 const busy = {
   shack: { board: [false, false, false], grill: [false, false, false] },
   juicebar: { juicer: [false, false] },
-  arcade: { claw: [false, false], skee: [false, false] },
+  // the attendant only ever works ONE station now - the token window. The
+  // cabinets belong to the customers standing at them (see THE ARCADE LOOP).
+  arcade: { booth: [false] },
   showers: {},
   hotel: { linen: [false] },
   coffee: { urn: [false, false] },
@@ -6568,6 +6809,11 @@ function save() {
     // THE PRICE: one multiplier per shop (1 = the board price in the recipe
     // table), plus the rivalry's whole state machine - see RIVAL_CFG
     price: (() => { const m = {}; for (const k in BIZ) m[k] = bizPriceMul(k); return m; })(),
+    // THE ARCADE'S DIALS. Four numbers; the bundles' board prices and the whole
+    // prize wall are DERIVED from them on load, so there is nothing else here
+    // to keep in step. (Crabs' ticket stubs ride in their personas above;
+    // visitors' ride in the guest list below.)
+    arc: { t: ARC.token, w: ARC.win, p: ARC.pay, z: ARC.prizeMul },
     rival: rival,   // ...including her war chest, which is real money
     hotelier,       // ...and the hotelier: who she is, when she landed, what she has moved
     hoursPol: hoursPolicyState,
@@ -6586,6 +6832,8 @@ function save() {
       ar: k.arrived, lt: Math.round(k.leaveT), b: k.buys,
       rm: k.room ? hotelRooms().indexOf(k.room) : -1,
       hu: k.hunger, th: k.thirst, di: k.dirt, bo: k.bored, ti: k.tired,
+      tk: Math.round(k.tickets || 0),   // the ticket stub in their pocket: a claim on a shelf, never money
+      pz: k.prizes || 0,
       log: k.log || [],
       // THE STAY LEDGER RIDES ALONG. A visit spans nights, so if this did not
       // survive a reload the departure card would quietly forget the half of
@@ -6598,6 +6846,7 @@ function save() {
         qm: Math.round(s.quitMin), qb: s.quitBiz, q: s.quits,
         sv: s.serves, tb: s.tables,
         me: s.meals, dr: s.drinks, wa: s.washes, ga: s.games, ro: s.rooms,
+        pz: s.prizes, pb: s.bestPrize,
         ti: s.topItem, tz: s.topBiz, tp: Math.round(s.topPaid),
         tp2: Math.round(s.tips), du: Math.round(s.dues),
         sh: s.shut, fu: s.full, br: s.broke,
@@ -6658,6 +6907,19 @@ function load(slot) {
   if (typeof s.rep === "number") rep = s.rep;
   if (typeof s.townCatch === "number") townCatch = s.townCatch;
   for (const k in UPS) if (s.lv && s.lv[k] != null) UPS[k].lvl = s.lv[k];
+  // THE ARCADE'S FOUR DIALS, and the floor they imply. Every one goes through
+  // its own setter, so a hand-edited or corrupt save is clamped into the same
+  // band the stepper can reach and the bundles' prices are rebuilt from the
+  // token price rather than trusted. An old save carries none of this and gets
+  // the shipping defaults, which is exactly the arcade it was saved with.
+  {
+    const a = s.arc && typeof s.arc === "object" ? s.arc : {};
+    setArcToken(a.t == null ? ARC_TOKEN_BASE : a.t);
+    setArcWin(a.w == null ? 0.20 : a.w);
+    setArcPay(a.p == null ? 40 : a.p);
+    setArcPrizeMul(a.z == null ? 1 : a.z);
+  }
+  syncArcadeFloor();   // CADE GEAR+ came off the save above: stand the cabinets it bought
   // laundromat-removal migration: SUDS N BUBBLES closed. Stale lv keys
   // (cleaners/sudsgear) are simply ignored above; an owned laundromat refunds
   // its purchase price ONCE (flag persists so a reload can't re-pay it).
@@ -6966,6 +7228,7 @@ function load(slot) {
       s.serves = num(st.sv, 99); s.tables = num(st.tb, 99);
       s.meals = num(st.me, 99); s.drinks = num(st.dr, 99); s.washes = num(st.wa, 99);
       s.games = num(st.ga, 99); s.rooms = num(st.ro, 99);
+      s.prizes = num(st.pz, 99); s.bestPrize = nm(st.pb);
       s.topItem = nm(st.ti); s.topBiz = nm(st.tz); s.topPaid = num(st.tp, 9999);
       s.tips = num(st.tp2, 9999); s.dues = num(st.du, 9999);
       s.shut = num(st.sh, 9999); s.full = num(st.fu, 9999); s.broke = num(st.br, 9999);
@@ -6974,6 +7237,8 @@ function load(slot) {
     }
     for (const [key, sk] of [["hunger", "hu"], ["thirst", "th"], ["dirt", "di"], ["bored", "bo"], ["tired", "ti"]])
       k[key] = Math.max(0, Math.min(1, +v[sk] || 0));
+    k.tickets = Math.max(0, Math.min(99999, Math.round(+v.tk || 0)));
+    k.prizes = Math.max(0, Math.min(99, Math.round(+v.pz || 0)));
     k.log = Array.isArray(v.log) ? v.log.filter(e => Array.isArray(e) && e.length >= 4
       && typeof e[3] === "string").slice(-VIS_LOG_MAX)
       .map(e => [+e[0] || 1, +e[1] || 0, LOG_CATS[e[2]] ? e[2] : "life", e[3].slice(0, LOG_TEXT)]) : [];
@@ -7496,7 +7761,7 @@ function hireShift() {
 // the customer entity from the queue, and stand a crew crab up in its place
 function convertTourist(k) {
   if (k.room) { k.room.occupant = null; k.room.dirty = true; k.room = null; }   // they've checked out for good
-  if (k.stall) { k.stall.occupant = null; k.stall.dirty = true; k.stall = null; }
+  releaseFixture(k);   // a stall goes dirty, a cabinet does not (releaseFixture)
   if (k.table) { k.table.occupant = null; k.table.dishes = 0; k.table = null; }
   for (const w of allCrabs()) if (w.cust === k) abortChef(w);   // unclaim a mid-prep order
   k.done = true; k.state = "leaving"; k.claimed = false;
@@ -8067,10 +8332,29 @@ function pickErrand(c) {
   // identical shape the two standpipes use, three blocks up.
   if (pollOpen() && !hasVoted(c) && !c.duty && c.dayState !== "working")
     for (let i = 0; i < POLL_PLACES.length; i++) take({ vote: true, poll: i, need: "vote" });
+  // THE ARCADE, AND THE TWO REASONS A CRAB WALKS INTO ONE. The first is the
+  // one that was always here: they are BORED, and the CLAWCADE is one of only
+  // two cures in town. The second is new and it is the whole directive - THEY
+  // HAVE TICKETS IN THEIR POCKET AND THE PRIZE THEY WANT IS STILL OUT OF
+  // REACH. `arcChase` is that urge and it is a ratio, not a timer: it grows as
+  // the stub grows and falls off a cliff the moment the prize is theirs.
+  //
+  // A CHASE IS SPENT OUT OF SPARE MONEY, not the rent. A bored crab buys a go
+  // on the same "+2" every other errand uses, because being bored is a NEED; a
+  // crab going back for a fourth handful of tokens because they are 12 tickets
+  // short is doing something else, and holds ARC_SPARE back for the night's
+  // rent and a bowl. Without it the chase is a runaway that empties the
+  // housing ladder's fuel tank - measured, and the reason this line exists.
   // bed rest otherwise: no arcade nights while ill
-  if (!c.p.sick && (c.p.bored || 0) >= (off ? 0.35 : 0.6) && staffed("arcade")) {
-    const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
-    if (c.p.wallet >= localPrice("arcade", r) + 2) take({ biz: "arcade", recipe: r, need: "fun" });
+  if (!c.p.sick && staffed("arcade")) {
+    const tix = c.p.tickets || 0, chase = arcChase(tix);
+    const bored = (c.p.bored || 0) >= (off ? 0.35 : 0.6);
+    if (bored || chase >= ARC_CHASE_AT) {
+      const r = BIZ.arcade.recipes[c.p.wallet > 40 ? 2 : 1];   // splurge on game night when flush
+      const spare = bored ? 2 : ARC_SPARE;
+      if (c.p.wallet >= localPrice("arcade", r) + spare)
+        take({ biz: "arcade", recipe: r, need: "fun", appeal: arcadePull(tix) });
+    }
   }
   let best = null, bestScore = 0;   // the chaining pick: best urgency per unit of detour
   for (const e of cand) {
@@ -8320,8 +8604,13 @@ function updateErrand(c, dt) {
     }
     if ((k.state === "dining" || k.state === "seatedWaiting" || k.state === "toSeat") && k.table) { c.x = k.table.x + 2; c.y = k.table.y + 1; }
     else if (k.state === "showering" && k.stall) { c.x = k.stall.x + 2; c.y = k.stall.y + 4; c.hidden = true; }
-    else if ((k.state === "toStall" || k.state === "outStall") && k.climb)
-      { c.hidden = false; c.x = k.x; c.y = 166 - 26 * k.climb; }   // stepping up/down
+    // AT THE MACHINE, AND VISIBLE. A bather is hidden because the stall draws
+    // them; a player is the whole point of the picture, so they stand in front
+    // of the cabinet with their claws on it and the claw drops over their head.
+    else if (k.state === "playing" && k.stall)
+      { c.hidden = false; c.x = k.stall.x - 1; c.y = k.stall.y + ARC_STAND_DY; }
+    else if ((k.state === "toStall" || k.state === "outStall" || k.state === "toPrize") && k.climb)
+      { c.hidden = false; c.x = k.x; c.y = 166 - custLift(k) * k.climb; }   // stepping up/down
     else { c.hidden = false; c.x = k.x; c.y = 166; }
   }
 }
@@ -8395,7 +8684,7 @@ function solidBandsKey() {
   // cache handed back the seven-room town's bands forever and walkers routed
   // straight through the huts.
   return Object.keys(BIZ).map(b => (bizUnlocked(b) ? 1 : 0)).join("") + ":" + UPS.table.lvl
-    + ":" + hotelRooms().length;
+    + ":" + hotelRooms().length + ":" + arcadeMachines().length;
 }
 let _bands = null, _bandsKey = "";
 function solidBands() {
@@ -8490,6 +8779,19 @@ function routedStep(c, spd, dt) {
 // room at y~155 to a shop door at y=167, which crosses the ENTIRE front row
 // of counters on the way. That single line was most of the town's bouncing.)
 function routedWalk(c, tx, ty, spd, dt) { setT(c, tx, ty); return routedStep(c, spd, dt); }
+// LET GO OF A FIXTURE, whatever kind it is. A shower stall and a hotel room go
+// DIRTY when their occupant leaves - that is the cleaning cycle, and every
+// abort path in the game relies on it. AN ARCADE CABINET DOES NOT: nobody
+// scrubs out a claw machine, and a machine flagged dirty would be filtered out
+// by `find(t => !t.occupant && !t.dirty)` for the rest of the game - the whole
+// floor would quietly close itself over a couple of days. One function, so
+// there is one place that knows the difference.
+function releaseFixture(k) {
+  if (!k || !k.stall) return;
+  k.stall.occupant = null;
+  if (!k.stall.machine) k.stall.dirty = true;
+  k.stall = null;
+}
 function tryAcquire(bizKey, kind) {
   const cap = stationCap(bizKey, kind);
   for (let i = 0; i < cap; i++) if (!busy[bizKey][kind][i]) { busy[bizKey][kind][i] = true; return i; }
@@ -8515,7 +8817,8 @@ function abortErrand(c) {
   // cleaning requires !occupant), a table likewise, and the ghost order pollutes the queue
   const k = c.errandCust;
   if (!k) return;
-  if (k.stall) { k.stall.occupant = null; k.stall.dirty = true; k.stall = null; }
+  if (k.tokens > 0) arcRefundTokens(k);   // brass they paid for and never played goes back over the counter
+  releaseFixture(k);   // a stall goes dirty, a cabinet does not (releaseFixture)
   // a table is now bused by staff, so it is released exactly like the stall:
   // occupant off FIRST (busing requires !occupant), then flagged dirty so a
   // crab is guaranteed to come and clear it. Leaving plates on an unflagged
@@ -8938,6 +9241,18 @@ function startBus(c, t) {
 }
 function updateKitchen(c, dt) {
   if (c.cust && (c.cust.state === "leaving" || c.cust.served)) { abortChef(c); return; }
+  // ...AND AN ORDER WITH NO RECIPE LEFT ON IT IS NOT AN ORDER. Every line
+  // below indexes c.cust.recipe.steps, so a customer whose recipe has been
+  // cleared out from under a working crab took the whole frame down with
+  // "cannot read properties of null (reading 'steps')" - seed 12033, day 30-ish
+  // of a growth town, and it killed the matrix worker rather than the town.
+  // The recipe is cleared on several legitimate paths (a guest who gives up on
+  // a queue, a lease shuttering under them, an arcade customer who has bought
+  // their tokens and moved to a machine), and none of them can reach in and
+  // tidy up every crab who might be mid-step on their behalf. So the KITCHEN
+  // checks the thing it is about to read, and drops the order the same way it
+  // drops one whose customer walked out.
+  if (c.cust && !c.cust.recipe) { abortChef(c); return; }
   const bizKey = c.workBiz, biz = BIZ[bizKey];
   // ---- THE MICROSLEEP -----------------------------------------------------
   // Runs BEFORE anything else in the kitchen, and AFTER the raged-guest abort
@@ -9238,7 +9553,7 @@ function creditAccomplishment(c, cust) {
   const n = c.p.made[id];
   for (const [need, , label] of MASTERY) {
     if (n === need) {
-      const dish = ITEM_NAMES[cust.recipe.icon];
+      const dish = itemName(cust.recipe);
       crabLog(c, "life", label + " " + dish + " (X" + n + ")", 0);   // DIARY
       toast = { text: c.p.name + " " + label + " " + dish + "! " + n + " SERVED", t: 6 };
       popText(label + " " + dish, c.x - 24, FLOOR_Y - 36, [255, 230, 120]);
@@ -9336,7 +9651,7 @@ function payAndBenefit(c, cust) {
     }
     if (!firstPour && c && c.p) {   // the bar's first drink is town news
       firstPour = true;
-      toast = { text: c.p.name + " POURED THE JUICE BAR'S FIRST " + ITEM_NAMES[cust.recipe.icon] + "!", t: 6 };
+      toast = { text: c.p.name + " POURED THE JUICE BAR'S FIRST " + itemName(cust.recipe) + "!", t: 6 };
       c.quip = { text: "FRESH SQUEEZED!", t: 2.6 };
     }
   }
@@ -9357,9 +9672,21 @@ function payAndBenefit(c, cust) {
       if (window._stats) window._stats.crabDrinks = (window._stats.crabDrinks || 0) + 1;
     }
     if (cust.need === "drink" || DRINKS[cust.recipe.id]) cust.crab.p.thirst = 0;   // any juice quenches, even one bought as lunch
-    if (cust.need === "fun") { cust.crab.p.bored = 0; cust.crab.quip = { text: "BEST DAY EVER!", t: 2.4 }; }
+    // BUYING TOKENS IS NOT HAVING FUN. Boredom used to go to zero at this
+    // counter, which is what made the arcade a taco stand: the crab paid and
+    // was cured without ever touching a machine. It is cured a little by each
+    // GO (arcPlay) and outright by a PRIZE (redeemPrize) instead - so a shop
+    // that takes your money and sends you home empty-handed has not actually
+    // sold you a good time, which is the whole directive in one line.
+    //
+    // THE GLOW STALL IS THE OTHER `fun` COUNTER and it is unaffected by that,
+    // because a glow stick IS the thing you came for: it relieves boredom
+    // through the recipe's own `cheer` in applyCounterExtras, not through a
+    // blanket cure at the till. Two shops, two honest answers.
+    if (cust.need === "fun")
+      cust.crab.quip = { text: cust.biz === "arcade" ? "TOKENS!" : "OOOH, GLOWY", t: 2.2 };
     applyCounterExtras(cust.crab, cust.recipe, cust.biz);
-    popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
+    popText(itemName(cust.recipe), cust.x - 14, 116, [140, 255, 160]);
   } else {
     const tipMult = TRAITS[c.p.trait].tip * (1 - 0.3 * (c.p.dirt || 0))
       * (1 - ((c.p.tired || 0) >= 0.85 ? 0.15 : 0));   // an EXHAUSTED server fumbles the charm (0.85 = the mood line; evenings routinely reach the old 0.66)
@@ -9394,7 +9721,7 @@ function payAndBenefit(c, cust) {
       window._stats[gk] = (window._stats[gk] || 0) + tip;
     }
     payTip(cust.biz, c, tip, cust.x, 108);   // credited separately, popped separately
-    popText(ITEM_NAMES[cust.recipe.icon], cust.x - 14, 116, [140, 255, 160]);
+    popText(itemName(cust.recipe), cust.x - 14, 116, [140, 255, 160]);
   }
 }
 // WHAT A VISITOR GOT FOR THEIR MONEY. Same vocabulary the crabs' errands use
@@ -9412,15 +9739,18 @@ function visBenefit(k) {
   if (k.need === "room") return;                       // paid at the desk; the bed is the benefit
   if (DRINKS[r.id]) k.thirst = 0;
   if (k.need === "food" || (!DRINKS[r.id] && k.biz === "shack")) k.hunger = 0;
-  if (k.need === "fun" || k.biz === "arcade") k.bored = 0;
-  // A VISITOR GETS THE PERK AND THE CHEER TOO - they are needs, and a tourist
-  // has them - but NEVER a durable: they are gone on Tuesday and have no house
-  // on this island to put a stove in. applyCounterExtras keys the durable on
-  // the persona, which a visitor does not have, so this is true by
+  // ...and the arcade is deliberately NOT in that list any more: see the note
+  // in payAndBenefit. A guest who bought tokens has bought a chance, not a
+  // cure - arcPlay and redeemPrize are where their boredom actually moves.
+  //
+  // A VISITOR GETS THE PERK AND THE CHEER, though - they are needs, and a
+  // tourist has them - but NEVER a durable: they are gone on Tuesday and have
+  // no house on this island to put a stove in. applyCounterExtras keys the
+  // durable on the persona, which a visitor does not have, so that is true by
   // construction rather than by a guard that could rot.
   if (r.perk) k.tired = Math.max(0, (k.tired || 0) - r.perk);
   if (r.cheer) k.bored = Math.max(0, (k.bored || 0) - r.cheer);
-  visLog(k, "need", "BOUGHT " + (ITEM_NAMES[r.icon] || "SOMETHING")
+  visLog(k, "need", "BOUGHT " + (itemName(r) || "SOMETHING")
     + " AT THE " + BIZ[k.biz].short + " - $" + menuPrice(k.biz, r));
 }
 // WHAT THE THREE NEW COUNTERS ACTUALLY DO TO A CRAB, in one place so the
@@ -9491,9 +9821,15 @@ function serve(c) {
     // The room was reserved before they joined the line (nobody sells the last
     // room twice), so there is nothing to find here - `leaving` sends them
     // through visAfterCounter, which checks them in.
-    if (BIZ[cust.biz].lodging) { cust.state = "leaving"; }
+    // THE ARCADE HANDS OVER TOKENS, NOT A PLATE. What the counter sold is a
+    // pocketful of brass, and the visit has only just started: they walk onto
+    // the floor and spend it a go at a time. Tested before the generic stalls
+    // branch below because the cabinets ARE stalls (same occupancy machinery,
+    // same abort guards) and would otherwise be treated as showers.
+    if (BIZ[cust.biz].arcadeFloor) { startArcadeSession(cust); }
+    else if (BIZ[cust.biz].lodging) { cust.state = "leaving"; }
     else if (stalls) {
-      if (stall) { stall.occupant = cust; cust.state = "toStall"; cust.stall = stall; }
+      if (stall) { stall.occupant = cust; cust.state = "toStall"; cust.stall = stall; cust.lift = null; }
       else { cust.state = "waitStall"; cust.waitT = 30; }
     }
     else if (seat) { seat.occupant = cust; cust.state = "toTable"; cust.table = seat; }
@@ -9782,6 +10118,9 @@ function newVisitor(overnightOnly) {
     nights, nightsHad: 0, rough: false, roughNights: 0, unhoused: 0,
     arrived: day, leaveT, room: null, buys: 0, thinkT: Math.random() * VIS_THINK,
     idleT: 0, target: null, log: [],
+    // the arcade's two pocket items: tokens (spent inside one visit) and the
+    // TICKET STUB, which survives the whole stay and is why a guest goes back
+    tokens: 0, tickets: 0, prizes: 0, eyeing: null,
     // the visit's own ledger, minted with the purse - see THE DEPARTURE CARD
     stay: newStay(), qJoin: null,
     hunger: n.hunger, thirst: n.thirst, dirt: n.dirt, bored: n.bored, tired: n.tired,
@@ -10129,12 +10468,12 @@ function visPick(k) {
   // lets a departing guest say WHICH of the three sent them home with money.
   // Nothing here changes what the scorer picks - `visOpen` already implies
   // `bizUnlocked`, so an un-built lot is silent rather than blamed.
-  const add = (b, need, pickR) => {
+  const add = (b, need, pickR, appeal) => {
     if (!visOpen(b)) { if (bizUnlocked(b)) stayBlocked(k, "shut"); return; }
     if (!visRoomFor(k, b)) { stayBlocked(k, "full"); return; }
     const rs = BIZ[b].recipes.filter(afford(b));
     if (!rs.length) { stayBlocked(k, "broke"); return; }
-    cand.push({ biz: b, need, recipe: pickR(rs) });
+    cand.push({ biz: b, need, recipe: pickR(rs), appeal });
   };
   const cheap = (rs) => rs.slice().sort((a, b) => a.pay - b.pay)[0];
   // exactly the crabs' own rule (pickErrand): treat yourself when flush, eat
@@ -10153,12 +10492,21 @@ function visPick(k) {
     else add("shack", "drink", (rs) => cheap(rs.filter(r => DRINKS[r.id]).length ? rs.filter(r => DRINKS[r.id]) : rs));
   }
   if (k.dirt >= VIS_WANT.clean) add("showers", "clean", treat);
-  if (k.bored >= VIS_WANT.fun) add("arcade", "fun", treat);
+  // THE ARCADE PULLS TWICE, exactly as it does for a local (see pickErrand):
+  // once because the guest is bored, and once because there is a ticket stub
+  // in their pocket and the prize they walked in wanting is still on the
+  // shelf. A holidaymaker who is 60 tickets into a 70-ticket plush goes back;
+  // that is the "a bit addictive" in the directive, and it is a ratio rather
+  // than a script - the pull dies the instant they can afford the thing.
+  if (k.bored >= VIS_WANT.fun || arcChase(k.tickets || 0) >= ARC_CHASE_AT)
+    add("arcade", "fun", treat, arcadePull(k.tickets || 0));
   // ---- THE NEW QUARTER TRADES WITH THE BOAT, and it has to: a crab carries
   // $20-90 and a visitor lands with $60-110, so three shops living on local
   // wallets alone bled rent and were bankrupt in a week (measured, seed 909).
   // Tourists are the trade; the locals are the regulars.
   if (k.tired >= VIS_WANT.perk) add("coffee", "perk", treat);
+  // ...and the glow stall takes the OTHER half of a bored evening. It only
+  // trades after dark, so it never competes with the arcade for the same hour.
   if (glowHour() && k.bored >= VIS_WANT.fun) add("glow", "fun", treat);
   // A SOUVENIR IS A DURABLE SOMEBODY ELSE WILL KEEP. The visitor gets no house
   // good out of it - they are gone on Tuesday - they get the thing itself, and
@@ -10193,7 +10541,11 @@ function visPick(k) {
       // land, this decides WHOSE door they walk through. priceAppeal is
       // exactly 1 at the default price, so a town nobody has repriced behaves
       // bit-identically.
-      s = (VIS_RANK[e.need] + visLevel(k, e.need)) * priceAppeal(e.biz) / (1 + d / DETOUR_SCALE);
+      // APPEAL, the same multiplier the crabs' own errandScore has always
+      // carried and the visitor scorer never had. Exactly 1 unless a candidate
+      // asks for more, so every existing stop scores what it always scored.
+      const ap = e.appeal != null ? e.appeal : 1;
+      s = ap * (VIS_RANK[e.need] + visLevel(k, e.need)) * priceAppeal(e.biz) / (1 + d / DETOUR_SCALE);
     }
     if (s > bestScore) { bestScore = s; best = e; }
   }
@@ -10345,6 +10697,10 @@ function visAfterCounter(k) {
   k.state = "roam"; k.biz = null; k.recipe = null; k.need = null;
   k.table = null; k.stall = null; k.server = null; k.claimed = false; k.served = false;
   k.target = null; k.thinkT = VIS_THINK;
+  // the arcade's per-visit props go back in the box; the TICKET STUB does not
+  // (that is the thing that brings them back - see arcChase)
+  if (k.tokens > 0) arcRefundTokens(k);
+  k.tokens = 0; k.prize = null; k.climb = 0; k.lift = null;
   k.y = FLOOR_Y; k.wy = FLOOR_Y;
 }
 
@@ -10394,6 +10750,187 @@ function newCustomer(bizKey) {
     qSeq: ++qSeqN,   // a walk-in joins the line the moment it is built
     claimed: false, served: false, server: null };
 }
+// ===========================================================================
+// A GO ON THE MACHINES  (the second and third steps of THE ARCADE LOOP)
+//
+// Everything from here to redeemPrize happens AFTER the money has moved. The
+// customer is holding tokens they already paid for, and none of the code below
+// credits or debits anybody except redeemPrize, which pays the WHOLESALER for
+// the prize coming off the shelf. That is the conservation boundary, and it is
+// one function wide on purpose.
+// ===========================================================================
+const ARC_PLAY_SECS = 0.9;      // one go, at the cabinet. A deluxe soak is 8.
+// HOW FAR IN FRONT OF A CABINET ITS PLAYER STANDS, and 12 is not a taste call:
+// it is the exact offset collide() exempts a walker at (t.x + 2, t.y + 12)
+// from, so a crab standing at a machine is never shoved off it by the machine.
+// It also closes the gap - screenshot-checked - between a player's head and
+// the glass, which is the difference between "standing at the claw machine"
+// and "standing in a row underneath some claw machines".
+const ARC_STAND_DY = 12;
+// HOW FAR UP THE SCREEN A FIXTURE'S FLOOR IS, for the step-up animation. The
+// shower stalls' 26 is what the game has always used and stays the default;
+// an arcade cabinet sets its own (arcTakeMachine) off its actual y, so moving
+// the floor in ARC_FLOOR moves the step with it and cannot desync.
+function custLift(k) { return k.lift != null ? k.lift : 26; }
+// WHICH MACHINE. A gambler who is a long way short of the prize they want
+// takes the CLAW, because when you need a big score you need variance; one who
+// is nearly there takes the SKEE LANE, because when you only need a few more
+// tickets the sure thing wins. Both are the same expected tickets per token,
+// so this is a choice about RISK and nothing else - and it falls out of two
+// numbers the customer is already carrying rather than out of a die roll.
+function arcPickMachine(k, tokens) {
+  const free = arcadeMachines().filter(m => !m.occupant);
+  if (!free.length) return null;
+  const want = k.eyeing || eyePrize(tixOf(k), tokens);
+  const gap = prizeTix(want) - tixOf(k);
+  const steady = gap <= tokens * arcEV();     // average luck already gets me there
+  const pick = free.find(m => m.game === (steady ? "skee" : "claw"));
+  return pick || free[0];
+}
+function arcTakeMachine(k, m) {
+  m.occupant = k; k.stall = m; k.state = "toStall"; k.climb = k.climb || 0;
+  k.lift = FLOOR_Y - (m.y + ARC_STAND_DY);   // how far up the screen this floor is; the climb interpolates it
+}
+// THE SESSION. Tokens in the pocket, a prize in the eye, and a cabinet.
+function startArcadeSession(k) {
+  k.tokens = (k.recipe && k.recipe.tokens) || 0;
+  k.eyeing = eyePrize(tixOf(k), k.tokens);
+  k.played = 0; k.wonTix = 0;
+  const m = arcPickMachine(k, k.tokens);
+  if (m) arcTakeMachine(k, m);
+  else { k.state = "waitStall"; k.waitT = 30; }   // every cabinet busy: hang about a bit
+}
+// ONE GO. A token in the slot, a roll on THIS cabinet's own odds, and whatever
+// comes out goes in their pocket. This is the only place a ticket is created
+// and it cannot create money: `addTix` writes to a persona field or a visitor
+// field, neither of which worldMoney() has ever counted.
+function arcPlay(k) {
+  const m = k.stall;
+  if (!m || k.tokens <= 0) return;
+  k.tokens--; k.played = (k.played || 0) + 1;
+  const won = arcRoll(m.game);
+  if (won > 0) { addTix(k, won); k.wonTix = (k.wonTix || 0) + won; }
+  m.flash = won > 0 ? 1 : 0;
+  m.anim = 0;
+  // PLAYING IS THE SMALL CURE. It buys back a little boredom whatever the
+  // machine pays, because standing at a claw machine is a good time even when
+  // the claw drops the crab. The BIG cure is the prize (redeemPrize).
+  if (k.isCrab) k.crab.p.bored = Math.max(0, (k.crab.p.bored || 0) - ARC_FUN_PLAY);
+  else k.bored = Math.max(0, k.bored - ARC_FUN_PLAY);
+  tradeImport("power", 1);   // a machine hour, on the town's ledger like every other import
+  if (window._stats) {
+    window._stats.arcPlays = (window._stats.arcPlays || 0) + 1;
+    window._stats.arcTix = (window._stats.arcTix || 0) + won;
+    if (m.game === "claw") {
+      window._stats.clawPlays = (window._stats.clawPlays || 0) + 1;
+      if (won > 0) window._stats.clawWins = (window._stats.clawWins || 0) + 1;
+    }
+  }
+  if (won > 0) popText("+" + won, m.x + 4, m.y - 18, [255, 216, 96]);
+  else popText("SO CLOSE", m.x - 4, m.y - 18, [190, 180, 190]);
+}
+// WHAT A PRIZE IS WORTH WALKING TO THE BACK OF THE SHOP FOR. Nothing here is
+// random: they take the thing they came in wanting the moment they can afford
+// it, and they HOLD OUT for it while they can still come back for more tokens.
+// A customer who cannot come back settles for whatever the stub actually buys,
+// which is the only reason anybody ever leaves with the small one.
+function arcCanReturn(k) {
+  if (!bizOpenNow("arcade") || !bizStaffed("arcade")) return false;
+  const r = BIZ.arcade.recipes[0];                       // the cheapest handful
+  const price = k.isCrab ? localPrice("arcade", r) : menuPrice("arcade", r);
+  const purse = k.isCrab ? (k.crab.p.wallet || 0) : (k.wallet || 0);
+  return purse >= price + ARC_SPARE;
+}
+function arcCashOut(k) {
+  const have = affordPrize(tixOf(k));
+  if (!have) return null;                                // nothing on the wall yet
+  const want = k.eyeing || ARC_PRIZES[0];
+  if (prizeTix(have) >= prizeTix(want)) return have;     // got what they came for
+  return arcCanReturn(k) ? null : have;                  // hold out, or settle
+}
+// OUT OF TOKENS. Let go of the cabinet, then either walk to the prize wall or
+// walk out with the stub still in your pocket - and the stub is the reason
+// they come back (arcChase).
+function arcEndPlaying(k) {
+  releaseFixture(k);
+  const p = arcCashOut(k);
+  if (p) { k.prize = p; k.state = "toPrize"; return; }
+  k.state = "leaving";
+  if (window._stats) window._stats.arcEmpty = (window._stats.arcEmpty || 0) + 1;
+  if (tixOf(k) > 0) {
+    const want = k.eyeing || ARC_PRIZES[0];
+    const short = Math.max(0, prizeTix(want) - tixOf(k));
+    popText(short + " SHORT", k.x - 6, 120, [255, 150, 150]);
+    if (k.isCrab) {
+      k.crab.quip = { text: short + " OFF THE " + want.name.split(" ")[0], t: 2.6 };
+      crabLog(k.crab, "need", "LEFT THE CLAWCADE " + short + " TICKETS SHORT OF THE " + want.name, 0);
+    } else if (k.visitor) visLog(k, "need", "LEFT THE CLAWCADE " + short + " TICKETS SHORT OF THE " + want.name);
+  }
+}
+// TOKENS THEY NEVER GOT TO PLAY GO BACK OVER THE COUNTER. A full floor is the
+// shop's problem, not the customer's, and the alternative - deleting brass they
+// have already paid for - would take money out of the world at a counter, which
+// is the one thing this file does not let a shop do. The refund is the sale
+// run backwards: the till is poorer by exactly what the wallet gets back, so
+// worldMoney() does not move. It is also a real cost of running a floor that
+// is too small, which is what CADE GEAR+ is for.
+function arcRefundTokens(k) {
+  const n = k.tokens || 0;
+  if (n <= 0) return 0;
+  k.tokens = 0;
+  // NOBODY BEHIND THE COUNTER TO REFUND FROM. A shuttered lease has no till
+  // (creditBiz and debitBiz both refuse one), so paying the wallet anyway
+  // would MINT the refund - the exact fault this function exists to avoid,
+  // wearing the opposite sign. The brass is simply lost with the shop.
+  if (!bizOwner("arcade")) return 0;
+  const back = n * arcToken();
+  debitBiz("arcade", back, k.x, FLOOR_Y - 40, "REFUND");
+  if (k.isCrab) k.crab.p.wallet = (k.crab.p.wallet || 0) + back;
+  else { k.wallet = (k.wallet || 0) + back; k.spent = Math.max(0, (k.spent || 0) - back); }
+  popText("REFUND $" + back, k.x - 10, 118, [255, 150, 150]);
+  if (window._stats) window._stats.arcRefund = (window._stats.arcRefund || 0) + back;
+  return back;
+}
+// THE ONLY PLACE MONEY MOVES ON THE ARCADE FLOOR, and it moves OUT: the till
+// pays the wholesaler for the thing coming off the shelf, exactly the way the
+// kitchen pays for a fish. Tickets are destroyed against the wall's price;
+// they were never money, so nothing is converted into anything here.
+function redeemPrize(k, p) {
+  const cost = prizeTix(p);
+  if (tixOf(k) < cost) return false;
+  // ...and a shuttered lease hands nothing over either: with no till the
+  // debit below is a no-op, and a prize off an unpaid-for shelf is stock
+  // conjured out of nothing. Same rule as the refund above.
+  if (!bizOwner("arcade")) return false;
+  addTix(k, -cost);
+  debitBiz("arcade", p.cost, BIZ.arcade.stations.prize[0].x, FLOOR_Y - 40, "PRIZE");
+  tradeImport("prize", 1, p.cost);
+  if (k.isCrab) {
+    k.crab.p.bored = 0;
+    k.crab.p.prizes = (k.crab.p.prizes || 0) + 1;
+    k.crab.quip = { text: "GOT THE " + p.name.split(" ")[0] + "!", t: 3 };
+    crabLog(k.crab, "life", "TRADED " + cost + " TICKETS FOR A " + p.name + " AT THE CLAWCADE", 0);
+  } else {
+    k.bored = 0;
+    k.prizes = (k.prizes || 0) + 1;
+    if (k.visitor) {
+      stayOf(k).prizes = (stayOf(k).prizes || 0) + 1;
+      stayOf(k).bestPrize = p.name;
+      visLog(k, "need", "TRADED " + cost + " TICKETS FOR A " + p.name);
+    }
+  }
+  k.eyeing = null;
+  popText(p.name, k.x - 14, 114, [255, 216, 96]);
+  if (typeof sfx !== "undefined" && sfx.ding) sfx.ding();
+  if (window._stats) {
+    window._stats.arcPrizes = (window._stats.arcPrizes || 0) + 1;
+    window._stats.arcPrizeCost = (window._stats.arcPrizeCost || 0) + p.cost;
+    const byId = window._stats.arcPrizeBy = window._stats.arcPrizeBy || {};
+    byId[p.id] = (byId[p.id] || 0) + 1;
+  }
+  return true;
+}
+
 function updateCustomers(dt) {
   trackCloseQueues();   // hours-policy signal: who was still in line when a shop shut
   runFerry(dt * TS);    // the timetable: she docks, lands a batch, and sails
@@ -10423,7 +10960,7 @@ function updateCustomers(dt) {
       if (k.state === "arriving") {
         if (k.x === slot) {
           k.state = "waiting";
-          popText((k.isCrab ? k.crab.p.name : k.name.split(" ")[0]) + ": " + ITEM_NAMES[k.recipe.icon] + "?", k.x - 26, FLOOR_Y - 42, [255, 255, 255]);
+          popText((k.isCrab ? k.crab.p.name : k.name.split(" ")[0]) + ": " + itemName(k.recipe) + "?", k.x - 26, FLOOR_Y - 42, [255, 255, 255]);
         }
       } else {
         k.patience -= dt * (bizStaffed(k.biz) ? 1 : 6) * serverFilth(k);   // nobody home? give up quick
@@ -10435,11 +10972,57 @@ function updateCustomers(dt) {
       }
     } else if (k.state === "toStall") {
       const st = k.stall;
-      const dxs = st.x + 3 - k.x;
+      // a bather steps into the middle of a 20px stall; a player stands in
+      // front of a 14px cabinet, and a 16px crab centres on it one pixel LEFT
+      // of its corner. Screenshot-checked: at +3 they read as a row of crabs
+      // standing next to some machines rather than playing them.
+      const dxs = (st.machine ? st.x - 1 : st.x + 3) - k.x;
       if (Math.abs(dxs) > 2) k.x += Math.sign(dxs) * Math.min(45 * dt, Math.abs(dxs));
       else {
-        k.climb = Math.min(1, (k.climb || 0) + dt * 1.8);   // step up into the stall
-        if (k.climb >= 1) { k.state = "showering"; k.showerT = k.recipe.showerT || 5; }
+        k.climb = Math.min(1, (k.climb || 0) + dt * 1.8);   // step up into the stall (or onto the arcade floor)
+        // A CABINET IS A STALL WITH A DIFFERENT CYCLE. The walk and the step up
+        // are identical - it is what happens once you are standing there that
+        // differs, so the two paths part here and nowhere else.
+        if (k.climb >= 1) {
+          if (st.machine) { k.state = "playing"; k.playT = ARC_PLAY_SECS; }
+          else { k.state = "showering"; k.showerT = k.recipe.showerT || 5; }
+        }
+      }
+    } else if (k.state === "playing") {
+      // ONE GO AT A TIME, until the tokens run out. The clock is the only thing
+      // this state owns; arcPlay owns the odds and arcEndPlaying owns what
+      // happens when the pocket is empty.
+      //
+      // A PLAYER WITH NO CABINET IS A WEDGE, and it is the shape every state
+      // machine in this file has been bitten by: arcPlay refuses to roll
+      // without a machine, so the token count would never fall, so playT would
+      // reset for ever and this customer would stand in an arcade nobody could
+      // see holding a queue slot until the town ended. Anything that takes the
+      // cabinet away (a lease that changed hands mid-session, a floor rebuilt
+      // under them) ends the session instead.
+      if (!k.stall) { arcEndPlaying(k); continue; }
+      k.stall.anim = (k.stall.anim || 0) + dt;
+      if (k.stall.flash > 0) k.stall.flash = Math.max(0, k.stall.flash - dt * 1.4);
+      k.playT -= dt;
+      if (k.playT <= 0) {
+        arcPlay(k);
+        if (k.tokens > 0) k.playT = ARC_PLAY_SECS;
+        else arcEndPlaying(k);
+      }
+    } else if (k.state === "toPrize") {
+      // the walk to the back wall, stepping down off the arcade floor on the way
+      if (k.climb) k.climb = Math.max(0, k.climb - dt * 2.2);
+      const px0 = BIZ.arcade.stations.prize[0].x + 12;
+      const dxp = px0 - k.x;
+      if (Math.abs(dxp) > 2) { k.x += Math.sign(dxp) * Math.min(45 * dt, Math.abs(dxp)); k.face = Math.sign(dxp); }
+      else {
+        // ...and they take the DEAREST thing the stub still buys when they get
+        // here, which is not always the thing they set out for: tickets are
+        // spent between the decision and the counter only by them.
+        const p = k.prize && tixOf(k) >= prizeTix(k.prize) ? k.prize : affordPrize(tixOf(k));
+        if (p) redeemPrize(k, p);
+        k.prize = null;
+        k.state = "leaving";
       }
     } else if (k.state === "outStall") {   // hop back down to the floor, towel-fresh
       k.climb = Math.max(0, (k.climb || 0) - dt * 2.2);
@@ -10467,9 +11050,21 @@ function updateCustomers(dt) {
       }
     } else if (k.state === "waitStall") {
       k.waitT -= dt;
-      const st = BIZ[k.biz].stalls.find(t => !t.occupant && !t.dirty);
-      if (st) { st.occupant = k; k.stall = st; k.state = "toStall"; }
-      else if (k.waitT <= 0) { k.state = "leaving"; k.happy = false; }
+      // ONE QUEUE FOR THE FLOOR, two kinds of floor. The arcade picks by RISK
+      // (arcPickMachine) rather than by first-free, so the wait is routed
+      // through the same chooser the session used when it started.
+      const arc = !!BIZ[k.biz].arcadeFloor;
+      const st = arc ? arcPickMachine(k, k.tokens || 0)
+        : BIZ[k.biz].stalls.find(t => !t.occupant && !t.dirty);
+      if (st && arc) arcTakeMachine(k, st);
+      else if (st) { st.occupant = k; k.stall = st; k.state = "toStall"; k.lift = null; }
+      else if (k.waitT <= 0) {
+        // A CABINET THEY NEVER GOT TO is not the same as a shower they never
+        // got: they are holding tokens they paid for. They walk out with them
+        // in their pocket rather than have them deleted (see arcRefundTokens).
+        if (BIZ[k.biz].arcadeFloor && k.tokens > 0) arcRefundTokens(k);
+        k.state = "leaving"; k.happy = false;
+      }
     } else if (k.state === "toSeat") {
       const t = k.table;
       const dxs2 = t.x + 10 - k.x;
@@ -10518,6 +11113,9 @@ function updateCustomers(dt) {
         k.state = "leaving";
       }
     } else if (k.state === "leaving") {
+      // ...stepping down off the arcade floor on the way out, if they were up
+      // on it. Everybody else's climb is already zero, so this is inert.
+      if (k.climb) k.climb = Math.max(0, k.climb - dt * 2.2);
       k.x += (k.happy ? 50 : 75) * dt;
       if (k.isCrab) { finishErrand(k); continue; }
       // A VISITOR IS NOT LEAVING TOWN, they are leaving a COUNTER. A few paces
@@ -10734,13 +11332,13 @@ function logServe(c, cust) {
   const who = cust.isCrab ? (cust.crab && cust.crab.p.name) || "A NEIGHBOUR"
     : (cust.name || "A TOURIST").split(" ")[0];   // a guest without a name is still a sale
   crabLogEvery(c, "serve", LOG_SERVE_GAP, "work",
-    "SERVED A " + (ITEM_NAMES[cust.recipe.icon] || "PLATE") + " TO " + who);
+    "SERVED A " + (itemName(cust.recipe) || "PLATE") + " TO " + who);
 }
 function logTreat(cust) {   // the crab on the OTHER side of the counter
   const c = cust.crab;
   if (!c || !c.p || !cust.recipe) return;
   if (cust.need === "clean") return;   // the wash is filed when they step OUT of the stall, not when the kit is handed over
-  const what = ITEM_NAMES[cust.recipe.icon] || "SOMETHING", where = BIZ[cust.biz].name;
+  const what = itemName(cust.recipe) || "SOMETHING", where = BIZ[cust.biz].name;
   const drank = cust.need === "drink" || DRINKS[cust.recipe.id];   // a juice bought as lunch is still a drink
   crabLog(c, "need", cust.need === "fun" ? "BLEW OFF STEAM AT THE " + where
     : (drank ? "DRANK A " : "ATE A ") + what + " AT THE " + where, 0);
@@ -10824,6 +11422,10 @@ function tryBuy(key) {
   if (key === "juicebar") {
     toast = { text: "THE JUICE BAR IS YOURS! REASSIGN A CRAB TO WORK THE JUICERS", t: 8 };
     popText("GRAND OPENING!", BIZ.juicebar.x0 + 20, 100, [140, 255, 160]);
+  }
+  if (key === "cadegear") {   // two more cabinets on the floor, stood up the way the annexe stands up rooms
+    syncArcadeFloor();
+    toast = { text: "TWO MORE MACHINES ON THE CLAWCADE FLOOR - " + arcadeMachines().length + " IN ALL", t: 7 };
   }
   if (key === "chef") hireCrew();   // recruited from the tourist pool (or the bus), never minted with a house
   sfx.buy(); save();
@@ -11106,8 +11708,23 @@ cv.addEventListener("click", (ev) => {
       if (hit(R.op)) { setBizHours(manage, Math.min(h.open + 30, h.close - HOURS_SPAN_MIN), h.close); sfx.buy(); save(); return; }
       if (hit(R.cm)) { setBizHours(manage, h.open, Math.max(h.close - 30, h.open + HOURS_SPAN_MIN)); sfx.buy(); save(); return; }
       if (hit(R.cp)) { setBizHours(manage, h.open, h.close + 30); sfx.buy(); save(); return; }
-      if (hit(R.pm)) { setBizPrice(manage, bizPriceMul(manage) - PRICE_STEP); sfx.buy(); save(); return; }
-      if (hit(R.pp)) { setBizPrice(manage, bizPriceMul(manage) + PRICE_STEP); sfx.buy(); save(); return; }
+      // THE PRICE ROW, and at the arcade it steps DOLLARS PER TOKEN - the same
+      // control in the same place, in the unit that shop prices in. See
+      // bizPriceMul's note on why the arcade has only one price.
+      if (manage === "arcade") {
+        if (hit(R.pm)) { setArcToken(arcToken() - 1); sfx.buy(); save(); return; }
+        if (hit(R.pp)) { setArcToken(arcToken() + 1); sfx.buy(); save(); return; }
+        // ...and the three mechanics dials underneath it
+        if (hit(R.acm)) { setArcWin(ARC.win - ARC_WIN_STEP); sfx.buy(); save(); return; }
+        if (hit(R.acp)) { setArcWin(ARC.win + ARC_WIN_STEP); sfx.buy(); save(); return; }
+        if (hit(R.apm)) { setArcPay(ARC.pay - ARC_PAY_STEP); sfx.buy(); save(); return; }
+        if (hit(R.app)) { setArcPay(ARC.pay + ARC_PAY_STEP); sfx.buy(); save(); return; }
+        if (hit(R.azm)) { setArcPrizeMul(ARC.prizeMul - ARC_PRIZE_STEP); sfx.buy(); save(); return; }
+        if (hit(R.azp)) { setArcPrizeMul(ARC.prizeMul + ARC_PRIZE_STEP); sfx.buy(); save(); return; }
+      } else {
+        if (hit(R.pm)) { setBizPrice(manage, bizPriceMul(manage) - PRICE_STEP); sfx.buy(); save(); return; }
+        if (hit(R.pp)) { setBizPrice(manage, bizPriceMul(manage) + PRICE_STEP); sfx.buy(); save(); return; }
+      }
       if ((manage === "shack" || manage === "juicebar") && hit(R.meal)) {
         b.mealPol = MEAL_POLS[(MEAL_POLS.indexOf(b.mealPol) + 1) % MEAL_POLS.length];
         sfx.ding(); save(); return;
@@ -12179,7 +12796,9 @@ function drawPollingPlaces() {
 
 const STATION_ART = { crate: CRATE, board: BOARD, grill: GRILL, pass: PASS,
   taps: TAPS, stall: null, scrub: SCRUB, towel: COUNTER,
-  booth: TOKEN_BOOTH, claw: null, skee: SKEEBALL, prize: PRIZE_COUNTER,
+  // (claw and skee are no longer STATIONS - they are cabinets the customer
+  //  occupies, drawn by drawMachine off BIZ.arcade.stalls)
+  booth: TOKEN_BOOTH, prize: PRIZE_COUNTER,
   fruitbin: FRUIT_BIN, juicer: null, bar: JUICE_COUNTER,
   linen: LINEN_PRESS, desk: HOTEL_DESK };
 
@@ -12388,12 +13007,59 @@ function drawRivalSigns() {
   }
 }
 
+// ONE CABINET, AND WHAT IS HAPPENING INSIDE IT. The whole arcade loop is
+// legible from the boardwalk here: an idle machine sits with its claw parked,
+// a machine somebody is playing drops the claw through the go and snaps it
+// back, and a WIN spits tickets out of the slot. Nothing is decided in this
+// function - it reads `m.anim` (seconds into the current go) and `m.flash`
+// (a win, fading) and draws them.
+function drawMachine(m) {
+  if (m.x - camX < -40 || m.x - camX > W + 40) return;
+  const busy = !!m.occupant && m.occupant.state === "playing";
+  const ph = busy ? Math.min(1, (m.anim || 0) / ARC_PLAY_SECS) : 0;
+  if (m.game === "claw") {
+    // frame 1 is the claw down over the plushies; the drop is the middle of
+    // the go, so it lands right where the roll is resolved
+    const down = busy && ph > 0.35 && ph < 0.85;
+    wblit(CLAW_MACHINE[down ? 1 : 0], m.x, m.y - CLAW_MACHINE[0].h);
+    if (m.flash > 0) {   // tickets out of the slot, one strip per pixel of luck
+      for (let i = 0; i < 4; i++) {
+        const t2 = (1 - m.flash) * 1.2 + i * 0.09;
+        if (t2 > 1) continue;
+        wrect(m.x + 5 + i * 2, m.y - 3 - t2 * 12, 1, 2, i % 2 ? [255, 216, 96] : [255, 150, 150]);
+      }
+    }
+  } else {
+    wblit(SKEEBALL, m.x, m.y - SKEEBALL.h);
+    if (busy) {   // the ball runs up the lane and drops through a ring
+      const bx = m.x + 2 + Math.round(ph * 9), by = m.y - 3 - Math.round(ph * 6);
+      wrect(bx, by, 2, 2, [255, 250, 235]);
+    }
+    if (m.flash > 0) wrect(m.x + 10, m.y - SKEEBALL.h - 2, 3, 2, [255, 216, 96]);
+  }
+}
+
 function drawStation(key, kind, i) {
   const st = BIZ[key].stations[kind][i];
   const isBusy = busy[key] && busy[key][kind] && busy[key][kind][i];
   let art = STATION_ART[kind];
-  if (kind === "claw") art = CLAW_MACHINE[isBusy ? ((time * 4) | 0) % 2 : 0];
   if (kind === "juicer") art = JUICER[isBusy ? ((time * 6) | 0) % 2 : 0];
+  // THE PRIZE WALL, with what is actually on it. The three prizes stand on the
+  // shelf in the order the wall lists them, so "what am I playing FOR" is
+  // answerable from the boardwalk - the same argument as the claw dropping in
+  // the window. The gold one gets a slow glint, because it is the one nobody
+  // walks out with on their first visit.
+  if (kind === "prize" && key === "arcade") {
+    wblit(art, st.x, st.y - art.h);
+    for (let p = 0; p < ARC_PRIZES.length; p++) {
+      const it = ITEMS[ARC_PRIZES[p].icon];
+      if (!it) continue;
+      wblit(it, st.x + p * 10, st.y - art.h - 7);
+      if (p === ARC_PRIZES.length - 1 && ((time * 1.5) | 0) % 3 === 0)
+        wrect(st.x + p * 10 + 7, st.y - art.h - 8, 1, 1, [255, 255, 255]);
+    }
+    return;
+  }
   if (kind === "stall") art = STALL[isBusy ? 1 : 0];
   wblit(art, st.x, st.y - art.h);
   if (kind === "grill" && isBusy) {
@@ -12539,7 +13205,7 @@ function drawCustomer(k) {
       // only ever walked one way, which is why this used to be a state test
       const flip = k.visitor ? (k.face == null ? true : k.face < 0) : k.state !== "leaving";
       const base = custY(k);
-      const cy = base - 12 - 26 * (k.climb || 0);
+      const cy = base - 12 - custLift(k) * (k.climb || 0);
       wblit(art, k.x, cy, flip);
       const acc = ACCESSORIES[k.acc];
       if (acc) {
@@ -12645,7 +13311,7 @@ function custStatus(k) {
   if (k.state === "waiting") return "IN LINE AT THE " + b;
   if (k.state === "toSeat") return "FINDING A SEAT";
   if (k.state === "seatedWaiting") return "WAITING ON THEIR ORDER";
-  if (k.state === "dining") return "EATING " + (ITEM_NAMES[k.recipe.icon] || "LUNCH");
+  if (k.state === "dining") return "EATING " + (itemName(k.recipe) || "LUNCH");
   if (k.state === "waitStall" || k.state === "toStall" || k.state === "outStall") return "AT THE SHOWERS";
   if (k.state === "leaving") return k.happy ? "HEADING HOME HAPPY" : k.served ? "HEADING HOME" : "LEAVING IN A HUFF";
   return "ENJOYING THE BEACH";
@@ -12709,7 +13375,7 @@ function drawCustCard(k) {
   }
   smallText(ctx, "TOURIST - IN TOWN FOR THE DAY", 29, 13, [120, 90, 60]);
   smallText(ctx, custStatus(k).slice(0, 26), 29, 21, [30, 110, 60]);
-  smallText(ctx, "WANTS: " + (ITEM_NAMES[k.recipe.icon] || "?") + " $" + menuPrice(k.biz, k.recipe), 29, 28, [140, 110, 40]);
+  smallText(ctx, "WANTS: " + (itemName(k.recipe) || "?") + " $" + menuPrice(k.biz, k.recipe), 29, 28, [140, 110, 40]);
   smallText(ctx, "PATIENCE", 6, 44, [110, 110, 130]);
   rect(ctx, 40, 45, 60, 4, [30, 20, 36]);
   const pf = Math.max(0, Math.min(1, k.patience / (k.maxPatience || 50)));
@@ -13159,9 +13825,16 @@ function drawPanel() {
     for (const key of Object.keys(BIZ)) {
       if (!bizUnlocked(key) || bizOwner(key) !== "player") continue;   // your menu, your books
       for (const r of BIZ[key].recipes) {
-        smallText(ctx, ITEM_NAMES[r.icon], 4, my, [190, 175, 160]);
+        smallText(ctx, itemName(r), 4, my, [190, 175, 160]);
+        // GREEN means "this is the board price"; amber means somebody moved
+        // it. The arcade's board is moved by the TOKEN price rather than by a
+        // multiplier (bizPriceMul is pinned at 1 there), so asking the same
+        // question of the same shop means asking a different number - without
+        // this a $6 token reads as untouched, which is the one thing this
+        // colour exists to say it is not.
+        const priced = key === "arcade" ? arcToken() !== ARC_TOKEN_BASE : bizPriceMul(key) !== 1;
         smallText(ctx, "$" + menuPrice(key, r) + " / $" + INGREDIENT_COST[r.raw], 72, my,
-          bizPriceMul(key) === 1 ? [140, 200, 150] : [255, 190, 90]);
+          priced ? [255, 190, 90] : [140, 200, 150]);
         my += MROW;
       }
     }
@@ -13674,7 +14347,12 @@ function drawVisDossier(k) {
   };
   row("PURSE", "$" + Math.round(k.wallet) + " LEFT OF THE $" + k.purse + " THEY BROUGHT",
     k.wallet < 6 ? [190, 80, 80] : [140, 110, 40]);
-  row("SPENT", "$" + Math.round(k.spent) + " IN TOWN OVER " + k.buys + " VISIT" + (k.buys === 1 ? "" : "S"),
+  // ...and the CLAWCADE stub rides on the same line, for the same reason it
+  // rides on a crab's WALLET row: it is the thing that decides whether this
+  // guest walks past the arcade again before the boat goes.
+  row("SPENT", fitSmall("$" + Math.round(k.spent) + " OVER " + k.buys + " VISIT" + (k.buys === 1 ? "" : "S")
+    + ((k.tickets || 0) ? " - " + k.tickets + " TIX" : "")
+    + ((k.prizes || 0) ? " - " + k.prizes + " PRIZE" + (k.prizes === 1 ? "" : "S") : ""), w2 - 64),
     [40, 150, 70]);
   row("SLEEPS", k.room ? "ROOM " + k.roomN + " AT THE DRIFTWOOD"
     : k.roughNights ? "ON THE BEACH - THE HOTEL WAS FULL"
@@ -13718,7 +14396,7 @@ function drawCustDossier(k) {
     ly += 9;
   };
   row("NOW", custStatus(k).slice(0, 32), [70, 90, 130]);
-  row("ORDER", (ITEM_NAMES[k.recipe.icon] || "?") + " - $" + menuPrice(k.biz, k.recipe) + (k.served ? " - PAID" : ""), [140, 110, 40]);
+  row("ORDER", (itemName(k.recipe) || "?") + " - $" + menuPrice(k.biz, k.recipe) + (k.served ? " - PAID" : ""), [140, 110, 40]);
   row("MOOD", !k.served && k.patience < 15 ? "ABOUT TO WALK OUT" : k.happy || k.served ? "HAVING A GREAT TIME" : "WAITING PATIENTLY",
     !k.served && k.patience < 15 ? [190, 80, 80] : [40, 150, 70]);
   ly += 2;
@@ -13799,7 +14477,19 @@ function drawDossier() {
       smallText(ctx, "THE GOING RATE IS $" + Math.round(goingRate(c)) + " (PIER $" + Math.round(pierDay()) + ")",
         x + 56, ly, [110, 100, 110]), ly += 9;
   }
-  row("WALLET", "$" + fmt(Math.max(0, p.wallet)), p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
+  // WALLET, and the OTHER thing in their pocket. A ticket stub is not money -
+  // it buys exactly one thing, off one wall, in one shop - but it is the
+  // reason this crab keeps walking east after work, so it belongs on the line
+  // a player reads to answer "what has this crab got?".
+  {
+    const tix = p.tickets || 0;
+    const want = ARC_PRIZES.find(pz => prizeTix(pz) > tix);
+    const stub = !tix && !(p.prizes || 0) ? ""
+      : "  -  " + tix + " TIX" + (tix && want ? ", " + (prizeTix(want) - tix) + " OFF THE " + want.name.split(" ")[0] : "")
+        + ((p.prizes || 0) ? " (" + p.prizes + " WON)" : "");
+    row("WALLET", fitSmall("$" + fmt(Math.max(0, p.wallet)) + stub, w2 - 64),
+      p.wallet < 12 ? [190, 80, 80] : [140, 110, 40]);
+  }
   // ...and the shop's money under it, because a crab who keeps a till holds
   // her money in two places and only one of them was ever on this card.
   for (const t of ownerTills(c))
@@ -13975,6 +14665,20 @@ function manageRects() {
     pm: { x: x + 40, y: y + 92, w: 16, h: 15 },
     pp: { x: x + 96, y: y + 92, w: 16, h: 15 },
     meal: { x: x + 6, y: y + 110, w: 156, h: 14 },
+    // ---- THE CLAWCADE'S OWN DIALS (HOURS tab, arcade only). They sit in the
+    // band the STAFF MEALS chip uses at the shack and the juice bar - an
+    // arcade has no pantry, so the row is free. The TOKEN PRICE is not here:
+    // it is the shop's PRICE row above (pm/pp), because that is the same
+    // decision every other shop makes on that row and it belongs where the
+    // player already looks for it.
+    // Three steppers, two to a row, each 100px wide so the label and the value
+    // fit BETWEEN the arrows rather than crowding the card's right edge.
+    acm: { x: x + 6,   y: y + 108, w: 14, h: 14 },   // claw grab -
+    acp: { x: x + 92,  y: y + 108, w: 14, h: 14 },   // claw grab +
+    apm: { x: x + 114, y: y + 108, w: 14, h: 14 },   // ticket payout -
+    app: { x: x + 200, y: y + 108, w: 14, h: 14 },   // ticket payout +
+    azm: { x: x + 6,   y: y + 126, w: 14, h: 14 },   // prize costs -
+    azp: { x: x + 92,  y: y + 126, w: 14, h: 14 },   // prize costs +
     // ---- SCHEDULE tab
     auto: { x: x + 6, y: y + 30, w: 104, h: 13 },
     sickPol: { x: x + 114, y: y + 30, w: 104, h: 13 },
@@ -14082,6 +14786,39 @@ function manageRects() {
   for (let i = 0; i < CENSUS_ROWS; i++) R.crows.push({ x: x + 4, y: y + 47 + i * 16, w: w2 - 8, h: 15 });
   return R;
 }
+// THE CLAWCADE'S MECHANICS, on the card. Three dials and three sentences, and
+// the sentences are the point: a dial the player cannot see the effect of is
+// an opaque interface, which this project calls a bug. Every number below is
+// read out of the same functions the floor uses (arcEV, skeeRoll's own band,
+// prizeTix), so the card cannot promise something the machines do not do.
+function drawArcadeDials(R, x, y, w2, btn) {
+  const stepper = (rm, rp, label, val, col) => {
+    btn(rm, "-"); btn(rp, "+");
+    const s = label + " " + val;
+    const mid = rm.x + rm.w, wid = rp.x - mid;
+    smallText(ctx, fitSmall(s, wid - 4), mid + ((wid - smallTextWidth(fitSmall(s, wid - 4))) >> 1), rm.y + 5, col);
+  };
+  const win = ARC.win, pay = Math.round(ARC.pay), ev = arcEV();
+  stepper(R.acm, R.acp, "CLAW GRAB", Math.round(win * 100) + "%", [58, 42, 38]);
+  stepper(R.apm, R.app, "PAYOUT", pay + " TIX", [58, 42, 38]);
+  stepper(R.azm, R.azp, "PRIZES", Math.round(ARC.prizeMul * 100) + "%", [58, 42, 38]);
+  // ONE GO, both cabinets, in the units a player counts in
+  const oneIn = Math.max(1, Math.round(1 / win));
+  const [lo, hi] = skeeBand();   // the lane's OWN band, not a copy of it
+  smallText(ctx, fitSmall("CLAW " + pay + " TIX 1 GO IN " + oneIn + "   SKEE " + lo + "-" + hi + " EVERY GO", w2 - 12),
+    x + 6, y + 146, [70, 90, 130]);
+  smallText(ctx, fitSmall(ARC_PRIZES.map(p => p.name.split(" ")[0] + " " + prizeTix(p)).join("  "), w2 - 12),
+    x + 6, y + 154, [110, 100, 110]);
+  // ...and THE HEADLINE, which is the only sentence that says what the four
+  // dials mean TOGETHER: what the thing at the top of the wall costs somebody
+  // in goes, and therefore in money. That number is the whole feature.
+  {
+    const top = ARC_PRIZES[ARC_PRIZES.length - 1];
+    const goes = Math.max(1, Math.ceil(prizeTix(top) / Math.max(0.01, ev)));
+    smallText(ctx, fitSmall(top.name + ": ~" + goes + " GOES, $" + (goes * arcToken()) + " OF TOKENS", w2 - 12),
+      x + 6, y + 162, [180, 60, 40]);
+  }
+}
 function drawManage() {
   if (!manage) return;
   const key = manage, b = BIZ[key], h = b.hours, R = manageRects();
@@ -14137,14 +14874,30 @@ function drawManage() {
     // ---- THE PRICE. One multiplier, the whole board underneath it, and what
     // it costs you: cheap pulls footfall off the shop next door and thins
     // every margin you have. The promenade is zero sum - see the spawn weights.
-    {
+    if (key === "arcade") {
+      // THE ARCADE'S PRICE IS DENOMINATED IN TOKENS, so the same row says so:
+      // dollars per token, and the three bundles it implies underneath. Same
+      // stepper, same place on the card, a unit the shop actually uses.
+      const tk = arcToken();
+      smallText(ctx, "TOKEN", x + 8, y + 97, [58, 42, 38]);
+      btn(R.pm, "-"); btn(R.pp, "+");
+      const pTxt = "$" + tk;
+      text(ctx, pTxt, x + 58 + ((38 - textWidth(pTxt)) >> 1), y + 97,
+        tk === ARC_TOKEN_BASE ? [40, 30, 40] : tk < ARC_TOKEN_BASE ? [190, 110, 40] : [40, 110, 60]);
+      const menu = b.recipes.map(r => r.tokens + "=$" + menuPrice(key, r)).join("  ");
+      smallText(ctx, fitSmall(menu, w2 - 124), x + 118, y + 92, [110, 100, 110]);
+      smallText(ctx, tk === ARC_TOKEN_BASE ? "THE BOARD PRICE"
+        : tk < ARC_TOKEN_BASE ? "MORE FEET, THIN MARGIN"
+        : "FEWER FEET, FAT MARGIN", x + 118, y + 101,
+        tk === ARC_TOKEN_BASE ? [150, 140, 160] : [190, 110, 40]);
+    } else {
       const mul = bizPriceMul(key), pct = Math.round(mul * 100);
       smallText(ctx, "PRICE", x + 8, y + 97, [58, 42, 38]);
       btn(R.pm, "-"); btn(R.pp, "+");
       const pTxt = pct + "%";
       text(ctx, pTxt, x + 58 + ((38 - textWidth(pTxt)) >> 1), y + 97,
         pct === 100 ? [40, 30, 40] : pct < 100 ? [190, 110, 40] : [40, 110, 60]);
-      const menu = b.recipes.slice(0, 3).map(r => (ITEM_NAMES[r.icon] || "?") + " $" + menuPrice(key, r)).join("  ");
+      const menu = b.recipes.slice(0, 3).map(r => (itemName(r) || "?") + " $" + menuPrice(key, r)).join("  ");
       // the card ends at x + w2; leave 6px of margin and trim to what is left
       smallText(ctx, fitSmall(menu, w2 - 124), x + 118, y + 92, [110, 100, 110]);
       smallText(ctx, pct === 100 ? "THE BOARD PRICE"
@@ -14152,6 +14905,14 @@ function drawManage() {
         : "FEWER FEET, FAT MARGIN", x + 118, y + 101,
         pct === 100 ? [150, 140, 160] : [190, 110, 40]);
     }
+    // ---- THE MECHANICS OF THE CLAW GAME (owner: "settings for the mechanics
+    // of the claw game and stuff"). Three steppers and three lines of what
+    // they DO, every number of them derived from arcEV / prizeTix rather than
+    // typed - because the standing rule is that interface opacity is a bug and
+    // economic uncertainty is the game. The player is told exactly what the
+    // machine does; whether a tighter claw makes them richer is theirs to find
+    // out, and the answer genuinely depends on the town.
+    if (key === "arcade") drawArcadeDials(R, x, y, w2, btn);
     if (key === "shack" || key === "juicebar") {
       chip(R.meal, "STAFF MEALS: " + MEAL_POL_LABEL[b.mealPol], "TAP", false);
       smallText(ctx, b.mealPol === "retail" ? "CREW PAY MENU PRICE AT THE PANTRY"
@@ -15106,6 +15867,11 @@ function newStay() {
     serves: 0,         // counters cleared
     tables: 0,         // ...of which were served AT A TABLE
     meals: 0, drinks: 0, washes: 0, games: 0, rooms: 0,
+    // ...and what they actually WON at the CLAWCADE, which is a different
+    // question from how many times they went in. A guest who bought tokens
+    // four times and went home with nothing is the arcade working as designed
+    // and is exactly the sentence the departure card should be able to say.
+    prizes: 0, bestPrize: null,
     topItem: null, topBiz: null, topPaid: 0,   // the dearest single thing they bought
     tips: 0,           // what they left on top of the price
     dues: 0,           // what the harbour took at the plank, if the town charges it
@@ -15159,7 +15925,7 @@ function stayBought(k, paid) {
   else s.meals++;
   if (paid > s.topPaid) {
     s.topPaid = Math.round(paid);
-    s.topItem = ITEM_NAMES[k.recipe.icon] || "SOMETHING";
+    s.topItem = itemName(k.recipe) || "SOMETHING";
     s.topBiz = BIZ[k.biz] ? BIZ[k.biz].name : "COUNTER";
   }
 }
@@ -15197,6 +15963,14 @@ function departRecord(k) {
     purse, left, spent: Math.max(0, purse - left), buys: k.buys,
     serves: s.serves, tables: s.tables,
     meals: s.meals, drinks: s.drinks, washes: s.washes, games: s.games, rooms: s.rooms,
+    // THE CLAWCADE, on the row rather than in the rule: what they won, the
+    // stub they are leaving with, and HOW FAR OFF the next thing on the wall
+    // was. `short` is derived here so the rule that speaks and the sentence it
+    // prints cannot disagree about the number.
+    prizes: s.prizes || 0, bestPrize: s.bestPrize,
+    tix: Math.round(k.tickets || 0),
+    want: (() => { const p = ARC_PRIZES.find(z => prizeTix(z) > (k.tickets || 0)); return p ? p.name : "WHOLE WALL"; })(),
+    short: (() => { const p = ARC_PRIZES.find(z => prizeTix(z) > (k.tickets || 0)); return p ? prizeTix(p) - Math.round(k.tickets || 0) : 0; })(),
     topItem: s.topItem, topBiz: s.topBiz, topPaid: s.topPaid,
     tips: Math.round(s.tips), dues: Math.round(s.dues),
     waitMin: Math.round(s.waitMin), worstMin: Math.round(s.worstMin),
@@ -15236,7 +16010,7 @@ function depList(r) {
   if (r.meals) bits.push(r.meals > 1 ? r.meals + " MEALS" : "ATE");
   if (r.drinks) bits.push(r.drinks > 1 ? r.drinks + " DRINKS" : "DRANK");
   if (r.washes) bits.push("WASHED");
-  if (r.games) bits.push("PLAYED");
+  if (r.games) bits.push(r.prizes ? "WON A PRIZE" : "PLAYED");
   if (r.rooms) bits.push("SLEPT");
   // three is what the card's width carries with the tail of the sentence still
   // on it - a guest who did five things says the first three and the count
@@ -15365,6 +16139,24 @@ const DEPART_RULES = [
   { id: "mist", mood: "flat",
     w: (r) => r.mistMin >= 100 ? 20 + Math.min(12, r.mistMin / 30) : 0,
     line: () => "THE MIST CAME IN AND I NEVER DID SEE THE FAR SHORE." },
+  // THE CLAWCADE, BOTH WAYS ROUND, and this pair is the directive's own
+  // sentence on a card. A guest who WON the thing they were chasing says so;
+  // one who went home with a ticket stub and no prize says how close they got,
+  // and that is the loudest thing the arcade can be: they are not angry, they
+  // are coming back. Both weights are read off the row, so the guest who was
+  // 8 tickets short says it louder than the one who was 190 short - which is
+  // the difference between a hook and a shrug.
+  { id: "prize", mood: "made",
+    w: (r) => r.prizes >= 1 ? 28 + 10 * r.prizes : 0,
+    line: (r) => r.prizes > 1
+      ? "WON " + r.prizes + " PRIZES OFF THE CLAWCADE WALL. THE " + (r.bestPrize || "PLUSH") + " TOO."
+      : "WON THE " + (r.bestPrize || "PLUSH") + " OFF THE CLAWCADE WALL." },
+  { id: "stub", mood: "mixed",
+    // only for somebody who actually played and actually held out: tickets in
+    // the pocket, nothing on the shelf to show for it
+    w: (r) => (r.games >= 1 && r.prizes === 0 && r.tix > 0 && r.short > 0)
+      ? 26 + Math.min(16, 400 / Math.max(8, r.short)) : 0,
+    line: (r) => r.short + " TICKETS OFF THE " + r.want + ". " + r.tix + " IN MY POCKET, GOING HOME." },
   { id: "table", mood: "made",
     w: (r) => r.tables >= 1 ? 30 + 8 * r.tables : 0,
     line: (r) => r.tables > 1
@@ -16567,6 +17359,13 @@ function frame(now) {
       }
     } });
     const stalls = BIZ[key].stalls;
+    // THE ARCADE FLOOR. Cabinets are stalls too, and this is the picture the
+    // directive asked for: "should have like a claw game to make this
+    // obvious". A claw machine you can see from the promenade, with the claw
+    // actually dropping while somebody is playing it and tickets spilling out
+    // of the slot when it grabs - so the loop reads at a glance, from the
+    // boardwalk, without opening a single card.
+    if (stalls && BIZ[key].arcadeFloor) { for (const m of stalls) paint.push({ base: m.y, f: () => drawMachine(m) }); continue; }
     // HOTEL ROOMS are stalls too, but they read as doors on a back wall: the
     // lamp is on when a guest is in residence, and an unmade bed (the DIRTY
     // flag housekeeping is about to clear) hangs its own little card.
@@ -16763,6 +17562,7 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) save(
 addEventListener("beforeunload", save);
 
 initNpcs();
+syncArcadeFloor();   // the cabinets are geometry, stood up from ARC_FLOOR - never a saved array of x's
 if (!FRESH) migrateLegacy();   // the old single-key town becomes slot 1, intact
 activeSlot = readActiveSlot();
 hasSave = load();

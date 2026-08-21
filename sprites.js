@@ -804,6 +804,16 @@ defItem("tickets", [
   "KAAKAAK..",
   ".........",
 ]);
+// the cheap end of the prize wall: a little rubber crab off the bottom shelf
+defItem("rubber_crab", [
+  ".........",
+  ".K.....K.",
+  "..KRRRK..",
+  ".KRRRRRK.",
+  ".KRBRBRK.",
+  "..KRRRK..",
+  ".K.K.K.K.",
+]);
 defItem("gold_plush", [
   ".KK..KK..",
   "KAAKKAAK.",
