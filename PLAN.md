@@ -3275,6 +3275,17 @@ and friends are one file on one machine. Two agents redirecting into it get one
 interleaved, truncated file and both read a false result. **Put the log inside
 your own worktree**, or name it after your branch.
 
+**2b. AND A REUSED LOG PATH IS THE SAME BUG WITH ONE AGENT.** I wrote rule 2
+for the fleet and then walked into it alone: successive runs all wrote to
+`.measure/parent-suite.log`, so when a later run replaced the file, TWO armed
+monitors reported the SAME stale result — a suite figure from a tree that had
+been edited twice since. Nothing warned me; the numbers were plausible and
+simply belonged to a different build.
+
+**Give every run its own log file, named for what it is measuring**, not for
+who is running it. "Mine versus theirs" is not the axis that matters — "this
+run versus the last one" is, and a monitor cannot tell them apart.
+
 **3. A RELAYED FACT IS A CLAIM, AND SO IS A RELAYED CONSTRAINT.** A sibling
 session reported a real bug and attached two details: line numbers, and a width
 ("the credit measures 264px on a 256px screen, so it needs its own line"). Both
