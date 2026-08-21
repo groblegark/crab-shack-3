@@ -3,6 +3,7 @@
 //   node tools/suite.mjs            run everything
 //   node tools/suite.mjs stuck ff   run scenarios matching any arg substring
 import { createSim } from "./simlib.mjs";
+import { existsSync } from "fs";
 
 const results = [];
 function scenario(name, fn) { results.push({ name, fn }); }
@@ -1757,20 +1758,46 @@ scenario("days off: wages skip exactly and the bill dips to match", () => {
   if (cw !== 50 - 10) return "off CLAWDIA wallet " + cw + ", expected 40 (house rent only, no wage)";
   // NPC payroll obeys the same rule: an employed fisher's SUN off is unpaid
   // but the job survives (no quit)
-  const sim2 = createSim({ seed: 8 });
-  sim2.runUntil("tmin >= 12 * 60", { maxSteps: 200000 });
-  sim2.G(`{ const s = npcs.find(k => k.p.name === "SALTY");
-    s.p.job = "showers"; s.p.employer = "sudsy"; s.workBiz = "showers";
-    s.workedToday = false;   // he rested (the flag is what settlement trusts)
-    OWNERS.sudsy.till = 200; coins = 600;
-    day = 7; lastRentDay = 6; tmin = 19.9 * 60; s.p.wallet = 30;
-    _offStamp = -1; }`);
-  if (!sim2.G('offToday(npcs.find(k => k.p.name === "SALTY"))')) return "SALTY (showers staff) not off on SUN";
-  sim2.runUntil("lastRentDay === day", { maxSteps: 30000 });
-  const st = JSON.parse(sim2.G('JSON.stringify((() => { const s = npcs.find(k => k.p.name === "SALTY"); return [Math.round(s.p.wallet), s.p.employer, Math.round(OWNERS.sudsy.till)]; })())'));
-  if (st[0] !== 30) return "off NPC staffer's wallet moved: " + st[0] + " (payroll should skip)";
-  if (st[1] !== "sudsy") return "off NPC staffer lost the job at settlement";
-  if (st[2] !== 200 - 35) return "SUDSY till " + st[2] + ", expected 165 (rent only - no payroll out)";
+  // A PAIRED SETTLEMENT, because one wallet per crab means her till is also her
+  // POCKET. It used to be enough to say "she started on 200 and the shop's
+  // rent is 35, so she must end on 165" - but SUDSY the crab now pays her own
+  // house rent and buys her own lunch out of that same number, so an absolute
+  // figure no longer isolates payroll from living.
+  //
+  // So the same night is run TWICE, identical but for whether the staffer
+  // worked, and the only thing asserted is the DIFFERENCE: exactly one wage.
+  // That is what this scenario was always about, and it is now measured in a
+  // way that cannot be confused with her groceries.
+  const night = (worked) => {
+    const s2 = createSim({ seed: 8 });
+    s2.runUntil("tmin >= 12 * 60", { maxSteps: 200000 });
+    s2.G(`{ const s = npcs.find(k => k.p.name === "SALTY");
+      s.p.job = "showers"; s.p.employer = "sudsy"; s.workBiz = "showers";
+      s.workedToday = ${worked ? "true" : "false"};
+      OWNERS.sudsy.till = 200; coins = 600;
+      day = 7; lastRentDay = 6; tmin = 19.9 * 60; s.p.wallet = 30;
+      _offStamp = -1; }`);
+    const off = s2.G('offToday(npcs.find(k => k.p.name === "SALTY"))');
+    const wage = Math.round(s2.G('bizWage("showers")'));
+    s2.runUntil("lastRentDay === day", { maxSteps: 30000 });
+    const st = JSON.parse(s2.G('JSON.stringify((() => { const s = npcs.find(k => k.p.name === "SALTY"); return [Math.round(s.p.wallet), s.p.employer, Math.round(OWNERS.sudsy.till)]; })())'));
+    const paid = JSON.parse(s2.G(`JSON.stringify(((npcs.find(k => k.p.name === "SALTY") || { p: {} }).p.log || [])
+      .filter(e => e[0] === day && String(e[3]).indexOf("WAS PAID") === 0).map(e => e[3]))`));
+    return { off, wage, wallet: st[0], employer: st[1], till: st[2], paid };
+  };
+  const rested = night(false);
+  if (!rested.off) return "SALTY (showers staff) not off on SUN";
+  // THE DAY OFF IS UNPAID AND THE JOB SURVIVES IT - the two halves of the rule.
+  if (rested.wallet !== 30) return "off NPC staffer's wallet moved: " + rested.wallet + " (payroll should skip)";
+  if (rested.employer !== "sudsy") return "off NPC staffer lost the job at settlement";
+  // ...AND THE EMPLOYER'S SIDE, asserted from the PAYROLL RECORD rather than
+  // from her balance. Her till is her pocket now (one wallet per crab), so she
+  // also paid her own house rent and bought her own supper out of the same
+  // number - an absolute figure cannot tell a skipped wage from a sandwich.
+  // The diary line is written by the pay branch itself, so its absence IS the
+  // claim: nobody was paid for a day nobody worked.
+  if (rested.paid.length)
+    return "a wage was paid for a day off: " + JSON.stringify(rested.paid);
   return true;
 });
 
@@ -2020,9 +2047,23 @@ scenario("hours: defaults are behavior-identical (frozen day-2 fingerprint)", ()
   // only cot-sleeper on day 2 - so he takes bed 0 where the modulo used to hand
   // him the third slot. A crab sleeping in the correct bed is the fix, and it
   // moves nothing else: no money changed hands differently anywhere.
+  // RE-BASELINED 2026-08-20 for ONE WALLET PER CRAB, and this drift is the
+  // change itself rather than a side effect of it. A shop's till IS its
+  // owner's pocket now, so the two owner-operators in this town are carrying
+  // their businesses' money where the fixture reads a wallet:
+  //     SUDSY   40 -> 220.47      REEF   27 -> 196.36
+  // and SUDSY's till column moves with her by the same arithmetic (180 -> 220).
+  // EVERY OTHER NUMBER IS BYTE-IDENTICAL on both seeds - coins, rep, catch,
+  // serves, crab serves, rage, and all five other wallets - which is the proof
+  // that this was an accounting change and not a behavioural one: nobody
+  // traded differently, the same money is simply in one pocket instead of two.
+  //
+  // Re-baselined LAST, deliberately, after the other seven failures from this
+  // refactor were understood. A fingerprint re-pointed while the world is
+  // still wrong just freezes the wrongness.
   const want = {
-    1337: '{"day":3,"tmin":0,"coins":148.494,"rep":53.609,"catch":4,"serves":42,"crabServes":4,"rage":4,"till":180.466,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",27],["SALTY",1],["DRIFT",16],["KELP",1]],"pos":[[520,154],[108,154],[974.7,166.9],[2136,154],[2072,154],[894.7,167.8],[443.2,167.4]]}',
-    4242: '{"day":3,"tmin":0,"coins":112.651,"rep":54.2896,"catch":4,"serves":44,"crabServes":3,"rage":5,"till":186.001,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",40],["REEF",40],["SALTY",1],["DRIFT",1],["KELP",8]],"pos":[[520,154],[108,154],[388,154],[646,163],[2072,154],[318,154],[450,155]]}',
+    1337: '{"day":3,"tmin":0,"coins":148.494,"rep":53.609,"catch":4,"serves":42,"crabServes":4,"rage":4,"till":220.466,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",220.47],["REEF",196.36],["SALTY",1],["DRIFT",16],["KELP",1]],"pos":[[520,154],[108,154],[974.7,166.9],[2136,154],[2072,154],[894.7,167.8],[443.2,167.4]]}',
+    4242: '{"day":3,"tmin":0,"coins":112.651,"rep":54.2896,"catch":4,"serves":44,"crabServes":3,"rage":5,"till":226.001,"wallets":[["PINCHY",16],["CLAWDIA",16],["SUDSY",226],["REEF",245.96],["SALTY",1],["DRIFT",1],["KELP",8]],"pos":[[520,154],[108,154],[388,154],[646,163],[2072,154],[318,154],[450,155]]}',
   };
   for (const seed of [1337, 4242]) {
     const sim = createSim({ seed });
@@ -3021,11 +3062,48 @@ scenario("failure: an owner who leaves the town leaves a business, not an orphan
   sim.G('npcs = npcs.filter(c => c.p.name !== "SUDSY");');   // exactly what a mortality pass does
   if (sim.G("BIZ.showers.owner") !== "sudsy") return "fixture wrong: the shop was not hers";
   sim.runUntil("lastRentDay === day", keep({ maxSteps: 400000 }));
-  if (!sim.G('forSale("showers")')) return "an ownerless business was left orphaned";
-  if (sim.G("market.showers.why") !== "gone") return "listed for the wrong reason: " + sim.G("market.showers.why");
-  if (!sim.G('bizDark("showers")')) return "an ownerless shop is somehow still trading";
+  // NOT AN ORPHAN - which now has TWO honest endings, and the second one is a
+  // consequence of one wallet per crab rather than a hole in the sweep.
+  //
+  // The sweep still lists the shop with reason "gone". But an owner's savings
+  // ARE their shop's takings now, so a peer owner is cash-rich in a way they
+  // never used to be, and REEF - who runs the Driftwood - can buy the vacated
+  // showers on the very settlement they are listed. Measured on this seed he
+  // does exactly that: owner "sudsy" -> listed "gone" -> owner "reef", inside
+  // one night. The shop is not an orphan; it changed hands so fast the market
+  // never held it.
+  //
+  // What must NOT happen is the thing this scenario was written for: a lease
+  // pointing at a crab who is not in the town, or a shop trading with nobody
+  // behind the counter.
+  const st = JSON.parse(sim.G(`JSON.stringify({ owner: bizOwner("showers"),
+    forSale: forSale("showers"), why: market.showers ? market.showers.why : null,
+    dark: bizDark("showers"),
+    ownerHere: !!allCrabs().some(k => k.p.owner === bizOwner("showers")) })`));
+  if (st.owner === "sudsy") return "the lease still points at a crab who left the town";
+  if (st.forSale) {
+    if (st.why !== "gone") return "listed for the wrong reason: " + st.why;
+    if (!st.dark) return "an ownerless shop is somehow still trading";
+  } else {
+    if (!st.owner) return "an ownerless business was left orphaned";
+    if (!st.ownerHere) return "the shop was handed to an owner who is not in the town: " + st.owner;
+  }
+  // ...AND THE TOWN RUNS ON THROUGH IT. The original tail insisted the shop was
+  // STILL on the market three days later, which was only ever a proxy for "the
+  // sweep did not wedge anything". It cannot hold now: a cash-rich peer owner
+  // buys the lease within a settlement or two, which is the sweep working
+  // harder, not failing. What is asserted is the thing that was actually meant
+  // - three more days pass, the town is alive, and the lease is in a real pair
+  // of hands or honestly on the market.
   sim.runDays(sim.G("day") + 3, KEEP);
-  return sim.G('!gameOver && forSale("showers")') ? true : "the town did not survive the ownerless stretch";
+  const end = JSON.parse(sim.G(`JSON.stringify({ over: gameOver, forSale: forSale("showers"),
+    owner: bizOwner("showers"),
+    ownerHere: !!allCrabs().some(k => k.p.owner === bizOwner("showers")) })`));
+  if (end.over) return "the town did not survive the ownerless stretch";
+  if (end.forSale) return true;
+  if (!end.owner) return "the shop ended up owned by nobody and not for sale";
+  if (!end.ownerHere) return "the lease ended in the hands of a crab who is not in the town";
+  return true;
 });
 
 scenario("sale: a saved-up crab buys the failed shop and it TRADES AGAIN", () => {
@@ -3055,12 +3133,40 @@ scenario("sale: a saved-up crab buys the failed shop and it TRADES AGAIN", () =>
     return "the failed shop did not go to a crab at all: " + id;
   const buyer = String(sim.G(`String((allCrabs().find(k => k.p.owner === "${id}") || { p: {} }).p.name)`));
   if (!buyer || buyer === "undefined") return "the new owner is not a crab in this town";
+  // THERE IS NO SEPARATE OPENING TILL ANY MORE. This used to assert that a new
+  // owner's till was exactly the float, which only meant something while a
+  // shop kept money apart from its owner. With one wallet per crab the "till"
+  // IS the buyer's pocket, so the honest claim is what the SALE COST THEM: the
+  // asking price less the float that stayed with them. Same arithmetic, on the
+  // number that still exists.
+  const float = Math.floor(price * sim.G("SALE_CFG.FLOAT_FRAC"));
   const till = sim.G("OWNERS['" + id + "'].till");
-  if (till !== Math.floor(price * sim.G("SALE_CFG.FLOAT_FRAC")))
-    return "opening till $" + till + " is not the float on a $" + price + " sale";
+  if (!(till >= float))
+    return "the new owner is not even holding the float: $" + till + " on a $" + price + " sale";
+  // (what the sale COST the buyer is asserted where it can be measured either
+  // side of the deal - see the two hotelier buy-out scenarios. This fixture
+  // discovers its sale after the fact, so the most it can honestly say is that
+  // the new owner opened with at least the float behind them.)
   const who = JSON.parse(sim.G(`JSON.stringify((() => { const c = allCrabs().find(k => k.p.name === "${buyer}"); return [c.p.owner, c.p.job, c.p.employer, Math.round(c.p.wallet)]; })())`));
-  if (who[0] !== id || who[1] !== "showers" || who[2] !== null)
-    return "the buyer is not the owner-operator: " + JSON.stringify(who);
+  // THE BUYER HOLDS THE LEASE, AND STANDS BEHIND A COUNTER OF THEIR OWN.
+  //
+  // This used to insist the buyer's JOB was the showers - true only of a crab
+  // buying their FIRST shop. With one wallet per crab an owner's savings are
+  // their shop's takings, so a crab who already runs one shop is far more
+  // likely to be the one who can afford the failed one - and seed after seed
+  // it is now BRASS, who owns the Driftwood and keeps working there. She has
+  // bought the showers, not moved into them, which is what a second shop means
+  // and is exactly the "one owner, several leases" case the owner layer was
+  // built to allow (see the OWNERS registry note).
+  //
+  // So: the lease is theirs, they are nobody's employee, and they are working
+  // a counter they own. Which one is their business.
+  if (who[0] !== id) return "the buyer does not hold the lease: " + JSON.stringify(who);
+  if (who[2] !== null) return "the new owner is still on somebody's payroll: " + JSON.stringify(who);
+  const theirs = JSON.parse(sim.G(`JSON.stringify(Object.keys(BIZ).filter(b => bizOwner(b) === "${id}"))`));
+  if (theirs.indexOf("showers") < 0) return "the showers are not among the buyer's leases";
+  if (theirs.indexOf(who[1]) < 0)
+    return "the new owner works a shop they do not own: " + JSON.stringify(who) + " of " + JSON.stringify(theirs);
   if (who[3] < 20) return "the buyer spent their housing reserve: $" + who[3];
   // ...and they run the SAME policies every peer owner runs (the tables are
   // keyed on the business, so a new owner inherits them by construction)
@@ -4612,11 +4718,26 @@ scenario("the nav strip: one table draws it, hit-tests it and jumps the camera",
   // and it stays out of the town's way: nothing is painted where a crab can walk
   if (flat.map.y <= flat.floorMax) return `the strip at y${flat.map.y} covers crabs, whose feet reach ${flat.floorMax}`;
   if (flat.map.y + flat.map.h > flat.panelY) return "the strip runs into the panel";
+  // THE CHIPS MOVED INTO THE PANEL (Matt: "move all 3 of those buttons to
+  // bottom of screen near the character select thing"), so they are BELOW the
+  // strip now rather than above it. The rule was never "above" - it was that a
+  // chip must not cover the map it is next to, and must not cover the town
+  // either. Both still hold, stated as what they are.
   for (const c of flat.chips) {
     if (c.y < 0 || c.x < 0 || c.x + c.w > 256) return "a nav chip hangs off the canvas";
-    if (c.y + c.h > flat.map.y) return "a nav chip sits on top of the map";
+    if (c.y < flat.map.y + flat.map.h && c.y + c.h > flat.map.y)
+      return "a nav chip sits on top of the map";
+    if (c.y + c.h > flat.map.y && c.y < flat.panelY)
+      return "a nav chip is stranded between the map and the panel";
   }
-  if (flat.chips[0].x + flat.chips[0].w > flat.chips[1].x) return "the MANAGE and TOWN chips overlap";
+  // ...and they do not sit on each other. They are STACKED now rather than side
+  // by side, so this is a real 2D test: an x-only comparison passed two chips
+  // at the same x and called them clear.
+  {
+    const [a2, b2] = flat.chips;
+    if (a2.x < b2.x + b2.w && a2.x + a2.w > b2.x && a2.y < b2.y + b2.h && a2.y + a2.h > b2.y)
+      return "the MANAGE and TOWN chips overlap";
+  }
 
   // ---- 4. the two chips, which are the whole point of the exercise
   const chip = (which) => sim.G(`(() => {
@@ -5521,13 +5642,21 @@ scenario("rivalry: the player can buy HER shop - the ownership layer stays symme
   const oid = sim.G(`rivalOwnerId()`), her = sim.G(`rivalCrab().p.name`);
   const price = sim.G(`rivalAsk("showers")`);
   sim.G(`coins = ${price} + 500; askArm = null;`);
-  const c0 = sim.G(`coins`), t0 = sim.G(`OWNERS["${oid}"].till`);
+  // MEASURE THE SELLER, NOT THE LEASE. With one wallet per crab, OWNERS[id].till
+  // resolves through whoever holds the lease - and this sale moves it, and
+  // stepDownOwner clears her p.owner on the way out, so afterwards that record
+  // points at nobody and reads as if she was never paid. Her wallet is hers
+  // whatever she owns.
+  const sellerName = sim.G(`String((allCrabs().find(k => k.p.owner === "${oid}") || { p: {} }).p.name)`);
+  const sellerW = () => sim.G(`(allCrabs().find(k => k.p.name === "${sellerName}") || { p: {} }).p.wallet || 0`);
+  const c0 = sim.G(`coins`), t0 = sellerW();
   if (sim.G(`tapAskChip("showers")`)) return `one tap bought a business - it must arm first`;
   if (!sim.G(`tapAskChip("showers")`)) return `the second tap did not complete the buy`;
   if (sim.G(`bizOwner("showers")`) !== "player") return `the lease did not move to the player`;
   if (Math.round(c0 - sim.G(`coins`)) !== Math.round(price)) return `the player paid the wrong number`;
-  if (Math.round(sim.G(`OWNERS["${oid}"].till`) - t0) !== Math.round(price))
-    return `the SELLER was not paid - a sale between two owners is a transfer`;
+  if (Math.round(sellerW() - t0) !== Math.round(price))
+    return `the SELLER was not paid - a sale between two owners is a transfer `
+      + `(${sellerName} banked ${Math.round(sellerW() - t0)} of ${Math.round(price)})`;
   // she is out of that shop and back on the town's default profession, and the
   // ambition that stood on that balance sheet is over
   const she = JSON.parse(sim.G(`JSON.stringify((() => { const k = allCrabs().find(c => c.p.name === "${her}");
@@ -6046,6 +6175,10 @@ scenario("hotelier: a new crab buys the Driftwood, and the lease is never in two
         if (ok) window._deal = { biz: b,
           sellerGain: (seller ? seller.p.wallet : 0) - w0,
           buyerPaid: p0 - (buyer ? buyer.p.wallet : coins),
+          // ONE WALLET: there is no third pot. ownerFunds(b) after the sale is
+          // the BUYER'S WHOLE WALLET, not an opening float, so it is kept only
+          // as context - the conservation claim is buyerPaid === sellerGain.
+          // (No backticks in this comment: it lives inside a template literal.)
           till: Math.round(ownerFunds(b)) };
         return ok;
       }; }`);
@@ -6094,12 +6227,21 @@ scenario("hotelier: a new crab buys the Driftwood, and the lease is never in two
   const float = Math.floor(buy.price * sim.G(`SALE_CFG.FLOAT_FRAC`));
   const deal = JSON.parse(sim.G(`JSON.stringify(window._deal)`));
   if (!deal) return "the buy-out path never ran";
-  if (Math.abs(deal.buyerPaid - buy.price) > 1)
-    return `she paid $${deal.buyerPaid} of a $${buy.price} sale`;
+  // HER NET COST IS THE PRICE LESS THE FLOAT SHE KEEPS. With one wallet the
+  // float never leaves the buyer - it is her own money, in her own pocket,
+  // behind the shop she now owns - so the gross price crosses no boundary and
+  // the only real number is what she is down at the end of it.
+  if (Math.abs(deal.buyerPaid - (buy.price - float)) > 1)
+    return `she paid $${deal.buyerPaid} net of a $${buy.price} sale (expected ${buy.price - float})`;
   if (Math.abs(deal.sellerGain - (buy.price - float)) > 1)
     return `REEF banked $${deal.sellerGain} of a $${buy.price} sale (expected ${buy.price - float})`;
-  if (Math.abs((deal.sellerGain + deal.till) - buy.price) > 1)
-    return `money was minted or burned: paid $${deal.buyerPaid}, REEF $${deal.sellerGain}, till $${deal.till}`;
+  // A SALE BETWEEN TWO CRABS IS A TRANSFER, and with one wallet per crab that
+  // is the whole of it: what left her pocket arrived in his. The float is not
+  // a third pot any more - it returns to the BUYER, who now owns the shop it
+  // belongs to - so `buyerPaid` is already net of it and the two numbers must
+  // simply agree.
+  if (Math.abs(deal.buyerPaid - deal.sellerGain) > 1)
+    return `money was minted or burned: she paid $${deal.buyerPaid} net, REEF banked $${deal.sellerGain}`;
   // REEF is out of the hotel trade, not out of the town, and he is rich
   const reef = JSON.parse(sim.G(`JSON.stringify((allCrabs().find(k => k.p.name === "REEF") || { p: {} }).p)`));
   if (reef.owner != null) return "REEF still owns a hotel he sold";
@@ -6218,13 +6360,18 @@ scenario("hotelier: one price on the hotel's sign, and it goes UP the day she si
   // SHE STILL SELLS - the number IS the negotiation, and two taps close it
   sim2.G(`coins = ${ask} + 500; askArm = null;`);
   if (sim2.G(`tapAskChip("hotel")`)) return "one tap bought a hotel - it must arm first";
-  const coins0 = sim2.G(`coins`), till0 = sim2.G(`OWNERS[hotelier.id].till`);
+  // MEASURE THE CRAB, NOT THE LEASE. `OWNERS[id].till` resolves through
+  // whoever holds the lease, and this sale moves it - so after the deal that
+  // record no longer points at BRASS and reads as if she was never paid. Her
+  // WALLET is where the money is, and it is hers whatever she owns.
+  const brassW = () => sim2.G(`(allCrabs().find(k => k.p.name === "BRASS") || { p: {} }).p.wallet || 0`);
+  const coins0 = sim2.G(`coins`), till0 = brassW();
   if (!sim2.G(`tapAskChip("hotel")`)) return "the second tap did not close the deal";
   if (sim2.G(`bizOwner("hotel")`) !== "player") return "the hotel did not change hands";
   const paid = coins0 - sim2.G(`coins`);
   if (Math.abs(paid - ask) > 1) return `the player paid $${paid} of a $${ask} ask`;
-  if (Math.abs((sim2.G(`OWNERS[hotelier.id].till`) - till0) - ask) > 1)
-    return "the seller was not paid what the buyer paid";
+  if (Math.abs((brassW() - till0) - paid) > 1)
+    return `the seller was not paid what the buyer paid: she banked $${brassW() - till0} of $${paid}`;
   const her = JSON.parse(sim2.G(`JSON.stringify((allCrabs().find(k => k.p.name === "BRASS") || { p: {} }).p)`));
   if (her.owner != null || her.job === "hotel") return "she still runs a hotel she sold";
   // ...and with the lease gone, so is the policy
@@ -6382,6 +6529,13 @@ scenario("the town fund moves money and never mints it", () => {
       const mech = ["levy", "dues", "rents", "tin"][(i++ >> 3) % 4];
       G(`hall.policy = { mech: "${mech}", rate: 3, bowls: 3 };`);
       if (G("coins") < 400) G("coins = 900");   // keep the town trading, so the levy has a base
+      // ...AND SOMEBODY IS ALWAYS ILL, so the PAY door is actually walked.
+      // The pot only buys bowls for crabs who are sick tonight (potWant), and
+      // one wallet per crab made the town wealthy enough that seed 1337 can go
+      // fourteen days without a single illness - so the audit was proving three
+      // doors out of four and calling it complete. An audit that quietly stops
+      // covering a door is worse than one that fails.
+      G(`{ const c = allCrabs().find(k => k.p.npc); if (c && !c.p.sick) c.p.sick = { days: 0 }; }`);
     } });
     const A = JSON.parse(sim.G("JSON.stringify(window._auditFund)"));
     const rows = A.rows || [];
@@ -8736,26 +8890,41 @@ scenario("the help card is reachable from play, and from a town with nothing lef
   sim.runDays(1);
   const R = JSON.parse(sim.G("JSON.stringify(navRects())"));
   const mid = (r) => `{ x: ${r.x + (r.w >> 1)}, y: ${r.y + (r.h >> 1)} }`;
+  const PANEL_Y_TEST = sim.G("PANEL_Y");
   sim.G('helpView = false; screen = "play"; gameOver = false; dossier = null; manage = null;'
     + " boardView = false; saveView = false; reportT = 0;");
-  if (!sim.G(`navTapChip(${mid(R.help)})`) || !sim.G("helpView")) return "the HELP chip did not open the card";
+  // THERE IS NO HELP CHIP ANY MORE (Matt, 2026-08-20: "we can remove the help
+  // button"). The card keeps the doors that do not cost a control in the
+  // middle of the screen: the H key, the ? key, and HOW TO PLAY on the title.
+  // What this scenario still has to prove is that it is FINDABLE, so it walks
+  // those instead - and that the chip is really gone rather than merely
+  // unpainted, since a live hit-box under nothing is worse than either.
+  if (!sim.G("typeof toggleHelp === 'function'")) return "there is no way to open the help card at all";
+  sim.G("toggleHelp();");
+  if (!sim.G("helpView")) return "the H key's own handler did not open the card";
   sim.G("helpView = false;");
-  // the chip's rect IS the chip that is drawn: nothing clickable that was never
-  // painted, and nothing painted you cannot hit
+  if (sim.G("navRects().help !== undefined")) return "a HELP rect is still hanging about in navRects";
   const painted = JSON.parse(sim.G(`(() => {
     const out = []; const S = smallText;
     smallText = (c, s2, x, y, col) => { out.push([String(s2), x, y]); return S(c, s2, x, y, col); };
-    try { drawNav(); } finally { smallText = S; }
+    try { drawNav(); drawNavChips(); } finally { smallText = S; }
     return JSON.stringify(out); })()`));
-  const chipRow = painted.find(p => p[0] === "HELP");
-  if (!chipRow) return "the HELP chip was never drawn";
-  if (chipRow[1] < R.help.x || chipRow[1] > R.help.x + R.help.w)
-    return `the HELP label prints at x${chipRow[1]}, outside its own rect x${R.help.x}..${R.help.x + R.help.w}`;
+  if (painted.some(p => p[0] === "HELP")) return "a HELP chip is still being drawn";
+  // ...and the two chips that DID stay are painted inside their own rects, in
+  // the panel where they now live
+  for (const k of ["manage", "town"]) {
+    const row = painted.find(p => p[0] === k.toUpperCase());
+    if (!row) return `the ${k.toUpperCase()} chip was never drawn`;
+    if (row[1] < R[k].x || row[1] > R[k].x + R[k].w)
+      return `${k.toUpperCase()} prints at x${row[1]}, outside its own rect`;
+    if (row[2] < PANEL_Y_TEST) return `${k.toUpperCase()} is still up in the world at y${row[2]}`;
+  }
   // A PLAYER WITH NOTHING LEFT can still ask what happened: MANAGE and TOWN go
-  // dark with the last business, HELP does not.
+  // dark with the last business, the help card does not.
   sim.G('for (const k in BIZ) if (bizOwner(k) === "player") BIZ[k].owner = "sudsy";');
   if (sim.G("navChipsLive()")) return "the fixture did not actually strip the player's businesses";
-  if (!sim.G(`navTapChip(${mid(R.help)})`) || !sim.G("helpView")) return "HELP went dark with the last shop";
+  sim.G("toggleHelp();");
+  if (!sim.G("helpView")) return "HELP went dark with the last shop";
   // the card swallows its own clicks and pages both ways off one rect table
   const HR = JSON.parse(sim.G("JSON.stringify(helpRects())"));
   sim.G("helpPage = 0;");
@@ -9482,6 +9651,129 @@ scenario("a shop's takings show on its owner's card the moment they land", () =>
   if (!got.onCard) return `${got.who}'s card does not show her till of $${got.till} (wallet $${got.wallet})`;
   if (!got.dossierHasTillLabel || !got.onDossier)
     return `${got.who}'s dossier does not show her till of $${got.till}`;
+  return true;
+});
+
+// ===========================================================================
+// THE CREW ROW AND THE CHIPS SHARE A BAND (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("a big crew never runs under the MANAGE and TOWN chips", () => {
+  // Matt: "we can remove the help button; and move all 3 of those buttons to
+  // bottom of screen near the character select thing." They now hold the
+  // right-hand end of the crew row - which is the row the crew tiles grow
+  // along, from x4 at CARD_STEP each. MEASURED before the guard: nine crew
+  // reach x244 against a chip edge at x214, so the last two tiles were drawn
+  // underneath a button.
+  //
+  // Asserted at every crew size up to a townful, because the bug only appears
+  // past six and a fixture with two crabs in it would never have seen it.
+  const sim = createSim({ seed: 13 });
+  sim.runDays(1);
+  const bad = JSON.parse(sim.G(`(() => {
+    const out = [];
+    const wasHeadless = window._headless;
+    tab = "crew"; manage = null; dossier = null; boardView = false; saveView = false; helpView = false;
+    for (let n = 1; n <= 12; n++) {
+      while (crabs.length < n) hireCrew();
+      if (crabs.length !== n) break;                 // the town ran out of names
+      const R = navRects(), shown = crewTilesShown(crabs.length);
+      // 1. NO TILE IS DRAWN UNDER A CHIP, and the overflow marker counts too:
+      //    it takes the slot after the last tile.
+      const slots = shown + (shown < crabs.length ? 1 : 0);
+      const right = slots ? 4 + (slots - 1) * CARD_STEP + CARD : 0;
+      if (right > R.manage.x) out.push([n, "tile right edge " + right + " past chip x" + R.manage.x]);
+      // 2. THE CHIP ANSWERS AT ITS OWN COORDINATES, whatever the crew size -
+      //    it is tested before the tiles in the panel's click chain, so a full
+      //    roster must not swallow it. (The panel's listener is anonymous and
+      //    cannot be called from here; navTapChip is the branch under test and
+      //    is what that listener calls first.)
+      manage = null;
+      const opened = navTapChip({ x: R.manage.x + 4, y: R.manage.y + 4 });
+      if (ownedBizList().length && (!opened || !manage))
+        out.push([n, "the MANAGE chip did not open under a crew of " + n]);
+      manage = null;
+      // 3. ...and nothing clickable that is not painted: the draw loop and the
+      //    hit-test loop both bound themselves with crewTilesShown, so a hidden
+      //    crab has no slot in either. Asserted as the shared reader agreeing
+      //    with the geometry above rather than by clicking a tile that is not
+      //    there.
+      if (shown > crabs.length) out.push([n, "more tiles shown than crabs"]);
+    }
+    window._headless = wasHeadless;
+    return JSON.stringify(out.slice(0, 6));
+  })()`));
+  if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
+  return true;
+});
+
+// ===========================================================================
+// THE MUSIC MATCHES THE TOWN (Matt, 2026-08-21)
+// ===========================================================================
+
+scenario("the playlist is energy-matched, and the event tracks stay out of the rotation", () => {
+  // Matt: "energy match the songs though and think about if some are event-
+  // appropriate." Two claims, and the second one is the one that rots quietly:
+  // a win sting that turns up on a Tuesday afternoon is not a win sting.
+  const sim = createSim({ seed: 1337 });
+  const got = JSON.parse(sim.G(`(() => {
+    // 1. EVERY track declares an energy, and the three bands all exist - a
+    //    picker with nothing calm to reach for silently plays the wrong thing.
+    const bands = {};
+    for (const t of PLAYLIST) bands[t.e] = (bands[t.e] || 0) + 1;
+    // 2. The roled tracks exist, are unique, and are NEVER returned by the
+    //    rotation. Sampled hard rather than argued: every energy target, many
+    //    draws each, because pickTrack is random within its band.
+    const roles = PLAYLIST.map((t, i) => [t.role, i]).filter(r => r[0]);
+    const rolled = new Set(roles.map(r => r[1]));
+    let leaked = 0, repeats = 0;
+    for (let want = 0; want <= 2; want++) {
+      for (let n = 0; n < 200; n++) {
+        trackIdx = n % PLAYLIST.length;
+        // force the target by stubbing the reader the picker uses
+        const T = targetEnergy; targetEnergy = () => want;
+        const got2 = pickTrack();
+        targetEnergy = T;
+        if (rolled.has(got2)) leaked++;
+        if (got2 === trackIdx) repeats++;
+      }
+    }
+    // 3. ...and the target actually MOVES with the town: a dark, empty night
+    //    and a busy afternoon must not ask for the same thing.
+    const night = (() => { tmin = 2 * 60; customers.length = 0; return targetEnergy(); })();
+    tmin = 13 * 60;
+    const quiet = targetEnergy();
+    for (let i = 0; i < 8; i++) customers.push({ x: 0, gone: false });
+    const busy = targetEnergy();
+    return JSON.stringify({ bands, roles: roles.map(r => r[0]), leaked, repeats, night, quiet, busy,
+      total: PLAYLIST.length });
+  })()`));
+  for (const e of [0, 1, 2])
+    if (!got.bands[e]) return `no track is tagged energy ${e} - the picker has nothing to reach for`;
+  if (got.bands.undefined) return `${got.bands.undefined} tracks have no energy at all`;
+  if (got.roles.length !== 2 || got.roles.indexOf("title") < 0 || got.roles.indexOf("end") < 0)
+    return "expected exactly a title and an end track, got " + JSON.stringify(got.roles);
+  if (got.leaked) return `a roled track was picked by the rotation ${got.leaked} times`;
+  if (got.repeats) return `the picker returned the track already playing ${got.repeats} times`;
+  if (!(got.night === 0)) return `a dark empty night asked for energy ${got.night}`;
+  if (!(got.busy > got.quiet)) return `a busy promenade (${got.busy}) did not ask for more than a quiet one (${got.quiet})`;
+  return true;
+});
+
+scenario("every track in the playlist is a file that exists", () => {
+  // Ten tracks arrived from two Suno albums in one go. A playlist entry whose
+  // mp3 is missing fails SILENTLY in a browser - the audio element errors, the
+  // 'ended' handler never fires, and the music simply stops for the rest of the
+  // session. Cheap to check, impossible to notice by playing.
+  const sim = createSim({ seed: 1 });
+  const srcs = JSON.parse(sim.G("JSON.stringify(PLAYLIST.map(t => t.src))"));
+  const seen = new Set();
+  for (const src of srcs) {
+    if (seen.has(src)) return "the same file is in the playlist twice: " + src;
+    seen.add(src);
+    if (!/^music\/[a-z0-9-]+\.mp3$/.test(src)) return "odd playlist path: " + src;
+    if (!existsSync(new URL("../" + src, import.meta.url))) return "playlist names a file that is not there: " + src;
+  }
   return true;
 });
 

@@ -495,6 +495,53 @@ function staffMealCharge(b, r) {   // what a selfCooking staffer rings up
 // a business and BIZ[k].owner is the key into it. `owner: null` means NOBODY
 // owns that business - it is closed and on the market (see the business
 // failure & succession block below).
+// ============================================================ ONE WALLET
+// A CRAB HAS ONE WALLET, AND AN OWNER GETS THE MONEY FROM THEIR SHOPS.
+// (Matt, 2026-08-20: "I like the idea that each crab just has one wallet, and
+// the owner gets all the money from their shops, that's how we work.")
+//
+// A shop used to keep a TILL separate from its owner's POCKET, and three
+// different bits of code shuffled money between them - an owner-operator
+// topping herself up on the way past, a buyer drawing the till down to make a
+// deposit, and a rival paying out of both at once. That is two accounts for
+// one crab, which is the thing this town's own iron rule forbids everywhere
+// else, and it produced two bugs in a single day: a rival who could bid money
+// she could not settle, and an owner whose takings were invisible on her card.
+//
+// So `till` is an ACCESSOR ONTO THE OWNER CRAB'S WALLET. Every existing call
+// site keeps working and now means one thing. The backing number is used only
+// while a lease has NO LIVING OWNER - a crab died, or the shop is between
+// hands - because money must not evaporate just because nobody is holding it.
+function ownerCrabOf(id) {
+  return !id || id === "player" ? null : allCrabs().find(k => k.p.owner === id) || null;
+}
+function defineTill(o) {
+  let held = Math.max(0, Math.round(o.till || 0));
+  // THE MONEY FOLLOWS THE OWNER, and it has to do so the INSTANT a lease has
+  // one, or the backing becomes a ghost. Two ways that bites, both measured:
+  // SUDSY opens with $200 behind her lease before any crab exists, and that
+  // $200 sat in `held` for the whole game while her wallet did the work; and
+  // an owner who dies would have handed a stale backing back to worldMoney as
+  // money appearing from nowhere. So the moment a lease HAS a crab, whatever
+  // is parked moves into their pocket and the backing goes to zero.
+  const settle = () => {
+    const c = ownerCrabOf(o.id);
+    if (c && held > 0) { c.p.wallet = Math.max(0, (c.p.wallet || 0) + held); held = 0; }
+    return c;
+  };
+  o._settleTill = settle;
+  Object.defineProperty(o, "till", {
+    get() { const c = settle(); return c ? Math.max(0, c.p.wallet || 0) : held; },
+    set(v) { const c = settle(), n = Math.max(0, v);
+      if (c) c.p.wallet = n; else held = n; },
+    enumerable: true, configurable: true });
+  // the ownerless backing, read by worldMoney so a wallet and a till that are
+  // the same money can never be counted twice
+  Object.defineProperty(o, "_held", {
+    get() { return held; }, set(v) { held = Math.max(0, v); },
+    enumerable: false, configurable: true });
+  return o;
+}
 const OWNERS = {
   sudsy: { id: "sudsy", name: "SUDSY", till: 200, credit: 0, darkT: 0 },
   // REEF keeps the DRIFTWOOD HOTEL. A second peer owner, on exactly the same
@@ -509,6 +556,7 @@ const OWNERS = {
   // seller keys on the crab because not everybody is one.)
   reef: { id: "reef", name: "REEF", till: 140, credit: 0, darkT: 0, soft: true },
 };
+for (const k in OWNERS) defineTill(OWNERS[k]);
 const bizOwner = (b) => BIZ[b].owner === null ? null : (BIZ[b].owner || "player");
 // never let a draw path throw on an owner who has left the registry (sold up,
 // or - the death seam - left the town between one frame and the next settlement)
@@ -878,7 +926,14 @@ function bizAcct(b) {   // the till behind a lease, whoever holds it tonight
 // negative it is.
 function worldMoney() {
   let m = coins - (credit.bal || 0) + townFund.bal;
-  for (const k in OWNERS) m += (OWNERS[k].till || 0) - (OWNERS[k].credit || 0);
+  // an owner's till IS their crab's wallet, counted in the crab loop below, so
+  // only the OWNERLESS backing is added here - and every lease is settled onto
+  // its crab first, so a parked backing can neither hide from this total nor
+  // be counted twice against a wallet that already holds it.
+  for (const k in OWNERS) {
+    if (OWNERS[k]._settleTill) OWNERS[k]._settleTill();
+    m += (ownerCrabOf(k) ? 0 : (OWNERS[k]._held || 0)) - (OWNERS[k].credit || 0);
+  }
   for (const c of allCrabs()) m += c.p.wallet || 0;
   for (const k of customers) if (k.visitor && !k.gone) m += k.wallet || 0;
   return m;
@@ -2074,8 +2129,7 @@ function buyBusiness(b, buyer) {
     if (buyer.p.wallet < price + SALE_CFG.RESERVE) return false;
     buyer.p.wallet -= price;
     const id = ownerIdFor(buyer);
-    OWNERS[id] = OWNERS[id] || { id, name: buyer.p.name, till: 0, credit: 0, darkT: 0 };
-    OWNERS[id].till += float;
+    OWNERS[id] = OWNERS[id] || defineTill({ id, name: buyer.p.name, till: 0, credit: 0, darkT: 0 });
     BIZ[b].owner = id;
     BIZ[b].autoLabor = true;    // a peer owner runs the same policy table SUDSY does
     if (!buyer.p.owner) {       // their FIRST shop: an owner-operator behind their own counter
@@ -2085,6 +2139,16 @@ function buyBusiness(b, buyer) {
       buyer.carrying = null; buyer.dayState = "home"; buyer.cstate = "";
       buyer.workBiz = b; buyer.fishSpot = null;
     }
+    // THE FLOAT COMES BACK AFTER THE BUYER IS THE OWNER, and the order is the
+    // whole of it. With one wallet the float is not a separate pot - it is the
+    // buyer's own money staying in the buyer's own pocket - and `till` finds
+    // that pocket by asking who owns the lease. Credited one line earlier, on
+    // a crab's FIRST shop, `p.owner` was not set yet, so the float landed in
+    // the ownerless backing and the buyer's wallet read short by it until
+    // something happened to touch the till. Nothing was lost, but the town was
+    // briefly wrong, and a sale measured in that window looked like theft:
+    // "she paid $677 net, REEF banked $339".
+    OWNERS[id].till += float;
     who = buyer.p.name;
     crabLog(buyer, "money", "BOUGHT THE " + BIZ[b].name + " FOR $" + price, 0);   // DIARY
     crabLog(buyer, "life", "THEIR OWN BOSS NOW - RUNS THE " + BIZ[b].short, 0);
@@ -2276,8 +2340,11 @@ function prizeIsPlayers() {
 // her purse is her TILL plus her own POCKET - the same two pots the housing
 // ladder already moves money between, and the only money she has
 function rivalPurse() {
-  const o = OWNERS[rivalOwnerId()], c = rivalCrab();
-  return (o ? Math.max(0, o.till) : 0) + (c ? Math.max(0, c.p.wallet) : 0);
+  // ONE ACCOUNT: her shop's till and her own pocket are the same money now, so
+  // adding them would count it twice and hand her a purse she does not have -
+  // the same bug this system already had once, from the other direction.
+  const c = rivalCrab(), o = OWNERS[rivalOwnerId()];
+  return c ? Math.max(0, c.p.wallet || 0) : o ? Math.max(0, o._held || 0) : 0;
 }
 // HER LINE OF CREDIT, the same one the player draws on and the same one that
 // shuts a shop after three missed settlements. A small operator buying a second
@@ -2327,10 +2394,12 @@ function rivalFloat() {
 // then her own pocket. No third pot to draw on and no drawing on the line -
 // see the note above rivalRaise for why those two doors are shut.
 function payFromRival(amt) {
-  const o = OWNERS[rivalOwnerId()], c = rivalCrab();
+  const c = rivalCrab(), o = OWNERS[rivalOwnerId()];
   let left = Math.max(0, Math.round(amt));
-  if (o) { const d = Math.min(Math.max(0, o.till), left); o.till -= d; left -= d; }
-  if (c) { const d = Math.min(Math.max(0, c.p.wallet), left); c.p.wallet -= d; left -= d; }
+  // she pays out of the one place she keeps money; taking it from the till AND
+  // the pocket would take it twice out of the same wallet
+  if (c) { const d = Math.min(Math.max(0, c.p.wallet || 0), left); c.p.wallet -= d; left -= d; }
+  else if (o) { const d = Math.min(Math.max(0, o._held || 0), left); o._held -= d; left -= d; }
   return Math.round(amt) - left;
 }
 function bizTakeAvg(b) {
@@ -2743,10 +2812,8 @@ function rivalFirstRefusal(b) {
   if (!c || c.p.sick) return false;
   const price = salePrice(b), o = OWNERS[rivalOwnerId()];
   if (rivalPurse() < price + SALE_CFG.RESERVE) return false;
-  // the buy path pays out of a crab's POCKET, so she draws the till down into
-  // it first - the owner draw the housing ladder already uses. Nothing minted.
-  const need = price + SALE_CFG.RESERVE - c.p.wallet;
-  if (need > 0 && o) { const d = Math.min(Math.max(0, o.till), need); o.till -= d; c.p.wallet += d; }
+  // (the buy path used to draw the till down into the crab's pocket first.
+  // One wallet: the money is already there.)
   if (!buyBusiness(b, c)) return false;
   rival.stage = "done"; rival.offer = null; rival.intent = 0;
   today.rival.push(rivalName() + " WAS FIRST IN THE QUEUE FOR THE " + BIZ[b].short);
@@ -2807,7 +2874,14 @@ function tapAskChip(b) {
   askArm = null; askArmT = 0;
   coins -= price;   // ...and out of it the same way, off the trading books
   popText("-$" + fmt(price), (BIZ[b].x0 + BIZ[b].x1) / 2 - 12, 110, [255, 120, 120]);
-  if (o) o.till += price;     // the seller is PAID: a transfer between two owners, nothing minted
+  // THE SELLER IS PAID A CRAB, NOT A LEASE. With one wallet, `o.till` resolves
+  // through whoever currently holds the lease - and this sale is about to move
+  // it, and stepDownOwner below clears the seller's `p.owner` on the way. So
+  // the payee is captured HERE, by identity, before anything moves; otherwise
+  // the money lands in a backing number belonging to nobody.
+  const sellerCrab = ownerCrabOf(oid);
+  if (sellerCrab) sellerCrab.p.wallet = Math.max(0, (sellerCrab.p.wallet || 0) + price);
+  else if (o) o._held = Math.max(0, (o._held || 0) + price);
   // her people are hers, not yours: the owner-operator steps down (to another
   // counter if she holds one) and the payroll goes back to the pier
   for (const k of allCrabs().slice()) {
@@ -5504,20 +5578,78 @@ function crabBerth(c) {
 }
 
 // ---------------------------------------------------------------- sound (from CS1)
+// THE PLAYLIST HAS AN ENERGY COLUMN, and two tracks that are not in the
+// rotation at all (Matt, 2026-08-21: "energy match the songs though and think
+// about if some are event-appropriate").
+//
+// Twelve tracks used to play in a fixed loop, which meant a lullaby could land
+// on the busiest afternoon of the week and a dance number on a dead Sunday
+// night. `e` is what a track is FOR - 0 calm, 1 steady, 2 lively - and the
+// picker reads the town rather than a counter (see targetEnergy).
+//
+// `role` takes a track OUT of the rotation because it belongs to a moment:
+//   title - the start screen, which is what the track is literally called
+//   end   - the ferry ending and the bankruptcy card, both of which are
+//           thirty-one seconds of somebody telling you how it went
+// A roled track is never picked by the rotation, so it keeps its meaning: a
+// win sting that turns up on a Tuesday afternoon is not a win sting.
 const PLAYLIST = [
-  { src: "music/pixel-wave-waltz.mp3", name: "PIXEL WAVE WALTZ" },
-  { src: "music/regalia-of-the-surf.mp3", name: "REGALIA OF THE SURF" },
-  { src: "music/regalia-waltz.mp3", name: "REGALIA WALTZ" },
-  { src: "music/butter-pow.mp3", name: "BUTTER POW" },
-  { src: "music/carnival-of-the-glitch.mp3", name: "CARNIVAL OF THE GLITCH" },
-  { src: "music/pixomatic-moon.mp3", name: "PIXOMATIC MOON" },
-  { src: "music/dense-portal.mp3", name: "DENSE PORTAL" },
-  { src: "music/dance-up.mp3", name: "DANCE UP" },
-  { src: "music/lantern-circuit.mp3", name: "LANTERN CIRCUIT" },
-  { src: "music/marble-rain.mp3", name: "MARBLE RAIN" },
-  { src: "music/rain-circuit-lullaby.mp3", name: "RAIN CIRCUIT LULLABY" },
-  { src: "music/goat-circuit.mp3", name: "GOAT CIRCUIT" },
+  { src: "music/pixel-wave-waltz.mp3", name: "PIXEL WAVE WALTZ", e: 1 },
+  { src: "music/regalia-of-the-surf.mp3", name: "REGALIA OF THE SURF", e: 1 },
+  { src: "music/regalia-waltz.mp3", name: "REGALIA WALTZ", e: 1 },
+  { src: "music/butter-pow.mp3", name: "BUTTER POW", e: 0 },
+  { src: "music/carnival-of-the-glitch.mp3", name: "CARNIVAL OF THE GLITCH", e: 2 },
+  { src: "music/pixomatic-moon.mp3", name: "PIXOMATIC MOON", e: 0 },
+  { src: "music/dense-portal.mp3", name: "DENSE PORTAL", e: 2 },
+  { src: "music/dance-up.mp3", name: "DANCE UP", e: 2 },
+  { src: "music/lantern-circuit.mp3", name: "LANTERN CIRCUIT", e: 1 },
+  { src: "music/marble-rain.mp3", name: "MARBLE RAIN", e: 0 },
+  { src: "music/rain-circuit-lullaby.mp3", name: "RAIN CIRCUIT LULLABY", e: 0 },
+  { src: "music/goat-circuit.mp3", name: "GOAT CIRCUIT", e: 1 },
+  // ---- DENSE DANCE + CLONKBOY (2026-08-21). Energy read off what each track
+  // actually is: the lullabies and the porch-sitting ones carry the night, the
+  // thumping ones carry a full house.
+  { src: "music/grease-man.mp3", name: "GREASE MAN", e: 0 },
+  { src: "music/frog-ledger.mp3", name: "FROG LEDGER", e: 0 },
+  { src: "music/front-porch.mp3", name: "FRONT PORCH", e: 0 },
+  { src: "music/island-sand.mp3", name: "ISLAND SAND", e: 1 },
+  { src: "music/raster-beach.mp3", name: "RASTER BEACH", e: 1 },
+  { src: "music/train-whistle.mp3", name: "TRAIN WHISTLE", e: 1 },
+  { src: "music/peenball.mp3", name: "PEENBALL", e: 2 },
+  { src: "music/power-limbo.mp3", name: "POWER LIMBO", e: 2 },
+  { src: "music/beach-volleyball-start-screen.mp3", name: "BEACH VOLLEYBALL", e: 1, role: "title" },
+  { src: "music/you-win-game-over.mp3", name: "YOU WIN/GAME OVER", e: 1, role: "end" },
 ];
+// WHAT THE TOWN IS DOING, as one number the picker can match a track to.
+// Deliberately read off things a player can SEE - the clock, the light, and how
+// many people are on the promenade - so the music agreeing with the town is
+// something you notice rather than something you are told.
+function targetEnergy() {
+  if (typeof darkness === "function" && darkness() > 0.6) return 0;   // after dark: the town is asleep
+  if (typeof townOpen === "function" && !townOpen()) return 0;        // before the shutters go up
+  const crowd = (typeof customers !== "undefined" ? customers : []).filter(k => k && !k.gone).length;
+  return crowd >= 6 ? 2 : crowd >= 2 ? 1 : 0;
+}
+// ...and the track for it. Never a roled track, never the one just played, and
+// it falls back through the neighbouring energies rather than going silent -
+// a town with no lively track left still gets music, just calmer music.
+function pickTrack() {
+  const want = targetEnergy();
+  for (const d of [0, 1, 2, 3]) {
+    const pool = [];
+    for (let i = 0; i < PLAYLIST.length; i++) {
+      const t = PLAYLIST[i];
+      if (t.role || i === trackIdx) continue;
+      if (Math.abs((t.e == null ? 1 : t.e) - want) === d) pool.push(i);
+    }
+    if (pool.length) return pool[(Math.random() * pool.length) | 0];
+  }
+  return trackIdx;
+}
+function roleTrack(role) {
+  for (let i = 0; i < PLAYLIST.length; i++) if (PLAYLIST[i].role === role) return i;
+  return -1;
+}
 let musicOn = false, music = null, muted = false;   // opt-IN for new players (SFX stays on)
 let musNudges = 0, musNudged = false;               // invite, don't nag: gives up after 3 sessions
 function toggleMute() {
@@ -5532,11 +5664,22 @@ function playTrack(i) {
   const t = PLAYLIST[trackIdx];
   music = new Audio(t.src);
   music.volume = 0.55;
-  music.addEventListener("ended", () => { music = null; if (musicOn) playTrack(trackIdx + 1); });
+  // WHAT FOLLOWS A TRACK IS CHOSEN, NOT COUNTED. The next one is picked to
+  // match what the town is doing when this one runs out - see pickTrack.
+  music.addEventListener("ended", () => { music = null; if (musicOn) playTrack(pickTrack()); });
   music.play().then(() => { if (!toast) toast = { text: "NOW PLAYING: " + t.name, t: 4 }; })   // don't stomp a live toast (e.g. the migration refund)
     .catch(() => { music = null; });
 }
-function startMusic() { if (!music && musicOn && !muted) playTrack(trackIdx); }
+function startMusic() { if (!music && musicOn && !muted) playTrack(pickTrack()); }
+// THE TWO MOMENTS THAT OWN THEIR OWN MUSIC. Called from the screens that mean
+// them; each one only interrupts if it is not already the thing playing, so a
+// 31-second sting is not restarted every frame of the ending it belongs to.
+function playRole(role) {
+  const i = roleTrack(role);
+  if (i < 0 || !musicOn || muted) return;
+  if (music && trackIdx === i) return;
+  playTrack(i);
+}
 function toggleMusic() {
   musicOn = !musicOn;
   if (!musicOn && music) { music.pause(); music = null; } else if (musicOn) startMusic();
@@ -5726,6 +5869,11 @@ function save() {
     coins, lifetime, lv, day, tmin, lastRentDay, gameOver, memorials, rep, townCatch, t: nowMs(),   // (no `rate`: nothing accrues offline)
     bankrupt, credit: { bal: Math.round(credit.bal), warned: credit.warned },
     won, winRec,   // the ferry ending, snapshotted: a reloaded win reads identically
+    // ONE WALLET (see defineTill). A save written before this kept a shop's
+    // TILL and its owner's POCKET as two separate piles; a save written after
+    // has one number in two places. The loader must tell them apart or it
+    // either destroys a till or doubles it, so the world stamps itself.
+    _oneWallet: 1,
     dayLog: (window.dayLog || []).slice(-6),   // keeps the forecaster warm across reloads
     personas: crabs.map(c => c.p),
     npc: { tills: { sudsy: OWNERS.sudsy.till },
@@ -5889,12 +6037,12 @@ function load(slot) {
   if (s.owners) for (const k in s.owners) {
     const so = s.owners[k];
     if (!so || typeof so !== "object" || k === "player") continue;
-    OWNERS[k] = { id: k, name: String(so.name || k).toUpperCase().slice(0, 12),
+    OWNERS[k] = defineTill({ id: k, name: String(so.name || k).toUpperCase().slice(0, 12),
       till: Math.max(0, Math.round(+so.till || 0)), credit: Math.max(0, Math.round(+so.credit || 0)),
       darkT: Math.max(0, Math.min(9, +so.darkT || 0)),
       // a save written before willing sellers moved onto the owner: REEF was
       // the only one, and BIZ.sellable was the whole of it
-      soft: so.soft != null ? !!so.soft : k === "reef" };
+      soft: so.soft != null ? !!so.soft : k === "reef" });
   }
   if (s.bizOwner) for (const b in s.bizOwner) {
     if (!BIZ[b]) continue;
@@ -5917,7 +6065,10 @@ function load(slot) {
   if (s.bizStrike) for (const b in s.bizStrike) if (BIZ[b])
     bizStrike[b] = Math.max(0, Math.min(SALE_CFG.STRIKES - 1, Math.round(+s.bizStrike[b] || 0)));
   if (s.npc) {
-    if (s.npc.tills && s.npc.tills.sudsy != null) OWNERS.sudsy.till = s.npc.tills.sudsy;
+    // into the BACKING number, never through the accessor: the crab personas
+    // have not loaded yet, so writing `till` here would land in a wallet that
+    // is about to be overwritten. The reconcile below settles it.
+    if (s.npc.tills && s.npc.tills.sudsy != null) OWNERS.sudsy._held = s.npc.tills.sudsy;
     if (s.npc.credit && s.npc.credit.sudsy) {
       OWNERS.sudsy.credit = s.npc.credit.sudsy.bal || 0;
       OWNERS.sudsy.darkT = s.npc.credit.sudsy.darkT || 0;
@@ -5955,6 +6106,24 @@ function load(slot) {
     if (Array.isArray(s.npc.personas))
       npcs = npcs.filter(n => (preVis && n.p.owner === "reef")
         || s.npc.personas.some(sp => sp && sp.name === n.p.name));
+  }
+  // ONE WALLET, RECONCILED NOW THE CRABS EXIST. Until here every owner's money
+  // sits in `_held` and every crab's in their persona.
+  //   - A save from BEFORE the merge kept them apart, so they really are
+  //     different money and the till is ADDED to the pocket: same total, one
+  //     place, nothing lost and nothing conjured.
+  //   - A save from AFTER is one number written twice, so the pocket already
+  //     holds it and the backing is dropped.
+  // An owner with no living crab keeps `_held` either way, because a lease
+  // between hands still has money behind it.
+  {
+    const preMerge = !s._oneWallet;
+    for (const k in OWNERS) {
+      const c = ownerCrabOf(k);
+      if (!c) continue;
+      if (preMerge) c.p.wallet = Math.max(0, (c.p.wallet || 0) + (OWNERS[k]._held || 0));
+      OWNERS[k]._held = 0;
+    }
   }
   jobBoard = Array.isArray(s.board) ? s.board : [];
   // pre-toggle saves had music on by default - keep their experience
@@ -6835,13 +7004,9 @@ function updateSchedule(c, dt) {
       beginErrand(c, e, false);   // a fisher's water stop is the pier tap, ten paces off the rail
     } else c.errandCd = 3;
   }
-  // owner-operators top their pocket up from the till
-  if (c.p.npc) {
-    const o = OWNERS[c.p.owner];
-    const need = c.p.homeless ? 60 : 15;   // save up for a place of her own
-    if (o && c.p.wallet < need && o.till >= 90) { o.till -= 30; c.p.wallet += 30; }
-    else if (o && c.p.wallet < 15 && o.till >= 30) { o.till -= 30; c.p.wallet += 30; }
-  }
+  // (an owner-operator used to top her pocket up from her till here. One
+  // wallet: the shop's money is already in her pocket, so this was moving
+  // money from an account to itself.)
   // off-duty errands, while town is open and it's not almost shift time
   if (c.errandCd > 0) c.errandCd -= dt;
   // A SICK DAY IS NOT A SHIFT (Matt, 2026-08-19: "I feel like sick crabs dont
@@ -10183,6 +10348,11 @@ cv.addEventListener("click", (ev) => {
   }
   // panel
   if (p.y >= PANEL_Y) {
+    // THE TWO SCREEN CHIPS ANSWER FIRST. They live in the crew row now (see
+    // navRects), at its right-hand end, so they must be tested before the crew
+    // tiles that share that band - otherwise a tap on MANAGE selects whichever
+    // crab the tiles think is under it.
+    if (navTapChip(p)) return;
     if (p.y < TAB_Y - 1) {
       // ONE UNBROKEN CHAIN, HIGHEST x FIRST, and every band matches the thing
       // drawn in it. Written out as boundaries rather than a `>` ladder with a
@@ -10210,7 +10380,7 @@ cv.addEventListener("click", (ev) => {
       for (const b of BUTTONS)
         if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) { tapShopButton(buttonKey(b)); return; }
     } else if (tab === "crew") {   // menu tab: no invisible crew cards to click
-      for (let i = 0; i < crabs.length; i++) {
+      for (let i = 0; i < crewTilesShown(crabs.length); i++) {
         const bx = 4 + i * CARD_STEP;
         if (p.x >= bx && p.x < bx + CARD && p.y >= ROW_Y && p.y < ROW_Y + CARD) {
           followIdx = followIdx === i ? -1 : i; followNpc = null; followCust = null;
@@ -10221,8 +10391,8 @@ cv.addEventListener("click", (ev) => {
     return;
   }
   // THE NAV STRIP is painted over the bottom rows of the world, so it answers
-  // for them: its chips first, then the map, then the town underneath.
-  if (navTapChip(p)) return;
+  // for them: the map, then the town underneath. (Its CHIPS moved into the
+  // panel and are answered there - see the panel branch above.)
   if (navTrackHit(p)) { navJumpTo(p.x); sfx.ding(); return; }
   // follow-card job toggle
   if (followIdx >= 0 && !followNpc
@@ -10371,7 +10541,7 @@ cv.addEventListener("contextmenu", (ev) => {
 addEventListener("keydown", (e) => {
   if (e.key === "m") { toggleMute(); if (!muted) sfx.ding(); }
   if (e.key === "n") toggleMusic();
-  if (e.key === "b" && musicOn) playTrack(trackIdx + 1);   // next track
+  if (e.key === "b" && musicOn) playTrack(pickTrack());    // skip: another one that fits
   if (e.key === "f") ffMode = (ffMode + 1) % 4;            // fast-forward 1x/2x/3x/6x
   // [ and ] step the selection through the town, exactly what the little crab
   // cycler's chevrons do - the camera comes along, unlike an arrow-key pan
@@ -11671,19 +11841,40 @@ const NAV_MAP = { x: 0, y: PANEL_Y - NAV_H, w: W, h: NAV_H };
 // the right building. They sit on the LEFT of the chip row above the map,
 // because the RIGHT of that row is already spoken for: the debt and bankruptcy
 // warnings stack up from there.
+// THE TWO SCREENS LIVE IN THE PANEL NOW, beside the crew tiles (Matt,
+// 2026-08-20: "we can remove the help button; and move all 3 of those buttons
+// to bottom of screen near the character select thing").
+//
+// They used to sit on the world's bottom-left, over the sand, which put two
+// controls inside the picture. Stacked at the right-hand end of the crew row
+// they are next to the other thing a player picks with a thumb, and the world
+// is left to be a world. HELP is GONE from the chip row - the card is still
+// reachable on H, on ?, and from HOW TO PLAY on the title screen.
+//
+// The crew tiles grow left-to-right from x4 at CARD_STEP each, so the chips
+// take the right-hand end: seven crew reach x193 and the chips start at 214.
+const NAV_CHIP_W = 40;
+// HOW MANY CREW TILES FIT BEFORE THE CHIPS. The tiles grow left-to-right from
+// x4 at CARD_STEP each and the MANAGE/TOWN chips now hold the right-hand end of
+// that same row, so a big enough crew would run underneath them: MEASURED, nine
+// crew reach x244 against a chip edge at x214. One reader for the draw and the
+// hit test, so a tile that is not painted can never be clicked either.
+function crewTilesShown(n) {
+  const limit = W - NAV_CHIP_W - 4;
+  let fit = 0;
+  while (fit < n && 4 + fit * CARD_STEP + CARD <= limit) fit++;
+  // ...and if any crab is left out, the LAST slot is given over to saying so.
+  // A roster that silently stops at six is a roster that lies about the size of
+  // your crew - and the crabs it drops are still on the payroll, still on the
+  // bill, and still reachable with [ and ] or the cycler on their own card.
+  return fit < n ? Math.max(0, fit - 1) : fit;
+}
 function navRects() {
-  const cy = NAV_MAP.y - NAV_CHIP_H - 1;
-  const mw = smallTextWidth("MANAGE") + 8, tw = smallTextWidth("TOWN") + 8, hw = smallTextWidth("HELP") + 8;
+  const x = W - NAV_CHIP_W - 2;
   return {
     map: NAV_MAP,
-    manage: { x: 2, y: cy, w: mw, h: NAV_CHIP_H },
-    town: { x: 4 + mw, y: cy, w: tw, h: NAV_CHIP_H },
-    // HELP sits third because it is the one you need least often and the one
-    // you need most badly. Its x is a CONSTANT (both labels to its left are
-    // literals), so it does not move when a player with no shop left loses the
-    // other two - see navChipsLive: MANAGE and TOWN need a business to open,
-    // and the help card needs nothing at all.
-    help: { x: 6 + mw + tw, y: cy, w: hw, h: NAV_CHIP_H },
+    manage: { x, y: ROW_Y, w: NAV_CHIP_W, h: NAV_CHIP_H },
+    town: { x, y: ROW_Y + NAV_CHIP_H + 2, w: NAV_CHIP_W, h: NAV_CHIP_H },
   };
 }
 // world x <-> strip x. Rounded on the way out so a building's block and its
@@ -11764,7 +11955,6 @@ function navTapChip(p) {
   const hit = (r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
   // HELP first, and on navLive rather than navChipsLive: a player who has lost
   // every shop can still ask what happened.
-  if (hit(R.help)) { toggleHelp(); return true; }
   if (!navChipsLive()) return false;
   if (hit(R.manage)) {
     // WHICH SHOP? The one you are looking at, if you own it - the chip answers
@@ -11855,23 +12045,25 @@ function drawNav() {
     const px2 = Math.max(m.x, Math.min(m.x + m.w - 1, sx(sel.x + 8)));
     rect(ctx, px2, m.y + 2, 1, 1, [255, 255, 255]);
   }
-  // ---- and the two screens that used to be buildings, plus the card that
-  // explains the other two
-  const chip = (r, label, hot) => {
+}
+// ...and the two chips, drawn AFTER the panel because they now sit inside it.
+// (drawNav runs before drawPanel - it is the map, and the map is under the
+// HUD - so a chip drawn there at panel coordinates would be painted over.)
+function drawNavChips() {
+  if (!navLive() || !navChipsLive()) return;
+  const R = navRects();
+  const chip = (r, label) => {
     rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
-    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, hot ? [255, 216, 96] : [235, 225, 205]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [235, 225, 205]);
     smallText(ctx, label, r.x + ((r.w - smallTextWidth(label)) >> 1), r.y + 3, [90, 60, 40]);
   };
-  if (navChipsLive()) { chip(R.manage, "MANAGE"); chip(R.town, "TOWN"); }
-  // A TOWN THAT HAS NEVER OPENED THE HELP PULSES THE CHIP, once, on day one -
-  // exactly the shape of the music invite two rows down, and for the same
-  // reason: a chip nobody has ever pressed is a chip nobody knows is there.
-  // It stops the moment it is opened (helpSeen persists in the save), so it
-  // costs a returning player nothing.
-  const invite = !helpSeen && day <= 1;
-  chip(R.help, "HELP", invite && (time % 2) < 1.2);
-  if (invite && !helpNudged && !toast && reportT <= 0 && tmin > 7 * 60 + 20) {
-    toast = { text: "NEW HERE? TAP HELP - OR PRESS H", t: 7 };
+  chip(R.manage, "MANAGE");
+  chip(R.town, "TOWN");
+  // THE HELP INVITE OUTLIVED ITS CHIP. A player who has never opened the card
+  // still gets told once, on day one, that it is there - it just names the KEY
+  // now instead of pointing at a button that no longer exists.
+  if (!helpSeen && day <= 1 && !helpNudged && !toast && reportT <= 0 && tmin > 7 * 60 + 20) {
+    toast = { text: "NEW HERE? PRESS H FOR HELP", t: 7 };
     helpNudged = true;
   }
 }
@@ -12016,7 +12208,16 @@ function drawPanel() {
       text(ctx, maxed ? "MAX" : "$" + fmt(cost), b.x + 3, b.y + (TALL ? 14 : 10), maxed ? [160, 145, 135] : afford ? [80, 45, 20] : [140, 125, 115], 5);
     }
   } else {
-    for (let i = 0; i < crabs.length; i++) {
+    const shown = crewTilesShown(crabs.length);
+    if (shown < crabs.length) {   // the overflow marker, in the slot it cost
+      const bx = 4 + shown * CARD_STEP, hidden = crabs.length - shown;
+      rect(ctx, bx, ROW_Y, CARD, CARD, [30, 20, 20]);
+      rect(ctx, bx + 1, ROW_Y + 1, CARD - 2, CARD - 2, [60, 48, 44]);
+      const t1 = "+" + hidden;
+      smallText(ctx, t1, bx + ((CARD - smallTextWidth(t1)) >> 1), ROW_Y + 6, [255, 216, 96]);
+      smallText(ctx, "[ ]", bx + ((CARD - smallTextWidth("[ ]")) >> 1), ROW_Y + 14, [150, 140, 160]);
+    }
+    for (let i = 0; i < shown; i++) {
       const c = crabs[i], bx = 4 + i * CARD_STEP;
       const picked = sel === c;
       rect(ctx, bx, ROW_Y, CARD, CARD, picked ? [255, 230, 120] : [30, 20, 20]);
@@ -14975,6 +15176,8 @@ function frame(now) {
     return;
   }
   if (screen === "title") {
+    // THE START SCREEN HAS ITS OWN TRACK, and it is the one named after it.
+    playRole("title");
     if (newConfirmT > 0) newConfirmT -= dt;
     // attract mode: slow ping-pong pan across the town
     const span = WORLD_W - W, s = (time * 9) % (2 * span);
@@ -15246,9 +15449,16 @@ function frame(now) {
   drawFollowCard();
   drawCycler();   // < crab > : step the selection (and the camera) through the town
   drawPanel();
+  drawNavChips();      // MANAGE / TOWN sit IN the panel now, so they go on after it
   drawShopTip();       // hangs off the bottom of the world, pointing at the grid it explains
   drawHireCard();
   if (!boardView && !manage && !saveView && !dossier && !helpView && departT <= 0) drawToast();   // reading surfaces own the screen
+  // ...AND SO DOES THE END, either kind of it: the ferry ending and the
+  // bankruptcy card are the same thirty-one seconds of somebody telling you how
+  // it went. (Placed with the draw rather than at the moment of death because a
+  // town can also be LOADED into its own ending - see winRec - and a reloaded
+  // win should sound like the one you played.)
+  if (gameOver || won) playRole("end");
   if (gameOver) drawGameOver();
   drawSaveScreen();
   drawHelp();          // the last word: HOW TO PLAY sits over everything, including game over
