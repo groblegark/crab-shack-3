@@ -1967,6 +1967,69 @@ function settleCreditLine(bal, funds, due) {
   }
   return r;
 }
+// ---------------------------------------------------------------- BACK PAY
+// (Matt, 2026-08-20: "not making salary needs to be a real alternative to
+// going bankrupt; probably via a choice mechanic at the critical moment, 'take
+// out loan to pay salary' kind of button.")
+//
+// MISSING PAYDAY ALREADY HAPPENED - it just cost nothing and said nothing. The
+// settlement paid whoever the till could cover and logged a peril line for the
+// rest, and that was the end of it: no debt, no grievance, no choice.
+//
+// The two bills a town owes are not the same KIND of debt, and this is the
+// whole mechanic:
+//   * RENT is owed to a landlord who evicts you. That is the cliff, and it is
+//     unchanged - the credit line draws for it and running out is bankruptcy.
+//   * WAGES are owed to crabs who can QUIT. Skipping them is survivable, and
+//     what it costs is your crew.
+// So there is no bankruptcy for a missed payday. There is a debt you carry
+// (p.owed), a grievance that does not shed that night (WAGE_CFG.MISSED), and a
+// button on the report offering to borrow the difference. NOT pressing it IS
+// the alternative Matt asked for - inaction is a choice here, not a default.
+function backPayDue() {
+  let s = 0;
+  for (const c of crabs) s += Math.max(0, Math.round(c.p.owed || 0));
+  return s;
+}
+function creditRoom() { return Math.max(0, creditLimit() - credit.bal); }
+function wageLoanWhy() {
+  const due = backPayDue();
+  if (due <= 0) return "NOBODY IS OWED A PENNY";
+  // THE BANK IS NOT A WISH. The line is the same one the rent draws on, so a
+  // town that has already borrowed its way through a week cannot borrow its
+  // way out of payday either - and then missing it really is the only road.
+  if (creditRoom() < due) return "THE BANK STOPS AT $" + fmt(creditLimit());
+  return null;
+}
+// Pay off everything owed, on the line. Money is CONSERVED: the draw adds to
+// coins and to credit.bal (worldMoney nets them), and the payout moves coins
+// into wallets - nothing is minted anywhere.
+function takeWageLoan() {
+  if (wageLoanWhy()) return false;
+  const due = backPayDue();
+  credit.bal += due; coins += due;
+  let n = 0;
+  for (const c of crabs) {
+    const owed = Math.max(0, Math.round(c.p.owed || 0));
+    if (owed <= 0) continue;
+    coins -= owed; c.p.wallet += owed; c.p.owed = 0; n++;
+    c.p.gripe = Math.max(0, (c.p.gripe || 0) - WAGE_CFG.MISSED * 2);
+    // ...and the refusal comes off with it. A crab who walked out over pay and
+    // has now been paid in full has nothing left to walk out about, and making
+    // them sulk through a shift the player already bought would be a bug.
+    if (c.p.walkoutWhy === "pay") { c.p.walkout = null; c.p.walkoutWhy = null; }
+    crabLog(c, "money", "GOT $" + owed + " IN BACK PAY", 0);   // DIARY
+    popText("PAID!", c.x - 4, FLOOR_Y - 40, [140, 255, 160]);
+  }
+  today.moved.push("BORROWED $" + fmt(due) + " TO MAKE PAYDAY - " + n + " CRAB" + (n === 1 ? "" : "S") + " PAID");
+  toast = { text: "BORROWED $" + fmt(due) + " TO MAKE PAYDAY", t: 6 };
+  if (window._stats) {
+    window._stats.wageLoans = (window._stats.wageLoans || 0) + 1;
+    window._stats.wageLoaned = (window._stats.wageLoaned || 0) + due;
+  }
+  sfx.buy(); save();
+  return true;
+}
 function creditDueTonight() {   // cash the bank will auto-collect at 20:00
   if (credit.bal <= 0) return 0;
   const int2 = Math.ceil(credit.bal * CREDIT_CFG.RATE);
@@ -4264,6 +4327,11 @@ const WAGE_CFG = {
   CALM: 0.34,         // grievance shed per night when the pay is fair (3 good nights clears a bad week)
   MAKEUP: 3,          // ...and much faster when the fix is generous: a real raise buys peace overnight
   CAP: 1.3,           // grievance never banks more than a third of a night past LEAVE, so a fixed wage is FELT
+  MISSED: 0.6,        // ...and a PAYDAY THAT DID NOT ARRIVE AT ALL, which is a
+                      // different complaint from a wage being low: it does not
+                      // shed on the night it happens, and two of them in a row
+                      // clear LEAVE. Miss payday once and you get away with it;
+                      // miss it twice and the crew stop turning up.
   GRUMBLE: 0.35,      // a quip, a mood, a line on the dossier
   WARN: 0.70,         // a named toast and a day-report line: they are asking around
   LEAVE: 1.0,         // NPC staff walk; crew refuse the shift
@@ -4491,12 +4559,23 @@ function runWageRelations() {
     if (c.p.wageJob !== c.p.job) {   // a new job restarts the clock: nobody resents a boss they met yesterday
       c.p.wageJob = c.p.job; c.p.wageDay = day; c.p.gripe = 0; continue;
     }
-    if (day - (c.p.wageDay || 0) < WAGE_CFG.GRACE) continue;
+    // GRACE COVERS A LOW RATE, NEVER A MISSING PACKET. Nobody resents a boss
+    // they met yesterday over the going rate; everybody resents not being paid.
+    const stiffed = !!c._stiffed;
+    if (day - (c.p.wageDay || 0) < WAGE_CFG.GRACE && !stiffed) continue;
     const r = payRatio(c), was = c.p.gripe || 0, rate = Math.round(wageRate(c));
     // fair pay sheds grievance; a GENEROUS fix sheds it fast, so a player who
     // puts it right sees the crab back on the clock the next morning rather
-    // than sulking through a week they already paid for
-    c.p.gripe = Math.max(0, Math.min(WAGE_CFG.CAP, r < 1 ? was + (1 - r) * WAGE_CFG.GAIN
+    // than sulking through a week they already paid for.
+    //
+    // ...AND A NIGHT THEY WERE PAID NOTHING GROWS IT WHATEVER THE RATE SAYS.
+    // This runs AFTER the settlement's wage loop, so without the branch a
+    // stiffed crab on a generous rate would shed CALM on the very night the
+    // till skipped them - the books would read "well paid" on a night nobody
+    // got a penny.
+    c.p.gripe = Math.max(0, Math.min(WAGE_CFG.CAP,
+      stiffed ? was + WAGE_CFG.MISSED
+      : r < 1 ? was + (1 - r) * WAGE_CFG.GAIN
       : was - WAGE_CFG.CALM - (r - 1) * WAGE_CFG.MAKEUP));
     const g = c.p.gripe;
     // ---- the warnings, in order, each fired once on the way up
@@ -4877,6 +4956,10 @@ function ferryKnown() { return won || UPS.arcade.lvl > 0; }
 let memorials = [];   // { x, name } - the town remembers
 let today = newDayLog();
 let report = null, reportT = 0, dossier = null, boardView = false, dossierHit = {};
+// WHERE THE BORROW BUTTON IS, written by drawReport and read by the tap
+// handler - the same idiom as dossierHit. Null whenever there is nothing owed
+// or the bank will not cover it, so the tap can never fire on a dead button.
+let reportLoanR = null;
 let manage = null;   // key of the player-owned business whose MANAGEMENT card is open
 let jobBoard = [], hireDay = 0;   // postings: {biz, wage, day}
 function newDayLog() {
@@ -10569,7 +10652,24 @@ cv.addEventListener("click", (ev) => {
     }
     boardView = false; return;
   }
-  if (reportT > 0) { reportT = 0; return; }
+  if (reportT > 0) {
+    // THE BUTTON IS ANSWERED FIRST, because every other tap on this card means
+    // "carry on" - and a borrow chip that shares its click with the dismissal
+    // would be a button you can only press by accident. The card stays UP
+    // afterwards so the player watches the debt land on the same page that
+    // offered it.
+    const rp = evPos(ev);
+    if (reportLoanR && !wageLoanWhy()
+        && rp.x >= reportLoanR.x && rp.x < reportLoanR.x + reportLoanR.w
+        && rp.y >= reportLoanR.y && rp.y < reportLoanR.y + reportLoanR.h) {
+      if (takeWageLoan() && report) {
+        report.backPaid = (report.backPaid || 0) + (report.owed || 0);
+        report.owed = 0; report.debt = Math.round(credit.bal);
+      }
+      return;
+    }
+    reportT = 0; return;
+  }
   if (departT > 0) { departTapped(); return; }   // ...and the day's second page pages, then closes
   startMusic();
   const p = evPos(ev);
@@ -14088,8 +14188,15 @@ function drawReport() {
     + (report.tipsShared ? 1 : 0) + (report.bused ? 1 : 0)   // the table-service ledger
     + (report.rival || []).length                             // ...and the rivalry
     + (report.hallPaid ? 1 : 0) + (report.hallGot ? 1 : 0)     // ...and the town hall's two
+    + (report.backPaid ? 1 : 0) + (report.missedN ? 1 : 0)     // ...and payday, if it went wrong
     + 1;                                                       // ...and the mayor's own line
-  const w2 = 176, x = ((W - w2) / 2) | 0, y = 24, h2 = 118 + creditLines * 8 + (report.off ? 8 : 0);
+  // THE BUTTON ONLY EXISTS WHILE THERE IS SOMETHING TO PRESS IT FOR, and it
+  // needs a row of its own plus a line of its own to say what it costs.
+  const owedNow = backPayDue();
+  const loanWhy = owedNow > 0 ? wageLoanWhy() : "NOBODY IS OWED A PENNY";
+  const payRow = owedNow > 0 ? 22 : 0;
+  const w2 = 176, x = ((W - w2) / 2) | 0, y = 24,
+    h2 = 118 + creditLines * 8 + (report.off ? 8 : 0) + payRow;
   ctx.fillStyle = "rgba(16,12,30,0.55)";
   ctx.fillRect(0, 0, W, PANEL_Y);
   rect(ctx, x - 2, y - 2, w2 + 4, h2 + 4, [30, 20, 36]);
@@ -14108,6 +14215,8 @@ function drawReport() {
   if (report.bused) line("TABLES BUSED", report.bused, [70, 90, 130]);
   line("WALKED OUT ANGRY", report.rage, report.rage > 2 ? [180, 60, 60] : [110, 100, 110]);
   line("WAGES PAID", "-$" + fmt(report.wages), [150, 70, 60]);
+  if (report.backPaid) line("BACK PAY CLEARED", "-$" + fmt(report.backPaid), [40, 110, 60]);
+  if (report.missedN) line("PAYDAY MISSED", "-$" + fmt(report.missedPay), [180, 60, 60]);
   line("RENT", "-$" + fmt(report.rent), [150, 70, 60]);
   if (report.drew) line("DREW ON CREDIT", "+$" + fmt(report.drew), [200, 130, 40]);
   if (report.interest) line("LOAN INTEREST", "+$" + fmt(report.interest), [180, 60, 60]);
@@ -14151,6 +14260,29 @@ function drawReport() {
   for (const n of report.sick) smallText(ctx, n + " FELL ILL", x + 6, ly, [120, 150, 90]), ly += 7;
   for (const n of report.recovered) smallText(ctx, n + " IS BACK ON THEIR CLAWS", x + 6, ly, [40, 110, 60]), ly += 7;
   for (const m of report.moved) smallText(ctx, m, x + 6, ly, [110, 100, 110]), ly += 7;
+  // ---- THE CHOICE, at the critical moment and nowhere else on this card.
+  // It is a BUTTON, not a confirmation: pressing it borrows, and NOT pressing
+  // it is the other half of the decision rather than a dialog you dismissed.
+  // The card says what the money costs either way - the debt it adds on one
+  // side, the crew it costs on the other - because a choice whose two prices
+  // are not both on screen is not a choice the player actually made.
+  reportLoanR = null;
+  if (owedNow > 0) {
+    const by = y + h2 - 30;
+    smallText(ctx, "$" + fmt(owedNow) + " IN WAGES IS OWED", x + 6, by, [180, 60, 60]);
+    if (loanWhy) {
+      smallText(ctx, fitSmall(loanWhy, w2 - 12), x + 6, by + 8, [150, 130, 120]);
+    } else {
+      const r2 = { x: x + 6, y: by + 7, w: 96, h: 13 };
+      reportLoanR = r2;
+      rect(ctx, r2.x, r2.y, r2.w, r2.h, [30, 20, 36]);
+      rect(ctx, r2.x + 1, r2.y + 1, r2.w - 2, r2.h - 2, [190, 140, 80]);
+      const lb = "BORROW $" + fmt(owedNow);
+      smallText(ctx, lb, r2.x + ((r2.w - smallTextWidth(lb)) >> 1), r2.y + 3, [40, 24, 16]);
+      smallText(ctx, fitSmall("OR LET IT RIDE - THEY WILL MIND", w2 - 112),
+        r2.x + r2.w + 4, r2.y + 3, [150, 130, 120]);
+    }
+  }
   if (((time * 1.5) | 0) % 2) smallText(ctx, "CLICK TO CARRY ON", x + 52, y + h2 - 9, [150, 130, 120]);
 }
 
@@ -15137,7 +15269,38 @@ function frame(now) {
     for (const c of crabs) c.p.walletPrev = c.p.wallet;
     (window.dayLog = window.dayLog || []).push({ day, close: Math.round(coins) });
     // 1. wages: pay every crab you can afford
-    let wages = 0;
+    //
+    // THE RENT IS RESERVED BEFORE A PENNY OF PAYROLL GOES OUT, and that one
+    // line is what makes missing salary an ALTERNATIVE to bankruptcy rather
+    // than a step on the way to it. Before it, the wage loop spent the till
+    // down to nothing and the landlord's bill hit an empty drawer - so paying
+    // your crew was itself a way to get evicted, and the player never got the
+    // choice because the money was already gone.
+    //
+    // Now the cliff and the soft debt are ranked the way the world ranks them:
+    // the landlord evicts you, so he is paid first; the crew can only quit, so
+    // they are paid out of what is left and carry the rest as back pay. On any
+    // ordinary night the till clears both and this reserve does nothing at all.
+    const rentReserve = Math.max(0, Math.round(totalRent()));
+    let wages = 0, backPaid = 0, missedPay = 0, missedN = 0;
+    // BACK PAY COMES FIRST, and it comes before tonight's wages on purpose: a
+    // crab who was stiffed on Tuesday and the till recovers on Wednesday is
+    // owed Tuesday, not given a fresh start. It also means the debt clears
+    // itself the moment the town can afford it - a player who missed the
+    // report card has not lost the ability to put it right, only the choice
+    // about WHEN.
+    for (const c of crabs) {
+      c._stiffed = false;
+      const owed = Math.max(0, Math.round(c.p.owed || 0));
+      if (owed <= 0 || coins - rentReserve < owed) continue;
+      coins -= owed; c.p.wallet += owed; c.p.owed = 0;
+      wages += owed; backPaid += owed;
+      c.p.gripe = Math.max(0, (c.p.gripe || 0) - WAGE_CFG.MISSED * 2);
+      if (c.p.walkoutWhy === "pay") { c.p.walkout = null; c.p.walkoutWhy = null; }
+      crabLog(c, "money", "GOT $" + owed + " IN BACK PAY", 0);   // DIARY
+      popText("BACK PAY!", c.x - 10, FLOOR_Y - 40, [140, 255, 160]);
+      today.moved.push(c.p.name + " WAS PAID $" + owed + " IN BACK PAY");
+    }
     for (const c of crabs) {
       if (c.p.sick && !c.workedToday) continue;      // sick day: no work, no pay (a REQUIRED crab who worked is paid in full)
       // day off OR a walk-out: same rule - the bill dips, the wallet doesn't.
@@ -15145,7 +15308,7 @@ function frame(now) {
       if (awayToday(c) && !c.workedToday) continue;
       const prem = Math.round(otPayToday(c));        // overtime premium on top of the flat day
       const due = Math.round(basePayToday(c)) + prem;   // the day, priced by the hours contracted
-      if (coins >= due) {
+      if (coins - rentReserve >= due) {
         coins -= due; c.p.wallet += due; wages += due;
         crabLog(c, "money", "DREW $" + due + " IN WAGES", 0);   // DIARY
         if (prem > 0) {
@@ -15155,7 +15318,25 @@ function frame(now) {
             window._stats.otMin = (window._stats.otMin || 0) + Math.round(c.otMin || 0);
           }
         }
-      } else { crabLog(c, "peril", "WENT UNPAID - THE TILL WAS EMPTY", 0); popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]); }   // DIARY
+      } else {
+        // NOT PAID IS NOT FORGIVEN. It is a debt the town carries, a grievance
+        // that will not shed tonight, and - on the report card that is about to
+        // come up - an offer to borrow the difference.
+        c.p.owed = Math.max(0, Math.round(c.p.owed || 0)) + due;
+        c._stiffed = true;
+        missedPay += due; missedN++;
+        crabLog(c, "peril", "WENT UNPAID - $" + due + " OWED", 0);   // DIARY
+        popText("NO PAY?!", c.x, FLOOR_Y - 30, [255, 120, 120]);
+      }
+    }
+    if (missedN > 0) {
+      today.moved.push("PAYDAY MISSED - $" + fmt(missedPay) + " OWED TO "
+        + missedN + " CRAB" + (missedN === 1 ? "" : "S"));
+      if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+      if (window._stats) {
+        window._stats.paydayMissed = (window._stats.paydayMissed || 0) + 1;
+        window._stats.wagesOwed = (window._stats.wagesOwed || 0) + missedPay;
+      }
     }
     if (wages > 0) earnHist.push({ t: time, amt: -wages });
     // 2. house rent from each crab's own wallet; broke crabs move to the shelter
@@ -15462,6 +15643,7 @@ function frame(now) {
         bestN: 0, coins: Math.round(coins),
         tipsShared: Math.round(today.tipsShared || 0), bused: today.bused || 0,
         drew: fin.drew, interest: fin.interest, loanPaid: fin.paid, debt: Math.round(credit.bal),
+        backPaid, missedPay, missedN, owed: backPayDue(),
       };
       if (report.best) report.bestN = today.byCrab[report.best];
       reportT = 11;

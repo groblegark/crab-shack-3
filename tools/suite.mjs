@@ -10149,6 +10149,131 @@ scenario("a house limit is a competition policy, and the town reads it that way"
   return true;
 });
 
+// A NOTE ON THE FIXTURES BELOW: simlib's runDays(N) runs while `day <= N`, so
+// it is ABSOLUTE, not relative. A second runDays(2) after runDays(5) is a
+// silent no-op that returns instantly - which is exactly how the first three
+// attempts at this scenario "proved" that missing payday did nothing.
+scenario("missing payday costs the crew, not the lease", () => {
+  // MATT: "not making salary needs to be a real alternative to going bankrupt;
+  // probably via a choice mechanic at the critical moment."
+  //
+  // The two bills a town owes are different KINDS of debt. Rent is owed to a
+  // landlord who evicts you; wages are owed to crabs who can only quit. So the
+  // rent is RESERVED before a penny of payroll goes out, and what payroll
+  // cannot cover becomes back pay and grievance instead of an eviction.
+  const sim = createSim({ seed: 41 });
+  sim.runDays(5, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 1600"); } });
+  const nights = [];
+  sim.runDays(12, { tickEvery: 2, onTick: (G) => {
+    const d = +G("day");
+    // exactly the rent and not a penny more, held across the settlement
+    if (+G("tmin") > 19 * 60 + 30 && +G("lastRentDay") !== d) G(`coins = totalRent() + 5;`);
+    if (+G("lastRentDay") === d && d > 5 && !nights.some(n => n.day === d))
+      nights.push(JSON.parse(G(`JSON.stringify({ day, owed: backPayDue(), bankrupt, gameOver,
+        gripes: crabs.map(c => +(c.p.gripe || 0)),
+        refusing: crabs.filter(c => c.p.walkoutWhy === "pay").length })`)));
+  } });
+  if (nights.length < 3) return "the fixture never reached three settlements - runDays is ABSOLUTE";
+  const last = nights[nights.length - 1];
+  // 1. IT IS SURVIVABLE. That is the whole ask.
+  if (last.bankrupt || last.gameOver)
+    return `the town went bankrupt on a night it could pay its rent (day ${last.day})`;
+  // 2. IT IS NOT FREE. A debt is carried...
+  if (!(last.owed > 0)) return "nobody is owed a penny after a run of broke paydays";
+  // 3. ...and the crew mind, and eventually stop turning up.
+  const maxGripe = Math.max(...nights.flatMap(n => n.gripes));
+  if (!(maxGripe > 0)) return "a run of missed paydays raised nobody's grievance at all";
+  if (!nights.some(n => n.refusing > 0))
+    return `nobody ever refused a shift over pay across ${nights.length} missed paydays ` +
+      `(top grievance ${maxGripe.toFixed(2)}, LEAVE is 1)`;
+  const stats = JSON.parse(sim.G(`JSON.stringify(window._stats || {})`));
+  if (!(stats.paydayMissed > 0)) return "the missed paydays were never counted";
+  return true;
+});
+
+scenario("the wage loan clears the back pay, mints nothing, and calls off the refusal", () => {
+  // The button on the report. Money must be CONSERVED: the draw adds to coins
+  // AND to credit.bal (worldMoney nets them), then the payout moves coins into
+  // wallets. A loan that quietly minted money would be the same class of bug
+  // as the town fund minting bowls, and the same rule catches it.
+  // ONE missed payday, not a run of them. The line the loan draws on is the
+  // same one the rent uses and it is deliberately short - about a night's
+  // bills - so a town four broke paydays deep has a debt the bank will not
+  // touch, which is the NEXT scenario's subject. The button is a bridge over
+  // one bad night, and this is that night.
+  const sim = createSim({ seed: 42 });
+  sim.runDays(5, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 1600"); } });
+  sim.runDays(6, { tickEvery: 2, onTick: (G) => {
+    const d = +G("day");
+    if (+G("tmin") > 19 * 60 + 30 && +G("lastRentDay") !== d) G(`coins = totalRent() + 5;`);
+  } });
+  const owed = +sim.G("backPayDue()");
+  if (!(owed > 0)) return "the fixture never missed a payday, so there is nothing to borrow for";
+  if (owed > +sim.G("creditLimit()"))
+    return `one missed payday ($${owed}) already outruns the whole credit line ` +
+      `($${sim.G("creditLimit()")}) - the button could never be pressed even once`;
+  const got = JSON.parse(sim.G(`(() => {
+    credit.bal = 0; coins = 300;                 // room on the line, and a till to pay from
+    for (const c of crabs) if ((c.p.owed || 0) > 0) { c.p.walkout = day + 1; c.p.walkoutWhy = "pay"; }
+    const before = { world: Math.round(worldMoney()), debt: Math.round(credit.bal),
+      owed: backPayDue(), refusing: crabs.filter(c => c.p.walkoutWhy === "pay").length,
+      wallets: crabs.reduce((a, c) => a + c.p.wallet, 0) };
+    const why = wageLoanWhy(), ok = takeWageLoan();
+    return JSON.stringify({ before, why, ok, after: { world: Math.round(worldMoney()),
+      debt: Math.round(credit.bal), owed: backPayDue(),
+      refusing: crabs.filter(c => c.p.walkoutWhy === "pay").length,
+      wallets: crabs.reduce((a, c) => a + c.p.wallet, 0) } });
+  })()`));
+  if (got.why) return "the bank refused a loan it had room for: " + got.why;
+  if (!got.ok) return "takeWageLoan() returned false with room on the line";
+  if (got.after.owed !== 0) return `$${got.after.owed} still owed after the loan cleared it`;
+  if (got.after.world !== got.before.world)
+    return `the loan MINTED $${got.after.world - got.before.world} - worldMoney moved`;
+  if (got.after.debt !== got.before.debt + got.before.owed)
+    return `debt went ${got.before.debt} -> ${got.after.debt} for a $${got.before.owed} loan`;
+  if (!(got.after.wallets > got.before.wallets))
+    return "the crew are owed nothing and no richer - the money went somewhere else";
+  if (!(got.before.refusing > 0)) return "the fixture set no pay refusal to call off";
+  if (got.after.refusing !== 0)
+    return "a crab paid in full is still refusing tomorrow's shift over pay";
+  return true;
+});
+
+scenario("back pay is paid before tonight's wages, and the bank has a limit", () => {
+  // Two rules in one fixture because they share it. A crab stiffed on Tuesday
+  // and a till that recovers on Wednesday is owed TUESDAY - not given a fresh
+  // start - so the debt clears itself even for a player who never saw the
+  // card. And the line the rent draws on is the SAME line, so a town that has
+  // already borrowed its way through a week cannot borrow its way out of
+  // payday either: then missing it really is the only road left.
+  const sim = createSim({ seed: 43 });
+  sim.runDays(5, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 1600"); } });
+  sim.runDays(8, { tickEvery: 2, onTick: (G) => {
+    const d = +G("day");
+    if (+G("tmin") > 19 * 60 + 30 && +G("lastRentDay") !== d) G(`coins = totalRent() + 5;`);
+  } });
+  const owed = +sim.G("backPayDue()");
+  if (!(owed > 0)) return "the fixture never missed a payday";
+  // the bank's limit is real
+  const refused = sim.G(`(() => { credit.bal = creditLimit(); return String(wageLoanWhy()); })()`);
+  if (!refused || refused === "null")
+    return "the bank offered a loan with the line already exhausted";
+  if (refused.indexOf("BANK") < 0) return "an exhausted line gives no legible reason: " + refused;
+  // ...and a solvent night clears the debt on its own
+  const got = JSON.parse(sim.G(`(() => {
+    credit.bal = 0;
+    const owed0 = backPayDue(), walletsBefore = crabs.reduce((a, c) => a + c.p.wallet, 0);
+    return JSON.stringify({ owed0, walletsBefore });
+  })()`));
+  sim.runDays(11, { tickEvery: 20, onTick: (G) => { if (G("coins") < 2500) G("coins = 4000"); } });
+  const after = +sim.G("backPayDue()");
+  if (after !== 0)
+    return `a solvent town still owes $${after} of the $${got.owed0} it missed - back pay never cleared`;
+  const stats = JSON.parse(sim.G(`JSON.stringify(window._stats || {})`));
+  if (!(stats.paydayMissed > 0)) return "the fixture proved nothing - no payday was ever missed";
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

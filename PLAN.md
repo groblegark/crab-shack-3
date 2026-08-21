@@ -6968,3 +6968,83 @@ The grid is now 4 mechs × 5 rates × 7 pots × 5 floors × 5 limits = **3500
 platforms**, scored once an election. `allPlatforms()` prices the purse half
 once per (mech, rate, bowls) and shares it across the 25 floor/limit
 combinations, which is what keeps `buildBallot()` at **30ms**.
+
+## PAYDAY (Matt, 2026-08-20) — "not making salary needs to be a real alternative to going bankrupt"
+
+His words: *"probably via a choice mechanic at the critical moment, 'take out
+loan to pay salary' kind of button."*
+
+### It already happened. It just cost nothing and said nothing.
+
+The settlement paid whoever the till could cover and logged a peril line for
+the rest. No debt, no grievance, no choice, no mention on the report. Missing
+payday was **free**, which is why it was not an alternative to anything.
+
+### The mechanic: two bills, two kinds of debt
+
+This is the whole idea, and everything else falls out of it:
+
+- **RENT is owed to a landlord who evicts you.** That is the cliff, unchanged —
+  the credit line draws for it and running out is bankruptcy.
+- **WAGES are owed to crabs who can only quit.** Skipping them is survivable,
+  and what it costs you is your crew.
+
+So there is no bankruptcy for a missed payday. There is a debt you carry
+(`p.owed`), a grievance that will not shed that night (`WAGE_CFG.MISSED = 0.6`,
+so **two misses in a row clear LEAVE**), and a button on the report offering to
+borrow the difference. **Not pressing it IS the alternative** — inaction is a
+choice here, not a default you failed to dismiss.
+
+### The one line that made it work
+
+The wage loop ran BEFORE the rent, so payroll spent the till down to nothing
+and the landlord's bill hit an empty drawer. **Paying your crew was itself a
+way to get evicted**, and the player never got the choice because the money was
+already gone — the first fixture showed exactly this: rent covered, wages
+missed, bankrupt anyway.
+
+    const rentReserve = Math.max(0, Math.round(totalRent()));
+
+Rank the two bills the way the world ranks them: the landlord is paid first
+because he evicts; the crew are paid out of what is left and carry the rest.
+On any ordinary night the till clears both and the reserve does nothing.
+
+### What it looks like (seed 909, rent covered and never a penny more)
+
+    day 6   owed $23    still trading   CLAWDIA g0.60
+    day 7   owed $69    still trading   CLAWDIA g1.20 REFUSES d8   PINCHY g0.60
+    day 8   owed $92    still trading   PINCHY  g1.20 REFUSES d9
+    day 10  owed $115   still trading   PINCHY  g1.30 REFUSES d11
+
+A self-correcting rhythm falls out of it for free: a refusing crab is not owed
+that day, so their grievance decays, so they come back — and get stiffed again.
+The town survives and visibly rots, which is a death the player can see coming
+and act on, unlike a settlement that simply ends the run.
+
+### Balance: it costs about one day
+
+| | before | after |
+|---|---|---|
+| baseline | 0/16, median 11 | 0/16, median **12** |
+| growth A | 1/8, median 11 | 1/8, median 12 |
+| growth B | 1/8, median 12 | 1/8, median 13 |
+
+Survival COUNTS are unchanged; towns last about a day longer. That is the
+honest price of making a missed payday survivable, and it is small because the
+crew walking out kills the income that was keeping the town alive anyway.
+
+### The bank is not a wish
+
+The loan draws on the SAME line the rent uses, and that line is deliberately
+short (~a night's bills). One missed payday is about $46 against a $90 limit,
+so the button is a **bridge over one bad night** — a town four broke paydays
+deep has a debt the bank will not touch, and then missing it really is the only
+road left. `wageLoanWhy()` says which of the two it is.
+
+### And a fixture lesson, third time this session
+
+`simlib`'s **`runDays(N)` is ABSOLUTE** — it runs while `day <= N`. A second
+`runDays(2)` after `runDays(5)` is a silent no-op that returns instantly. The
+first three attempts at this fixture "proved" that missing payday did nothing,
+and all three were measuring a loop that never ran. Now in CLAUDE.md, and
+called out at the top of the payday scenarios.

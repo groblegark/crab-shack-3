@@ -11,6 +11,9 @@ numbers, backlog, and conventions. Don't duplicate it — update it there.
 - Corollary: if game.js starts using a new browser API, stub it in
   simlib.mjs (and the matching stubs in tools/headless.mjs) or the whole
   headless toolchain breaks.
+- **`runDays(N)` is ABSOLUTE, not relative** — it runs while `day <= N`. A
+  second `runDays(2)` after `runDays(5)` is a silent no-op that returns
+  instantly and proves nothing. Always pass the day you want to reach.
 
 ## Perf expectations
 - ~5–10 sim-days/sec per core, single-threaded per seed.
