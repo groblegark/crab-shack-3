@@ -692,6 +692,54 @@ const PURSES = {
     who: "WHOEVER CAN SPARE IT", steps: [0, 1, 2, 3, 4] },
 };
 const PURSE_KEYS = ["levy", "dues", "rents", "tin"];
+// THE FIFTH DIAL, and the only one on the ballot that is not about the
+// shelter. The four purses all answer "who pays for the pot"; the floor
+// answers a different question entirely - what the lowest day in town is
+// worth - and it moves money from TILLS to WAGE PACKETS without the fund ever
+// touching it. That is why it is a separate axis rather than another mech:
+// a crab can want a big pot and a low floor, or neither, or both, and the
+// ballot should be able to say so.
+//
+// Step 0 is NO FLOOR, and it is the founding policy: a save written before
+// this loads with wage:0 and pays exactly what it always paid. WAGE_STD is
+// 23, so the steps straddle it - two below, two above - which is what makes
+// the vote a real argument instead of a ratchet.
+const WAGE_FLOOR = { name: "THE WAGE FLOOR", short: "FLOOR", unit: "$ A DAY, LOWEST PAID",
+  who: "EVERY TILL THAT MEETS A PAYROLL", steps: [0, 18, 23, 27, 32] };
+const FLOOR_STEPS = WAGE_FLOOR.steps.length - 1;
+// ...AND THE SIXTH (Matt, 2026-08-20: "another policy to vote on: maximum
+// employees per business"). The floor says what a day is worth; the house
+// limit says how many days one till may buy. It is the town's answer to one
+// shop out-staffing every other one - which, in a town where the player is
+// usually the biggest employer, means it is mostly aimed at THEM.
+//
+// IT NEVER FIRES ANYBODY. Matt's standing ruling on this office is that it is
+// local government and "they're not gods": a cap that reached into a shop and
+// took crabs off the payroll would be a rug-pull the player cannot answer. So
+// it is a LICENSING limit - a shop at the line simply cannot take anyone new
+// on, and one already over it is grandfathered and thins out by attrition.
+// Step 0 is NO LIMIT and is the founding policy.
+const HEAD_CAP = { name: "THE HOUSE LIMIT", short: "STAFF", unit: "EMPLOYEES TO A BUSINESS",
+  who: "EVERY SHOP ON THE PROMENADE - YOURS FIRST", steps: [0, 2, 3, 4, 6] };
+const CAP_STEPS = HEAD_CAP.steps.length - 1;
+function capOf(p) {
+  return HEAD_CAP.steps[Math.max(0, Math.min(CAP_STEPS, (p && p.cap) | 0))] || 0;
+}
+function headCap() { return hallOn() && !window._noCap ? capOf(hall.policy) : 0; }
+// EMPLOYEES, not bodies: an owner-operator working their own counter is not
+// somebody they hired, and a limit that counted them would bite hardest on the
+// one-crab shops it exists to protect.
+function bizHeads(b) {
+  const oid = bizOwner(b);
+  return allCrabs().filter(k => k.p.job === b && !(k.p.owner && k.p.owner === oid)).length;
+}
+function capFull(b) { const n = headCap(); return n > 0 && BIZ[b] && bizHeads(b) >= n; }
+function capWhy(b) {
+  return capFull(b) ? BIZ[b].short + " IS AT THE TOWN'S HOUSE LIMIT OF " + headCap() : null;
+}
+function floorOf(p) {
+  return WAGE_FLOOR.steps[Math.max(0, Math.min(FLOOR_STEPS, (p && p.wage) | 0))] || 0;
+}
 const TIN_KEEP = 30;   // nobody drops a coin in the tin who is not this far clear themselves
 const POLL_LINES = 24; // how many written vote reasons a ballot keeps (display + save only)
 
@@ -825,10 +873,10 @@ let townFund = { bal: 0, bowls: 0, strikes: 0, shut: 0, arrears: 0,
 // has been keeping the shelter open on it since before the player took the
 // lease, and it covers the roof and almost nothing else.
 let hall = {
-  mayor: null, policy: { mech: "rents", rate: 4, bowls: 2 },
+  mayor: null, policy: { mech: "rents", rate: 4, bowls: 2, wage: 0, cap: 0 },
   termDay: 0, poll: null,
   stand: false, nominee: null,                    // is the player on the ballot, and who for
-  plat: { mech: "levy", rate: 2, bowls: 3 },      // ...and the platform they run on
+  plat: { mech: "levy", rate: 2, bowls: 3, wage: 0, cap: 0 },   // ...and the platform they run on
 };
 // THE BOX ITSELF. Null when there is no election in the diary. printBallots()
 // sets it at the settlement the NIGHT BEFORE polling day, which is also when
@@ -886,9 +934,15 @@ function playerMayor() { const m = mayorCrab(); return !!m && !m.p.npc; }
 function purseOf(p) { return PURSES[p.mech] || PURSES.rents; }
 function purseRate(p) { const s = purseOf(p).steps; return s[Math.max(0, Math.min(s.length - 1, p.rate | 0))]; }
 function policyLine(p) {
-  const P = purseOf(p), r = purseRate(p), b = p.bowls | 0;
+  const P = purseOf(p), r = purseRate(p), b = p.bowls | 0, f = floorOf(p);
+  // The floor is APPENDED rather than woven in, and only when it is set: it is
+  // also the ballot's dedup key (buildBallot keys byPlat on this string), so
+  // two platforms that differ only in the floor have to read differently here
+  // or one of them silently vanishes off the paper.
+  const cp = capOf(p);
   return P.short + " " + (p.mech === "rents" || p.mech === "levy" ? r + "%" : "$" + r)
-    + " / " + b + " BOWL" + (b === 1 ? "" : "S");
+    + " / " + b + " BOWL" + (b === 1 ? "" : "S") + (f > 0 ? " / MIN $" + f : "")
+    + (cp > 0 ? " / " + cp + " STAFF" : "");
 }
 
 // ---------------------------------------------------------------- accounts
@@ -1279,11 +1333,77 @@ function roofWeight(c) {
   const seen = townFund.strikes > 0 || shelterShut() ? 2 : 1;
   return (c.p.homeless ? 0.60 : 0.20) * seen;
 }
+// WHAT THE FLOOR IS WORTH TO THIS CRAB, and it is the one line on the ballot
+// where the town splits along a seam the shelter never touches: a wage packet
+// on one side, a till on the other. Both halves are priced off the SAME
+// number - the raise the floor actually puts in a day - so the money a crab
+// gains is exactly the money their boss loses, and a floor nobody is under
+// costs nobody anything and is worth nothing to anyone.
+//
+// The player is on BOTH sides of it at once, which is the point: their crew
+// vote their packets up and the bill lands on the same till that pays the
+// lease.
+// PAYING YOURSELF MORE IS A WASH, and an owner-operator has to be told so or
+// they vote for a floor that just moves money from their own till into their
+// own pocket. SUDSY and REEF both work the shop they own; without this they
+// read a raise to themselves as pure gain and campaign for it. Excluded from
+// BOTH halves - the gain and the bill - because it is genuinely neither.
+function selfEmployed(c) { return !!c.p.owner && bizOwner(c.p.job) === c.p.owner; }
+function floorBill(c, floor) {   // what the floor adds to every payroll this crab meets
+  if (!c.p.owner || floor <= 0) return 0;
+  let s = 0;
+  for (const k of allCrabs())
+    if (k.p.name !== c.p.name && BIZ[k.p.job] && bizOwner(k.p.job) === c.p.owner)
+      s += Math.max(0, floor - rawWage(k));
+  return s;
+}
+function floorRaise(c, floor) {   // what it puts in THIS crab's day, as wages
+  return BIZ[c.p.job] && !selfEmployed(c) ? Math.max(0, floor - rawWage(c)) : 0;
+}
+// WHAT A HOUSE LIMIT IS WORTH TO THIS CRAB. It is a competition policy, so it
+// is read almost entirely off tills: a limit costs the shop that is at it and
+// pays the shops that are not. The seam is therefore between BIG and SMALL
+// employers rather than between labour and capital - which is why it is worth
+// having on the ballot next to the floor rather than folded into it.
+function capStake(c, p) {
+  const cap = capOf(p);
+  if (cap <= 0) return 0;
+  let v = 0;
+  if (c.p.owner) {
+    for (const b of Object.keys(BIZ)) {
+      if (!bizUnlocked(b) || !bizOwner(b)) continue;
+      const over = bizHeads(b) + 1 - cap;          // >0 means this shop cannot hire again
+      if (bizOwner(b) === c.p.owner) v -= Math.max(0, over) * 0.22;   // your own hands, tied
+      else v += Math.min(0.5, Math.max(0, over) * 0.18);              // ...and so are theirs
+    }
+  }
+  // A CRAB WITHOUT A WAGE JOB IS THE ONE IT COSTS, and they are not an
+  // abstraction here: a limit is a posting that never goes up on the board.
+  if (!BIZ[c.p.job] && !c.p.owner) v -= 0.18;
+  return v;
+}
+function wageStake(c, p) {
+  const floor = floorOf(p);
+  if (floor <= 0) return 0;
+  // a day's raise, as a fraction of a standard day - so "the floor is worth a
+  // third of my wage to me" is literally what the number says
+  return floorRaise(c, floor) / WAGE_STD
+    - floorBill(c, floor) / 45;   // 45 = a heavy morning's lift on one till
+}
+// The purse half of a platform does not depend on the floor, so allPlatforms()
+// prices it once per (mech, rate, bowls) and hands the same three numbers to
+// all five wage steps. Without it the fifth dial multiplied a grid that walks
+// the whole town three times per square by five. hall.policy and hall.plat
+// carry no cache, so every reader falls back to the live call.
+function pYield(p) { return p._y != null ? p._y : purseYield(p); }
+function pTake(p) { return p._take != null ? p._take : platTake(p); }
+function pBowls(p) { return p._bowls != null ? p._bowls : platBowls(p); }
 function platValue(c, p) {
-  const roof = purseYield(p) >= shelterRent() ? 1 : 0;
-  return potStake(c) * (platBowls(p) / POT_MAX)
+  const roof = pYield(p) >= shelterRent() ? 1 : 0;
+  return potStake(c) * (pBowls(p) / POT_MAX)
     + roofWeight(c) * roof
-    - purseCost(c, p.mech) * (platTake(p) / 60);   // 60 = a big night for this fund
+    + wageStake(c, p) + capStake(c, p)
+    - purseCost(c, p.mech) * (pTake(p) / 60);   // 60 = a big night for this fund
 }
 // every platform on the grid, scored once an election and shared by every
 // voter (the yields depend on the town, never on who is reading them)
@@ -1291,9 +1411,22 @@ function allPlatforms() {
   const out = [];
   for (const mech of PURSE_KEYS)
     for (let rate = 0; rate <= 4; rate++)
-      for (let bowls = 0; bowls <= POT_MAX; bowls++) out.push({ mech, rate, bowls });
+      for (let bowls = 0; bowls <= POT_MAX; bowls++) {
+        const base = { mech, rate, bowls };
+        const _y = purseYield(base), _take = platTake(base), _bowls = platBowls(base);
+        for (let wage = 0; wage <= FLOOR_STEPS; wage++)
+          for (let cap = 0; cap <= CAP_STEPS; cap++)
+            out.push({ mech, rate, bowls, wage, cap, _y, _take, _bowls });
+      }
   return out;
 }
+// THE HOUSE LIMIT RUNS BACKWARDS TO EVERY OTHER DIAL, and the tie-break has to
+// know it: on rate, bowls and the wage floor a SMALLER number is a smaller ask,
+// but on the cap a smaller number is a HARSHER one. Step 0 (no limit at all) is
+// the smallest ask there is, and after that the ask grows as the cap tightens.
+// Without this the tie-break quietly campaigned for the most punitive limit on
+// the board every time a rival owner was indifferent between three of them.
+function capAsk(p) { const v = (p && p.cap) | 0; return v === 0 ? -1 : CAP_STEPS + 1 - v; }
 // the platform this crab would stand on. Ties go to the SMALLER ask: nobody
 // campaigns for a bigger levy than the pot they are promising actually needs,
 // and without the tie-break the ballot fills up with platforms that differ
@@ -1304,9 +1437,13 @@ function idealPlatform(c, grid) {
     const v = platValue(c, p);
     if (v > bv + 1e-9
         || (Math.abs(v - bv) <= 1e-9 && best && (p.rate < best.rate
-            || (p.rate === best.rate && p.bowls < best.bowls)))) { bv = v; best = p; }
+            || (p.rate === best.rate && p.bowls < best.bowls)
+            || (p.rate === best.rate && p.bowls === best.bowls
+                && (p.wage | 0) < (best.wage | 0))
+            || (p.rate === best.rate && p.bowls === best.bowls
+                && (p.wage | 0) === (best.wage | 0) && capAsk(p) < capAsk(best))))) { bv = v; best = p; }
   }
-  return best || { mech: "rents", rate: 0, bowls: 0 };
+  return best || { mech: "rents", rate: 0, bowls: 0, wage: 0, cap: 0 };
 }
 // ONE LINE PER VOTER, in their own terms. This is the whole legibility bar for
 // the feature: a result has to be arguable from the roster, not just watched.
@@ -1316,9 +1453,23 @@ function voteReason(c, p) {
     : !c.p.npc ? "ON YOUR PAYROLL"
     : c.p.fisher ? "FISHES FOR THEMSELF" : "HAS A WAGE AND A ROOF"];
   if (c.p.sick) bits.push("ILL");
-  const b = platBowls(p);
+  const b = pBowls(p);
   bits.push(b > 0 ? b + " BOWL" + (b === 1 ? "" : "S") : "NO POT");
-  bits.push(purseCost(c, p.mech) * platTake(p) >= 12 ? "AND PAYS FOR IT" : "AND PAYS LITTLE");
+  // THE FLOOR, ONLY WHEN IT MOVES THIS CRAB. A wage earner says what it puts
+  // in their day; whoever signs the cheques says what it takes out. A floor
+  // that binds on nobody is not mentioned, because it did not decide anything.
+  const f = floorOf(p), raise = floorRaise(c, f);
+  const bill = Math.round(floorBill(c, f));
+  if (raise > 0) bits.push("$" + Math.round(raise) + " MORE A DAY");
+  if (bill > 0) bits.push("$" + bill + " MORE ON THE PAYROLL");
+  const cp = capOf(p);
+  if (cp > 0) {
+    const mine = c.p.owner && Object.keys(BIZ).some(b => bizUnlocked(b)
+      && bizOwner(b) === c.p.owner && bizHeads(b) >= cp);
+    if (mine) bits.push("AND CANNOT HIRE AGAIN");
+    else if (!BIZ[c.p.job] && !c.p.owner) bits.push("AND IS LOOKING FOR WORK");
+  }
+  bits.push(purseCost(c, p.mech) * pTake(p) >= 12 ? "AND PAYS FOR IT" : "AND PAYS LITTLE");
   return bits.join(", ");
 }
 // THE BALLOT. Everybody has an ideal; the crabs who STAND are the ones who
@@ -1578,7 +1729,15 @@ function declarePoll() {
   for (const k of B.cands)
     if (k.votes > win.votes || (k.votes === win.votes && !win.inc && (k.inc || k.name < win.name))) win = k;
   hall.mayor = win.name;
-  hall.policy = { mech: win.plat.mech, rate: win.plat.rate | 0, bowls: win.plat.bowls | 0 };
+  // FIELD BY FIELD, AND THAT IS THE HAZARD: a platform that grows a dial and
+  // is not added here is a dial the town can campaign on, vote for and WIN,
+  // and then never actually get. It happened the day the wage floor landed -
+  // CORAL took the hat on MIN $32 with seven votes and the town went on paying
+  // what it always had. Copy the winner's platform whole, and keep the
+  // normalising `| 0` on the numbers so a hand-edited save cannot smuggle a
+  // fractional rate into the office.
+  hall.policy = { mech: win.plat.mech, rate: win.plat.rate | 0,
+    bowls: win.plat.bowls | 0, wage: win.plat.wage | 0, cap: win.plat.cap | 0 };
   hall.termDay = day;
   hall.poll = rec(win.name, !!win.you, B.cands, B.lines);
   if (window._stats) (window._stats.polls = window._stats.polls || []).push({
@@ -2680,7 +2839,9 @@ function runRivalCompete() {
         line = "OPENS THE " + BIZ[shop].short + " AT " + fmtClock(BIZ[shop].hours.open);
       }
     } else if (move === "wage") {
-      const best = Math.max(WAGE_STD, townWage(shop), bizWage(shop));
+      // ...and never under the town's floor: a "raise" that the law already
+      // pays is not a raise, and would poach nobody while reading as one.
+      const best = Math.max(WAGE_STD, minWage(), townWage(shop), bizWage(shop));
       const want = Math.min(WAGE_MAX, Math.max(bizWage(shop) + 1, best + RIVAL_CFG.WAGE_OVER));
       const staffN = Math.max(1, allCrabs().filter(k => k.p.job === shop && !k.p.owner).length);
       // ...and only the WAGE costs cash on the night: a price cut and a longer
@@ -3989,10 +4150,30 @@ function onOvertimeNow(c) {
 // through it - basePayToday, contractPay, hourlyRate and otPremium all read
 // it, so the settlement, the BILL chip, the MENU column and the bankruptcy
 // forecaster total per-crab rates without any of them learning a new rule.
-function wageRate(c) {
+// THE TOWN'S FLOOR, under all three layers (Matt, 2026-08-20: "minimum wage
+// setting needs to be a mayoral platform thing"). It is not a fourth layer on
+// the same ladder - it is a FLOOR, so it never lowers a wage and never touches
+// what a shop POSTS. BIZ[b].wage stays exactly what its owner set it to, which
+// is what makes the floor repealable: vote it away and every till goes back to
+// paying the rate it was already advertising, with nothing to migrate.
+//
+// It binds on a PAYROLL and nothing else. A fisher sells their catch (fishPay)
+// and has no employer to bill, so BIZ[c.p.job] is the whole test.
+function rawWage(c) {   // the posted rate, before the town gets a say
   const deal = privateWage(c);
   return deal != null ? deal : bizWage(c.p.job);
 }
+// `_noFloor` is a measurement hatch in the same family as _noHall, _noHotelier
+// and _noBerth: it holds the town's floor at zero no matter who wins, so an
+// arm that is measuring something else (the price lever, the walkout counter)
+// is not quietly confounded by a town electing itself a pay rise mid-run.
+function minWage() { return hallOn() && !window._noFloor ? floorOf(hall.policy) : 0; }
+function wageRate(c) {
+  const raw = rawWage(c);
+  return BIZ[c.p.job] ? Math.max(minWage(), raw) : raw;
+}
+// is the town's floor actually doing something to this crab's packet?
+function floorBinds(c) { return BIZ[c.p.job] && minWage() > rawWage(c); }
 // ---- THE HOURLY RATE (one clock for all labor) -----------------------------
 // CRAB_WAGE / NPC_WAGE are DAY RATES FOR A STANDARD DAY OF THAT SHIFT - the
 // span the shift has under the town's default 8:00-20:00 hours (SHIFT_SPAN: a
@@ -4277,6 +4458,7 @@ function quitOverPay(c, why) {
   const to = poachTarget(c), from = c.p.job;
   c.p.gripe = 0; c.p.wageJob = null;
   noteWageLoss(from);   // the boss they left remembers, and their policy answers it
+  if (to && capFull(to)) to = null;   // ...and a full house cannot poach one either
   if (to) {
     const oid = bizOwner(to);
     abortErrand(c); abortChef(c);
@@ -6161,16 +6343,22 @@ function load(slot) {
   if (s.hall && typeof s.hall === "object") {
     const H = s.hall, pol = H.policy || {};
     hall.mayor = typeof H.mayor === "string" ? H.mayor.slice(0, 14) : null;
+    // `wage` defaults to 0 = NO FLOOR, so a town saved before the fifth dial
+    // existed reloads on exactly the payroll it went to sleep on.
     hall.policy = { mech: PURSES[pol.mech] ? pol.mech : "rents",
       rate: Math.max(0, Math.min(4, Math.round(+pol.rate || 0))),
-      bowls: Math.max(0, Math.min(POT_MAX, Math.round(+pol.bowls || 0))) };
+      bowls: Math.max(0, Math.min(POT_MAX, Math.round(+pol.bowls || 0))),
+      wage: Math.max(0, Math.min(FLOOR_STEPS, Math.round(+pol.wage || 0))),
+      cap: Math.max(0, Math.min(CAP_STEPS, Math.round(+pol.cap || 0))) };
     hall.termDay = Math.max(0, Math.round(+H.termDay || 0));
     hall.stand = !!H.stand;
     hall.nominee = typeof H.nominee === "string" ? H.nominee.slice(0, 14) : null;
     const pl = H.plat || {};
     hall.plat = { mech: PURSES[pl.mech] ? pl.mech : "levy",
       rate: Math.max(0, Math.min(4, Math.round(+pl.rate || 0))),
-      bowls: Math.max(0, Math.min(POT_MAX, Math.round(+pl.bowls || 0))) };
+      bowls: Math.max(0, Math.min(POT_MAX, Math.round(+pl.bowls || 0))),
+      wage: Math.max(0, Math.min(FLOOR_STEPS, Math.round(+pl.wage || 0))),
+      cap: Math.max(0, Math.min(CAP_STEPS, Math.round(+pl.cap || 0))) };
     if (H.poll && typeof H.poll === "object" && Array.isArray(H.poll.cands)) hall.poll = {
       day: Math.max(1, Math.round(+H.poll.day || 1)),
       winner: String(H.poll.winner || "").slice(0, 14), you: !!H.poll.you,
@@ -6197,7 +6385,9 @@ function load(slot) {
         return { name: String((k && k.name) || "").slice(0, 14),
           plat: { mech: PURSES[pl.mech] ? pl.mech : "rents",
             rate: Math.max(0, Math.min(4, Math.round(+pl.rate || 0))),
-            bowls: Math.max(0, Math.min(POT_MAX, Math.round(+pl.bowls || 0))) },
+            bowls: Math.max(0, Math.min(POT_MAX, Math.round(+pl.bowls || 0))),
+            wage: Math.max(0, Math.min(FLOOR_STEPS, Math.round(+pl.wage || 0))),
+            cap: Math.max(0, Math.min(CAP_STEPS, Math.round(+pl.cap || 0))) },
           votes: Math.max(0, Math.round(+(k && k.votes) || 0)),
           inc: !!(k && k.inc), you: !!(k && k.you) };
       }).filter(k => k.name);
@@ -6759,6 +6949,10 @@ function runJobBoard() {
     } else if (j.day < day && npcs.length < 8) {
       hire = spawnDrifter();
     }
+    // A POSTING IS NOT A HIRE. The limit is checked HERE rather than where the
+    // ad goes up, so a shop that fell under the line overnight fills the
+    // vacancy it already advertised instead of the ad silently expiring.
+    if (hire && capFull(j.biz)) hire = null;
     if (hire) {
       hire.p.job = j.biz; hire.p.employer = bizOwner(j.biz);
       // clock out of the old life cleanly - updateSchedule will commute them to the new job
@@ -9914,6 +10108,11 @@ function buttonKey(b) {
 function tryBuy(key) {
   const u = UPS[key];
   if (!u || u.lvl >= u.max || coins < upCost(u)) return;
+  if (key === "chef" && capFull("shack")) {   // refused BEFORE the money moves
+    toast = { text: capWhy("shack") + " - THE TOWN VOTED FOR IT", t: 8 };
+    if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+    return;
+  }
   if (key === "chef" && !recruitBites("shack")) {   // refused BEFORE the money moves
     toast = { text: "NOBODY'S BITING AT $" + bizWage("shack") + " - THE FISH ARE PAYING $"
       + Math.round(pierDay()) + " A DAY", t: 8 };
@@ -10164,7 +10363,22 @@ cv.addEventListener("click", (ev) => {
       }
     }
     if (c.p && !c.p.npc && owned.length > 1 && pt.y >= 47 && pt.y < 57 && pt.x >= 24 && pt.x < 232) {
-      c.p.job = owned[(owned.indexOf(c.p.job) + 1) % owned.length];
+      // THE HOUSE LIMIT APPLIES TO A TRANSFER TOO, or it is not a limit: the
+      // cycler steps PAST any shop of yours already at the line rather than
+      // moving a crab into one. If every other shop is full it says so instead
+      // of silently doing nothing, which would read as a dead control.
+      const from = c.p.job;
+      let j = from;
+      for (let n = 0; n < owned.length; n++) {
+        j = owned[(owned.indexOf(j) + 1) % owned.length];
+        if (j === from || !capFull(j)) break;
+      }
+      if (j === from) {
+        toast = { text: "EVERY OTHER SHOP OF YOURS IS AT THE HOUSE LIMIT OF " + headCap(), t: 6 };
+        if (typeof sfx !== "undefined" && sfx.angry) sfx.angry();
+        return;
+      }
+      c.p.job = j;
       sfx.buy();
       popText("NEW JOB: " + BIZ[c.p.job].name, c.x - 20, FLOOR_Y - 34, [140, 255, 160]);
       return;
@@ -10318,6 +10532,10 @@ cv.addEventListener("click", (ev) => {
         if (hit(R.prp)) { bump("rate", 1, 0, 4); return; }
         if (hit(R.pbm)) { bump("bowls", -1, 0, POT_MAX); return; }
         if (hit(R.pbp)) { bump("bowls", 1, 0, POT_MAX); return; }
+        if (hit(R.pwm)) { bump("wage", -1, 0, FLOOR_STEPS); return; }
+        if (hit(R.pwp)) { bump("wage", 1, 0, FLOOR_STEPS); return; }
+        if (hit(R.pcm)) { bump("cap", -1, 0, CAP_STEPS); return; }
+        if (hit(R.pcp)) { bump("cap", 1, 0, CAP_STEPS); return; }
       }
     } else {   // TOWN census
       if (hit(R.csort)) { censusSort = (censusSort + 1) % CENSUS_SORTS.length; censusPage = 0; sfx.ding(); return; }
@@ -12943,7 +13161,7 @@ function censusList() {
 }
 function censusPages() { return Math.max(1, Math.ceil(censusList().length / CENSUS_ROWS)); }
 function manageRects() {
-  const x = 16, y = 6, w2 = 224, h2 = 164;
+  const x = 16, y = 6, w2 = 224, h2 = 196;
   const R = {
     x, y, w: w2, h: h2,
     next: { x: x + w2 - 40, y: y + 2, w: 38, h: 11 },
@@ -12984,13 +13202,27 @@ function manageRects() {
     // and only the platform: the office's remit is the shelter and nothing
     // else, so there is deliberately nothing else on this card to touch.
     hview: { x: x + 148, y: y + 30, w: 70, h: 13 },
-    stand: { x: x + 6, y: y + h2 - 34, w: 70, h: 13 },
-    nom: { x: x + 78, y: y + h2 - 34, w: 60, h: 13 },
-    pmech: { x: x + 140, y: y + h2 - 34, w: 78, h: 13 },
-    prm: { x: x + 6, y: y + h2 - 18, w: 15, h: 13 },
-    prp: { x: x + 52, y: y + h2 - 18, w: 15, h: 13 },
-    pbm: { x: x + 78, y: y + h2 - 18, w: 15, h: 13 },
-    pbp: { x: x + 124, y: y + h2 - 18, w: 15, h: 13 },
+    // THREE ROWS NOW, not two. The wage floor is a platform dial like the
+    // other three and belongs on the same block, but the RATE/BOWLS row had
+    // 32px of slack and a stepper needs 61 - so the whole block moved up one
+    // row and the reading surface above it gave up 16px (see the two list
+    // bounds in drawHall, which walk down to h2 - 62 instead of h2 - 46).
+    stand: { x: x + 6, y: y + h2 - 66, w: 70, h: 13 },
+    nom: { x: x + 78, y: y + h2 - 66, w: 60, h: 13 },
+    pmech: { x: x + 140, y: y + h2 - 66, w: 78, h: 13 },
+    prm: { x: x + 6, y: y + h2 - 50, w: 15, h: 13 },
+    prp: { x: x + 52, y: y + h2 - 50, w: 15, h: 13 },
+    pbm: { x: x + 78, y: y + h2 - 50, w: 15, h: 13 },
+    pbp: { x: x + 124, y: y + h2 - 50, w: 15, h: 13 },
+    // FOUR DIALS, TWO TO A ROW, and the two rows are geometrically identical -
+    // a stepper is 61px whatever it is stepping, so RATE/BOWLS and MIN/STAFF
+    // line up in a grid rather than drifting. The card grew 32px in total to
+    // hold them; every absolute y above the strip is back where it was at
+    // h2 = 164, which is why the BOOKS ledger still fits its four rows.
+    pwm: { x: x + 6, y: y + h2 - 34, w: 15, h: 13 },
+    pwp: { x: x + 52, y: y + h2 - 34, w: 15, h: 13 },
+    pcm: { x: x + 78, y: y + h2 - 34, w: 15, h: 13 },
+    pcp: { x: x + 124, y: y + h2 - 34, w: 15, h: 13 },
     done: { x: x + w2 - 46, y: y + h2 - 15, w: 42, h: 13 },
     // ANSWERING AN OFFER FROM THE CARD THAT ANNOUNCES IT (Matt, 2026-08-20:
     // "we need to make selling to an NPC more intuitive... I saw that an NPC
@@ -13336,7 +13568,7 @@ function drawHall(R, chip) {
       smallText(ctx, fitSmall("FOUND NO PAPER: " + B0.turnedAway.join(", "), w2 - 16), x + 8, ly, [190, 80, 80]), ly += 7;
     if (B0.late.length)
       smallText(ctx, fitSmall("ARRIVED TOO LATE: " + B0.late.join(", "), w2 - 16), x + 8, ly, [190, 80, 80]), ly += 7;
-    if (missed.length && ly < y + h2 - 46)
+    if (missed.length && ly < y + h2 - 78)
       smallText(ctx, fitSmall("YET TO VOTE: " + missed.join(", "), w2 - 16), x + 8, ly, [110, 100, 110]);
   } else {
     const poll = hall.poll;
@@ -13357,7 +13589,7 @@ function drawHall(R, chip) {
       ly += 2;
       // ...and a taste of the roll, with a pointer at the page that holds it
       // all. The BALLOT page is the RESULT; the ROLL page is the argument.
-      const room = Math.max(0, Math.floor((y + h2 - 44 - ly) / 7));
+      const room = Math.max(0, Math.floor((y + h2 - 76 - ly) / 7));
       for (const l of poll.lines.slice(0, room)) {
         smallText(ctx, fitSmall(l, w2 - 16), x + 8, ly, [110, 100, 110]);
         ly += 7;
@@ -13384,6 +13616,38 @@ function drawHall(R, chip) {
   smallText(ctx, "RATE " + (ed.rate | 0), R.prm.x + 20, R.prm.y + 4, [40, 30, 40]);
   chip(R.pbm, "-", null, false); chip(R.pbp, "+", null, false);
   smallText(ctx, "BOWLS " + (ed.bowls | 0), R.pbm.x + 19, R.pbm.y + 4, [40, 30, 40]);
+  // ...and the two dials that are not about the shelter at all. Both read as
+  // the THING VOTED FOR - "$27", "4" - never as a step index, which is an
+  // implementation detail of the stepper and not what is on the ballot.
+  const fl = floorOf(ed), cp = capOf(ed);
+  chip(R.pwm, "-", null, false); chip(R.pwp, "+", null, false);
+  smallText(ctx, fl > 0 ? "MIN $" + fl : "MIN OFF", R.pwm.x + 19, R.pwm.y + 4,
+    fl > 0 ? [40, 30, 40] : [110, 100, 110]);
+  chip(R.pcm, "-", null, false); chip(R.pcp, "+", null, false);
+  smallText(ctx, cp > 0 ? "STAFF " + cp : "STAFF -", R.pcm.x + 19, R.pcm.y + 4,
+    cp > 0 ? [40, 30, 40] : [110, 100, 110]);
+  // WHAT THE TWO OF THEM WOULD COST THE HAND HOLDING THE DIALS, on the row
+  // they share with DONE. Neither bill comes through the fund, so nothing else
+  // on this card would ever show either one - and a player who cannot see
+  // their own payroll move is exactly the opacity the STAND note above is
+  // about. The budget is the GAP TO DONE, measured, not a number that looked
+  // about right: the first cut of this line ran off the canvas and printed
+  // itself under the chip.
+  {
+    const bits = [];
+    if (fl > 0) {
+      const lift = Math.round(crabs.reduce((a, k) => a + floorRaise(k, fl), 0));
+      const under = allCrabs().filter(k => floorRaise(k, fl) > 0).length;
+      bits.push(under + " UNDER" + (lift > 0 ? " - $" + lift + " A DAY YOURS" : ""));
+    }
+    if (cp > 0) {
+      const shut = ownedBizList().filter(b => bizHeads(b) >= cp).length;
+      bits.push(shut > 0 ? shut + " OF YOURS CANNOT HIRE" : "YOUR SHOPS ARE UNDER IT");
+    }
+    if (bits.length)
+      smallText(ctx, fitSmall(bits.join(" / "), R.done.x - R.pwm.x - 4),
+        R.pwm.x, R.done.y + 4, [190, 110, 40]);
+  }
   // ...and NO fourth caption on this row: the only gap left between the BOWLS
   // stepper and the DONE chip is 32px, and every honest wording of "you are on
   // the ballot" is wider than that. The STAND chip says it, and the NEXT
@@ -14487,14 +14751,49 @@ const HELP_PAGES = [
     ["t", "IT PAYS THE LANDLORD RENT JUST LIKE YOU DO,"],
     ["t", "AND IT SERVES A POT OF BOWLS AT NIGHT."],
     ["-"],
+    ["h", "WHO DECIDES"],
+    ["t", "THE MAYOR SETS THE TOWN'S POLICY, AND THE"],
+    ["t", "TOWN ELECTS THE MAYOR. IT IS LOCAL"],
+    ["t", "GOVERNMENT: THE REMIT IS THE SHELTER AND"],
+    ["t", "THE PAYROLL, AND NOTHING ELSE."],
+    ["-"],
+    ["t", "NOTHING HERE IS FREE. EVERY BOWL IN THAT POT"],
+    ["t", "WAS BOUGHT FROM A REAL SHOP THE NIGHT BEFORE."],
+  ] },
+  // ...and the dials themselves get the page after it. The fund outgrew the
+  // town-hall page the moment the floor joined it, and the floor is the one
+  // policy on the ballot that bills a player directly - it does not belong in
+  // the four lines left at the bottom of somebody else's page.
+  { title: "WHAT THE MAYOR SETS", lines: [
     ["h", "THE TOWN FUND - FOUR PURSES, MAYOR'S PICK"],
     ["t", "A LEVY ON TAKINGS. HARBOUR DUES PER HEAD"],
     ["t", "LANDED. A CUT OF THE HOUSE RENTS. A TIN."],
     ["t", "THEY FALL ON DIFFERENT CRABS, WHICH IS WHY"],
     ["t", "THE VOTE IS WORTH CASTING."],
     ["-"],
-    ["t", "NOTHING HERE IS FREE. EVERY BOWL IN THAT POT"],
-    ["t", "WAS BOUGHT FROM A REAL SHOP THE NIGHT BEFORE."],
+    ["h", "THE POT"],
+    ["t", "HOW MANY BOWLS GO ON THE FIRE AT NIGHT, UP"],
+    ["t", "TO WHAT THE PURSE CAN BUY."],
+  ] },
+  // THE TWO DIALS THAT ARE NOT ABOUT THE SHELTER. They bill a till directly
+  // rather than through the fund, which is exactly why they do not belong on
+  // the page that explains the pot.
+  { title: "THE FLOOR AND THE LIMIT", lines: [
+    ["h", "THE WAGE FLOOR"],
+    ["t", "THE LOWEST DAY IN TOWN. IT NEVER CUTS A"],
+    ["t", "WAGE AND NEVER CHANGES WHAT A SHOP POSTS -"],
+    ["t", "IT LIFTS ANY PACKET UNDER IT, YOURS TOO,"],
+    ["t", "OUT OF THE TILL THAT PAYS IT, NOT THE POT."],
+    ["t", "VOTE IT AWAY AND EVERY TILL GOES STRAIGHT"],
+    ["t", "BACK TO ITS OWN RATE."],
+    ["-"],
+    ["h", "THE HOUSE LIMIT"],
+    ["t", "THE MOST STAFF ONE BUSINESS MAY EMPLOY."],
+    ["t", "IT NEVER FIRES ANYBODY: A SHOP AT THE LINE"],
+    ["t", "SIMPLY CANNOT TAKE ANYONE NEW ON, AND ONE"],
+    ["t", "ALREADY OVER IT THINS OUT AS CRABS LEAVE."],
+    ["t", "IN THIS TOWN THE BIGGEST EMPLOYER IS"],
+    ["t", "USUALLY YOU, SO IT IS USUALLY AIMED AT YOU."],
   ] },
   { title: "POLLING DAY", lines: [
     ["h", "EVERY SUNDAY"],

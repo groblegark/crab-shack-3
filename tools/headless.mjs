@@ -43,6 +43,14 @@ const NOHOTELIER = args.includes("--nohotelier");
 // elections. This is how the mayor pass's own balance movement was attributed
 // - the same arm-off pattern as --failoff and --norival.
 const NOHALL = args.includes("--nohall");
+// `--nofloor` leaves the hall running - elections, the fund, the pot - but
+// holds the WAGE FLOOR at zero, so a payroll effect can be attributed without
+// switching the whole office off (which would move the shelter too).
+const NOFLOOR = args.includes("--nofloor");
+// ...and `--nocap` for the house limit, the other dial that bills a till
+// directly. A capped shack cannot take the hires `--buy` asks for, so a growth
+// matrix that moved needs to be able to ask whether the town did that.
+const NOCAP = args.includes("--nocap");
 // ACCOMMODATION UPGRADES: the two halves come apart, and the matrix can read
 // each of them on its own. These are CONFIG overrides rather than a
 // `window._noX` flag because both halves are pure data, and the override lands
@@ -134,6 +142,8 @@ if (FAILOFF.length) G(`window._failOff = ${JSON.stringify(Object.fromEntries(FAI
 if (NORIVAL) G(`window._noRival = true;`);
 if (NOHOTELIER) G(`window._noHotelier = true;`);
 if (NOHALL) G(`window._noHall = true;`);
+if (NOFLOOR) G(`window._noFloor = true;`);
+if (NOCAP) G(`window._noCap = true;`);
 if (NOANNEXE) G(`ROOM_CFG.EXTRA = 0; setHotelRooms(HOTEL_ROOMS_BASE);`);
 if (NODORM) G(`DORM_CFG.BASE = 99;`);
 const stepScript = new vm.Script(`simNow += ${STEP * 1000}; rafCb(simNow);`);

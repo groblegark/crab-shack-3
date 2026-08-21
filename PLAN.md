@@ -6808,3 +6808,163 @@ was invisible to every one of them. The instrument that found it in one shot
 was `_blocked`, the collider's own "furniture is in the way" flag, which is the
 thing the report was actually about. Measure the mechanism, not the symptom
 you imagine it produces.
+
+## THE WAGE FLOOR (Matt, 2026-08-20) — "minimum wage setting needs to be a mayoral platform thing"
+
+The fifth dial on a platform, and the first one that has nothing to do with
+the shelter. The four purses all answer *who pays for the pot*; the floor
+answers *what the lowest day in town is worth*, and it moves money from TILLS
+to WAGE PACKETS without the fund ever touching it.
+
+### What it is
+
+`WAGE_FLOOR.steps = [0, 18, 23, 27, 32]` — step 0 is NO FLOOR and is the
+founding policy, so a save written before the dial existed reloads paying
+exactly what it always paid. The steps straddle `WAGE_STD` (23): two below,
+two above, so the ballot can express a floor that binds on nobody as well as
+one that binds on everybody.
+
+It is a **floor, not a fourth wage layer**. It sits under `WAGE_STD` →
+`BIZ[b].wage` → `p.wage` at the single chokepoint `wageRate()`, it never cuts
+a packet, and it never touches what a shop POSTS. That last part is what makes
+it repealable with nothing to migrate: vote it away and every till goes back to
+the rate it was already advertising, that night. It binds on a PAYROLL and
+nothing else — `BIZ[c.p.job]` is the whole test, so a fisher selling their own
+catch is untouched.
+
+### The seam it falls on
+
+| who | what the floor does | how they vote |
+|---|---|---|
+| a crab on a wage | puts $N in their day | **for** |
+| whoever signs their cheque | takes $N out of the till | **against** |
+| an owner-operator paying themselves | a wash | **indifferent** |
+| a fisher | nothing | **indifferent** |
+
+That third row is a rule, not an accident: without `selfEmployed()` excluding
+them from *both* halves, SUDSY and REEF both campaigned to pay themselves more
+out of their own tills. Gain and bill are priced off the same number — the
+raise the floor actually puts in a day — so the money a crab gains is exactly
+the money their boss loses.
+
+**The player is on both sides at once**, which is the point. Their own crew
+vote their packets up and the bill lands on the same till that pays the lease.
+
+### The bug it shipped with, and the scenario that now guards it
+
+`declarePoll()` rebuilt `hall.policy` **field by field**. The new dial was
+campaigned on, reached the paper, and WON — CORAL took the hat on `MIN $32`
+with seven votes — and the town went on paying what it always had. It looked
+like the feature simply didn't fire, and the ballot dump is what found it:
+floors all over the paper, `minWage()` reading $0.
+
+*Any future dial added to a platform must survive
+"a platform that WINS actually reaches the office".* Three separate parsers
+also read a platform off disk (live policy, the player's manifesto, every
+candidate in an un-declared box); a dial only two of them know about loses an
+election on reload.
+
+### It is a real politics, measured
+
+35 days, four seeds, once the winner's platform was actually applied: floors
+get voted in and voted back out. Seed 77 is the whole arc — `MIN $32` in on
+day 7, held through three elections, then REEF (an owner) takes the hat on day
+28 and repeals it. Closures across the four seeds went 6 → 8: a $32 floor is a
+real cost the town can absorb, not a death spiral.
+
+### Deliberately NOT built: the job-risk term
+
+NPC voting is bimodal — a wage earner always wants the *maximum* floor and an
+owner always wants none, so steps 1–3 never win an NPC election. The honest
+fix is that a floor its own employer cannot carry lays that crab off, which
+the town already models. It is not built because the input would have to be
+the employer's takings, and `buildBallot` runs at the settlement (a full day)
+while `pickCandidate` runs *during* polling day (a partial one) — the same
+platform would score differently at 9am and 9pm, which is a subtle,
+day-phase-dependent bug in the one system that most needs to be arguable.
+
+The middle steps are not dead: they are the PLAYER's. An NPC stands on what
+they personally want; the player reads the whole town and stands on what will
+actually carry AND what their own till can pay. That asymmetry is already the
+design note beside the STAND seat in `buildBallot`.
+
+### Where it shows
+
+- HALL tab: a third dial row (the block moved up 16px; the reading surface
+  above gave up the same). It reads as a WAGE — `MIN WAGE $27` — not as a step
+  index, and beside it the card names how many crabs are under it and what it
+  would add to **your** payroll. That bill comes through no fund, so nothing
+  else on the card would ever have shown it.
+- `policyLine()` appends `/ MIN $N`, which is also the ballot's dedup key — two
+  platforms differing only in the floor have to read differently or one of them
+  silently vanishes off the paper.
+- Help: the town-hall page outgrew itself, so the dials got their own page,
+  WHAT THE MAYOR SETS.
+
+## THE HOUSE LIMIT (Matt, 2026-08-20) — "maximum employees per business!!!"
+
+The sixth dial, and the second one that has nothing to do with the shelter.
+The floor says what a day is worth; the limit says **how many days one till may
+buy**. `HEAD_CAP.steps = [0, 2, 3, 4, 6]`, step 0 = NO LIMIT and the founding
+policy.
+
+### It never fires anybody
+
+Matt's standing ruling on this office is that it is local government and
+*"they're not gods"*. A cap that reached into a shop and took crabs off the
+payroll would be a rug-pull with no answer, so it is a **licensing limit**:
+
+- a shop **at** the line cannot take anyone new on;
+- a shop **already over** it is grandfathered and thins out by attrition.
+
+Four doors a crab walks through into a job, and all four are gated: the
+player's own hire (refused before the money moves, same shape as
+`recruitBites`), the job board, poaching, and the player moving their own crab
+between their own shops. That last one steps *past* a full shop rather than
+refusing silently — and says so when every other shop of yours is full, because
+a control that does nothing reads as broken.
+
+### It is a competition policy, not a labour one
+
+The floor splits the town between labour and capital. The limit splits it
+between **big and small employers** — and in this town the biggest employer is
+usually the player, so it is usually aimed at them. Measured with seven crew in
+the shack: both rival owners (SUDSY, BRASS) campaign for a staff limit, the
+player's own crew are neutral (they are grandfathered, so it is worth nothing
+to them either way), and crabs with no wage job are **against** it — a limit is
+a posting that never goes up on the board.
+
+**EMPLOYEES, NOT BODIES.** An owner-operator at their own counter is not
+somebody they hired. Counting them would bite hardest on exactly the one-crab
+shops the limit exists to protect — SUDSY would be at a 2-staff limit with one
+employee.
+
+### THE DIAL RUNS BACKWARDS, and that was a real bug
+
+Every other dial asks for MORE as its number rises. The cap asks for more as
+its number **falls**, and step 0 — no limit at all — is the smallest ask on the
+board. The shared *"ties go to the smaller ask"* tie-break therefore has to run
+the other way round for this one dial (`capAsk`). Before it did, a rival owner
+indifferent between three limits quietly campaigned for the most punitive one
+on the ballot every time: they wanted `2 STAFF` where `4 STAFF` was equally
+good to them.
+
+**Watch for this on any future dial**: the tie-break assumes bigger = more
+demanding, and a dial that inverts that has to say so.
+
+### The mutation that survived, and what it cost to fix
+
+Four mutations, four scenarios — except the third. **Counting bodies instead of
+employees passed every scenario in the file.** The rule was real, deliberate,
+documented, and completely untested; only an assertion aimed straight at it
+(`bizHeads(b) === bodies - 1` for every owner-run shop) catches it. Same lesson
+as the beach ball and the rivalry arm, third time now: *a rule you did not
+write an assertion for is a rule you are not testing, however carefully you
+commented it.*
+
+### Cost
+
+The grid is now 4 mechs × 5 rates × 7 pots × 5 floors × 5 limits = **3500
+platforms**, scored once an election. `allPlatforms()` prices the purse half
+once per (mech, rate, bowls) and shares it across the 25 floor/limit
+combinations, which is what keeps `buildBallot()` at **30ms**.

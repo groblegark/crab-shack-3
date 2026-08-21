@@ -5557,7 +5557,16 @@ scenario("rivalry: after a refusal she competes with the PLAYER'S OWN levers, an
     let bar = 0, shwr = 0;
     for (const seed of [909, 1337, 4242]) {
       const s2 = createSim({ seed });
+      // ...AND THE TOWN'S WAGE FLOOR IS PINNED OFF, for exactly the reason the
+      // hotelier is. An elected floor lifts every packet in town, and crabs
+      // with fuller wallets buy at a dear board that would otherwise have
+      // turned them away - which flattens the affordability channel this arm
+      // measures. Seed 1337 elects a $32 floor by day 7 on its own, and the
+      // dear and level arms came back identical (175/175) the day the dial
+      // landed. Nothing here is a claim about wages; the only thing allowed to
+      // vary is what the player writes on their own sign.
       s2.G(`window._noHotelier = true; window._failOff = { walkout: 1 };
+        window._noFloor = true;
         coins = 9000; tryBuy("juicebar"); tryBuy("table"); while (crabs.length < 6) hireCrew();
         crabs[2].p.job = "juicebar"; crabs[4].p.job = "juicebar";
         crabs[2].p.shift = "M"; crabs[4].p.shift = "E";
@@ -6491,7 +6500,15 @@ scenario("measurement: a bored walkout and a pay walkout share one counter", () 
   // crab whose grievance is over the line refuses tomorrow's shift
   let err = null;
   try {
+    // THE FLOOR HAS TO COME OFF FIRST, and that is a finding rather than a
+    // fixture tweak: with a wage floor in force a shop CANNOT underpay, so
+    // nobody under it can ever hold a pay grievance. This town elects $32 by
+    // day 7 on its own, and posting the legal minimum of $8 still paid $32 -
+    // so the pay walkout this scenario needs simply could not happen. That is
+    // the minimum wage working; this scenario is about the SHAPE OF THE
+    // COUNTER, so it takes the floor off and forces the grievance directly.
     sim.G(`{ const k = crabs[0];
+      hall.policy.wage = 0;
       k.p.wageJob = k.p.job; k.p.wageDay = 0; k.p.gripe = WAGE_CFG.LEAVE; k.p.walkout = null;
       setBizWage("shack", WAGE_MIN); runWageRelations(); }`);
   } catch (e) { err = String(e.message || e); }
@@ -9833,6 +9850,302 @@ scenario("a crab may stand in the cabana it has come to clean", () => {
   if (!got.exempt) return "a cleaner sent to a cabana is not exempt from it in collide()";
   if (!(got.up === 6 && got.dn === 4)) return `cabana band is ${got.up}/${got.dn}, expected 6/4`;
   if (got.plainUp !== 9) return "ordinary furniture lost its 9px band";
+  return true;
+});
+
+scenario("the wage floor lifts a packet, never cuts one, and never moves a posted rate", () => {
+  // MATT: "minimum wage setting needs to be a mayoral platform thing."
+  // A FLOOR, not a fourth wage layer: it raises anything under it and touches
+  // nothing else, which is what makes it repealable with nothing to migrate.
+  const sim = createSim({ seed: 21 });
+  sim.runDays(5, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 2000"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    const paid = () => allCrabs().filter(k => BIZ[k.p.job])
+      .map(k => [k.p.name, rawWage(k), wageRate(k)]);
+    const posted = () => Object.keys(BIZ).filter(bizUnlocked).map(b => [b, bizWage(b)]);
+    hall.policy.wage = 0;
+    const off = paid(), postOff = posted();
+    hall.policy.wage = FLOOR_STEPS;                 // the top step
+    const top = floorOf(hall.policy), on = paid(), postOn = posted();
+    hall.policy.wage = 1;                           // ...and a step BELOW the town's rates
+    const low = floorOf(hall.policy), under = paid();
+    hall.policy.wage = 0;
+    return JSON.stringify({ top, low, off, on, under, postOff, postOn, back: paid(),
+      std: WAGE_STD, steps: WAGE_FLOOR.steps });
+  })()`));
+  if (got.steps[0] !== 0) return "step 0 is not NO FLOOR, so the founding policy is not inert";
+  if (!(got.top > got.std)) return "the top floor step is not above the standard day";
+  if (!(got.steps.some(v => v > 0 && v < got.std)))
+    return "no step sits BELOW the standard day - the dial cannot express a floor that binds on nobody";
+  for (const [n, raw, pay] of got.off)
+    if (pay !== raw) return `with no floor ${n} is paid ${pay} against a posted ${raw}`;
+  for (const [n, raw, pay] of got.on) {
+    if (pay !== Math.max(got.top, raw)) return `floor $${got.top}: ${n} paid ${pay}, posted ${raw}`;
+    if (pay < raw) return `the floor CUT ${n} from ${raw} to ${pay}`;
+  }
+  for (const [n, raw, pay] of got.under)
+    if (pay !== raw) return `a $${got.low} floor moved ${n} off its posted ${raw} to ${pay}`;
+  if (JSON.stringify(got.postOff) !== JSON.stringify(got.postOn))
+    return "the floor rewrote what a shop POSTS: " + JSON.stringify(got.postOn);
+  if (JSON.stringify(got.off) !== JSON.stringify(got.back))
+    return "repealing the floor did not put every packet back on its posted rate";
+  return true;
+});
+
+scenario("a platform that WINS actually reaches the office, floor and all", () => {
+  // This is the bug the floor shipped with, and it is the whole reason the
+  // scenario exists: declarePoll rebuilt hall.policy FIELD BY FIELD, so the
+  // new dial was campaigned on, voted for and won - CORAL took the hat on
+  // MIN $32 with seven votes - and the town went on paying what it always had.
+  // Any future dial added to a platform has to survive this test.
+  const sim = createSim({ seed: 22 });
+  sim.runDays(3, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 2000"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    const want = { mech: "levy", rate: 3, bowls: 4, wage: 3, cap: 2 };
+    ballotBox = { day, printed: 9, papers: 0, shut: true, declared: false, roll: 6,
+      voters: {}, counted: 0, turnedAway: [], lines: [],
+      cands: [{ name: "CORAL", plat: want, votes: 7 },
+              { name: "DRIFT", plat: { mech: "tin", rate: 1, bowls: 0, wage: 0, cap: 0 }, votes: 2 }],
+      // A REAL BOX, because declarePoll's first guard is an EMPTY one: no
+      // papers cast means nobody got there and the incumbent keeps the hat, so
+      // a fixture with a tally and no ballots declares nothing at all.
+      cast: [0,1,2,3,4,5,6].map(i => ({ voter: "V" + i, pick: "CORAL" }))
+        .concat([{ voter: "V7", pick: "DRIFT" }, { voter: "V8", pick: "DRIFT" }]) };
+    declarePoll();
+    return JSON.stringify({ want, got: hall.policy, mayor: hall.mayor,
+      line: policyLine(hall.policy), floor: minWage(), wantFloor: floorOf(want) });
+  })()`));
+  if (got.mayor !== "CORAL") return "the count did not seat the winner, it seated " + got.mayor;
+  for (const k of ["mech", "rate", "bowls", "wage", "cap"])
+    if (got.got[k] !== got.want[k])
+      return `the winner ran on ${k}=${JSON.stringify(got.want[k])} and the office got ` +
+        `${JSON.stringify(got.got[k])} - declarePoll dropped a dial`;
+  if (got.floor !== got.wantFloor)
+    return `CORAL won on a $${got.wantFloor} floor and the town pays $${got.floor}`;
+  if (got.line.indexOf("MIN $") < 0) return "the declared policy line does not name the floor: " + got.line;
+  return true;
+});
+
+scenario("the town splits on a wage floor along the seam it actually falls on", () => {
+  // The floor is the one dial on the ballot that has nothing to do with the
+  // shelter: it moves money from tills to packets. So a crab on a wage wants
+  // it, the crab who signs their cheque does not, and an owner-operator paying
+  // themselves out of their own till is a WASH and must read as one - without
+  // that rule SUDSY and REEF both campaigned to pay themselves more.
+  const sim = createSim({ seed: 23 });
+  sim.runDays(6, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 2000"); } });
+  const got = JSON.parse(sim.G(`(() => {
+    const hi = { mech: "rents", rate: 0, bowls: 0, wage: FLOOR_STEPS };
+    const lo = { mech: "rents", rate: 0, bowls: 0, wage: 0 };
+    const rows = allCrabs().map(c => ({
+      n: c.p.name, job: c.p.job || "-", owner: c.p.owner || "", self: selfEmployed(c),
+      earner: !!BIZ[c.p.job] && !selfEmployed(c),
+      raise: floorRaise(c, floorOf(hi)), bill: Math.round(floorBill(c, floorOf(hi))),
+      d: platValue(c, hi) - platValue(c, lo) }));
+    return JSON.stringify({ rows, boss: allCrabs().filter(c => c.p.owner &&
+      allCrabs().some(k => k.p.name !== c.p.name && BIZ[k.p.job] && bizOwner(k.p.job) === c.p.owner)).length });
+  })()`));
+  let earners = 0, bosses = 0;
+  for (const r of got.rows) {
+    if (r.earner && r.raise > 0) {
+      earners++;
+      if (!(r.d > 0)) return `${r.n} gains $${r.raise} a day from the floor and does not want it (${r.d})`;
+    }
+    if (r.self && r.bill === 0 && Math.abs(r.d) > 1e-9)
+      return `${r.n} works the shop they own - paying themselves more is a wash, but they score ${r.d}`;
+    if (r.bill > 0 && r.raise === 0) {
+      bosses++;
+      if (!(r.d < 0)) return `${r.n} would pay $${r.bill} more a day and still wants the floor (${r.d})`;
+    }
+  }
+  if (!earners) return "no crab in this town is under the top floor - the scenario proves nothing";
+  if (!bosses) return "nobody in this town pays for the floor - the scenario proves nothing";
+  return true;
+});
+
+scenario("the wage floor roundtrips a save on the policy, the platform and the box", () => {
+  // Three separate parsers read a platform off disk (the live policy, the
+  // player's manifesto, and every candidate in an un-declared ballot box).
+  // A dial that only two of them know about loses an election on reload.
+  const store = new Map();
+  const a = createSim({ seed: 24, storage: store, fresh: false });
+  a.runDays(3, { tickEvery: 60, onTick: (G) => { if (G("coins") < 900) G("coins = 2000"); } });
+  a.G(`hall.policy = { mech: "levy", rate: 2, bowls: 1, wage: 3, cap: 2 };
+       hall.plat = { mech: "tin", rate: 3, bowls: 5, wage: FLOOR_STEPS, cap: CAP_STEPS };
+       hall.stand = true;
+       ballotBox = { day, printed: 4, papers: 4, shut: false, declared: false, roll: 5,
+         voters: {}, counted: 0, turnedAway: [], lines: [], cast: [],
+         cands: [{ name: "CORAL", plat: { mech: "dues", rate: 1, bowls: 2, wage: 2, cap: 3 }, votes: 0 }] };
+       save();`);
+  const want = JSON.parse(a.G(`JSON.stringify({ pol: hall.policy, plat: hall.plat,
+    cand: ballotBox.cands[0].plat, floor: minWage(), cap: headCap() })`));
+  const b = createSim({ seed: 24, storage: store, fresh: false });
+  const got = JSON.parse(b.G(`JSON.stringify({ pol: hall.policy, plat: hall.plat,
+    cand: ballotBox && ballotBox.cands[0] ? ballotBox.cands[0].plat : null,
+    floor: minWage(), cap: headCap() })`));
+  if (!got.cand) return "the ballot box did not survive the reload at all";
+  for (const k of ["pol", "plat", "cand"])
+    for (const d of ["wage", "cap"])
+      if ((got[k][d] | 0) !== (want[k][d] | 0))
+        return `${k} went in on ${d}=${want[k][d]} and came back ${got[k][d]}`;
+  if (got.floor !== want.floor) return `the town paid $${want.floor} and reloaded on $${got.floor}`;
+  if (got.cap !== want.cap) return `the town ran a ${want.cap}-staff limit and reloaded on ${got.cap}`;
+  // ...and a save written before the dial existed loads as NO FLOOR, not as junk
+  const old = new Map(store);
+  const raw = JSON.parse(old.get([...old.keys()][0]));
+  delete raw.hall.policy.wage; delete raw.hall.plat.wage;
+  delete raw.hall.policy.cap; delete raw.hall.plat.cap;
+  old.set([...old.keys()][0], JSON.stringify(raw));
+  const c = createSim({ seed: 24, storage: old, fresh: false });
+  if (c.G("minWage()") !== 0) return "a save from before the floor existed did not load as NO FLOOR";
+  if (c.G("headCap()") !== 0) return "a save from before the limit existed did not load as NO LIMIT";
+  return true;
+});
+
+scenario("the house limit stops a hire and never fires anybody", () => {
+  // MATT: "another policy to vote on: maximum employees per business."
+  // A LICENSING LIMIT, NOT A PURGE. His standing ruling on this office is that
+  // it is local government and "they're not gods", so a cap that reached into
+  // a shop and took crabs off the payroll would be a rug-pull the player has
+  // no answer to. A shop at the line cannot take anyone NEW on; one already
+  // over it is grandfathered and thins out by attrition.
+  const sim = createSim({ seed: 31 });
+  sim.runDays(8, { tickEvery: 60, onTick: (G) => {
+    if (G("coins") < 3000) G("coins = 6000");
+    G(`(() => { while (crabs.length < 5) { const n = crabs.length; hireCrew(); if (crabs.length === n) break; } })()`);
+  } });
+  const got = JSON.parse(sim.G(`(() => {
+    // EMPLOYEES, NOT BODIES. An owner-operator standing at their own counter is
+    // not somebody they hired, and a limit that counted them would bite hardest
+    // on the one-crab shops it exists to protect - SUDSY would be at a 2-staff
+    // limit with ONE employee. (This assertion exists because the mutation that
+    // removed the rule passed every other scenario in the file.)
+    const selfRun = Object.keys(BIZ).filter(b => bizUnlocked(b) && bizOwner(b)
+      && allCrabs().some(k => k.p.job === b && k.p.owner === bizOwner(b)))
+      .map(b => ({ b, heads: bizHeads(b),
+        bodies: allCrabs().filter(k => k.p.job === b).length }));
+    const heads0 = bizHeads("shack"), crew0 = crabs.length;
+    hall.policy.cap = 0;
+    const off = { full: capFull("shack"), cap: headCap() };
+    // ...pin the limit UNDER what the shack already has
+    let step = 1;
+    while (step < CAP_STEPS && HEAD_CAP.steps[step] < heads0) step++;
+    while (step > 1 && HEAD_CAP.steps[step] >= heads0) step--;
+    hall.policy.cap = step;
+    const on = { full: capFull("shack"), cap: headCap(), why: capWhy("shack") };
+    coins = 9000; tryBuy("chef");
+    const afterTry = { crew: crabs.length, heads: bizHeads("shack") };
+    hall.policy.cap = 0; coins = 9000; tryBuy("chef");
+    return JSON.stringify({ heads0, crew0, off, on, afterTry, selfRun,
+      afterRepeal: { crew: crabs.length, heads: bizHeads("shack") } });
+  })()`));
+  if (!got.selfRun.length) return "no owner works their own shop here - the employee rule is untested";
+  for (const r of got.selfRun)
+    if (r.heads !== r.bodies - 1)
+      return `${r.b} is run by its owner: ${r.bodies} crabs work there so it has ${r.bodies - 1} ` +
+        `employees, but the limit counts ${r.heads} - an owner-operator is being counted as their own staff`;
+  if (got.heads0 < 2) return "the shack never got enough staff for the limit to mean anything";
+  if (got.off.full || got.off.cap !== 0) return "step 0 is not NO LIMIT";
+  if (!got.on.full) return `a ${got.on.cap}-staff limit does not read as full against ${got.heads0} staff`;
+  if (!got.on.why || got.on.why.indexOf("HOUSE LIMIT") < 0)
+    return "a refused hire has no legible reason: " + got.on.why;
+  if (got.afterTry.crew !== got.crew0)
+    return `the limit was ${got.on.cap} and the hire went through anyway (${got.crew0} -> ${got.afterTry.crew})`;
+  // THE WHOLE POINT: it blocked a hire and took nobody off the payroll
+  if (got.afterTry.heads !== got.heads0)
+    return `the limit FIRED somebody - shack went ${got.heads0} -> ${got.afterTry.heads}`;
+  if (!(got.afterRepeal.crew > got.crew0))
+    return "repealing the limit did not let the shop hire again";
+  return true;
+});
+
+scenario("the house limit runs backwards, and the tie-break knows it", () => {
+  // Every other dial on a platform asks for MORE as its number rises. The cap
+  // asks for more as its number FALLS, and step 0 - no limit at all - is the
+  // smallest ask on the board. The shared "ties go to the smaller ask" rule
+  // therefore has to run the other way round for this one dial; before it did,
+  // an owner indifferent between three limits quietly campaigned for the most
+  // punitive one on the ballot every single time.
+  const sim = createSim({ seed: 32 });
+  sim.runDays(9, { tickEvery: 60, onTick: (G) => {
+    if (G("coins") < 3000) G("coins = 6000");
+    G(`(() => { while (crabs.length < 6) { const n = crabs.length; hireCrew(); if (crabs.length === n) break; } })()`);
+  } });
+  const got = JSON.parse(sim.G(`(() => {
+    const asks = [];
+    for (let v = 0; v <= CAP_STEPS; v++) asks.push([HEAD_CAP.steps[v], capAsk({ cap: v })]);
+    // a rival owner with a small shop, against the player's big one
+    const rivals = allCrabs().filter(c => c.p.owner);
+    const pick = (c, ties) => {
+      let best = null;
+      for (const v of ties) {
+        const p = { mech: "rents", rate: 0, bowls: 0, wage: 0, cap: v };
+        if (!best || capAsk(p) < capAsk(best)) best = p;
+      }
+      return best.cap;
+    };
+    return JSON.stringify({ asks, tightest: HEAD_CAP.steps[1], loosest: HEAD_CAP.steps[CAP_STEPS],
+      tiePick: pick(rivals[0], [1, 2, 3]), rivals: rivals.length,
+      wants: rivals.map(c => policyLine(idealPlatform(c, allPlatforms()))) });
+  })()`));
+  const off = got.asks[0];
+  if (off[0] !== 0) return "step 0 is not NO LIMIT";
+  for (const [staff, ask] of got.asks.slice(1))
+    if (!(ask > off[1])) return `a ${staff}-staff limit asks ${ask}, no more than no limit at all (${off[1]})`;
+  // ...and among real limits, tighter must be the BIGGER ask
+  const real = got.asks.slice(1);
+  for (let i = 1; i < real.length; i++)
+    if (!(real[i][1] < real[i - 1][1]))
+      return `a ${real[i][0]}-staff limit asks more than a ${real[i - 1][0]}-staff one - the dial is inverted`;
+  if (got.tiePick !== 3)
+    return `tied between three limits, the tie-break took step ${got.tiePick} instead of the mildest`;
+  return true;
+});
+
+scenario("a house limit is a competition policy, and the town reads it that way", () => {
+  // The floor splits the town between labour and capital; the limit splits it
+  // between BIG and SMALL employers. In a town where the player is the biggest
+  // employer that means it is mostly aimed at THEM - which is the whole reason
+  // it is worth a seat on the ballot next to the floor rather than folded in.
+  const sim = createSim({ seed: 33 });
+  sim.runDays(10, { tickEvery: 60, onTick: (G) => {
+    if (G("coins") < 3000) G("coins = 6000");
+    G(`(() => { while (crabs.length < 7) { const n = crabs.length; hireCrew(); if (crabs.length === n) break; } })()`);
+  } });
+  const got = JSON.parse(sim.G(`(() => {
+    // a limit that bites the player's shop and nobody else's
+    const heads = bizHeads("shack");
+    let step = CAP_STEPS;
+    while (step > 1 && HEAD_CAP.steps[step] >= heads) step--;
+    const hi = { mech: "rents", rate: 0, bowls: 0, wage: 0, cap: step };
+    const lo = { mech: "rents", rate: 0, bowls: 0, wage: 0, cap: 0 };
+    return JSON.stringify({ heads, cap: HEAD_CAP.steps[step],
+      rows: allCrabs().map(c => ({ n: c.p.name,
+        owns: !!c.p.owner, mine: BIZ[c.p.job] && bizOwner(c.p.job) === "player",
+        theirs: c.p.owner ? Math.max(...Object.keys(BIZ).filter(b => bizUnlocked(b)
+          && bizOwner(b) === c.p.owner).map(bizHeads).concat([0])) : 0,
+        nojob: !BIZ[c.p.job] && !c.p.owner,
+        d: platValue(c, hi) - platValue(c, lo) })) });
+  })()`));
+  if (!(got.heads > got.cap)) return "the fixture never got the shack over the limit";
+  let small = 0, seekers = 0;
+  for (const r of got.rows) {
+    if (r.owns && r.theirs <= got.cap) {
+      small++;
+      if (!(r.d > 0)) return `${r.n} keeps a shop under the limit and does not want it (${r.d})`;
+    }
+    if (r.nojob) {
+      seekers++;
+      if (!(r.d < 0)) return `${r.n} has no wage job and is not against a limit on hiring (${r.d})`;
+    }
+    // GRANDFATHERED: staff already inside the big shop keep their jobs, so the
+    // limit is worth nothing to them either way. If that ever changes, the
+    // "never fires anybody" rule has been broken somewhere.
+    if (r.mine && Math.abs(r.d) > 1e-9)
+      return `${r.n} already works the capped shop and the limit moved their score (${r.d})`;
+  }
+  if (!small) return "no small owner in this town - the scenario proves nothing";
+  if (!seekers) return "nobody is looking for work - the scenario proves nothing";
   return true;
 });
 

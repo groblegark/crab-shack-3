@@ -21,10 +21,16 @@ numbers, backlog, and conventions. Don't duplicate it — update it there.
 
 ## Suite discipline
 - `node tools/suite.mjs` (all scenarios) must be green before any commit.
-- Balance changes need a headless matrix re-run. Baseline (buy nothing):
-  0/N survive, median eviction ~14. Growth (`--buy chef,table`): **1/16**, and
-  that is the intended difficulty as of 2026-08-20, not a regression to fix —
-  see STATE OF PLAY in PLAN.md. Compare against the verified numbers there.
+- Balance changes need a headless matrix re-run. Measured 2026-08-21: baseline
+  (buy nothing) **0/16, median eviction 11**; growth (`--buy chef,table`)
+  **2/16** across both 8-seed blocks (1/8 + 1/8). That growth number is the
+  intended difficulty, not a regression to fix — see STATE OF PLAY in PLAN.md.
+- **Arm-off hatches for attribution**, all of them `window._no*` flags the
+  harness sets: `--nohall` (the whole office), `--nofloor` (the wage floor
+  only, office still running), `--nocap` (the house limit only), `--norival`,
+  `--nohotelier`, `--nodorm`, `--noannexe`, `--failoff`. Reach for the narrow
+  one: `--nohall` moves the shelter too, so it cannot tell you whether a
+  payroll policy did something.
 - **The 8-seed growth block is noisy — run the second one.** Measured on the
   visitor pass: the same build reads 2/8 on the default seeds and 4/8 on
   `--seedbase 8`, and the pre-pass build reads 4/8 and 2/8 on the same two
