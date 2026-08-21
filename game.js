@@ -2130,7 +2130,6 @@ function buyBusiness(b, buyer) {
     buyer.p.wallet -= price;
     const id = ownerIdFor(buyer);
     OWNERS[id] = OWNERS[id] || defineTill({ id, name: buyer.p.name, till: 0, credit: 0, darkT: 0 });
-    OWNERS[id].till += float;
     BIZ[b].owner = id;
     BIZ[b].autoLabor = true;    // a peer owner runs the same policy table SUDSY does
     if (!buyer.p.owner) {       // their FIRST shop: an owner-operator behind their own counter
@@ -2140,6 +2139,16 @@ function buyBusiness(b, buyer) {
       buyer.carrying = null; buyer.dayState = "home"; buyer.cstate = "";
       buyer.workBiz = b; buyer.fishSpot = null;
     }
+    // THE FLOAT COMES BACK AFTER THE BUYER IS THE OWNER, and the order is the
+    // whole of it. With one wallet the float is not a separate pot - it is the
+    // buyer's own money staying in the buyer's own pocket - and `till` finds
+    // that pocket by asking who owns the lease. Credited one line earlier, on
+    // a crab's FIRST shop, `p.owner` was not set yet, so the float landed in
+    // the ownerless backing and the buyer's wallet read short by it until
+    // something happened to touch the till. Nothing was lost, but the town was
+    // briefly wrong, and a sale measured in that window looked like theft:
+    // "she paid $677 net, REEF banked $339".
+    OWNERS[id].till += float;
     who = buyer.p.name;
     crabLog(buyer, "money", "BOUGHT THE " + BIZ[b].name + " FOR $" + price, 0);   // DIARY
     crabLog(buyer, "life", "THEIR OWN BOSS NOW - RUNS THE " + BIZ[b].short, 0);
