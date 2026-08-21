@@ -11,8 +11,9 @@ Three games, all live on GitHub Pages, all built on the snescat toy PPU
 
 ## STATE OF PLAY — start here (rewritten 2026-08-20, after a second day)
 
-**Suite 226 scenarios, green. Baseline 0/16 (median eviction day 13).
-Growth `--buy chef,table` 3/16 — see the note below on why it moved.**
+**Suite 230 scenarios, green. Baseline 0/16 (median eviction day 12).
+Growth `--buy chef,table` 2/16 — the difference from 3/16 is one town, i.e.
+noise; see the note below on why this number moves and why it is not a dial.**
 
 **GROWTH IS 3/16, AND THE DIFFICULTY IS NOT A TARGET TO HIT** — ruled by Matt,
 2026-08-20 at 1/16: *"1/16 is ok, we'll do better than the tests, as players."*
@@ -3346,6 +3347,50 @@ cannot be stopped: there is no pause, and no speed of zero"** pins the ruling
 as a mechanism rather than a grep — there must be no pause STATE to flip and no
 entry in `FF_SPEED` that stops time, and the clock is then checked to actually
 run, so a pause shipped as "speed 0 by default" fails it.
+
+## ONE WALLET PER CRAB (Matt, 2026-08-20) — shipped
+
+> "I like the idea that each crab just has one wallet, and the owner gets all
+> the money from their shops, that's how we work."
+
+A shop used to keep a TILL separate from its owner's POCKET, and three bits of
+code shuffled money between them. `till` is now an ACCESSOR onto the owner
+crab's wallet: every call site keeps working and means one thing. The backing
+number is used only while a lease has no living owner, and the money FOLLOWS
+THE OWNER — the instant a lease has a crab, whatever is parked moves into their
+pocket.
+
+**What it caught on the way in**, none of which the suite was looking for:
+- SUDSY's **$200 of seed capital had been stranded** behind her lease for the
+  whole game while her wallet did the work.
+- An owner **dying would have minted** their stale backing into the world.
+- The **float was credited before the buyer owned the lease**, so on a crab's
+  first shop it stranded and the buyer's wallet read short — a sale measured in
+  that window looked like theft.
+- The **seller was paid through a lease that had already moved**.
+
+**THE SENTENCE THAT FIXES ALL OF IT, in the code and in the suite alike: NAME A
+CRAB, NOT A LEASE.** Six scenarios were measuring `OWNERS[id].till` at exactly
+the moment a sale moves the lease, so afterwards that record points at nobody
+and reads as if the seller was never paid.
+
+**Three claims had to change because they were only true with two accounts:**
+a sale between two crabs is a straight TRANSFER (`buyerPaid === sellerGain`);
+there is no separate OPENING TILL; and the day-off payroll claim is asserted
+from the PAYROLL RECORD rather than a balance, because a till that is also a
+pocket cannot tell a skipped wage from a sandwich.
+
+**Two behaviour changes, consequences rather than faults:**
+- **Peer owners are cash-rich** — their takings ARE their savings — so a
+  vacated shop is bought the settlement it is listed. A failed business may
+  rarely reach the market for the player.
+- **A second shop does not make you its operator**: BRASS buys the showers and
+  keeps working her hotel.
+
+The frozen fingerprint was re-baselined LAST, after the other seven failures
+were understood, and it is the proof this was an accounting change rather than
+a behavioural one: **SUDSY 40 → 220 and REEF 27 → 196 with every other number
+byte-identical.** Nobody traded differently.
 
 ## THE CULTURE OF THE CRAB PEOPLE (Matt, 2026-08-20) — the direction for CS3
 
