@@ -10279,6 +10279,11 @@ cv.addEventListener("click", (ev) => {
   }
   // panel
   if (p.y >= PANEL_Y) {
+    // THE TWO SCREEN CHIPS ANSWER FIRST. They live in the crew row now (see
+    // navRects), at its right-hand end, so they must be tested before the crew
+    // tiles that share that band - otherwise a tap on MANAGE selects whichever
+    // crab the tiles think is under it.
+    if (navTapChip(p)) return;
     if (p.y < TAB_Y - 1) {
       // ONE UNBROKEN CHAIN, HIGHEST x FIRST, and every band matches the thing
       // drawn in it. Written out as boundaries rather than a `>` ladder with a
@@ -10306,7 +10311,7 @@ cv.addEventListener("click", (ev) => {
       for (const b of BUTTONS)
         if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) { tapShopButton(buttonKey(b)); return; }
     } else if (tab === "crew") {   // menu tab: no invisible crew cards to click
-      for (let i = 0; i < crabs.length; i++) {
+      for (let i = 0; i < crewTilesShown(crabs.length); i++) {
         const bx = 4 + i * CARD_STEP;
         if (p.x >= bx && p.x < bx + CARD && p.y >= ROW_Y && p.y < ROW_Y + CARD) {
           followIdx = followIdx === i ? -1 : i; followNpc = null; followCust = null;
@@ -10317,8 +10322,8 @@ cv.addEventListener("click", (ev) => {
     return;
   }
   // THE NAV STRIP is painted over the bottom rows of the world, so it answers
-  // for them: its chips first, then the map, then the town underneath.
-  if (navTapChip(p)) return;
+  // for them: the map, then the town underneath. (Its CHIPS moved into the
+  // panel and are answered there - see the panel branch above.)
   if (navTrackHit(p)) { navJumpTo(p.x); sfx.ding(); return; }
   // follow-card job toggle
   if (followIdx >= 0 && !followNpc
@@ -11767,19 +11772,40 @@ const NAV_MAP = { x: 0, y: PANEL_Y - NAV_H, w: W, h: NAV_H };
 // the right building. They sit on the LEFT of the chip row above the map,
 // because the RIGHT of that row is already spoken for: the debt and bankruptcy
 // warnings stack up from there.
+// THE TWO SCREENS LIVE IN THE PANEL NOW, beside the crew tiles (Matt,
+// 2026-08-20: "we can remove the help button; and move all 3 of those buttons
+// to bottom of screen near the character select thing").
+//
+// They used to sit on the world's bottom-left, over the sand, which put two
+// controls inside the picture. Stacked at the right-hand end of the crew row
+// they are next to the other thing a player picks with a thumb, and the world
+// is left to be a world. HELP is GONE from the chip row - the card is still
+// reachable on H, on ?, and from HOW TO PLAY on the title screen.
+//
+// The crew tiles grow left-to-right from x4 at CARD_STEP each, so the chips
+// take the right-hand end: seven crew reach x193 and the chips start at 214.
+const NAV_CHIP_W = 40;
+// HOW MANY CREW TILES FIT BEFORE THE CHIPS. The tiles grow left-to-right from
+// x4 at CARD_STEP each and the MANAGE/TOWN chips now hold the right-hand end of
+// that same row, so a big enough crew would run underneath them: MEASURED, nine
+// crew reach x244 against a chip edge at x214. One reader for the draw and the
+// hit test, so a tile that is not painted can never be clicked either.
+function crewTilesShown(n) {
+  const limit = W - NAV_CHIP_W - 4;
+  let fit = 0;
+  while (fit < n && 4 + fit * CARD_STEP + CARD <= limit) fit++;
+  // ...and if any crab is left out, the LAST slot is given over to saying so.
+  // A roster that silently stops at six is a roster that lies about the size of
+  // your crew - and the crabs it drops are still on the payroll, still on the
+  // bill, and still reachable with [ and ] or the cycler on their own card.
+  return fit < n ? Math.max(0, fit - 1) : fit;
+}
 function navRects() {
-  const cy = NAV_MAP.y - NAV_CHIP_H - 1;
-  const mw = smallTextWidth("MANAGE") + 8, tw = smallTextWidth("TOWN") + 8, hw = smallTextWidth("HELP") + 8;
+  const x = W - NAV_CHIP_W - 2;
   return {
     map: NAV_MAP,
-    manage: { x: 2, y: cy, w: mw, h: NAV_CHIP_H },
-    town: { x: 4 + mw, y: cy, w: tw, h: NAV_CHIP_H },
-    // HELP sits third because it is the one you need least often and the one
-    // you need most badly. Its x is a CONSTANT (both labels to its left are
-    // literals), so it does not move when a player with no shop left loses the
-    // other two - see navChipsLive: MANAGE and TOWN need a business to open,
-    // and the help card needs nothing at all.
-    help: { x: 6 + mw + tw, y: cy, w: hw, h: NAV_CHIP_H },
+    manage: { x, y: ROW_Y, w: NAV_CHIP_W, h: NAV_CHIP_H },
+    town: { x, y: ROW_Y + NAV_CHIP_H + 2, w: NAV_CHIP_W, h: NAV_CHIP_H },
   };
 }
 // world x <-> strip x. Rounded on the way out so a building's block and its
@@ -11860,7 +11886,6 @@ function navTapChip(p) {
   const hit = (r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
   // HELP first, and on navLive rather than navChipsLive: a player who has lost
   // every shop can still ask what happened.
-  if (hit(R.help)) { toggleHelp(); return true; }
   if (!navChipsLive()) return false;
   if (hit(R.manage)) {
     // WHICH SHOP? The one you are looking at, if you own it - the chip answers
@@ -11951,23 +11976,25 @@ function drawNav() {
     const px2 = Math.max(m.x, Math.min(m.x + m.w - 1, sx(sel.x + 8)));
     rect(ctx, px2, m.y + 2, 1, 1, [255, 255, 255]);
   }
-  // ---- and the two screens that used to be buildings, plus the card that
-  // explains the other two
-  const chip = (r, label, hot) => {
+}
+// ...and the two chips, drawn AFTER the panel because they now sit inside it.
+// (drawNav runs before drawPanel - it is the map, and the map is under the
+// HUD - so a chip drawn there at panel coordinates would be painted over.)
+function drawNavChips() {
+  if (!navLive() || !navChipsLive()) return;
+  const R = navRects();
+  const chip = (r, label) => {
     rect(ctx, r.x, r.y, r.w, r.h, [30, 20, 36]);
-    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, hot ? [255, 216, 96] : [235, 225, 205]);
+    rect(ctx, r.x + 1, r.y + 1, r.w - 2, r.h - 2, [235, 225, 205]);
     smallText(ctx, label, r.x + ((r.w - smallTextWidth(label)) >> 1), r.y + 3, [90, 60, 40]);
   };
-  if (navChipsLive()) { chip(R.manage, "MANAGE"); chip(R.town, "TOWN"); }
-  // A TOWN THAT HAS NEVER OPENED THE HELP PULSES THE CHIP, once, on day one -
-  // exactly the shape of the music invite two rows down, and for the same
-  // reason: a chip nobody has ever pressed is a chip nobody knows is there.
-  // It stops the moment it is opened (helpSeen persists in the save), so it
-  // costs a returning player nothing.
-  const invite = !helpSeen && day <= 1;
-  chip(R.help, "HELP", invite && (time % 2) < 1.2);
-  if (invite && !helpNudged && !toast && reportT <= 0 && tmin > 7 * 60 + 20) {
-    toast = { text: "NEW HERE? TAP HELP - OR PRESS H", t: 7 };
+  chip(R.manage, "MANAGE");
+  chip(R.town, "TOWN");
+  // THE HELP INVITE OUTLIVED ITS CHIP. A player who has never opened the card
+  // still gets told once, on day one, that it is there - it just names the KEY
+  // now instead of pointing at a button that no longer exists.
+  if (!helpSeen && day <= 1 && !helpNudged && !toast && reportT <= 0 && tmin > 7 * 60 + 20) {
+    toast = { text: "NEW HERE? PRESS H FOR HELP", t: 7 };
     helpNudged = true;
   }
 }
@@ -12112,7 +12139,16 @@ function drawPanel() {
       text(ctx, maxed ? "MAX" : "$" + fmt(cost), b.x + 3, b.y + (TALL ? 14 : 10), maxed ? [160, 145, 135] : afford ? [80, 45, 20] : [140, 125, 115], 5);
     }
   } else {
-    for (let i = 0; i < crabs.length; i++) {
+    const shown = crewTilesShown(crabs.length);
+    if (shown < crabs.length) {   // the overflow marker, in the slot it cost
+      const bx = 4 + shown * CARD_STEP, hidden = crabs.length - shown;
+      rect(ctx, bx, ROW_Y, CARD, CARD, [30, 20, 20]);
+      rect(ctx, bx + 1, ROW_Y + 1, CARD - 2, CARD - 2, [60, 48, 44]);
+      const t1 = "+" + hidden;
+      smallText(ctx, t1, bx + ((CARD - smallTextWidth(t1)) >> 1), ROW_Y + 6, [255, 216, 96]);
+      smallText(ctx, "[ ]", bx + ((CARD - smallTextWidth("[ ]")) >> 1), ROW_Y + 14, [150, 140, 160]);
+    }
+    for (let i = 0; i < shown; i++) {
       const c = crabs[i], bx = 4 + i * CARD_STEP;
       const picked = sel === c;
       rect(ctx, bx, ROW_Y, CARD, CARD, picked ? [255, 230, 120] : [30, 20, 20]);
@@ -15342,6 +15378,7 @@ function frame(now) {
   drawFollowCard();
   drawCycler();   // < crab > : step the selection (and the camera) through the town
   drawPanel();
+  drawNavChips();      // MANAGE / TOWN sit IN the panel now, so they go on after it
   drawShopTip();       // hangs off the bottom of the world, pointing at the grid it explains
   drawHireCard();
   if (!boardView && !manage && !saveView && !dossier && !helpView && departT <= 0) drawToast();   // reading surfaces own the screen

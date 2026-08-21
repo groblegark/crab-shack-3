@@ -4717,11 +4717,26 @@ scenario("the nav strip: one table draws it, hit-tests it and jumps the camera",
   // and it stays out of the town's way: nothing is painted where a crab can walk
   if (flat.map.y <= flat.floorMax) return `the strip at y${flat.map.y} covers crabs, whose feet reach ${flat.floorMax}`;
   if (flat.map.y + flat.map.h > flat.panelY) return "the strip runs into the panel";
+  // THE CHIPS MOVED INTO THE PANEL (Matt: "move all 3 of those buttons to
+  // bottom of screen near the character select thing"), so they are BELOW the
+  // strip now rather than above it. The rule was never "above" - it was that a
+  // chip must not cover the map it is next to, and must not cover the town
+  // either. Both still hold, stated as what they are.
   for (const c of flat.chips) {
     if (c.y < 0 || c.x < 0 || c.x + c.w > 256) return "a nav chip hangs off the canvas";
-    if (c.y + c.h > flat.map.y) return "a nav chip sits on top of the map";
+    if (c.y < flat.map.y + flat.map.h && c.y + c.h > flat.map.y)
+      return "a nav chip sits on top of the map";
+    if (c.y + c.h > flat.map.y && c.y < flat.panelY)
+      return "a nav chip is stranded between the map and the panel";
   }
-  if (flat.chips[0].x + flat.chips[0].w > flat.chips[1].x) return "the MANAGE and TOWN chips overlap";
+  // ...and they do not sit on each other. They are STACKED now rather than side
+  // by side, so this is a real 2D test: an x-only comparison passed two chips
+  // at the same x and called them clear.
+  {
+    const [a2, b2] = flat.chips;
+    if (a2.x < b2.x + b2.w && a2.x + a2.w > b2.x && a2.y < b2.y + b2.h && a2.y + a2.h > b2.y)
+      return "the MANAGE and TOWN chips overlap";
+  }
 
   // ---- 4. the two chips, which are the whole point of the exercise
   const chip = (which) => sim.G(`(() => {
@@ -8874,26 +8889,41 @@ scenario("the help card is reachable from play, and from a town with nothing lef
   sim.runDays(1);
   const R = JSON.parse(sim.G("JSON.stringify(navRects())"));
   const mid = (r) => `{ x: ${r.x + (r.w >> 1)}, y: ${r.y + (r.h >> 1)} }`;
+  const PANEL_Y_TEST = sim.G("PANEL_Y");
   sim.G('helpView = false; screen = "play"; gameOver = false; dossier = null; manage = null;'
     + " boardView = false; saveView = false; reportT = 0;");
-  if (!sim.G(`navTapChip(${mid(R.help)})`) || !sim.G("helpView")) return "the HELP chip did not open the card";
+  // THERE IS NO HELP CHIP ANY MORE (Matt, 2026-08-20: "we can remove the help
+  // button"). The card keeps the doors that do not cost a control in the
+  // middle of the screen: the H key, the ? key, and HOW TO PLAY on the title.
+  // What this scenario still has to prove is that it is FINDABLE, so it walks
+  // those instead - and that the chip is really gone rather than merely
+  // unpainted, since a live hit-box under nothing is worse than either.
+  if (!sim.G("typeof toggleHelp === 'function'")) return "there is no way to open the help card at all";
+  sim.G("toggleHelp();");
+  if (!sim.G("helpView")) return "the H key's own handler did not open the card";
   sim.G("helpView = false;");
-  // the chip's rect IS the chip that is drawn: nothing clickable that was never
-  // painted, and nothing painted you cannot hit
+  if (sim.G("navRects().help !== undefined")) return "a HELP rect is still hanging about in navRects";
   const painted = JSON.parse(sim.G(`(() => {
     const out = []; const S = smallText;
     smallText = (c, s2, x, y, col) => { out.push([String(s2), x, y]); return S(c, s2, x, y, col); };
-    try { drawNav(); } finally { smallText = S; }
+    try { drawNav(); drawNavChips(); } finally { smallText = S; }
     return JSON.stringify(out); })()`));
-  const chipRow = painted.find(p => p[0] === "HELP");
-  if (!chipRow) return "the HELP chip was never drawn";
-  if (chipRow[1] < R.help.x || chipRow[1] > R.help.x + R.help.w)
-    return `the HELP label prints at x${chipRow[1]}, outside its own rect x${R.help.x}..${R.help.x + R.help.w}`;
+  if (painted.some(p => p[0] === "HELP")) return "a HELP chip is still being drawn";
+  // ...and the two chips that DID stay are painted inside their own rects, in
+  // the panel where they now live
+  for (const k of ["manage", "town"]) {
+    const row = painted.find(p => p[0] === k.toUpperCase());
+    if (!row) return `the ${k.toUpperCase()} chip was never drawn`;
+    if (row[1] < R[k].x || row[1] > R[k].x + R[k].w)
+      return `${k.toUpperCase()} prints at x${row[1]}, outside its own rect`;
+    if (row[2] < PANEL_Y_TEST) return `${k.toUpperCase()} is still up in the world at y${row[2]}`;
+  }
   // A PLAYER WITH NOTHING LEFT can still ask what happened: MANAGE and TOWN go
-  // dark with the last business, HELP does not.
+  // dark with the last business, the help card does not.
   sim.G('for (const k in BIZ) if (bizOwner(k) === "player") BIZ[k].owner = "sudsy";');
   if (sim.G("navChipsLive()")) return "the fixture did not actually strip the player's businesses";
-  if (!sim.G(`navTapChip(${mid(R.help)})`) || !sim.G("helpView")) return "HELP went dark with the last shop";
+  sim.G("toggleHelp();");
+  if (!sim.G("helpView")) return "HELP went dark with the last shop";
   // the card swallows its own clicks and pages both ways off one rect table
   const HR = JSON.parse(sim.G("JSON.stringify(helpRects())"));
   sim.G("helpPage = 0;");
@@ -9620,6 +9650,59 @@ scenario("a shop's takings show on its owner's card the moment they land", () =>
   if (!got.onCard) return `${got.who}'s card does not show her till of $${got.till} (wallet $${got.wallet})`;
   if (!got.dossierHasTillLabel || !got.onDossier)
     return `${got.who}'s dossier does not show her till of $${got.till}`;
+  return true;
+});
+
+// ===========================================================================
+// THE CREW ROW AND THE CHIPS SHARE A BAND (Matt, 2026-08-20)
+// ===========================================================================
+
+scenario("a big crew never runs under the MANAGE and TOWN chips", () => {
+  // Matt: "we can remove the help button; and move all 3 of those buttons to
+  // bottom of screen near the character select thing." They now hold the
+  // right-hand end of the crew row - which is the row the crew tiles grow
+  // along, from x4 at CARD_STEP each. MEASURED before the guard: nine crew
+  // reach x244 against a chip edge at x214, so the last two tiles were drawn
+  // underneath a button.
+  //
+  // Asserted at every crew size up to a townful, because the bug only appears
+  // past six and a fixture with two crabs in it would never have seen it.
+  const sim = createSim({ seed: 13 });
+  sim.runDays(1);
+  const bad = JSON.parse(sim.G(`(() => {
+    const out = [];
+    const wasHeadless = window._headless;
+    tab = "crew"; manage = null; dossier = null; boardView = false; saveView = false; helpView = false;
+    for (let n = 1; n <= 12; n++) {
+      while (crabs.length < n) hireCrew();
+      if (crabs.length !== n) break;                 // the town ran out of names
+      const R = navRects(), shown = crewTilesShown(crabs.length);
+      // 1. NO TILE IS DRAWN UNDER A CHIP, and the overflow marker counts too:
+      //    it takes the slot after the last tile.
+      const slots = shown + (shown < crabs.length ? 1 : 0);
+      const right = slots ? 4 + (slots - 1) * CARD_STEP + CARD : 0;
+      if (right > R.manage.x) out.push([n, "tile right edge " + right + " past chip x" + R.manage.x]);
+      // 2. THE CHIP ANSWERS AT ITS OWN COORDINATES, whatever the crew size -
+      //    it is tested before the tiles in the panel's click chain, so a full
+      //    roster must not swallow it. (The panel's listener is anonymous and
+      //    cannot be called from here; navTapChip is the branch under test and
+      //    is what that listener calls first.)
+      manage = null;
+      const opened = navTapChip({ x: R.manage.x + 4, y: R.manage.y + 4 });
+      if (ownedBizList().length && (!opened || !manage))
+        out.push([n, "the MANAGE chip did not open under a crew of " + n]);
+      manage = null;
+      // 3. ...and nothing clickable that is not painted: the draw loop and the
+      //    hit-test loop both bound themselves with crewTilesShown, so a hidden
+      //    crab has no slot in either. Asserted as the shared reader agreeing
+      //    with the geometry above rather than by clicking a tile that is not
+      //    there.
+      if (shown > crabs.length) out.push([n, "more tiles shown than crabs"]);
+    }
+    window._headless = wasHeadless;
+    return JSON.stringify(out.slice(0, 6));
+  })()`));
+  if (bad.length) return bad.map(b => b.join(" :: ")).join("\n        ");
   return true;
 });
 
