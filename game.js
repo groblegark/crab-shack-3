@@ -6471,6 +6471,22 @@ function leaveGmin(c) {
 }
 
 const FLOOR_MIN = 126, FLOOR_MAX = 168;
+// A CABANA IS A HUT, NOT A COUNTER. Generic furniture claims y-9..y+6, which
+// for the forecourt row at y=158 is 149..164 - and that sits between the two
+// travel lanes with 3px of daylight above and 4px below. giveBerth shoves a
+// walker up to 3px in y in a single frame, so ONE jostle while passing put a
+// crab inside the row; and because the bands overlap by 2px at the 26px cabana
+// pitch, the six huts are a CONTINUOUS 158px wall with no gap to escape
+// through. The crab then ground along it for up to a whole BOUNCE_BUDGET (30
+// game-minutes) before the warp valve let it past - Matt's "with multiple
+// cabanas, crabs are getting stuck for a long time". Measured, 20 days seed
+// 909: 2 blocked frames in the forecourt with no cabanas, 512 with six.
+// Narrowing the huts' band to y-6..y+4 doubles both lanes' margins to 6px,
+// which is wider than any single berth push. solidBands() and collide() must
+// agree on these two numbers.
+const CAB_UP = 6, CAB_DN = 4;
+function furnUp(t) { return t.cabana ? CAB_UP : 9; }
+function furnDn(t) { return t.cabana ? CAB_DN : 6; }
 function stepTo(c, tx, speed, dt, ty) {
   if (ty == null) ty = c.ty != null ? c.ty : 160;
   const dx = tx - c.x, dy = ty - c.y;
@@ -6560,7 +6576,7 @@ function collide(dt) {
       for (const c of bodies) {
         if (Math.abs((c.tx || 0) - (t.x + 2)) < 8 && Math.abs((c.ty || 0) - (t.y + 12)) < 8) continue;
         const dx = c.x + 8 - (t.x + 10), dy = c.y - t.y;
-        if (Math.abs(dx) < 14 && dy > -9 && dy < 6) {
+        if (Math.abs(dx) < 14 && dy > -furnUp(t) && dy < furnDn(t)) {
           const push = Math.min(95 * dt, 5);
           if (Math.abs(dx) > Math.abs(dy) * 1.6) c.x += (dx > 0 ? 1 : -1) * push;
           else c.y = clampY(c.y + (dy > -2 ? 1 : -1) * push);
@@ -7615,7 +7631,7 @@ function solidBands() {
   for (const b of Object.keys(BIZ)) {
     if (!bizUnlocked(b)) continue;
     for (const t of (bizTables(b) || []).concat(BIZ[b].stalls || []))
-      out.push({ x0: t.x - 12, x1: t.x + 16, y0: t.y - 9, y1: t.y + 6 });   // collide(): |c.x+8-(t.x+10)|<14, -9<dy<6
+      out.push({ x0: t.x - 12, x1: t.x + 16, y0: t.y - furnUp(t), y1: t.y + furnDn(t) });   // collide(): |c.x+8-(t.x+10)|<14, -furnUp<dy<furnDn
     const sts = BIZ[b].stations;
     for (const kind of Object.keys(sts)) for (const st of sts[kind])
       out.push({ x0: st.x - 11, x1: st.x + 15, y0: st.y - 10, y1: st.y + 6 });   // |c.x+8-(st.x+10)|<13, -10<dy<6

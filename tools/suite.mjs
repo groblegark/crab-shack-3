@@ -9777,6 +9777,65 @@ scenario("every track in the playlist is a file that exists", () => {
   return true;
 });
 
+scenario("the cabana row leaves both travel lanes a real margin", () => {
+  // MATT: "with multiple cabanas, crabs are getting stuck for a long time."
+  // The forecourt huts are stalls, and generic furniture claims y-9..y+6 -
+  // which at the row's y=158 is 149..164, sitting between the two lanes with
+  // 3px of daylight above and 4px below. LANE_PAD is 2, so lane 146 cleared by
+  // a single pixel, while giveBerth shoves a walker up to 3px in y in ONE
+  // frame: any jostle while passing put a crab inside the row. And the bands
+  // OVERLAP by 2px at the 26px pitch, so six huts are a continuous 158px wall
+  // with no gap to escape through - the crab ground along it until the
+  // 30-game-minute bounce budget warped it past.
+  // The margin must stay wider than a single berth push, and this pins it.
+  const sim = createSim({ seed: 5 });
+  sim.G("ROOM_CFG.EXTRA = 6; setHotelRooms(HOTEL_ROOMS_BASE + 6);");
+  const got = JSON.parse(sim.G(`(() => {
+    const cabs = hotelRooms().filter(r => r.cabana);
+    const bands = solidBands().filter(b => cabs.some(c => Math.abs(b.x0 - (c.x - 12)) < 0.5));
+    const margins = [];
+    for (const lane of LANES) {
+      let min = 99;
+      for (const b of bands) {
+        const gap = lane < b.y0 ? b.y0 - lane : lane > b.y1 ? lane - b.y1 : -1;
+        if (gap < min) min = gap;
+      }
+      margins.push(min);
+    }
+    return JSON.stringify({ n: cabs.length, bands: bands.length, margins,
+      push: 3, pad: LANE_PAD, y: cabs[0].y });
+  })()`));
+  if (got.n !== 6) return "expected six cabanas, got " + got.n;
+  if (got.bands !== 6) return "the six huts produced " + got.bands + " solid bands";
+  for (let i = 0; i < got.margins.length; i++)
+    if (!(got.margins[i] > got.push))
+      return `lane ${i} clears the cabana row by ${got.margins[i]}px, which a single ` +
+        `${got.push}px berth push wipes out - a jostled crab lands inside the row`;
+  if (!(Math.min(...got.margins) > got.pad))
+    return "a lane's margin is inside LANE_PAD, so the router will not use it";
+  return true;
+});
+
+scenario("a crab may stand in the cabana it has come to clean", () => {
+  // The collider exempts a crab whose TARGET is a given piece of furniture, and
+  // housekeeping targets (stall.x + 2, stall.y + 7). If that ever drifts out of
+  // the exemption's +-8 box the cleaner is bounced off the very hut it was sent
+  // to scrub, which reads as a crab stuck in the forecourt all evening.
+  const sim = createSim({ seed: 6 });
+  sim.G("ROOM_CFG.EXTRA = 6; setHotelRooms(HOTEL_ROOMS_BASE + 6);");
+  const got = JSON.parse(sim.G(`(() => {
+    const cab = hotelRooms().filter(r => r.cabana)[0];
+    const tx = cab.x + 2, ty = cab.y + 7;                       // what setT() gets
+    return JSON.stringify({
+      exempt: Math.abs(tx - (cab.x + 2)) < 8 && Math.abs(ty - (cab.y + 12)) < 8,
+      up: furnUp(cab), dn: furnDn(cab), plainUp: furnUp({ x: 0, y: 0 }) });
+  })()`));
+  if (!got.exempt) return "a cleaner sent to a cabana is not exempt from it in collide()";
+  if (!(got.up === 6 && got.dn === 4)) return `cabana band is ${got.up}/${got.dn}, expected 6/4`;
+  if (got.plainUp !== 9) return "ordinary furniture lost its 9px band";
+  return true;
+});
+
 // ---- runner
 const filters = process.argv.slice(2);
 const list = filters.length ? results.filter(r => filters.some(f => r.name.includes(f))) : results;

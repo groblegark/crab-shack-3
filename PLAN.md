@@ -6727,3 +6727,84 @@ the merge** — 207 + 13 = 220 is the only cheap proof that nothing was eaten.
 - **`visLog` was not extended.** Every quote already has its matching diary
   line, because the events the ledger counts are the events `visLog` was already
   writing. Nothing needed adding to make a quote checkable.
+
+## THE CABANA WALL (Matt, 2026-08-20) — "crabs are getting stuck for a long time"
+
+Matt, playing with several cabanas up: **"with multiple cabanas, crabs are
+getting stuck for a long time."** Six probes found nothing, and the sixth one
+found it. Worth writing down mostly for how many of the obvious answers were
+wrong.
+
+### What it was NOT (all measured, 20 days, seeds 909/1337, 6 cabanas vs 0)
+
+- **Not the unstick watchdog failing.** It fires 0–4 times per 20 days, and
+  just as often with no cabanas at all. Nothing was ever hard-pinned.
+- **Not housekeeping falling behind.** Thirteen rooms on the same staff: mean
+  dirty rooms 2.2 vs 1.9 on seven, zero cleaners stuck. The annexe does not
+  outrun its cleaners.
+- **Not the check-in queue.** Mean desk queue 0.14 vs 0.11. `queueX: 2432` is a
+  static constant — the hotel line has always formed east of the forecourt and
+  cabanas do not move it.
+- **Not guests stranded walking to a cabana.** `toRoom` never once showed up as
+  long-stationary. And visitors are not in `allCrabs()`, so `collide()` never
+  touches them: a guest can walk through furniture, but can also never be
+  pushed by it.
+- **Not the longest freeze in the town.** That is ~900 ticks and it is a
+  `toPier` visitor in the ferry queue — identical with cabanas (911) and
+  without (904). Legitimately standing still.
+
+### What it was
+
+Cabanas are stalls, and generic furniture claims `y-9 .. y+6`. At the row's
+y=158 that is **149–164**, which sits *between* the two travel lanes:
+
+    lane 146 ....... 3px ....... [ 149  CABANA BAND  164 ] ....... 4px ....... lane 168
+
+`LANE_PAD` is 2, so lane 146 counted as clear by exactly **one pixel** of
+margin — while `giveBerth` shoves a walker **up to 3px in y in a single
+frame**. One jostle from a passing crab put you inside the row.
+
+And there is nowhere to go once you are in it. The bands are 28px wide at a
+26px pitch, so they **overlap by 2px**: six huts are not six obstacles, they
+are one **continuous 158px wall with no gap**. A crab shoved into it ground
+along the whole thing until `BOUNCE_BUDGET` — **30 game-minutes** — finally
+warped it 14px past. That is the "long time".
+
+### The fix
+
+A cabana is a hut, not a counter: give it its own band, `CAB_UP = 6`,
+`CAB_DN = 4` → 152–162, which leaves **both lanes a 6px margin**, wider than
+any single berth push. `solidBands()` and `collide()` share `furnUp`/`furnDn`
+so they cannot drift apart.
+
+Furniture-blocked frames inside the forecourt (x2240–2430), 20 days:
+
+| cabanas | before | after |
+|---|---|---|
+| 0 (control) | 2 | 2 |
+| 1 | 666 | 105 |
+| 6 | 512 | 171 |
+
+Town-wide blocked frames on seed 909 fall 7212 → 5826 against a no-cabana
+baseline of 5424 — the forecourt stops being an outlier (band 975 alone
+carries 1626).
+
+### The residual, and why it is left alone
+
+What is left is housekeeping in `toStallClean` crossing the row: the collider
+exempts a crab from the hut it is *targeting*, but a cleaner descending from
+the hotel counter at y≈145 to the boardwalk has to cross the other five. At
+~8 blocked frames a day across two cleaners it is now quieter than several
+shop fronts nobody has ever complained about. Fixing it properly means
+routing the merge-to-lane around the row, which is a general router change and
+not worth the risk for this.
+
+### The lesson
+
+**A crab being pushed is not a crab standing still.** Five of the six probes
+measured *stationarity* — longest-frozen entity, long-stationary counts,
+unstick events — and a crab grinding along a wall is moving the whole time. It
+was invisible to every one of them. The instrument that found it in one shot
+was `_blocked`, the collider's own "furniture is in the way" flag, which is the
+thing the report was actually about. Measure the mechanism, not the symptom
+you imagine it produces.
