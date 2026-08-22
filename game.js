@@ -116,6 +116,10 @@ const TAP_QUENCH = 0.5;     // a mouthful, not a drink: a juice zeroes thirst, w
 const TAP_SIP = 6;         // a long draw at the spout - minutes of the working day, gone
 const TAP_APPEAL = 0.35;      // a poor third to anything a counter can hand you
 const TAP_CD = 20;           // errand cooldown after a sip
+// THE ON-SHIFT BREAK: how bad it has to get before a crab leaves a counter,
+// and how long before they may do it again. Tuned against the growth matrix -
+// see the note at the break itself.
+const ONSHIFT_AT = 0.82, ONSHIFT_CD = 26;
 const TAP_RINSE = 0.35;      // a cold rinse under the spout: worse than a $5 shower
 const TAP_RINSE_AT = 0.85;   // ...and only when filthy - the showers own 0.66 upward
 const TAP_RINSE_SICK = 0.66; // an ill crab hoses down at the CARED bar, shower or no shower
@@ -7981,14 +7985,36 @@ function updateSchedule(c, dt) {
   // costs her the trade standing in front of it. So she goes only when the
   // need is PRESSING - 0.7, the bottom of the sickness band - and only for
   // food or water. She is not popping out for a game of ball.
-  if (c.p.owner && c.p.job !== "fishing" && BIZ[c.p.job] && bizOwner(c.p.job) === c.p.owner
-      && c.dayState === "working" && c.errandCd <= 0
-      && ((c.p.thirst || 0) >= 0.7 || (c.p.hunger || 0) >= 0.7)) {
+  // ...AND SO DOES ANYBODY ELSE ON A SHIFT, once the need is PRESSING. The
+  // licence started with owner-operators because SUDSY was the loudest
+  // casualty, but the hole was never about ownership: only an unemployed
+  // fisher had a break, so an EMPLOYED crab could be worked through a whole
+  // shift with no water at all. Measured after the owner fix landed: DRIFT,
+  // hired onto the showers, spent 30% of its life on the dehydration sickness
+  // line - the same number SUDSY used to post, for the same reason, one rung
+  // down. A crab worked dry is the same problem whoever signs the cheque.
+  //
+  // The licence stays narrow for everyone: 0.7 (the bottom of the sickness
+  // band), food or water only, and a ten-second cooldown after. Nobody is
+  // popping out for a game of ball, and a shop pays for it in the minutes its
+  // counter is empty - which is what a break costs in a real shop too.
+  // MEASURED AND TIGHTENED. At 0.7 with a ten-second cooldown this emptied
+  // counters often enough to cost the growth pillar outright (2/16 -> 0/16 on
+  // the matrix, with towns living LONGER and none of them escaping - the shape
+  // of a town whose shops are staffed a little less of the day). It is a last
+  // resort, not a tea break: 0.82 is well inside the sickness band, and the
+  // cooldown is long enough that it cannot become a rhythm.
+  if (BIZ[c.p.job] && c.dayState === "working" && c.errandCd <= 0
+      && ((c.p.thirst || 0) >= ONSHIFT_AT || (c.p.hunger || 0) >= ONSHIFT_AT)) {
     const e2 = pickErrand(c);
-    if (e2 && !e2.selfCook && (e2.need === "drink" || e2.need === "food")) {
-      c.duty = false; c.errandCd = 10; c.dayState = "home";
+    // ...AND THE FREE STOP FIRST. A crab who steps off a counter walks to the
+    // nearest TAP, which is free and public and never more than a lane away;
+    // holding out for a bought drink is what turns a two-minute break into a
+    // trip across the promenade.
+    if (e2 && !e2.selfCook && (e2.tap != null || e2.need === "drink" || e2.need === "food")) {
+      c.duty = false; c.errandCd = ONSHIFT_CD; c.dayState = "home";
       beginErrand(c, e2, false);
-    } else c.errandCd = 5;
+    } else c.errandCd = 8;
   }
   // (an owner-operator used to top her pocket up from her till here. One
   // wallet: the shop's money is already in her pocket, so this was moving

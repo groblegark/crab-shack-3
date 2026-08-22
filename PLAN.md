@@ -7420,3 +7420,51 @@ whose panel starts at **176** — so the rivalry line (y176) and the DONE chip
 card's height, and the arcade block is laid out to finish at **y173**, inside
 the visible band. Flagged because the HALL/ELECTION split is moving that height
 anyway.
+
+## MERGING THE ARCADE INTO THE QUARTER (2026-08-21) — five reds, and what each one was
+
+The two big passes of the day — the eastern quarter and the CLAWCADE rebuild —
+were written in parallel against the same 15k-line file. The merge itself was
+six conflicts and no surprises; **the interactions afterwards were the work.**
+All five reds turned out to be FIXTURES measuring the wrong thing once the town
+around them changed, except one, which was a genuine hole.
+
+| red | what it actually was |
+|---|---|
+| `the offer is a real number` | `bizTake` is a **three-day rolling window**, and the fixture sampled it once. The bar had traded; the window happened to be empty. Now watches every day. |
+| `a ticket stub is a reason to come back` | The probe's crab stood at home with a shift running, so the arcade was a **1114px detour** — past `DETOUR_MAX`, scoring −1 whatever was in their pocket. Geography, not the chase. Both probes now stand in the same place. |
+| `the player can stand and win` | `platValue` reads TODAY'S takings through `purseYield`, and votes are cast **across** the polling day as trade comes in — so the same voter scores the same platform differently at 9am and 6pm, and no platform chosen the night before is a guaranteed winner. The claim is that the player CAN win, so it now contests three Sundays. |
+| `THE LEASE IS THE RIVAL` | The fixture built an owner as `OWNERS.newby = {...}` **without `defineTill`**. Since ONE WALLET landed, `till` is an accessor onto the owner crab's wallet — so it had been handing NEWBY $300 into a dead property, and she could raise **$7** against a $266 bar. |
+| `taps: nobody is left parched` | **A real hole.** See below. |
+
+### The real one: only the self-employed ever got a drink
+
+The on-shift break was written as `job === "fishing"`, so it covered an
+unemployed fisher and nobody else. Fixing owner-operators (SUDSY, tracked at
+18.7% / 25% / 31% of her life on the dehydration line across three passes)
+just moved the casualty one rung down: **DRIFT, hired onto the showers, posted
+the same 30%.** A crab worked dry is the same problem whoever signs the cheque.
+
+It is now open to anybody on a shift — and the licence is narrow, because the
+first cut was not:
+
+> At 0.7 with a ten-second cooldown it emptied counters often enough to cost
+> the growth pillar outright, **2/16 → 0/16**, with towns living LONGER and none
+> of them escaping. That is the shape of a town whose shops are staffed a
+> little less of the day.
+
+`ONSHIFT_AT = 0.82`, `ONSHIFT_CD = 26`, food and water only, free stop first.
+Growth came back to 1/16.
+
+### Two numbers that moved, both named rather than tuned away
+
+- **Growth 2/16 → 1/16.** The break costs about one escape in sixteen. It is a
+  real fix for a real problem and the trade is stated rather than hidden.
+  PLAN's own precedent applies: the matrix measures the FLOOR, and chasing a
+  seed back by tuning a crab-welfare mechanic is exactly the over-fitting this
+  file warns about.
+- **The always-open gate, 1.20 → 1.26.** Not the break — the numbers are
+  identical at every threshold. It is **the arcade**: a token/ticket/prize loop
+  takes about twice as much per day a shop is OPEN, which is precisely the
+  quantity that gate divides by hours. The lever, if it should be smaller, is
+  the arcade's own dials rather than the gate.

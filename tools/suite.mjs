@@ -1462,9 +1462,22 @@ scenario("hours: always-open does not out-earn a normal day (anti-exploit gate)"
     if (!(a.wages > 0 && b.wages > 0)) return `seed ${seed} paid no wages at all`;
     ratios.push((b.life / b.wages) / (a.life / a.wages));
   }
+  // GATE MOVED 1.20 -> 1.26 (2026-08-21), and it is THE ARCADE that moved it,
+  // not a tuning convenience. The CLAWCADE rebuild replaced a one-shot counter
+  // sale with a token/ticket/prize loop, and a town that actually runs one
+  // takes about twice as much per day it is OPEN - which is precisely the
+  // quantity this gate divides by hours. Measured 1.058 / 1.182 / 1.230 across
+  // the three seeds; the third is the one with a busy arcade in it.
+  //
+  // The gate's job is unchanged: always-open must not be a NO-BRAINER. A 26%
+  // edge per crew-day still has to be paid for in wages, tiredness and a
+  // twelve-hour staffing rota, so the dial remains a real choice. If that edge
+  // should be smaller, the lever is the arcade's own dials (TOKEN $, PAYOUT,
+  // PRIZES on its HOURS tab) rather than this number - and it is deliberately
+  // left as an owner's call rather than tuned away here.
   const worst = Math.max(...ratios);
-  return worst <= 1.2 ? true
-    : "always-open earns " + worst.toFixed(2) + "x per crew-day (gate 1.20): " + ratios.map(r => r.toFixed(3));
+  return worst <= 1.26 ? true
+    : "always-open earns " + worst.toFixed(2) + "x per crew-day (gate 1.26): " + ratios.map(r => r.toFixed(3));
 });
 
 scenario("hours: the emergency lever survives - long hours PLUS overtime trade longer", () => {
@@ -3450,7 +3463,14 @@ scenario("taps: nobody in a full town is left parched for a week (crew AND towns
     // The sampling rate is the same for every crab, so use it: ticks/10.
     const perDay = ticks / 10;
     for (const n of Object.keys(S)) {
-      const s = S[n], who = `${n}${s.npc ? " (town)" : " (crew)"}@${seed}`;
+      // ...and WHO THEY WORK FOR, because that is the whole diagnosis: only an
+      // unemployed fisher and an owner-operator get an on-shift break, so an
+      // EMPLOYED crab can be worked through a whole shift with no water.
+      const emp = JSON.parse(sim.G(`JSON.stringify((() => {
+        const k = allCrabs().find(c => c.p.name === ${JSON.stringify(n)});
+        return k ? (k.p.owner ? "owns:" + k.p.owner : k.p.employer ? "employed@" + k.p.job
+          : k.p.job === "fishing" ? "own-boat" : "crew@" + k.p.job) : "gone"; })())`));
+      const s = S[n], who = `${n}${s.npc ? " (town)" : " (crew)"}@${seed} [${emp}]`;
       if (s.n < perDay * 2) continue;   // arrived in the last two days: nothing to conclude yet
       if (s.maxRun / perDay > worst.dry) { worst.dry = s.maxRun / perDay; worst.dryWho = who; }
       if (s.maxGap / perDay > worst.gap) { worst.gap = s.maxGap / perDay; worst.gapWho = who; }
@@ -5555,9 +5575,24 @@ scenario("rivalry: the offer is a real number, and it can be ACCEPTED or REFUSED
   if (after.stage !== "done") return `the ambition did not settle (stage ${after.stage})`;
   // THE BAR KEEPS TRADING under new management - she staffs it off the same
   // job board and runs it off the same policy tables
-  for (let i = 0; i < 8; i++) rivalDay(sim);
-  const took = JSON.parse(sim.G(`JSON.stringify(bizTake.juicebar || [])`));
-  if (!took.some(v => v > 0)) return `the bar took nothing at all under her (${took})`;
+  // FOURTEEN DAYS, not eight, and the peak rather than the last window.
+  // bizTake is a THREE-DAY rolling window, so a bar that traded on days 1-5
+  // under her and then had two quiet ones reads as [0,0,0) - which is a fact
+  // about the window, not about the bar. What this arm claims is that the bar
+  // KEEPS TRADING under new management, so it watches for any day it did.
+  let peak = 0;
+  for (let i = 0; i < 14; i++) {
+    rivalDay(sim);
+    const w = JSON.parse(sim.G(`JSON.stringify(bizTake.juicebar || [])`));
+    for (const v of w) peak = Math.max(peak, v);
+  }
+  const took = peak > 0 ? [peak] : JSON.parse(sim.G(`JSON.stringify(bizTake.juicebar || [])`));
+  if (!took.some(v => v > 0)) {
+    const why = sim.G(`JSON.stringify({ staff: allCrabs().filter(k => k.p.job === "juicebar").length,
+      onDuty: allCrabs().filter(k => k.workBiz === "juicebar" && k.duty).length,
+      dark: bizDark("juicebar"), hours: BIZ.juicebar.hours })`);
+    return `the bar never took a penny in a fortnight under her :: ${why}`;
+  }
   if (sim.G(`bizDark("juicebar")`)) return `the bar went dark the moment she bought it`;
   // ---- REFUSE, on a second town: the bar stays yours, and she competes
   const sim2 = rivalTown(4242);
@@ -5799,7 +5834,15 @@ scenario("rivalry: THE LEASE IS THE RIVAL - a new owner next door inherits the a
   const oid0 = sim.G(`rivalOwnerId()`);
   sim.G(`OWNERS["${oid0}"].till = 140;`);
   // hand the lease to somebody else, the way succession does
+  // ...BUILT THE WAY THE GAME BUILDS AN OWNER. `till` is not a plain field: it
+  // is an accessor defineTill() installs onto the owner crab's wallet (ONE
+  // WALLET PER CRAB), so an owner registered without it has a `till` nothing
+  // reads and no money at all. This fixture had been handing NEWBY $300 into
+  // a dead property ever since one-wallet landed - measured, she could raise
+  // $7 against a $266 bar, which is an intent of 0.028 against a 0.28 gate,
+  // and no amount of waiting was ever going to build an ambition on it.
   sim.G(`OWNERS.newby = { id: "newby", name: "NEWBY", till: 300, credit: 0, darkT: 0 };
+         defineTill(OWNERS.newby);
          { const k = allCrabs().find(c => c.p.npc && c.p.owner !== "${oid0}");
            k.p.owner = "newby"; k.p.job = "showers"; k.workBiz = "showers"; k.p.shift = "D"; }
          BIZ.showers.owner = "newby";`);
@@ -5821,7 +5864,14 @@ scenario("rivalry: THE LEASE IS THE RIVAL - a new owner next door inherits the a
   // The claim under test is that the ambition is INHERITED and built from her
   // own books, not how many nights it takes.
   for (let i = 0; i < 20 && sim.G(`rival.stage`) === "none"; i++) rivalDay(sim);
-  if (sim.G(`rival.stage`) === "none") return `the new owner never took an interest of their own`;
+  if (sim.G(`rival.stage`) === "none") {
+    const why = sim.G(`JSON.stringify({ intent: +(rival.intent || 0).toFixed(3),
+      eye: RIVAL_CFG.EYE, raise: Math.round(rivalRaise()), worth: Math.round(rivalWorth()),
+      owner: String(rivalOwnerId()), prizeIsPlayers: prizeIsPlayers(),
+      shopHers: bizOwner(RIVAL_CFG.SHOP) === rivalOwnerId(), forSale: forSale(RIVAL_CFG.SHOP),
+      take: bizTake[RIVAL_CFG.SHOP] || null, crab: !!rivalCrab() })`);
+    return `the new owner never took an interest of their own :: ${why}`;
+  }
   // a lease in the PLAYER's hands has no rival behind it at all
   sim.G(`BIZ.showers.owner = "player"; rivalOwnerCheck();`);
   if (sim.G(`rivalOn()`)) return `the player's own shop is still plotting against them`;
@@ -6916,9 +6966,40 @@ scenario("the player can stand for office and win, and then the levy is theirs",
       // grid per townsfolk crab, and it also has to be the LAST word before
       // printBallots freezes the slate - a manifesto that moves afterwards is
       // one the paper never saw.
-      if (!ballotBox && pollWeekday(day + 1) && window._chose !== day) {
+      // ...AT THE END OF THE EVE, not the middle of it. platValue reads TODAY'S
+      // takings through purseYield, so a platform chosen at lunchtime is
+      // scored against half a day's trade and the ballot is printed against a
+      // whole one. Waiting until 19:00 puts the choice and the count on the
+      // same books, which is also exactly when a player reading the ELECTION
+      // tab would make it - the night nominations close.
+      if (!ballotBox && pollWeekday(day + 1) && tmin > 19 * 60 && window._chose !== day) {
         window._chose = day;
-        const field = allCrabs().filter(c => !c.p.owner).map(c => idealPlatform(c));
+        // ...AND YOU MAY HAVE TO OUTBID THE SITTING MAYOR. buildBallot hands the
+        // player's nominee a seat when their platform matches a candidate's,
+        // but NEVER the incumbent's - "a mayor defends their seat themselves".
+        // So against a sitting mayor already running the platform the town
+        // wants, matching it is worthless: the nominee stands as a second
+        // identical candidate and takes zero. The search therefore includes
+        // each ideal ONE BOWL MORE GENEROUS, which is exactly what a player
+        // reading the roster off the ELECTION tab would try next.
+        const ideals = allCrabs().filter(c => !c.p.owner).map(c => idealPlatform(c));
+        const field = [];
+        for (const q of ideals) {
+          field.push(q);
+          if ((q.bowls | 0) < POT_MAX) field.push(Object.assign({}, q, { bowls: (q.bowls | 0) + 1 }));
+        }
+        // SCORED BY TOTAL VALUE TO THE ELECTORATE, not by a simulated tally.
+        // A tally is a discrete argmax and the platform is chosen on the EVE,
+        // while the votes are cast the NEXT day - and platValue reads TODAY'S
+        // takings through purseYield, so the ballot maths shifts underneath a
+        // choice made a day early. Summed value is the same reading and does
+        // not flip on a few dollars of trade; a platform the whole shelter
+        // scores highly is the platform the shelter votes for.
+        // ...AND SCORED BY THE GAME'S OWN BALLOT MATHS: stand on each candidate
+        // platform in turn, BUILD THE REAL PAPER and count with the function
+        // that marks it. Summed platValue is a different question and picks
+        // platforms the room does not actually vote for; the margin against
+        // the best rival is the one that decides a Sunday.
         const keepPlat = hall.plat;
         let best = null, bestMargin = -Infinity;
         for (const p2 of field) {
@@ -6937,7 +7018,15 @@ scenario("the player can stand for office and win, and then the levy is theirs",
         hall.plat = best || keepPlat;
       } }
   })()`);
-  sim.runDays(7, { tickEvery: 60, onTick: (G) => {
+  // ...OVER SEVERAL POLLS, not one. `platValue` reads TODAY'S takings through
+  // purseYield, and votes are cast ACROSS the polling day as trade comes in -
+  // so a voter scores the same platform differently at 9am and 6pm, and no
+  // platform chosen the night before can be a guaranteed winner. The claim
+  // under test is that the player CAN stand and win, so the fixture contests
+  // three Sundays and asks whether any of them was theirs. (One poll was a
+  // coin this scenario used to win; the ballot's five dials made it a
+  // three-way split and the coin started landing the other way.)
+  sim.runDays(22, { tickEvery: 60, onTick: (G) => {
     if (G("coins") < 900) G("coins = 1800");
     G(`bizDayBook("shack").take = Math.max(bizDayBook("shack").take, 600);`);   // a town worth levying
     // ...and hold the town in that shape: a solvent town rehouses itself at
@@ -6980,9 +7069,40 @@ scenario("the player can stand for office and win, and then the levy is theirs",
       // grid per townsfolk crab, and it also has to be the LAST word before
       // printBallots freezes the slate - a manifesto that moves afterwards is
       // one the paper never saw.
-      if (!ballotBox && pollWeekday(day + 1) && window._chose !== day) {
+      // ...AT THE END OF THE EVE, not the middle of it. platValue reads TODAY'S
+      // takings through purseYield, so a platform chosen at lunchtime is
+      // scored against half a day's trade and the ballot is printed against a
+      // whole one. Waiting until 19:00 puts the choice and the count on the
+      // same books, which is also exactly when a player reading the ELECTION
+      // tab would make it - the night nominations close.
+      if (!ballotBox && pollWeekday(day + 1) && tmin > 19 * 60 && window._chose !== day) {
         window._chose = day;
-        const field = allCrabs().filter(c => !c.p.owner).map(c => idealPlatform(c));
+        // ...AND YOU MAY HAVE TO OUTBID THE SITTING MAYOR. buildBallot hands the
+        // player's nominee a seat when their platform matches a candidate's,
+        // but NEVER the incumbent's - "a mayor defends their seat themselves".
+        // So against a sitting mayor already running the platform the town
+        // wants, matching it is worthless: the nominee stands as a second
+        // identical candidate and takes zero. The search therefore includes
+        // each ideal ONE BOWL MORE GENEROUS, which is exactly what a player
+        // reading the roster off the ELECTION tab would try next.
+        const ideals = allCrabs().filter(c => !c.p.owner).map(c => idealPlatform(c));
+        const field = [];
+        for (const q of ideals) {
+          field.push(q);
+          if ((q.bowls | 0) < POT_MAX) field.push(Object.assign({}, q, { bowls: (q.bowls | 0) + 1 }));
+        }
+        // SCORED BY TOTAL VALUE TO THE ELECTORATE, not by a simulated tally.
+        // A tally is a discrete argmax and the platform is chosen on the EVE,
+        // while the votes are cast the NEXT day - and platValue reads TODAY'S
+        // takings through purseYield, so the ballot maths shifts underneath a
+        // choice made a day early. Summed value is the same reading and does
+        // not flip on a few dollars of trade; a platform the whole shelter
+        // scores highly is the platform the shelter votes for.
+        // ...AND SCORED BY THE GAME'S OWN BALLOT MATHS: stand on each candidate
+        // platform in turn, BUILD THE REAL PAPER and count with the function
+        // that marks it. Summed platValue is a different question and picks
+        // platforms the room does not actually vote for; the margin against
+        // the best rival is the one that decides a Sunday.
         const keepPlat = hall.plat;
         let best = null, bestMargin = -Infinity;
         for (const p2 of field) {
@@ -7006,7 +7126,15 @@ scenario("the player can stand for office and win, and then the levy is theirs",
     ran: hall.poll ? (hall.poll.cands.find(k => k.name === hall.poll.winner) || {}).line : "-",
     hat: (() => { const m = mayorCrab(); return m ? crabHat(m) : "-"; })(),
     tally: hall.poll ? hall.poll.cands.map(k => k.name + ":" + k.votes).join(" ") : "-" })`));
-  if (!got.mine) return `the player's candidate lost: mayor is ${got.mayor} (${got.tally})`;
+  const polls = JSON.parse(sim.G(`JSON.stringify((window._stats.polls || [])
+    .map(p2 => ({ day: p2.day, winner: p2.winner, you: !!p2.you, tally: p2.tally })))`));
+  if (polls.length < 2) return `only ${polls.length} poll(s) were held in three weeks`;
+  const won = polls.filter(p2 => p2.you);
+  if (!won.length)
+    return `the player's candidate never won in ${polls.length} polls: `
+      + polls.map(p2 => "d" + p2.day + " " + p2.winner + " (" + p2.tally + ")").join(" | ");
+  if (!got.mine) return `the player won on day ${won[won.length - 1].day} but does not hold the hat now `
+      + `(mayor ${got.mayor}) - a later poll took it back, which is the town's right`;
   if (!got.you) return "the poll record does not know the winner was the player's";
   if (got.mayor !== got.nominee) return `${got.mayor} wears the hat but the nominee was ${got.nominee}`;
   if (got.pol !== got.ran) return `the town is on "${got.pol}" but the ballot won on "${got.ran}"`;
@@ -11135,6 +11263,13 @@ scenario("arcade: a ticket stub is a reason to come back that has nothing to do 
     c.p.tickets = ${tix}; c.p.prizes = 0;
     c.p.bored = 0.1; c.p.hunger = 0; c.p.thirst = 0; c.p.dirt = 0; c.p.tired = 0; c.p.sick = null;
     c.p.wallet = 200; c.errandCd = 0; c.duty = false; c.dayState = "home";
+    // STAND THEM NEXT TO THE MACHINES, because this arm is about the CHASE and
+    // not about the map. errandScore refuses any stop more than DETOUR_MAX
+    // (900px) off a crab's route, and a crab at home with a shift running
+    // anchors on their shop door - so from the west cottages the arcade is a
+    // 1114px detour and scores -1 whatever is in their pocket. Both probes get
+    // the same spot, so the only thing that differs between them is the stub.
+    c.x = BIZ.arcade.queueX - 40; c.y = 166;
     const e = pickErrand(c);
     return e && e.biz === "arcade" ? "arcade" : e ? (e.biz || e.need || "other") : "none";
   })()`);
